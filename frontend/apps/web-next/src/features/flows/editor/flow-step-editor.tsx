@@ -33,6 +33,7 @@ import { RecordUploadProvider, useEditorUploads } from "./editor-uploads";
 import {
   describeSaveError,
   FIELD_ANCHORS,
+  httpAnchor,
   isStaleRevision,
   type FieldAnchor,
   type FieldProblems
@@ -40,10 +41,17 @@ import {
 import { StepAdvancedSection, parseContract, type ContractDrafts } from "./step-advanced-section";
 import { StepAiSection } from "./step-ai-section";
 import {
-  httpUrlProblem,
+  contentTypeHeaderPart,
+  DELIVERABLE_FILE_NAME_MAX,
+  DELIVERABLE_LABEL_MAX,
+  httpUrlProblemKey,
+  readDeliverable,
   readHttpConfig,
   readTextProcessingMode,
-  readToolConfig
+  readToolConfig,
+  sendsRunResult,
+  stepCanBeDeliverable,
+  withTidyDeliverable
 } from "./step-configs";
 import { StepControlSection } from "./step-control-section";
 import {
@@ -64,12 +72,14 @@ import { stepNameTaken } from "./step-kinds";
 import { stepLabel } from "./step-labels";
 import { StepOutputSection } from "./step-output-section";
 import { StepReadOnly } from "./step-read-only";
+import { StepRunResultSections } from "./step-run-result-section";
 import { StepRequestPreviewButton } from "./step-request-preview";
 import { stepUsesModel } from "./step-rules";
 import {
   assistantConfigOf,
   EDITABLE_STEP_FIELDS,
   sameJson,
+  sameStepField,
   stepConfigOf,
   type AssistantConfig,
   type EditableStepField,
@@ -110,6 +120,8 @@ type EditorProps = {
   anchorRequest?: { anchor: FieldAnchor } | null;
   /** Told true while the step has edits that are not saved, and false once it has none. */
   onUnsavedChange?: (unsaved: boolean) => void;
+  /** Opens "Lägg till steg" at a place in the flow; absent, no step is offered to add. */
+  onAddStep?: (position: number) => void;
 };
 
 /** Where the editor's top bar can go besides back to the list. */
@@ -253,7 +265,11 @@ export function FlowStepEditor({ navigation, ...props }: EditorProps): React.JSX
             </div>
           }
         >
-          <StepEditorSession key={`${props.flow.id}:${props.stepId}`} {...props} />
+          <StepEditorSession
+            key={`${props.flow.id}:${props.stepId}`}
+            {...props}
+            onGoStep={navigation?.onGo}
+          />
         </Suspense>
       </SpaceProvider>
     </div>
@@ -336,8 +352,10 @@ function StepEditorSession({
   suggestionDismissal,
   suggestionRuns = 0,
   anchorRequest = null,
-  onUnsavedChange
-}: Omit<EditorProps, "navigation">) {
+  onUnsavedChange,
+  onAddStep,
+  onGoStep
+}: Omit<EditorProps, "navigation"> & { onGoStep?: (stepId: string) => void }) {
   const t = useTranslations();
   const announce = useAnnounce();
   const queryClient = useQueryClient();
@@ -596,6 +614,9 @@ function StepEditorSession({
 
   const { draft, stepOrder, flow } = session;
   const usesModel = stepUsesModel(draft);
+  // The step that sends the run's result reads nothing and calls no model:
+  // it shows what is sent and to whom.
+  const sendsResult = sendsRunResult(draft);
   const isLast = isLastStep(flow, { step_order: stepOrder });
   const groups = variableGroups({ flow, stepOrder, inputConfig: draft.input_config });
   // Only the AI instruction runs once per section, so only it reads the section's number.
@@ -625,14 +646,28 @@ function StepEditorSession({
     const changed = EDITABLE_STEP_FIELDS.filter((field) => !sameJson(current[field], next[field]));
     if (changed.length === 0) return;
     const saved = session.saved;
-    setStepBases((bases) => ({
-      ...Object.fromEntries(changed.map((field) => [field, saved[field]])),
-      ...bases
-    }));
-    setStepEdits((edits) => ({
-      ...edits,
-      ...Object.fromEntries(changed.map((field) => [field, next[field]]))
-    }));
+    // A field changed back to its saved value is no edit: the form follows a
+    // newer version of it again, and a save leaves it out.
+    const reverted = new Set(
+      changed.filter((field) => sameStepField(field, saved[field], next[field]))
+    );
+    const edited = changed.filter((field) => !reverted.has(field));
+    const withoutReverted = (values: StepEdits) =>
+      Object.fromEntries(
+        Object.entries(values).filter(([field]) => !reverted.has(field as keyof StepConfig))
+      ) as StepEdits;
+    setStepBases((bases) =>
+      withoutReverted({
+        ...Object.fromEntries(edited.map((field) => [field, saved[field]])),
+        ...bases
+      })
+    );
+    setStepEdits((edits) =>
+      withoutReverted({
+        ...edits,
+        ...Object.fromEntries(edited.map((field) => [field, next[field]]))
+      })
+    );
     setServerProblems((problems) => {
       const cleared = new Set(changed.flatMap(anchorsOf));
       return Object.fromEntries(
@@ -726,21 +761,44 @@ function StepEditorSession({
       problems.user_description = t("flow_step_editor_name_taken");
     }
     if (current.input_source === "http_get") {
-      const problem = httpUrlProblem(readHttpConfig(current.input_config, "input").url);
-      if (problem) {
-        problems["input_config.http"] =
-          problem === "missing"
-            ? t("flow_step_editor_http_url_missing")
-            : t("flow_step_editor_http_url_invalid");
-      }
+      const problem = httpUrlProblemKey(readHttpConfig(current.input_config, "input").url, false);
+      if (problem) problems["input_config.http"] = t(problem);
     }
     if (current.output_mode === "http_post") {
-      const problem = httpUrlProblem(readHttpConfig(current.output_config, "output").url);
-      if (problem) {
-        problems["output_config.http"] =
-          problem === "missing"
-            ? t("flow_step_editor_http_url_missing")
-            : t("flow_step_editor_http_url_invalid");
+      const http = readHttpConfig(current.output_config, "output");
+      // A body that sends the run's result holds the core's own address rule.
+      const problem = httpUrlProblemKey(http.url, http.body.mode === "run_result");
+      if (problem) problems["output_config.http"] = t(problem);
+      if (http.body.mode === "run_result") {
+        const part = contentTypeHeaderPart(http);
+        if (part) {
+          problems[httpAnchor("output_config.http", part)] = t(
+            "flow_step_editor_http_run_result_content_type"
+          );
+        }
+      }
+    }
+    // A stale value on a step that cannot be delivered is not shown, and the core drops it.
+    const deliverable = stepCanBeDeliverable(current)
+      ? readDeliverable(current.output_config)
+      : null;
+    if (deliverable) {
+      // In characters (code points), as the core counts them.
+      if (!deliverable.label.trim()) {
+        problems["output_config.deliverable.label"] = t(
+          "flow_step_editor_deliverable_label_required"
+        );
+      } else if (Array.from(deliverable.label).length > DELIVERABLE_LABEL_MAX) {
+        problems["output_config.deliverable.label"] = t(
+          "flow_step_editor_deliverable_label_too_long",
+          { max: DELIVERABLE_LABEL_MAX }
+        );
+      }
+      if (Array.from(deliverable.file_name ?? "").length > DELIVERABLE_FILE_NAME_MAX) {
+        problems["output_config.deliverable.file_name"] = t(
+          "flow_step_editor_deliverable_file_name_too_long",
+          { max: DELIVERABLE_FILE_NAME_MAX }
+        );
       }
     }
     if (current.input_source === "tool" && readToolConfig(current.input_config) === null) {
@@ -766,7 +824,16 @@ function StepEditorSession({
     // tree through its portal too; only this form saves the step.
     if (event.target !== event.currentTarget) return;
     if (!session || save.isPending || effectiveReadOnly) return;
-    const problems = localProblems(session.draft);
+    // Spaces typed into the result's names are tidied as the save sends them.
+    const output_config = withTidyDeliverable(
+      session.draft.output_config
+    ) as StepConfig["output_config"];
+    const current =
+      output_config === session.draft.output_config
+        ? session
+        : { ...session, draft: { ...session.draft, output_config } };
+    if (current !== session) changeStep(current.draft);
+    const problems = localProblems(current.draft);
     const first = FIELD_ANCHORS.find((anchor) => problems[anchor]);
     if (first) {
       flushSync(() => setChecked(true));
@@ -778,7 +845,7 @@ function StepEditorSession({
       return;
     }
     setFormProblems([]);
-    save.mutate(session);
+    save.mutate(current);
   }
 
   const changeCount =
@@ -792,12 +859,18 @@ function StepEditorSession({
       <Heading level={2} id={headingId}>
         {name}
       </Heading>
-      <StepRequestPreviewButton
-        flow={flow}
-        stepOrder={stepOrder}
-        draft={draft}
-        assistant={assistantDraft}
-      />
+      {sendsResult ? (
+        <Text type="supporting" size="sm" as="p" display="block" className="m-0 max-w-prose">
+          {t("flow_step_editor_run_result_description")}
+        </Text>
+      ) : (
+        <StepRequestPreviewButton
+          flow={flow}
+          stepOrder={stepOrder}
+          draft={draft}
+          assistant={assistantDraft}
+        />
+      )}
     </header>
   );
 
@@ -969,44 +1042,62 @@ function StepEditorSession({
                 />
               )}
 
-              <StepInputSection
-                formId={formId}
-                sectionId={`${formId}-input`}
-                flow={flow}
-                stepId={stepId}
-                stepOrder={stepOrder}
-                draft={draft}
-                onChange={changeStep}
-                problems={shownProblems}
-                groups={groups}
-                toolGroups={wholeValueGroups}
-                showUnderlag={
-                  draft.output_mode !== "transcribe_only" && draft.output_mode !== "template_fill"
-                }
-              />
+              {sendsResult ? (
+                <StepRunResultSections
+                  formId={formId}
+                  flow={flow}
+                  stepId={stepId}
+                  stepOrder={stepOrder}
+                  draft={draft}
+                  onChange={changeStep}
+                  problems={shownProblems}
+                  onGoStep={onGoStep}
+                  onAddStepBefore={onAddStep}
+                />
+              ) : (
+                <>
+                  <StepInputSection
+                    formId={formId}
+                    sectionId={`${formId}-input`}
+                    flow={flow}
+                    stepId={stepId}
+                    stepOrder={stepOrder}
+                    draft={draft}
+                    onChange={changeStep}
+                    problems={shownProblems}
+                    groups={groups}
+                    toolGroups={wholeValueGroups}
+                    showUnderlag={
+                      draft.output_mode !== "transcribe_only" &&
+                      draft.output_mode !== "template_fill"
+                    }
+                  />
 
-              <StepOutputSection
-                formId={formId}
-                sectionId={`${formId}-output`}
-                flow={flow}
-                stepId={stepId}
-                stepOrder={stepOrder}
-                draft={draft}
-                isLast={isLast}
-                onChange={changeStep}
-                problems={shownProblems}
-                groups={groups}
-                onContractProposed={(contract) => {
-                  // The advanced section shows the accepted contract, not text typed before it.
-                  setContractDrafts((drafts) => ({ ...drafts, output_contract: undefined }));
-                  changeStep({ ...draft, output_contract: contract });
-                  announce(t("flow_editor_tools_contract_example_accepted"));
-                }}
-              />
+                  <StepOutputSection
+                    formId={formId}
+                    sectionId={`${formId}-output`}
+                    flow={flow}
+                    stepId={stepId}
+                    stepOrder={stepOrder}
+                    draft={draft}
+                    isLast={isLast}
+                    onChange={changeStep}
+                    problems={shownProblems}
+                    groups={groups}
+                    onContractProposed={(contract) => {
+                      // The advanced section shows the accepted contract, not text typed before it.
+                      setContractDrafts((drafts) => ({ ...drafts, output_contract: undefined }));
+                      changeStep({ ...draft, output_contract: contract });
+                      announce(t("flow_editor_tools_contract_example_accepted"));
+                    }}
+                  />
+                </>
+              )}
 
               <StepControlSection
                 formId={formId}
                 sectionId={`${formId}-control`}
+                hasReview={!sendsResult}
                 draft={draft}
                 onChange={changeStep}
                 problems={shownProblems}
@@ -1017,18 +1108,20 @@ function StepEditorSession({
                 }}
               />
 
-              <StepAdvancedSection
-                formId={formId}
-                sectionId={`${formId}-advanced`}
-                draft={draft}
-                onChange={changeStep}
-                drafts={contractDrafts}
-                onDraftsChange={(next) => {
-                  pin();
-                  setContractDrafts(next);
-                }}
-                problems={shownProblems}
-              />
+              {!sendsResult && (
+                <StepAdvancedSection
+                  formId={formId}
+                  sectionId={`${formId}-advanced`}
+                  draft={draft}
+                  onChange={changeStep}
+                  drafts={contractDrafts}
+                  onDraftsChange={(next) => {
+                    pin();
+                    setContractDrafts(next);
+                  }}
+                  problems={shownProblems}
+                />
+              )}
             </div>
           </TemplateScope>
         </RecordUploadProvider>

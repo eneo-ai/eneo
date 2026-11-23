@@ -140,7 +140,7 @@ async function finishedFlowRun(page: Page, spaceId: string, completionModel: str
   });
   const status = `/flows/${flow.id}/runs/${run.id}/status/`;
   for (let attempt = 0; attempt < 60; attempt++) {
-    const summary = await apiRequest<Schema<"FlowRunSummaryPublic">>(page, status);
+    const summary = await apiRequest<Schema<"FlowRunStatusPublic">>(page, status);
     if (summary.status === "completed") return { flowId: flow.id, runId: run.id };
     if (summary.status === "failed" || summary.status === "cancelled")
       throw new Error(`The contract's flow run ended ${summary.status}`);

@@ -388,3 +388,30 @@ async def test_execute_http_test_reports_a_redirect_as_a_status_error() -> None:
     assert result.success is False
     assert result.status_code == 302
     assert result.error_code == HttpTransportError.STATUS_ERROR
+
+
+@pytest.mark.asyncio
+async def test_a_run_result_body_is_refused_by_the_test_without_a_request() -> None:
+    """A run result exists only once a run has completed, so the test has
+    nothing true to send; it says so instead of sending an empty body."""
+    sent: list[dict[str, Any]] = []
+
+    async def _send_http_request(**kwargs: Any) -> httpx.Response:
+        sent.append(kwargs)
+        raise AssertionError("no request may be sent")
+
+    result = await execute_http_test(
+        config=_config(body=HttpBody(mode=HttpBodyMode.RUN_RESULT)),
+        direction="output",
+        method="POST",
+        test_variables={},
+        interpolate=_interpolate,
+        send_http_request=_send_http_request,
+        max_timeout=120,
+    )
+
+    assert result.success is False
+    assert result.error_code is HttpTransportError.RUN_RESULT_NOT_TESTABLE
+    assert result.error_message
+    assert result.request_preview is None
+    assert sent == []

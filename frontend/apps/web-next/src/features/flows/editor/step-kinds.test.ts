@@ -83,6 +83,21 @@ describe("newStepUpdate", () => {
     expect(configurationOf(send)?.output_config).toEqual({ ...http, url: OPTIONS.url });
     expect(configurationOf(tool)?.input_config).toEqual({ tool: OPTIONS.tool });
   });
+
+  it("puts the receiver's address in and keeps the body that sends the run's result", () => {
+    const http = {
+      url: "",
+      auth: { mode: "none" },
+      timeout_seconds: 30,
+      body: { mode: "run_result" }
+    };
+    const sendResult = makeKindOption("send_run_result", {
+      configuration: { output_mode: "http_post", output_config: http }
+    });
+    expect(
+      newStepUpdate(twoSteps, 3, sendResult, OPTIONS).new_steps?.[0]?.configuration?.output_config
+    ).toEqual({ ...http, url: OPTIONS.url, body: { mode: "run_result" } });
+  });
 });
 
 describe("the new step's assistant", () => {

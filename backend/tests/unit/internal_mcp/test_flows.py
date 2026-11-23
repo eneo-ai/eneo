@@ -1330,8 +1330,12 @@ async def test_add_step_offers_kinds_and_closed_values_in_its_schema():
 
     (tool,) = [tool for tool in await flows.mcp.list_tools() if tool.name == "add_step"]
     schema = tool.inputSchema
-    kinds = schema["$defs"]["FlowStepKind"]["enum"]
-    assert kinds == [kind.value for kind in FlowStepKind]
+    kinds = schema["properties"]["kind"]["enum"]
+    # The step that sends the run's result is the editor's, not the chat's.
+    assert "send_run_result" not in kinds
+    assert kinds == [
+        kind.value for kind in FlowStepKind if kind is not FlowStepKind.SEND_RUN_RESULT
+    ]
     (values, _null) = schema["properties"]["values"]["anyOf"]
     assert values["additionalProperties"] is False
     assert "instruction" in values["properties"]
@@ -1352,7 +1356,27 @@ async def test_add_step_offers_kinds_and_closed_values_in_its_schema():
     assert schema["additionalProperties"] is False
     description = " ".join((tool.description or "").split())
     for kind, text in STEP_KIND_DESCRIPTIONS.items():
-        assert f"{kind.value} ({text})" in description
+        if kind is FlowStepKind.SEND_RUN_RESULT:
+            assert "send_run_result" not in description
+            assert text not in description
+        else:
+            assert f"{kind.value} ({text})" in description
+
+
+async def test_the_chat_cannot_add_a_run_result_sender(monkeypatch):
+    save = _adding_chat(monkeypatch, [])
+
+    refused, text = await _through_the_server(
+        "add_step",
+        expected_revision=4,
+        name="Skicka",
+        kind="send_run_result",
+        values={"url": "https://example.org/"},
+    )
+
+    assert refused, text
+    assert "kind" in text
+    save.assert_not_awaited()
 
 
 async def test_a_value_no_kind_has_is_refused_without_its_value(monkeypatch):
@@ -3324,7 +3348,12 @@ async def test_read_step_kinds_says_which_kinds_may_stand_first_and_why_not(
     answer = json.loads(page["content"])
     assert answer["position"] == 1
     kinds = {item["kind"]: item for item in answer["kinds"]}
-    assert list(kinds) == [kind.value for kind in flows.FlowStepKind]
+    assert "send_run_result" not in kinds
+    assert list(kinds) == [
+        kind.value
+        for kind in flows.FlowStepKind
+        if kind is not flows.FlowStepKind.SEND_RUN_RESULT
+    ]
     transcribe = kinds["transcribe"]
     assert transcribe["allowed"] is True
     assert transcribe["gives"] == "text"
@@ -3391,6 +3420,7 @@ async def test_a_long_step_kinds_answer_is_read_page_by_page(monkeypatch, draft)
         offset = page["next_offset"]
 
     kinds = json.loads(content)["kinds"]
-    assert len(kinds) == len(flows.FlowStepKind)
+    assert len(kinds) == len(flows.FlowStepKind) - 1
+    assert "send_run_result" not in {item["kind"] for item in kinds}
     if draft == "published":
         assert not any(item["allowed"] for item in kinds)

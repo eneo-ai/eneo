@@ -137,6 +137,7 @@ export function makeKindPlace(position: number, options: StepKindOption[] = []):
     "review",
     "fetch_http",
     "tool",
+    "send_run_result",
     "send_http"
   ];
   return {

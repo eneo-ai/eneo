@@ -107,7 +107,6 @@ FORWARDERS: frozenset[tuple[str, str]] = frozenset(
             "get_run_detail_with_result_files_and_usage",
             "get_run_status",
             "get_run_versioned_view",
-            "get_run_with_result_files_and_usage",
             "list_run_statuses",
             "list_step_results_with_files",
         )

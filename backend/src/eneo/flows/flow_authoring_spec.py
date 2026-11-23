@@ -13,6 +13,7 @@ from eneo.flows.domain.flow import (
     FlowPersistedJsonObject,
     parse_flow_step_retrieval_policy,
 )
+from eneo.flows.domain.step_deliverable import parse_flow_step_deliverable
 from eneo.flows.enums import (
     FlowAuthoringInputSource as InputSource,
 )
@@ -171,6 +172,7 @@ class StepSpec(BaseModel):
         cls, value: FlowPersistedJsonObject | None
     ) -> FlowPersistedJsonObject | None:
         parse_flow_step_retrieval_policy(value)
+        parse_flow_step_deliverable(value)
         return value
 
 

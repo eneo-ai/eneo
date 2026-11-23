@@ -1726,3 +1726,38 @@ async def test_a_transcript_over_the_limit_records_the_runs_origin(
         stored.origin_flow_id,
         stored.origin_flow_run_id,
     ) == (space_id, case.run.flow_id, case.run.id)
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_a_step_that_sends_the_run_result_reads_no_transcript_kept_in_a_file(
+    transcript_spill_runtime,
+):
+    """A transcript over the inline limit is read from a file. A step that
+    sends the run's result reads nothing: its body is built from the run's
+    deliverables once the run has completed, each text whole from its file,
+    so the transcript never stops the step."""
+    case = transcript_spill_runtime
+    if case.transformed:
+        pytest.skip("The run result step reads the transcript as it is.")
+    step = replace(
+        case.step,
+        output_mode="http_post",
+        output_type="text",
+        output_config={
+            "url": "https://receiver.example.org/eneo/results",
+            "auth": {"mode": "none"},
+            "body": {"mode": "run_result"},
+        },
+    )
+
+    result = await case.executor._execute_step(
+        step=step,
+        run=case.run,
+        state=_state(),
+        attempt_no=1,
+        version_metadata=case.metadata,
+    )
+
+    assert result.output.full_text == ""
+    assert len(result.delivery_intents) == 1

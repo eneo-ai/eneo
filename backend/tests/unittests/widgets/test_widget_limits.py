@@ -155,12 +155,21 @@ async def test_ip_limits_count_a_whole_ipv6_64(monkeypatch):
 class _FakeRedis:
     def __init__(self, *, fail: bool = False) -> None:
         self.keys: dict[str, int] = {}
+        self.values: dict[str, bytes] = {}
         self.fail = fail
 
-    async def eval(self, script, numkeys, key, deadline):
+    async def eval(self, script, numkeys, key, argument):
         if self.fail:
             raise ConnectionError("down")
-        ttl = deadline - int(datetime.now(timezone.utc).timestamp())
+        if "DEL" in script:
+            # WidgetLimiter._RELEASE: delete the hold only while it is the caller's.
+            owner = argument.encode() if isinstance(argument, str) else argument
+            if self.values.get(key) != owner:
+                return 0
+            self.keys.pop(key, None)
+            self.values.pop(key, None)
+            return 1
+        ttl = argument - int(datetime.now(timezone.utc).timestamp())
         if key in self.keys or ttl <= 0:
             return 0
         self.keys[key] = ttl
@@ -177,11 +186,13 @@ class _FakeRedis:
         if nx and key in self.keys:
             return None
         self.keys[key] = ex or 0
+        self.values[key] = value
         return True
 
     async def delete(self, key):
         if self.fail:
             raise ConnectionError("down")
+        self.values.pop(key, None)
         return 1 if self.keys.pop(key, None) is not None else 0
 
 
@@ -291,14 +302,39 @@ async def test_a_conversation_answers_one_follow_up_at_a_time():
     limiter = WidgetLimiter(redis_client=redis, settings=_settings())
     widget = _widget()
     session_id = uuid4()
-    await limiter.hold_turn(widget, session_id)
+    owner = await limiter.hold_turn(widget, session_id)
+    assert owner
     with pytest.raises(WidgetRateLimitedError) as refused:
         await limiter.hold_turn(widget, session_id)
     assert refused.value.code == "rate_limited_session"
     # Another conversation of the same widget is not held up by it.
     await limiter.hold_turn(widget, uuid4())
-    await limiter.release_turn(widget, session_id)
-    await limiter.hold_turn(widget, session_id)
+    await limiter.release_turn(widget, session_id, owner)
+    assert await limiter.hold_turn(widget, session_id) != owner
+
+
+async def test_only_the_holder_of_a_turn_releases_it():
+    redis = _FakeRedis()
+    limiter = WidgetLimiter(redis_client=redis, settings=_settings())
+    widget = _widget()
+    session_id = uuid4()
+    owner = await limiter.hold_turn(widget, session_id)
+
+    # Another marker, or none at all, leaves the hold where it is.
+    await limiter.release_turn(widget, session_id, "someone-else")
+    await limiter.release_turn(widget, session_id, None)
+    with pytest.raises(WidgetRateLimitedError):
+        await limiter.hold_turn(widget, session_id)
+
+    await limiter.release_turn(widget, session_id, owner)
+    successor = await limiter.hold_turn(widget, session_id)
+    # A request that outlived its hold and comes back to release it must not
+    # free the turn its successor holds.
+    await limiter.release_turn(widget, session_id, owner)
+    with pytest.raises(WidgetRateLimitedError):
+        await limiter.hold_turn(widget, session_id)
+    await limiter.release_turn(widget, session_id, successor)
+    assert await limiter.hold_turn(widget, session_id)
 
 
 async def test_the_turn_hold_follows_the_limiter_fail_policy():
@@ -310,5 +346,7 @@ async def test_the_turn_hold_follows_the_limiter_fail_policy():
         redis_client=_FakeRedis(fail=True),
         settings=_settings(widget_rate_limit_fail_open=True),
     )
-    await opened.hold_turn(widget, uuid4())
-    await opened.release_turn(widget, uuid4())
+    # No hold was taken, so there is nothing to release later.
+    assert await opened.hold_turn(widget, uuid4()) is None
+    await opened.release_turn(widget, uuid4(), None)
+    await opened.release_turn(widget, uuid4(), "abc")

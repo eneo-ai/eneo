@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Literal, TypeAlias
+from typing import Annotated, Literal, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -11,6 +11,7 @@ from eneo.flows.application.flow_run_evidence_export_manifest import (
 )
 from eneo.flows.enums import FlowRunReviewCheckpointState
 from eneo.flows.flow_run_provenance import PayloadPreview
+from eneo.flows.flow_run_step_result_file import FlowRunStepResultFileAvailability
 from eneo.json_types import JsonObject, JsonValue
 
 EvidenceOutputKind: TypeAlias = Literal[
@@ -95,6 +96,42 @@ class EvidenceFinalOutputSummary(BaseModel):
     artifact_count: int
     artifact_names: list[str]
     artifact_details: list[EvidenceArtifactManifestItem]
+
+
+class EvidenceDeliverableFileSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    file_id: str
+    name: str
+    availability: FlowRunStepResultFileAvailability
+
+
+class EvidenceDeliverableSummary(BaseModel):
+    """A document the run delivered, as the run's ``deliverables`` lists it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["artifact"] = "artifact"
+    step_order: int
+    label: str | None
+    files: list[EvidenceDeliverableFileSummary]
+
+
+class EvidenceTextDeliverableSummary(BaseModel):
+    """A text the run delivered, by its step and label; the text itself is
+    the step's output in the bundle."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["text"] = "text"
+    step_order: int
+    label: str | None
+
+
+EvidenceDeliverable: TypeAlias = Annotated[
+    EvidenceDeliverableSummary | EvidenceTextDeliverableSummary,
+    Field(discriminator="kind"),
+]
 
 
 class EvidenceStepReviewEvent(BaseModel):
@@ -195,6 +232,14 @@ class EvidenceExportSummary(BaseModel):
     citations: JsonObject
     review_checkpoints: EvidenceReviewCheckpointSummary
     final_output: EvidenceFinalOutputSummary
+    deliverables: list[EvidenceDeliverable] = Field(
+        default_factory=lambda: list[EvidenceDeliverable](),
+        description=(
+            "Texts and documents the run delivered, in step order, each "
+            "document with its step's current document files. Empty until the "
+            "run has completed. Kept out of the hashed bundle."
+        ),
+    )
     step_overview: list[EvidenceStepOverview]
 
 

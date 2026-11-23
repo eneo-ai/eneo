@@ -97,8 +97,16 @@ def _build_flow(
     assistant_id: UUID,
     output_config: dict[str, object] | None = None,
     include_prior_step: bool = False,
+    prior_step_output: tuple[str, str, dict[str, object] | None] = (
+        "pass_through",
+        "text",
+        None,
+    ),
+    later_prior_steps: tuple[tuple[str, str, dict[str, object] | None], ...] = (),
+    first_step_question: str = "{{flow.input.question}}",
+    webhook_question: str | None = "{{flow.input.question}}",
 ) -> Flow:
-    webhook_step_order = 2 if include_prior_step else 1
+    webhook_step_order = (2 if include_prior_step else 1) + len(later_prior_steps)
     steps = (
         [
             FlowStep(
@@ -111,17 +119,40 @@ def _build_flow(
                 input_source="flow_input",
                 input_type="text",
                 input_contract=None,
-                output_mode="pass_through",
-                output_type="text",
+                output_mode=prior_step_output[0],
+                output_type=prior_step_output[1],
                 output_contract=None,
-                input_bindings={"question": "{{flow.input.question}}"},
-                output_config=None,
+                input_bindings={"question": first_step_question},
+                output_config=prior_step_output[2],
                 output_classification_override=None,
                 input_config=None,
             )
         ]
         if include_prior_step
         else []
+    )
+    # Further steps before the webhook step, each reading the step before it.
+    first_later = len(steps) + 1
+    steps.extend(
+        FlowStep(
+            id=None,
+            flow_id=uuid4(),
+            tenant_id=tenant_id,
+            assistant_id=assistant_id,
+            step_order=first_later + offset,
+            user_description=f"Step {first_later + offset}",
+            input_source="previous_step",
+            input_type="text",
+            input_contract=None,
+            output_mode=mode,
+            output_type=output_type,
+            output_contract=None,
+            input_bindings=None,
+            output_config=config,
+            output_classification_override=None,
+            input_config=None,
+        )
+        for offset, (mode, output_type, config) in enumerate(later_prior_steps)
     )
     steps.append(
         FlowStep(
@@ -137,7 +168,9 @@ def _build_flow(
             output_mode="http_post",
             output_type="text",
             output_contract=None,
-            input_bindings={"question": "{{flow.input.question}}"},
+            input_bindings=(
+                None if webhook_question is None else {"question": webhook_question}
+            ),
             output_config=output_config
             or {
                 "url": "https://example.org/hook/{{flow_input.case_id}}",
@@ -190,6 +223,14 @@ async def _create_queued_webhook_run(
     output_config: dict[str, object] | None = None,
     include_prior_step: bool = False,
     model_name: str = "gpt-4o-mini",
+    prior_step_output: tuple[str, str, dict[str, object] | None] = (
+        "pass_through",
+        "text",
+        None,
+    ),
+    later_prior_steps: tuple[tuple[str, str, dict[str, object] | None], ...] = (),
+    first_step_question: str = "{{flow.input.question}}",
+    webhook_question: str | None = "{{flow.input.question}}",
 ):
     """A published webhook flow and one queued run of it."""
     model = await completion_model_factory(session, model_name)
@@ -210,6 +251,10 @@ async def _create_queued_webhook_run(
             assistant_id=assistant.id,
             output_config=output_config,
             include_prior_step=include_prior_step,
+            prior_step_output=prior_step_output,
+            later_prior_steps=later_prior_steps,
+            first_step_question=first_step_question,
+            webhook_question=webhook_question,
         ),
         tenant_id=admin_user.tenant_id,
     )
@@ -278,6 +323,11 @@ async def _create_running_webhook_run(
     output_config: dict[str, object] | None = None,
     prior_output_payload: dict[str, object] | None = None,
     model_name: str = "gpt-4o-mini",
+    prior_step_output: tuple[str, str, dict[str, object] | None] = (
+        "pass_through",
+        "text",
+        None,
+    ),
 ):
     flow, run, step = await _create_queued_webhook_run(
         session=session,
@@ -288,6 +338,7 @@ async def _create_running_webhook_run(
         output_config=output_config,
         include_prior_step=prior_output_payload is not None,
         model_name=model_name,
+        prior_step_output=prior_step_output,
     )
     run_repo = FlowRunRepository(session=session)
     await session.execute(

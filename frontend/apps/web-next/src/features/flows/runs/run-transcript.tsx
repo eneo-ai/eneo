@@ -32,6 +32,7 @@ import {
   transcriptCorrectionsQueryOptions,
   transcriptQueryOptions
 } from "./runs-api";
+import { useReadsOnReturn } from "./run-webhooks";
 import {
   correctionSet,
   editRequest,
@@ -211,8 +212,12 @@ function StepTranscript({
   const userId = user.id;
   const { routeId } = useSpace();
   const queryClient = useQueryClient();
-  // One read for all of the run's transcripts: they share the query.
-  const correctionsRead = useQuery(transcriptCorrectionsQueryOptions(flowId, runId));
+  // One read for all of the run's transcripts: they share the query. An audited read: not read
+  // again on coming back while a finished run's result is on its way.
+  const correctionsRead = useQuery({
+    ...transcriptCorrectionsQueryOptions(flowId, runId),
+    ...useReadsOnReturn(flowId, runId)
+  });
   const corrections = correctionsRead.data?.find((item) => item.step_id === target.stepId) ?? null;
   const source = useQuery(transcriptQueryOptions(flowId, runId, target));
   const correctionsKey = runKeys.corrections(flowId, runId);

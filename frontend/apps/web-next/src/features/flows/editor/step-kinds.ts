@@ -41,7 +41,9 @@ export function kindOption(
 
 /**
  * What the author entered, put into the core's starting configuration: the
- * document format, the address of an HTTP kind and the tool of a tool kind.
+ * document format, the address of an HTTP kind (the core's body kept, so the
+ * step that sends the run's result keeps sending it) and the tool of a tool
+ * kind.
  */
 function enteredConfiguration(option: StepKindOption, entered: NewStepOptions): StepPatch {
   const configuration: StepPatch = { ...option.configuration };
@@ -53,6 +55,7 @@ function enteredConfiguration(option: StepKindOption, entered: NewStepOptions): 
       configuration.input_config = { ...option.configuration.input_config, url: entered.url ?? "" };
       break;
     case "send_http":
+    case "send_run_result":
       configuration.output_config = {
         ...option.configuration.output_config,
         url: entered.url ?? ""

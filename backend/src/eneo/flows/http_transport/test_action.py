@@ -10,6 +10,7 @@ import httpx
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.http_transport.authored_config import (
     HttpAuthoredConfig,
+    HttpBodyMode,
     HttpMethod,
     contains_secret_sentinel,
 )
@@ -34,6 +35,7 @@ from eneo.flows.http_transport.secret_codec import (
     unresolved_secret_sentinel_fields,
 )
 from eneo.flows.http_transport.validator import (
+    AUTHOR_ACTIONS,
     validate_authored_config,
     validate_http_url,
 )
@@ -110,6 +112,15 @@ async def execute_http_test(
             success=False,
             error_code=errors[0],
             error_message=_error_message(errors[0], max_timeout=max_timeout),
+        )
+
+    # A run result exists only once a run has completed: there is nothing
+    # true to send, and an invented body would test a different request.
+    if decrypted.body.mode is HttpBodyMode.RUN_RESULT:
+        return HttpTestResult(
+            success=False,
+            error_code=HttpTransportError.RUN_RESULT_NOT_TESTABLE,
+            error_message=_error_message(HttpTransportError.RUN_RESULT_NOT_TESTABLE),
         )
 
     try:
@@ -289,4 +300,4 @@ def _error_message(
         HttpTransportError.CREDENTIALS_REQUIRE_HTTPS: "HTTP credentials require a fixed HTTPS origin",
         HttpTransportError.INVALID_HEADER_NAME: "Invalid custom header name",
     }
-    return messages.get(error, error.value)
+    return messages.get(error) or AUTHOR_ACTIONS.get(error, error.value)

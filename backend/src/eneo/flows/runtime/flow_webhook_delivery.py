@@ -2,14 +2,21 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
+from uuid import UUID
 
 from eneo.audit.application.audit_service import AuditService
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.domain.outcome import Outcome
 from eneo.authentication.api_key_v2_repo import ApiKeysV2Repository
 from eneo.authentication.principal_types import PrincipalType
+from eneo.files.file_models import FileContentVariant
+from eneo.files.file_repo import FileRepository
+from eneo.flows.api.flow_run_contract_models import FlowRunTextDeliverablePublic
 from eneo.flows.application.flow_run_terminalization import FlowRunTerminalizer
 from eneo.flows.application.flow_webhook_delivery_policy import (
     FLOW_WEBHOOK_MAX_ATTEMPTS,
@@ -27,12 +34,18 @@ from eneo.flows.domain.step_output import (
     StepOutputMetadataError,
     interpret_step_text,
 )
-from eneo.flows.enums import FlowRunLifecycleSource
+from eneo.flows.enums import FlowRunLifecycleSource, is_terminal_flow_run_status
 from eneo.flows.flow_api_error_code import (
     FLOW_RUN_TERMINAL_ERROR_CODES,
     FlowApiErrorCode,
 )
+from eneo.flows.flow_run_contract_service import (
+    build_run_output_contract,
+    project_run_deliverables,
+)
 from eneo.flows.flow_run_error import FlowRunError
+from eneo.flows.http_transport import sends_run_result
+from eneo.flows.http_transport.effective_url import parse_effective_http_url
 from eneo.flows.infrastructure.flow_repo import FlowRepository
 from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
 from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
@@ -58,8 +71,27 @@ from eneo.flows.runtime.http_orchestration import (
 )
 from eneo.flows.runtime.http_runtime import FlowHttpRuntimeHelper
 from eneo.flows.runtime.run_outcome import finalize_run_from_current_results
+from eneo.flows.runtime.run_result_body import (
+    RunResultPart,
+    RunResultText,
+    check_run_result,
+    run_result_body,
+    run_result_file_ids,
+    run_result_text,
+)
 from eneo.flows.variable_resolver import FlowVariableResolver
-from eneo.main.exceptions import BadRequestException, TypedIOValidationException
+from eneo.json_types import JsonValue
+from eneo.main.exceptions import (
+    BadRequestException,
+    NotFoundException,
+    TypedIOValidationException,
+)
+from eneo.object_content.content import (
+    ContentReadGrant,
+    ObjectContentIntegrityError,
+    ObjectContentStateError,
+)
+from eneo.object_content.content_service import ObjectContentService
 from eneo.settings.encryption_service import EncryptionService
 from eneo.tenants.tenant_repo import TenantRepository
 from eneo.users.user_repo import UsersRepository
@@ -132,10 +164,31 @@ class WebhookDeliveryPayload:
     text_payload: str
     context: dict[str, Any]
     audit_actor: FlowRunActor | None
+    # The document a run_result body sends; None for a template body, which
+    # is sent while its run is running. It holds content: never in a repr.
+    run_result_body: JsonValue | None = field(default=None, repr=False)
+    # The steps and files that body sends, for the audit row written before
+    # each send.
+    run_result_step_ids: tuple[UUID, ...] = ()
+    run_result_file_ids: tuple[UUID, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class _RunResultSource:
+    """What a run result body is built from once the delivery's transaction
+    has ended: its deliverables and a read grant for each file found."""
+
+    parts: list[RunResultPart]
+    grants: dict[UUID, ContentReadGrant]
 
 
 class WebhookDeliveryClaimLostError(RuntimeError):
     pass
+
+
+class RunResultAuditUnavailableError(RuntimeError):
+    """The audit row a run result needs before it is sent was not written;
+    nothing is sent and the delivery is tried again."""
 
 
 class WebhookDeliveryAttemptBudgetExhaustedError(RuntimeError):
@@ -157,7 +210,11 @@ class FlowRunWebhookDeliveryService:
         api_key_repo: ApiKeysV2Repository,
         tenant_repo: TenantRepository,
         http_runtime: FlowHttpRuntimeHelper,
+        file_repo: FileRepository,
+        object_content: Callable[[], ObjectContentService],
     ) -> None:
+        self.file_repo = file_repo
+        self.object_content = object_content
         self.webhook_delivery_repo = webhook_delivery_repo
         self.flow_repo = flow_repo
         self.flow_run_repo = flow_run_repo
@@ -233,9 +290,11 @@ class FlowRunWebhookDeliveryService:
     ) -> FlowWebhookDeliveryResult:
         attempted_result = FlowWebhookDeliveryResult(attempted_count=1)
         payload_prepared = False
+        result_read = False
         try:
             payload = await self._prepare_before_sends_end(row=row, deadline=deadline)
             payload_prepared = True
+            result_read = payload.run_result_body is not None
             try:
                 await self._deliver_payload(row=row, payload=payload, deadline=deadline)
             finally:
@@ -243,8 +302,27 @@ class FlowRunWebhookDeliveryService:
                 # their read transaction before persisting the delivery outcome.
                 if self.webhook_delivery_repo.session.in_transaction():
                     await self.webhook_delivery_repo.session.rollback()
-        except WebhookSendNotStartedError:
-            return await self._release_unsent_claim(row=row)
+        except WebhookSendNotStartedError as exc:
+            if not result_read:
+                return await self._release_unsent_claim(row=row)
+            # Once the run's result has been read, a deadline that passes
+            # before the send spends the attempt, as a cut read does: a job
+            # that always gets that far would otherwise never run out of them.
+            try:
+                async with self.webhook_delivery_repo.session.begin():
+                    did_dead_letter = await self._record_failure(
+                        row=row,
+                        error=exc,
+                        force_dead_letter=False,
+                    )
+            except WebhookDeliveryClaimLostError:
+                return attempted_result
+            return attempted_result.combine(
+                FlowWebhookDeliveryResult(
+                    dead_lettered_count=int(did_dead_letter),
+                    retry_scheduled_count=int(not did_dead_letter),
+                )
+            )
         except (
             BadRequestException,
             FlowPublishedDefinitionWithoutExecutableStepsError,
@@ -358,17 +436,33 @@ class FlowRunWebhookDeliveryService:
         deadline: FlowWebhookDeliveryDeadline,
     ) -> WebhookDeliveryPayload:
         preparation = asyncio.timeout_at(deadline.sends_end_at)
+        reading_files = False
         try:
             async with preparation:
                 async with self.webhook_delivery_repo.session.begin():
-                    return await self._prepare_delivery_payload(row=row)
+                    payload, source = await self._prepare_delivery_payload(row=row)
+                if source is None:
+                    return payload
+                # The files' bytes are read on a connection of their own, once
+                # this delivery's transaction no longer holds one.
+                reading_files = True
+                return await self._with_run_result_body(
+                    payload, source=source, tenant_id=row.tenant_id
+                )
         except TimeoutError as exc:
-            if preparation.expired():
-                raise WebhookSendNotStartedError(
-                    "The webhook delivery job ran out of time while preparing "
-                    "the request."
+            if not preparation.expired():
+                raise
+            # A slow job gives its claim back unspent, but a store that never
+            # answers would then hold the delivery forever: a read cut by the
+            # deadline spends the attempt and waits out the backoff.
+            if reading_files:
+                raise TimeoutError(
+                    "The webhook delivery job ran out of time while reading the "
+                    "run result's files."
                 ) from exc
-            raise
+            raise WebhookSendNotStartedError(
+                "The webhook delivery job ran out of time while preparing the request."
+            ) from exc
 
     async def _release_unsent_claim(
         self, *, row: FlowRunWebhookDeliveryRow
@@ -423,13 +517,19 @@ class FlowRunWebhookDeliveryService:
         self,
         *,
         row: FlowRunWebhookDeliveryRow,
-    ) -> WebhookDeliveryPayload:
+    ) -> tuple[WebhookDeliveryPayload, _RunResultSource | None]:
+        """The delivery's run, step, text and audit actor, read in the
+        delivery's transaction. A run result also gets what its body is built
+        from; its files' bytes are not read here."""
         run = await self.flow_run_repo.get(
             run_id=row.flow_run_id,
             tenant_id=row.tenant_id,
             flow_id=row.flow_id,
         )
-        if run.status != FlowRunStatus.RUNNING:
+        # A template body is sent while its run is running; a run result body
+        # once its run has completed. Only the pinned step says which, so a
+        # run in any other state is refused before the version is read.
+        if run.status not in (FlowRunStatus.RUNNING, FlowRunStatus.COMPLETED):
             raise ValueError("Webhook delivery run is no longer running.")
         flow_version = await self.flow_version_repo.get(
             flow_id=row.flow_id,
@@ -447,6 +547,15 @@ class FlowRunWebhookDeliveryService:
         if step is None:
             raise ValueError(
                 "Webhook delivery step is missing from published snapshot."
+            )
+        run_result = sends_run_result(step.output_mode, step.output_config)
+        if run.status != (
+            FlowRunStatus.COMPLETED if run_result else FlowRunStatus.RUNNING
+        ):
+            raise ValueError(
+                "Run result delivery requires a completed run."
+                if run_result
+                else "Webhook delivery run is no longer running."
             )
         results = await self.flow_run_repo.list_step_results(
             run_id=row.flow_run_id,
@@ -491,7 +600,8 @@ class FlowRunWebhookDeliveryService:
         if isinstance(structured, dict | list):
             context["structured"] = structured
 
-        return WebhookDeliveryPayload(
+        # Headers may read run data as for any body; the address may not.
+        payload = WebhookDeliveryPayload(
             run=run,
             step=step,
             step_result=step_result,
@@ -499,6 +609,167 @@ class FlowRunWebhookDeliveryService:
             context=context,
             audit_actor=audit_actor,
         )
+        if not run_result:
+            return payload, None
+        # Every deliverable of the completed run, as its detail lists them,
+        # each text read from its step's current result.
+        result_files = await self.flow_run_repo.list_result_files_for_runs(
+            run_ids=[run.id], tenant_id=row.tenant_id
+        )
+        results_by_step = {item.step_id: item for item in results}
+        parts: list[RunResultPart] = [
+            run_result_text(
+                deliverable,
+                step_result=results_by_step.get(deliverable.step_id),
+                result_files=result_files,
+            )
+            if isinstance(deliverable, FlowRunTextDeliverablePublic)
+            else deliverable
+            for deliverable in project_run_deliverables(
+                status=run.status,
+                outputs=build_run_output_contract(steps),
+                result_files=result_files,
+            )
+        ]
+        if not parts:
+            raise ValueError(
+                "Run result delivery has nothing to send: the run delivers no "
+                "text or document."
+            )
+        check_run_result(parts)
+        return payload, _RunResultSource(
+            parts=parts,
+            grants=await self._content_grants(
+                run_result_file_ids(parts), tenant_id=row.tenant_id
+            ),
+        )
+
+    async def _with_run_result_body(
+        self,
+        payload: WebhookDeliveryPayload,
+        *,
+        source: _RunResultSource,
+        tenant_id: UUID,
+    ) -> WebhookDeliveryPayload:
+        """The payload with its run result body. A file whose bytes cannot
+        be read, or no longer match, refuses the body."""
+        contents: dict[UUID, bytes] = {}
+        if source.grants:
+            try:
+                payloads = await self.object_content().read_content_bytes(
+                    list(source.grants.values())
+                )
+            except (ObjectContentIntegrityError, ObjectContentStateError) as exc:
+                # Bytes that no longer match, or content no longer readable,
+                # will not be there on a later attempt either. A store that is
+                # down is left to one.
+                raise ValueError(
+                    f"Run result delivery could not read its files: {exc.code}."
+                ) from exc
+            contents = {
+                file_id: payloads[grant.content_id]
+                for file_id, grant in source.grants.items()
+                if grant.content_id in payloads
+            }
+        return replace(
+            payload,
+            run_result_body=run_result_body(
+                run=payload.run, parts=source.parts, contents=contents
+            ),
+            run_result_step_ids=tuple(
+                part.deliverable.step_id
+                if isinstance(part, RunResultText)
+                else part.step_id
+                for part in source.parts
+            ),
+            run_result_file_ids=tuple(run_result_file_ids(source.parts)),
+        )
+
+    async def _content_grants(
+        self, file_ids: list[UUID], *, tenant_id: UUID
+    ) -> dict[UUID, ContentReadGrant]:
+        """A read grant for each file's own bytes: an upload's original or a
+        generated document's artifact. A file without one is left out, which
+        refuses the body."""
+        if not file_ids:
+            return {}
+        references = await self.file_repo.get_content_references(file_ids)
+        grants: dict[UUID, ContentReadGrant] = {}
+        for file_id in file_ids:
+            try:
+                await self.file_repo.get_by_id(file_id=file_id, tenant_id=tenant_id)
+            except NotFoundException:
+                continue
+            own = {
+                reference.variant: reference
+                for reference in references
+                if reference.file_id == file_id and reference.ordinal == 0
+            }
+            reference = own.get(FileContentVariant.ORIGINAL) or own.get(
+                FileContentVariant.GENERATED_ARTIFACT
+            )
+            if reference is not None:
+                grants[file_id] = ContentReadGrant(
+                    content_id=reference.content_id,
+                    tenant_id=tenant_id,
+                    access_class=reference.access_class,
+                )
+        return grants
+
+    async def _audit_run_result_send(
+        self,
+        *,
+        row: FlowRunWebhookDeliveryRow,
+        payload: WebhookDeliveryPayload,
+        url: str,
+    ) -> None:
+        """Record, and commit, that the run's result and files are about to
+        leave Eneo: after its request is compiled, before it is sent. The row
+        names the steps and files by id and the receiver by the host of the
+        compiled address; it holds no label, file name or content."""
+        url_host = parse_effective_http_url(url).host
+        actor = payload.audit_actor
+        try:
+            if self.audit_service is None or actor is None:
+                raise RunResultAuditUnavailableError(
+                    "Run result delivery audit logging is unavailable."
+                )
+            actor_fields = actor.audit_actor_fields()
+            async with self.webhook_delivery_repo.session.begin():
+                await self.audit_service.log(
+                    tenant_id=row.tenant_id,
+                    actor_id=actor_fields["actor_id"],
+                    actor_type=actor_fields["actor_type"],
+                    actor_api_key_id=actor_fields["actor_api_key_id"],
+                    action=ActionType.FLOW_RUN_RESULT_SENDING,
+                    entity_type=EntityType.FLOW_RUN,
+                    entity_id=row.flow_run_id,
+                    description=f"Sending the result of flow run {row.flow_run_id}",
+                    metadata=actor.audit_metadata(
+                        target=payload.run,
+                        extra={
+                            "flow_id": str(row.flow_id),
+                            "run_id": str(row.flow_run_id),
+                            "delivery_id": str(row.id),
+                            "delivery_attempt": row.delivery_attempts,
+                            "url_host": url_host,
+                            "step_ids": [
+                                str(step_id) for step_id in payload.run_result_step_ids
+                            ],
+                            "file_ids": [
+                                str(file_id) for file_id in payload.run_result_file_ids
+                            ],
+                        },
+                    ),
+                    required=True,
+                    record_client=False,
+                )
+        except RunResultAuditUnavailableError:
+            raise
+        except Exception as exc:
+            raise RunResultAuditUnavailableError(
+                "Run result delivery audit logging is unavailable."
+            ) from exc
 
     async def _deliver_payload(
         self,
@@ -533,6 +804,9 @@ class FlowRunWebhookDeliveryService:
                 ends_at=deadline.ends_at,
             )
 
+        async def audit_run_result_send(url: str) -> None:
+            await self._audit_run_result_send(row=row, payload=payload, url=url)
+
         deps = FlowHttpOrchestrationDeps(
             encryption_service=self.encryption_service,
             variable_resolver=self.variable_resolver,
@@ -549,6 +823,10 @@ class FlowRunWebhookDeliveryService:
             deps=deps,
             idempotency_key=row.idempotency_key,
             sends_end_at=deadline.sends_end_at,
+            run_result_body=payload.run_result_body,
+            before_send=(
+                audit_run_result_send if payload.run_result_body is not None else None
+            ),
         )
 
     async def _record_success(
@@ -557,6 +835,17 @@ class FlowRunWebhookDeliveryService:
         row: FlowRunWebhookDeliveryRow,
         payload: WebhookDeliveryPayload,
     ) -> bool:
+        if payload.run_result_body is not None:
+            # The run completed before the send: only the delivery is recorded.
+            if not await self.webhook_delivery_repo.mark_delivery_succeeded(
+                delivery_id=row.id,
+                claim_token=row.claim_token,
+                delivered_at=datetime.now(timezone.utc),
+            ):
+                raise WebhookDeliveryClaimLostError(
+                    "Webhook delivery claim was lost before success could be recorded."
+                )
+            return True
         # Preserve the active-run write guard before marking delivery succeeded.
         saved_result = await self.flow_run_repo.save_step_result(
             row.flow_run_id,
@@ -621,7 +910,7 @@ class FlowRunWebhookDeliveryService:
                 "Webhook delivery claim was lost before failure could be recorded."
             )
 
-        if dead_lettered_at is not None:
+        if dead_lettered_at is not None and not await self._run_has_ended(row):
             await self.flow_run_terminalizer.terminalize_run(
                 run_id=row.flow_run_id,
                 tenant_id=row.tenant_id,
@@ -640,6 +929,15 @@ class FlowRunWebhookDeliveryService:
                 ),
             )
         return dead_lettered_at is not None
+
+    async def _run_has_ended(self, row: FlowRunWebhookDeliveryRow) -> bool:
+        """A delivery for a run that has already ended never ends the run: a
+        run result is sent after its run completed, and the run stays
+        completed whatever the receiver does."""
+        run = await self.flow_run_repo.get(
+            run_id=row.flow_run_id, tenant_id=row.tenant_id, flow_id=row.flow_id
+        )
+        return is_terminal_flow_run_status(run.status)
 
     async def _resolve_audit_actor(self, run: FlowRun) -> FlowRunActor | None:
         if self.audit_service is None:

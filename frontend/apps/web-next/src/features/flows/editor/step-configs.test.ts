@@ -1,14 +1,22 @@
 import { describe, expect, it } from "vitest";
 import {
   argumentValue,
+  contentTypeHeaderPart,
+  httpUrlProblemKey,
   longMaterialEligibility,
   newSourceRef,
+  oneLineStart,
   readHttpConfig,
   readInputBindings,
   readLongMaterial,
   readRuntimeInput,
+  readDeliverable,
   readTemplateFill,
+  runResultUrlFixed,
+  stepCanBeDeliverable,
+  stepDeliversArtifact,
   toolArguments,
+  withDeliverable,
   withHttpConfig,
   withLongMaterial,
   withReviewChoice,
@@ -113,6 +121,80 @@ describe("uploads", () => {
 });
 
 describe("HTTP", () => {
+  it("keeps a body that sends the run's result as stored", () => {
+    const stored = {
+      url: "https://hook.example.org",
+      auth: { mode: "none" },
+      timeout_seconds: 30,
+      body: { mode: "run_result" },
+      custom_headers: [],
+      response_format: null
+    };
+    const config = readHttpConfig(stored, "output");
+    expect(config.body).toEqual({ mode: "run_result", template: null });
+    expect(withHttpConfig(stored, { ...config, timeout_seconds: 45 })).toEqual({
+      ...stored,
+      timeout_seconds: 45
+    });
+  });
+
+  it("writes no template for a body that sends the run's result", () => {
+    const stored = {
+      url: "https://hook.example.org",
+      auth: { mode: "none" },
+      timeout_seconds: 30,
+      body: { mode: "json_template", template: '{"a": 1}' },
+      custom_headers: [],
+      response_format: null
+    };
+    const config = readHttpConfig(stored, "output");
+    expect(
+      withHttpConfig(stored, { ...config, body: { ...config.body, mode: "run_result" } }).body
+    ).toEqual({ mode: "run_result" });
+  });
+
+  it("holds a body that sends the run's result to the core's address and header rules", () => {
+    expect(runResultUrlFixed("https://receiver.example.org/eneo/results")).toBe(true);
+    expect(runResultUrlFixed("https://receiver.example.org/{{ flow_input.path }}")).toBe(false);
+    expect(runResultUrlFixed("http://receiver.example.org/eneo/results")).toBe(false);
+    // A sender names its own rule for any address it cannot send to: the general advice
+    // (http:// when the step does not sign in) does not hold for it.
+    for (const url of [
+      "ftp://receiver.example.org/eneo",
+      "https://anna:hemligt@receiver.example.org/eneo",
+      "http://receiver.example.org/eneo",
+      "https://receiver.example.org/{{ flow_input.path }}"
+    ]) {
+      expect(httpUrlProblemKey(url, true)).toBe("flow_step_editor_http_run_result_url_fixed");
+    }
+    expect(httpUrlProblemKey("ftp://receiver.example.org/eneo", false)).toBe(
+      "flow_step_editor_http_url_invalid"
+    );
+    expect(httpUrlProblemKey("http://receiver.example.org/eneo", false)).toBeNull();
+    expect(httpUrlProblemKey(" ", true)).toBe("flow_step_editor_http_url_missing");
+    expect(httpUrlProblemKey("https://receiver.example.org/eneo", true)).toBeNull();
+    const config = readHttpConfig(
+      { url: "https://receiver.example.org", auth: { mode: "none" }, body: { mode: "run_result" } },
+      "output"
+    );
+    expect(contentTypeHeaderPart(config)).toBeNull();
+    expect(
+      contentTypeHeaderPart({
+        ...config,
+        custom_headers: [
+          { name: "X-Trace", value: "1", secret: false },
+          { name: "content-type", value: "text/plain", secret: false }
+        ]
+      })
+    ).toBe("more");
+    expect(
+      contentTypeHeaderPart({
+        ...config,
+        auth: { mode: "api_key", header_name: "Content-Type", key: "k" }
+      })
+    ).toBe("auth");
+  });
+
   it("round-trips a stored secret as its sentinel and never as a value", () => {
     const stored = {
       url: "https://api.example.org",
@@ -224,32 +306,105 @@ describe("long material", () => {
   });
 
   it("is offered only on a completion step that reads its material whole", () => {
-    expect(longMaterialEligibility({ output_mode: "pass_through", input_config: null })).toBe(
-      "eligible"
-    );
-    expect(longMaterialEligibility({ output_mode: "http_post", input_config: null })).toBe(
-      "eligible"
-    );
-    expect(longMaterialEligibility({ output_mode: "compose_text", input_config: null })).toBe(
-      "output"
-    );
     expect(
       longMaterialEligibility({
         output_mode: "pass_through",
-        input_config: { text_processing: { mode: "summarize" } }
+        input_config: null,
+        output_config: null
+      })
+    ).toBe("eligible");
+    expect(
+      longMaterialEligibility({ output_mode: "http_post", input_config: null, output_config: null })
+    ).toBe("eligible");
+    expect(
+      longMaterialEligibility({
+        output_mode: "compose_text",
+        input_config: null,
+        output_config: null
+      })
+    ).toBe("output");
+    expect(
+      longMaterialEligibility({
+        output_mode: "pass_through",
+        input_config: { text_processing: { mode: "summarize" } },
+        output_config: null
       })
     ).toBe("text_processing");
     expect(
       longMaterialEligibility({
         output_mode: "pass_through",
-        input_config: { item_map: { enabled: true } }
+        input_config: { item_map: { enabled: true } },
+        output_config: null
       })
     ).toBe("mapped");
     expect(
       longMaterialEligibility({
         output_mode: "pass_through",
-        input_config: { runtime_input: { enabled: true, execution_mode: "per_source" } }
+        input_config: { runtime_input: { enabled: true, execution_mode: "per_source" } },
+        output_config: null
       })
     ).toBe("mapped");
+  });
+});
+
+describe("deliverable", () => {
+  it("makes a name one line and cuts it to the core's bound", () => {
+    expect(oneLineStart("  Möte\n med\u200B  styrelsen\t ")).toBe("Möte med styrelsen");
+    expect(oneLineStart(`${"a".repeat(119)} bcd`)).toBe("a".repeat(119));
+    expect(oneLineStart("ä".repeat(121))).toBe("ä".repeat(120));
+    expect(oneLineStart("   ")).toBe("");
+  });
+
+  it("can be text or a document of the step's own", () => {
+    expect(stepCanBeDeliverable({ output_type: "text", output_mode: "pass_through" })).toBe(true);
+    expect(stepCanBeDeliverable({ output_type: "text", output_mode: "compose_text" })).toBe(true);
+    expect(stepCanBeDeliverable({ output_type: "docx", output_mode: "template_fill" })).toBe(true);
+    expect(stepCanBeDeliverable({ output_type: "json", output_mode: "pass_through" })).toBe(false);
+    expect(stepCanBeDeliverable({ output_type: "text", output_mode: "http_post" })).toBe(false);
+    expect(stepCanBeDeliverable({ output_type: "json", output_mode: "speaker_mapping" })).toBe(
+      false
+    );
+  });
+
+  const stored = {
+    template_asset_id: "asset-1",
+    bindings: { namn: "{{flow_input.namn}}" },
+    future: { kept: true }
+  };
+
+  it("is set and cleared without touching the step's other output settings", () => {
+    const on = withDeliverable(stored, {
+      label: "Till Startsidan",
+      file_name: "Standup {{flow_input.team}}"
+    });
+    expect(on).toEqual({
+      ...stored,
+      deliverable: { label: "Till Startsidan", file_name: "Standup {{flow_input.team}}" }
+    });
+    expect(readDeliverable(on)).toEqual({
+      label: "Till Startsidan",
+      file_name: "Standup {{flow_input.team}}"
+    });
+    expect(withDeliverable(on, null)).toEqual(stored);
+    expect(withDeliverable({ deliverable: { label: "Eneo" } }, null)).toBeNull();
+  });
+
+  it("leaves an empty file name out, so the run's own naming applies", () => {
+    expect(withDeliverable(null, { label: "Eneo", file_name: "" })).toEqual({
+      deliverable: { label: "Eneo" }
+    });
+    expect(readDeliverable({ deliverable: { label: "Eneo" } })).toEqual({ label: "Eneo" });
+    expect(readDeliverable({ future: 1 })).toBeNull();
+    expect(readDeliverable(null)).toBeNull();
+  });
+
+  it("is something only a step that delivers a file can be", () => {
+    expect(stepDeliversArtifact({ output_type: "docx", output_mode: "template_fill" })).toBe(true);
+    expect(stepDeliversArtifact({ output_type: "pdf", output_mode: "render_verbatim" })).toBe(true);
+    expect(stepDeliversArtifact({ output_type: "pdf", output_mode: "pass_through" })).toBe(true);
+    expect(stepDeliversArtifact({ output_type: "text", output_mode: "pass_through" })).toBe(false);
+    expect(stepDeliversArtifact({ output_type: "json", output_mode: "copy_input" })).toBe(false);
+    // Outbound delivery sends the result away: it is never a file of the run.
+    expect(stepDeliversArtifact({ output_type: "pdf", output_mode: "http_post" })).toBe(false);
   });
 });

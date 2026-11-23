@@ -37,6 +37,7 @@ from eneo.flows.api.flow_api_common import (
     error_response,
 )
 from eneo.flows.api.flow_assembler import FlowAssembler
+from eneo.flows.api.flow_definition_access import require_flow_edit_access
 from eneo.flows.api.flow_models import (
     PAGINATED_FLOW_RUN_RESPONSE_EXAMPLE,
     FlowRunCreateRequest,
@@ -46,8 +47,9 @@ from eneo.flows.api.flow_models import (
     FlowRunPublic,
     FlowRunRedispatchRequest,
     FlowRunRedispatchResponse,
-    FlowRunStartedByPublic,
-    FlowRunSummaryPublic,
+    FlowRunStatusPublic,
+    FlowRunWebhookDeliveryPublic,
+    FlowRunWebhookRedeliveryRequest,
 )
 from eneo.flows.api.flow_run_concurrency_response import (
     FLOW_RUN_CONCURRENCY_MESSAGE,
@@ -55,6 +57,7 @@ from eneo.flows.api.flow_run_concurrency_response import (
     flow_run_concurrency_limit_response,
 )
 from eneo.flows.api.flow_run_contract_models import FlowRunCapacityPublic
+from eneo.flows.api.flow_run_response import read_run_public, started_run_public
 from eneo.flows.api.flow_run_started_by import (
     started_by_for_run,
     started_by_for_runs,
@@ -70,6 +73,7 @@ from eneo.flows.api.flow_runtime_paths import (
     FLOW_RUN_REDISPATCH_PATH,
     FLOW_RUN_STATUS_CAPABILITIES_PATH,
     FLOW_RUN_STATUS_PATH,
+    FLOW_RUN_WEBHOOK_REDELIVER_PATH,
     FLOW_RUNS_PATH,
 )
 from eneo.flows.application.flow_dispatch import (
@@ -86,6 +90,10 @@ from eneo.flows.application.flow_trace_audit import (
     FLOW_EVIDENCE_READ_ON_GET,
     log_flow_trace_audit_or_raise,
     raise_flow_trace_audit_unavailable,
+)
+from eneo.flows.application.flow_webhook_redelivery import (
+    redeliver_run_result,
+    wake_webhook_outbox,
 )
 from eneo.flows.domain.flow import FlowRun, FlowRunStatus
 from eneo.flows.domain.flow_run_exceptions import FlowRunConcurrencyLimitReachedError
@@ -243,6 +251,7 @@ _FLOW_RUN_STATUS_DESCRIPTION = """
     This is the routine polling contract. It contains lifecycle, timing, and bounded,
     secret-free dispatch diagnosis fields, but excludes accepted input, terminal errors,
     terminal output, result-file metadata, provider usage, and webhook-delivery content.
+    `result_delivery` says only where the run's latest outbound delivery stands.
     Poll about every 2 seconds for the first 30 seconds, then every 5 seconds, then every
     15 seconds, and stop when the status capability `should_poll` is false.
 
@@ -470,10 +479,7 @@ async def create_flow_run(
         )
     ),
 ) -> FlowRunPublic | JSONResponse:
-    assembler = FlowAssembler()
     dispatch_run: FlowRun | None = None
-    completed_replay_view = None
-    started_by: FlowRunStartedByPublic | None = None
     try:
         async with commit_flow_runtime_write_before_response(container):
             await flow_access_context.enforce_flow_scope(
@@ -510,7 +516,6 @@ async def create_flow_run(
                 ),
             )
             run = create_result.run
-            started_by = await started_by_for_run(container, run)
             if create_result.created:
                 await container.audit_service().log(
                     tenant_id=user.tenant_id,
@@ -531,12 +536,7 @@ async def create_flow_run(
                     required=True,
                 )
                 dispatch_run = run
-            elif run.status is FlowRunStatus.COMPLETED:
-                completed_replay_view = (
-                    await run_service.enrich_run_with_result_files_and_usage(
-                        run=run,
-                    )
-                )
+            public = await started_run_public(container, run)
     except FlowRunConcurrencyLimitReachedError as exc:
         return flow_run_concurrency_limit_response(request, exc)
 
@@ -547,16 +547,7 @@ async def create_flow_run(
             tenant_id=dispatch_run.tenant_id,
             expected_revision=dispatch_run.revision,
         )
-    if completed_replay_view is not None:
-        return assembler.to_run_public(
-            completed_replay_view.run,
-            result_files=completed_replay_view.result_files,
-            token_usage=completed_replay_view.token_usage,
-            transcription_usage=completed_replay_view.transcription_usage,
-            final_output=completed_replay_view.final_output,
-            started_by=started_by,
-        )
-    return assembler.to_run_public(run, started_by=started_by)
+    return public
 
 
 @router.get(
@@ -734,7 +725,7 @@ async def list_flow_runs(
 
 @router.get(
     FLOW_RUN_STATUS_PATH,
-    response_model=FlowRunSummaryPublic,
+    response_model=FlowRunStatusPublic,
     status_code=status.HTTP_200_OK,
     operation_id="get_flow_run_status",
     summary="Get flow run status",
@@ -777,13 +768,16 @@ async def get_flow_run_status(
         allow_service_key_principals=True,
         history=True,
     )
-    run = await container.flow_run_service().get_run_status(
+    run_service = container.flow_run_service()
+    run = await run_service.get_run_status(
         run_id=run_id,
         flow_id=id,
         history=True,
     )
-    return FlowAssembler.to_run_summary_public(
-        run, started_by=await started_by_for_run(container, run)
+    return FlowAssembler.to_run_status_public(
+        run,
+        started_by=await started_by_for_run(container, run),
+        result_delivery=await run_service.latest_webhook_delivery(run_id=run.id),
     )
 
 
@@ -860,7 +854,7 @@ async def get_flow_run(
                 result_files=run_view.result_files,
                 token_usage=run_view.token_usage,
                 transcription_usage=run_view.transcription_usage,
-                final_output=run_view.final_output,
+                outputs=run_view.outputs,
                 webhook_deliveries=run_view.webhook_deliveries,
                 started_by=await started_by_for_run(container, run_view.run),
                 evidence_access=await run_service.evidence_access(
@@ -948,15 +942,138 @@ async def cancel_flow_run(
                 )
             )
     if completed_run_view is not None:
-        return FlowAssembler().to_run_public(
-            completed_run_view.run,
-            result_files=completed_run_view.result_files,
-            token_usage=completed_run_view.token_usage,
-            transcription_usage=completed_run_view.transcription_usage,
-            final_output=completed_run_view.final_output,
-            started_by=started_by,
-        )
+        return read_run_public(completed_run_view, started_by=started_by)
     return FlowAssembler().to_run_public(run, started_by=started_by)
+
+
+@router.post(
+    FLOW_RUN_WEBHOOK_REDELIVER_PATH,
+    response_model=FlowRunWebhookDeliveryPublic,
+    status_code=status.HTTP_200_OK,
+    operation_id="redeliver_flow_run_webhook_delivery",
+    summary="Send a run's result again",
+    description="""
+    Send a completed run's result again after its delivery ended in dead letter.
+    The delivery gets a fresh attempt budget and is sent as before: the same
+    receiver and the same `Idempotency-Key`, so a receiver that already stored
+    the result can recognise it. Only a `run_result` delivery can be sent again.
+
+    Send the delivery's observed `dead_lettered_at` as `expected_dead_lettered_at`.
+    Only that dead letter is reset, so a retried request cannot reset a later one.
+    The audit record and the reset commit together, and it is written even when
+    the tenant has turned that audit action off; a failed audit write prevents
+    the redelivery.
+
+    Requires the right to edit the flow. Service keys cannot send a result again.
+    """,
+    responses={
+        400: error_response(
+            description=(
+                "The run's published snapshot failed integrity verification, so "
+                "the delivery was not reset. The machine-readable code is "
+                "`flow_definition_checksum_mismatch`; do not retry."
+            ),
+            message=(
+                "Published flow definition checksum does not match the stored "
+                "snapshot. Do not retry this pinned version. Publish a valid "
+                "version and start a new run."
+            ),
+            eneo_error_code=ErrorCodes.BAD_REQUEST,
+            code=FlowApiErrorCode.DEFINITION_CHECKSUM_MISMATCH,
+        ),
+        403: error_response(
+            description="Caller lacks permission to edit this flow.",
+            message="Insufficient permissions.",
+            eneo_error_code=ErrorCodes.UNAUTHORIZED,
+            code=AccessDenialCode.INSUFFICIENT_SCOPE,
+            context={"auth_layer": "space_membership"},
+        ),
+        404: error_response(
+            description=(
+                "The run or the delivery was not found for this flow and tenant. "
+                f"{RETIRED_FLOW_MUTATION_NOT_FOUND_CLAUSE}"
+            ),
+            message="Flow run webhook delivery not found.",
+            eneo_error_code=ErrorCodes.NOT_FOUND,
+        ),
+        409: error_response(
+            description=(
+                "The delivery cannot be sent again. `context.reason` says why: "
+                "`not_run_result`, `run_not_completed`, `not_dead_lettered` or "
+                "`dead_lettered_at_changed`. Refresh the run before retrying."
+            ),
+            examples={
+                FlowApiErrorCode.RUN_WEBHOOK_REDELIVERY_CONFLICT.value: {
+                    "summary": "The delivery was dead-lettered again",
+                    "value": {
+                        "message": (
+                            "The delivery's dead letter changed; refresh the run "
+                            "before retrying."
+                        ),
+                        "eneo_error_code": int(ErrorCodes.CONFLICT),
+                        "code": FlowApiErrorCode.RUN_WEBHOOK_REDELIVERY_CONFLICT.value,
+                        "context": {
+                            "reason": "dead_lettered_at_changed",
+                            "delivery_id": "00000000-0000-4000-8000-000000000201",
+                        },
+                    },
+                }
+            },
+        ),
+        503: error_response(
+            description=(
+                "Required audit logging is unavailable, so the delivery was not reset."
+            ),
+            examples={
+                FlowApiErrorCode.RUN_WEBHOOK_REDELIVERY_AUDIT_UNAVAILABLE.value: {
+                    "summary": "Required redelivery audit unavailable",
+                    "value": {
+                        "message": "Redelivery audit logging is unavailable.",
+                        "eneo_error_code": int(ErrorCodes.INTERNAL_SERVER_ERROR),
+                        "code": (
+                            FlowApiErrorCode.RUN_WEBHOOK_REDELIVERY_AUDIT_UNAVAILABLE.value
+                        ),
+                        "context": {"audit_required": True},
+                    },
+                }
+            },
+        ),
+    },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.EDIT),
+)
+async def redeliver_flow_run_webhook_delivery(
+    id: Annotated[UUID, Path(description="Identifier of the flow that owns the run.")],
+    run_id: Annotated[UUID, Path(description="Identifier of the completed run.")],
+    delivery_id: Annotated[
+        UUID,
+        Path(description="Identifier of the dead-lettered delivery to send again."),
+    ],
+    request: Request,
+    payload: FlowRunWebhookRedeliveryRequest,
+    container: Container = Depends(
+        get_container(with_user=True, with_module_user=True)
+    ),
+) -> FlowRunWebhookDeliveryPublic:
+    access_context = await require_flow_edit_access(request, container, flow_id=id)
+    user = container.user()
+    actor_kwargs = audit_actor_kwargs(user)
+    delivery = await redeliver_run_result(
+        tenant_id=user.tenant_id,
+        flow_id=id,
+        run_id=run_id,
+        delivery_id=delivery_id,
+        expected_dead_lettered_at=payload.expected_dead_lettered_at,
+        actor_id=actor_kwargs["actor_id"],
+        actor_type=actor_kwargs["actor_type"],
+        actor_api_key_id=actor_kwargs["actor_api_key_id"],
+        audit_metadata=AuditMetadata.standard(actor=user, target=access_context.flow),
+    )
+    await wake_webhook_outbox(container.platform_task_enqueuer())
+    return FlowRunWebhookDeliveryPublic.model_validate(delivery)
 
 
 @router.post(
@@ -1103,14 +1220,7 @@ async def redispatch_flow_run(
     started_by = await started_by_for_run(container, run)
     assembler = FlowAssembler()
     public_run = (
-        assembler.to_run_public(
-            completed_run_view.run,
-            result_files=completed_run_view.result_files,
-            token_usage=completed_run_view.token_usage,
-            transcription_usage=completed_run_view.transcription_usage,
-            final_output=completed_run_view.final_output,
-            started_by=started_by,
-        )
+        read_run_public(completed_run_view, started_by=started_by)
         if completed_run_view is not None
         else assembler.to_run_public(run, started_by=started_by)
     )

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { focusManager } from "@tanstack/react-query";
+import { focusManager, onlineManager } from "@tanstack/react-query";
 import { Profiler, Suspense } from "react";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import messages from "@/lib/i18n/messages/sv.json";
@@ -45,6 +45,7 @@ vi.mock("@/features/spaces/use-space", async () => {
   return { useSpace: () => useSpaceFromQuery(() => space({})) };
 });
 
+import { FlowRunCard } from "../chat/flow-run-card";
 import { FlowRunPage } from "./run-page";
 
 const STATUS = "GET /api/v1/flows/{id}/runs/{run_id}/status/";
@@ -449,7 +450,8 @@ describe("FlowRunPage", () => {
   });
 
   it("shows a step's prompt and model settings when asked, and the run's webhook deliveries", async () => {
-    const summary = makeRunSummary();
+    // A plain POST that was given up fails its run.
+    const summary = makeRunSummary({ status: "failed" });
     answerRun(
       summary,
       makeRunDetail({
@@ -464,7 +466,8 @@ describe("FlowRunPage", () => {
             delivery_attempts: 5,
             dead_lettered_at: "2026-10-21T09:00:00Z",
             created_at: "2026-10-21T08:01:00Z",
-            updated_at: "2026-10-21T09:00:00Z"
+            updated_at: "2026-10-21T09:00:00Z",
+            state: "dead_lettered"
           }
         ]
       })
@@ -506,7 +509,8 @@ describe("FlowRunPage", () => {
       within(delivery!).getByText(messages.flow_run_extras_webhook_dead_lettered)
     ).toBeTruthy();
     expect(delivery!.textContent).toContain("5 försök");
-    expect(within(deliveries).getByText(messages.flow_run_extras_webhook_retry_note)).toBeTruthy();
+    // Given up: no attempt is left for the note about trying again.
+    expect(within(deliveries).queryByText(messages.flow_run_extras_webhook_retry_note)).toBeNull();
     await expectNoAxeViolations(container);
   });
 
@@ -578,17 +582,21 @@ describe("FlowRunPage", () => {
       delivery_attempts: attempts,
       next_delivery_at: attempts > 0 ? "2026-10-21T08:05:00Z" : null,
       created_at: "2026-10-21T08:01:00Z",
-      updated_at: "2026-10-21T08:01:00Z"
+      updated_at: "2026-10-21T08:01:00Z",
+      state: attempts > 0 ? ("retry_scheduled" as const) : ("sending" as const)
     });
+    // An attempt being sent is counted, and it is still being sent, not tried again.
+    const sending = { ...delivery(1), next_delivery_at: null, state: "sending" as const };
     answerRun(
-      running,
-      makeRunDetail({ ...running, result: null, webhook_deliveries: [delivery(0)] })
+      { ...running, result_delivery: sending },
+      makeRunDetail({ ...running, result: null, webhook_deliveries: [sending] })
     );
     renderRun();
 
     expect(
       await screen.findByText(`· ${messages.flow_run_progress_delivery_summary}`)
     ).toBeTruthy();
+    expect(screen.getByText(messages.flow_run_extras_webhook_pending)).toBeTruthy();
     expect(screen.queryByText(`· ${messages.flow_run_progress_pending_summary}`)).toBeNull();
     // The delivery fold is open: it is what the run waits on.
     const deliveries = screen.getByRole("region", {
@@ -602,13 +610,16 @@ describe("FlowRunPage", () => {
 
     cleanup();
     answerRun(
-      running,
+      { ...running, result_delivery: delivery(2) },
       makeRunDetail({ ...running, result: null, webhook_deliveries: [delivery(2)] })
     );
     renderRun();
     expect(
       await screen.findByText(`· ${messages.flow_run_progress_delivery_retrying_summary}`)
     ).toBeTruthy();
+    // A plain POST keeps its own words.
+    expect(screen.getByText(messages.flow_run_extras_webhook_retrying)).toBeTruthy();
+    expect(screen.getByText(messages.flow_run_extras_webhook_retry_note)).toBeTruthy();
   });
 
   it("cancels a running run after asking, and says what the core answered", async () => {
@@ -822,6 +833,680 @@ describe("FlowRunPage", () => {
     );
   });
 
+  /** The delivery of the step that sends the run's result, as the core says it stands. */
+  function resultDelivery(overrides: Partial<NonNullable<RunSummary["result_delivery"]>> = {}) {
+    return {
+      id: "delivery-1",
+      step_id: "step-2",
+      step_order: 2,
+      attempt_no: 1,
+      delivery_status: "pending" as const,
+      delivery_attempts: 0,
+      next_delivery_at: null,
+      delivered_at: null,
+      dead_lettered_at: null,
+      created_at: "2026-10-21T08:01:07Z",
+      updated_at: "2026-10-21T08:01:07Z",
+      state: "sending" as const,
+      ...overrides
+    };
+  }
+
+  /** A completed run whose last step sends its result afterwards (the core's step diagnostic). */
+  function answerSentAfterRun(delivery: ReturnType<typeof resultDelivery>) {
+    const completed = makeRunSummary({ result_delivery: delivery });
+    answerRun(
+      completed,
+      makeRunDetail({
+        ...completed,
+        result: { kind: "outbound_http", delivery_status: delivery.delivery_status },
+        webhook_deliveries: [delivery]
+      })
+    );
+    state.routes[STEPS] = () => ({
+      body: [
+        makeRunStep(1),
+        makeRunStep(2, {
+          output_payload_json: { text: "" },
+          diagnostics: [
+            { code: "run_result_sent_after_run", message: "Sent after the run.", severity: "info" }
+          ]
+        })
+      ]
+    });
+  }
+
+  it("follows the result sent after the run through its status alone, in the state the core gives", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    // An attempt being sent is counted: still "Skickas", never a retry.
+    answerSentAfterRun(resultDelivery({ delivery_attempts: 1 }));
+    const { container } = renderRun();
+    const sending = await screen.findByRole("region", {
+      name: messages.flow_run_extras_send_heading
+    });
+    expect(within(sending).getByText(messages.flow_run_extras_send_sending)).toBeTruthy();
+    expect(screen.getByText(messages.flow_runs_result_sending)).toBeTruthy();
+    expect(screen.queryByText(messages.flow_run_extras_webhook_heading)).toBeNull();
+    expect(screen.getByText(messages.flow_run_extras_send_retry_note)).toBeTruthy();
+    await expectNoAxeViolations(container);
+    // The status the page opened with is where the delivery's own reads start: read once.
+    expect(calls(STATUS)).toHaveLength(1);
+    // Where it stood on arrival is on the screen, not news.
+    expect(state.announce).not.toHaveBeenCalled();
+    const [details, graphs, steps] = [
+      calls(DETAIL).length,
+      calls(GRAPH).length,
+      calls(STEPS).length
+    ];
+
+    // The core plans a new attempt: both rows say when, from the same state.
+    const retry = resultDelivery({
+      delivery_attempts: 1,
+      next_delivery_at: "2026-10-21T08:05:00Z",
+      state: "retry_scheduled"
+    });
+    state.routes[STATUS] = () => ({ body: makeRunSummary({ result_delivery: retry }) });
+    await act(() => vi.advanceTimersByTimeAsync(2_100));
+    const retryLabel = await within(sending).findByText(/^Nytt försök kl\. \d{1,2}[:.]\d{2}$/);
+    // "kl." and the time stay on one line: a no-break space between them.
+    const time = retryLabel.textContent!.replace("Nytt försök kl.\u00a0", "");
+    // Text matching folds the no-break space into a space.
+    expect(
+      screen.getByText(
+        messages.flow_runs_result_retry_at.replace("{time}", time).replace(/\u00a0/g, " ")
+      )
+    ).toBeTruthy();
+    // Each move is said aloud as it happens, in the result's own words.
+    expect(state.announce).toHaveBeenCalledWith(
+      messages.flow_runs_result_retry_at.replace("{time}", time)
+    );
+
+    // Delivered: the status says so, and nothing is read again after it.
+    const delivered = resultDelivery({
+      delivery_status: "delivered",
+      delivery_attempts: 2,
+      delivered_at: "2026-10-21T08:05:01Z",
+      state: "delivered"
+    });
+    state.routes[STATUS] = () => ({ body: makeRunSummary({ result_delivery: delivered }) });
+    await act(() => vi.advanceTimersByTimeAsync(5_100));
+    expect(await within(sending).findByText(messages.flow_run_extras_send_delivered)).toBeTruthy();
+    expect(screen.getByText(messages.flow_runs_result_delivered)).toBeTruthy();
+    expect(state.announce).toHaveBeenCalledWith(messages.flow_runs_result_delivered);
+    const statuses = calls(STATUS).length;
+    await act(() => vi.advanceTimersByTimeAsync(60_000));
+    expect(calls(STATUS)).toHaveLength(statuses);
+    expect([calls(DETAIL).length, calls(GRAPH).length, calls(STEPS).length]).toEqual([
+      details,
+      graphs,
+      steps
+    ]);
+  });
+
+  /** The requests since `from`, per endpoint. */
+  function readsSince(from: number) {
+    const reads: Record<string, number> = {};
+    for (const call of state.stub.calls.slice(from)) {
+      const key = `${call.method} ${call.path}`;
+      reads[key] = (reads[key] ?? 0) + 1;
+    }
+    return reads;
+  }
+
+  /** The reads of the run itself: past half a minute the page frame reads the flow again too. */
+  function runReads(reads: Record<string, number>) {
+    return Object.fromEntries(
+      Object.entries(reads).filter(([key]) => key.includes("{run_id}") || key === GRAPH)
+    );
+  }
+
+  /** Closes the page, lets `between` happen, and opens it again `ms` later: the reads it made. */
+  async function openAgain(
+    rerender: ReturnType<typeof renderRun>["rerender"],
+    between: () => void,
+    ms = 2_000
+  ) {
+    rerender(<div />);
+    between();
+    await act(() => vi.advanceTimersByTimeAsync(ms));
+    const from = state.stub.calls.length;
+    rerender(
+      <Suspense>
+        <FlowRunPage flowId="flow-1" runId="run-1" />
+      </Suspense>
+    );
+    const region = await screen.findByRole("region", {
+      name: messages.flow_run_extras_send_heading
+    });
+    await act(() => vi.advanceTimersByTimeAsync(100));
+    return { region, reads: readsSince(from) };
+  }
+
+  const deadLettered = () =>
+    resultDelivery({
+      delivery_status: "dead_lettered",
+      delivery_attempts: 5,
+      dead_lettered_at: "2026-10-21T08:02:00Z",
+      updated_at: "2026-10-21T08:02:00Z",
+      state: "dead_lettered"
+    });
+
+  describe("opened again within half a minute", () => {
+    // Given up as the page opened (b), or while it was open (a); sent again while it was closed.
+    it.each([
+      ["while open", "sending"],
+      ["on opening", "dead_lettered"]
+    ] as const)(
+      "reads the run's status again when its result was given up %s, and follows it once sent again",
+      async (_when, first) => {
+        vi.useFakeTimers({ shouldAdvanceTime: true });
+        answerSentAfterRun(first === "sending" ? resultDelivery() : deadLettered());
+        const { rerender } = renderRun();
+        await screen.findByRole("region", { name: messages.flow_run_extras_send_heading });
+        state.routes[STATUS] = () => ({
+          body: makeRunSummary({ result_delivery: deadLettered() })
+        });
+        await act(() => vi.advanceTimersByTimeAsync(5_000));
+        expect(
+          within(
+            screen.getByRole("region", { name: messages.flow_run_extras_send_heading })
+          ).getByText(messages.flow_run_extras_send_dead_lettered)
+        ).toBeTruthy();
+
+        // Sent again: the same row is pending once more, and its time moves on.
+        const { region, reads } = await openAgain(rerender, () => {
+          state.routes[STATUS] = () => ({
+            body: makeRunSummary({
+              result_delivery: resultDelivery({ updated_at: "2026-10-21T08:03:00Z" })
+            })
+          });
+        });
+        // The status alone, once: the graph of a finished run is not read again so soon, nor
+        // anything audited.
+        expect(reads).toEqual({ [STATUS]: 1 });
+        expect(within(region).getByText(messages.flow_run_extras_send_sending)).toBeTruthy();
+
+        // The result's status is followed again: one window holds a poll.
+        const statuses = calls(STATUS).length;
+        await act(() => vi.advanceTimersByTimeAsync(2_100));
+        expect(calls(STATUS).length).toBeGreaterThan(statuses);
+      }
+    );
+
+    it("reads nothing again when its result was delivered", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      answerSentAfterRun(
+        resultDelivery({
+          delivery_status: "delivered",
+          delivery_attempts: 1,
+          delivered_at: "2026-10-21T08:01:09Z",
+          state: "delivered"
+        })
+      );
+      const { rerender } = renderRun();
+      await screen.findByRole("region", { name: messages.flow_run_extras_send_heading });
+      await act(() => vi.advanceTimersByTimeAsync(5_000));
+      const { region, reads } = await openAgain(rerender, () => {});
+      expect(reads).toEqual({});
+      expect(within(region).getByText(messages.flow_run_extras_send_delivered)).toBeTruthy();
+    });
+
+    it("reads a given-up result's status alone when the page opens again just inside half a minute, though the status answers past it", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      answerSentAfterRun(deadLettered());
+      const asked: number[] = [];
+      const given = state.routes[STATUS]!;
+      state.routes[STATUS] = (init: never) => {
+        asked.push(Date.now());
+        return given(init);
+      };
+      const { rerender } = renderRun();
+      await screen.findByRole("region", { name: messages.flow_run_extras_send_heading });
+
+      // Opened again 29 s after the last answer; the status, still given up, answers 2 s later.
+      rerender(<div />);
+      delayAnswers(STATUS, 2_000);
+      await act(() => vi.advanceTimersByTimeAsync(asked.at(-1)! + 29_000 - Date.now()));
+      const from = state.stub.calls.length;
+      rerender(
+        <Suspense>
+          <FlowRunPage flowId="flow-1" runId="run-1" />
+        </Suspense>
+      );
+      const region = await screen.findByRole("region", {
+        name: messages.flow_run_extras_send_heading
+      });
+      await act(() => vi.advanceTimersByTimeAsync(2_200));
+
+      // Fresh when the read began: the graph stands, whenever the status answers.
+      expect(runReads(readsSince(from))).toEqual({ [STATUS]: 1 });
+      expect(within(region).getByText(messages.flow_run_extras_send_dead_lettered)).toBeTruthy();
+    });
+  });
+
+  it("reads the run's status and graph again on a return past half a minute while its result stays given up", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    answerSentAfterRun(
+      resultDelivery({
+        delivery_status: "dead_lettered",
+        delivery_attempts: 5,
+        dead_lettered_at: "2026-10-21T08:02:00Z",
+        updated_at: "2026-10-21T08:02:00Z",
+        state: "dead_lettered"
+      })
+    );
+    renderRun();
+    await screen.findByRole("region", { name: messages.flow_run_extras_send_heading });
+    const from = state.stub.calls.length;
+    await comeBack();
+    // The graph says whether speakers are identified, which follows the set-up: read again too.
+    const reads = readsSince(from);
+    expect([reads[STATUS], reads[GRAPH]]).toEqual([1, 1]);
+  });
+
+  // Sent again from elsewhere while the page was closed past half a minute: the new status is the
+  // news, and a graph that cannot be read then must not hide it.
+  it.each([
+    ["being sent, and follows it", resultDelivery({ updated_at: "2026-10-21T08:03:00Z" }), true],
+    [
+      "sent",
+      resultDelivery({
+        delivery_status: "delivered",
+        delivery_attempts: 6,
+        delivered_at: "2026-10-21T08:03:01Z",
+        state: "delivered"
+      }),
+      false
+    ]
+  ] as const)(
+    "shows a given-up result %s when the page opens again past half a minute, from its status alone",
+    async (_shown, next, follows) => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      answerSentAfterRun(deadLettered());
+      const { rerender } = renderRun();
+      await screen.findByRole("region", { name: messages.flow_run_extras_send_heading });
+
+      const { region, reads } = await openAgain(
+        rerender,
+        () => {
+          state.routes[STATUS] = () => ({ body: makeRunSummary({ result_delivery: next }) });
+          state.routes[GRAPH] = () => ({ status: 503, body: { message: "Busy" } });
+        },
+        31_000
+      );
+      expect(runReads(reads)[GRAPH] ?? 0).toBe(0);
+      expect(
+        within(region).getByText(
+          follows ? messages.flow_run_extras_send_sending : messages.flow_run_extras_send_delivered
+        )
+      ).toBeTruthy();
+
+      const statuses = calls(STATUS).length;
+      await act(() => vi.advanceTimersByTimeAsync(2_100));
+      expect(calls(STATUS)).toHaveLength(follows ? statuses + 1 : statuses);
+      expect(calls(GRAPH)).toHaveLength(1);
+    }
+  );
+
+  // Sent again and given up again while the page was closed: the core reuses the row and resets its
+  // attempts, so only the time it was given up says so.
+  it("shows a result given up again when the page opens again past half a minute, from its status alone", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const givenUpAt = (at: string) =>
+      resultDelivery({
+        delivery_status: "dead_lettered",
+        delivery_attempts: 5,
+        dead_lettered_at: at,
+        updated_at: at,
+        state: "dead_lettered"
+      });
+    answerSentAfterRun(givenUpAt("2026-10-21T15:00:00Z"));
+    const { rerender } = renderRun();
+    await screen.findByRole("region", { name: messages.flow_run_extras_send_heading });
+
+    const { region, reads } = await openAgain(
+      rerender,
+      () => {
+        state.routes[STATUS] = () => ({
+          body: makeRunSummary({ result_delivery: givenUpAt("2026-10-21T16:00:00Z") })
+        });
+        state.routes[GRAPH] = () => ({ status: 503, body: { message: "Busy" } });
+      },
+      31_000
+    );
+    expect(runReads(reads)[GRAPH] ?? 0).toBe(0);
+    expect(within(region).getByText(messages.flow_run_extras_send_dead_lettered)).toBeTruthy();
+    const times = [...region.querySelectorAll("time")].map((time) => time.dateTime);
+    expect(times).toContain("2026-10-21T16:00:00.000Z");
+    expect(times).not.toContain("2026-10-21T15:00:00.000Z");
+  });
+
+  it("offers no refresh of the whole run when a given-up result's status cannot be read on a return", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    answerSentAfterRun(deadLettered());
+    renderRun();
+    await screen.findByRole("region", { name: messages.flow_run_extras_send_heading });
+
+    state.routes[STATUS] = () => ({ status: 503, body: { message: "Busy" } });
+    await comeBack();
+    expect(await screen.findByText(messages.query_error_refresh_title)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: messages.flow_run_more_refresh })).toBeNull();
+  });
+
+  it("renders nothing again while a finished run's result answers the same, and reads its status alone", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    answerSentAfterRun(resultDelivery());
+    let commits = 0;
+    renderRun(undefined, () => (commits += 1));
+    await screen.findByRole("region", { name: messages.flow_run_extras_send_heading });
+    await act(() => vi.advanceTimersByTimeAsync(2_100));
+    const [statuses, graphs] = [calls(STATUS).length, calls(GRAPH).length];
+    commits = 0;
+
+    for (let poll = 0; poll < 3; poll += 1) await act(() => vi.advanceTimersByTimeAsync(2_100));
+    expect(calls(STATUS)).toHaveLength(statuses + 3);
+    expect(calls(GRAPH)).toHaveLength(graphs);
+    expect(commits).toBe(0);
+  });
+
+  it("paces its polls by what the run shows while it moves, and by its result once it has finished", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const asked: number[] = [];
+    /** Answers the status with `body()`, noting when each read was asked. */
+    const answerStatus = (body: () => RunSummary) => {
+      state.routes[STATUS] = () => {
+        asked.push(Date.now());
+        return { body: body() };
+      };
+    };
+    const lastGap = () => asked.at(-1)! - asked.at(-2)!;
+    const running = makeRunSummary({ status: "running", finished_at: null, revision: 2 });
+    answerRun(running, makeRunDetail({ ...running, result: null }));
+    // While it moves, each status carries a result delivery that has moved on: not what the run shows.
+    let attempts = 0;
+    answerStatus(() => ({
+      ...running,
+      result_delivery: resultDelivery({ delivery_attempts: (attempts += 1) })
+    }));
+    renderRun();
+    await screen.findByText(messages.flow_runs_result_pending);
+    await act(() => vi.advanceTimersByTimeAsync(40_000));
+    expect(lastGap()).toBeGreaterThan(4_000);
+
+    // Finished, its result on its way and unchanged for a while: the same slower pace.
+    answerSentAfterRun(resultDelivery());
+    const sending = makeRunSummary({ result_delivery: resultDelivery() });
+    answerStatus(() => sending);
+    const done = asked.length;
+    await act(() => vi.advanceTimersByTimeAsync(40_000));
+    // The poll that sees it completed starts the clock over: the next comes 2 s after it.
+    const firstGap = asked[done + 1]! - asked[done]!;
+    expect(firstGap).toBeGreaterThanOrEqual(2_000);
+    expect(firstGap).toBeLessThan(3_000);
+    expect(lastGap()).toBeGreaterThan(4_000);
+
+    // The result moves on: the next poll comes 2 s after the one that saw it.
+    const seen = asked.length;
+    const planned = makeRunSummary({
+      result_delivery: resultDelivery({
+        delivery_attempts: 1,
+        next_delivery_at: "2026-10-21T08:05:00Z",
+        state: "retry_scheduled"
+      })
+    });
+    answerStatus(() => planned);
+    await act(() => vi.advanceTimersByTimeAsync(8_000));
+    expect(asked.length).toBeGreaterThan(seen + 1);
+    expect(asked[seen + 1]! - asked[seen]!).toBeLessThan(3_000);
+  });
+
+  it("stops following a finished run's result once the run is gone", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    answerSentAfterRun(resultDelivery());
+    renderRun();
+    await screen.findByRole("region", { name: messages.flow_run_extras_send_heading });
+
+    const before = calls(STATUS).length;
+    state.routes[STATUS] = () => ({ status: 404, body: { message: "Not found" } });
+    await act(() => vi.advanceTimersByTimeAsync(2_100));
+    // The poll that finds it gone was made: the quiet below follows it.
+    const reads = calls(STATUS).length;
+    expect(reads).toBe(before + 1);
+    await act(() => vi.advanceTimersByTimeAsync(60_000));
+    expect(calls(STATUS)).toHaveLength(reads);
+    expect(calls(GRAPH)).toHaveLength(1);
+  });
+
+  describe("opened again with its result on its way", () => {
+    it("reads the run's status once, before the first poll, when the page opens again soon", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      answerSentAfterRun(resultDelivery());
+      const { rerender } = renderRun();
+      await screen.findByRole("region", { name: messages.flow_run_extras_send_heading });
+
+      const { region, reads } = await openAgain(rerender, () => {});
+      expect(reads).toEqual({ [STATUS]: 1 });
+      expect(within(region).getByText(messages.flow_run_extras_send_sending)).toBeTruthy();
+    });
+
+    it("reads the run's status once, and nothing else of the run, when the page opens again past half a minute", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      answerSentAfterRun(resultDelivery());
+      const { rerender } = renderRun();
+      await screen.findByRole("region", { name: messages.flow_run_extras_send_heading });
+
+      const { reads } = await openAgain(rerender, () => {}, 31_000);
+      expect(runReads(reads)).toEqual({ [STATUS]: 1 });
+    });
+
+    // An attempt planned for later is being sent once its time has come: the core says so when
+    // the status is read, and the row's time stays the same or moves within the same millisecond.
+    it.each([
+      ["equal", "2026-10-21T08:03:00.123456Z", "2026-10-21T08:03:00.123456Z"],
+      ["a microsecond apart", "2026-10-21T08:03:00.123456Z", "2026-10-21T08:03:00.123457Z"]
+    ] as const)(
+      "keeps the newer state, being sent, when the page opens again and its status alone is read, with the row's times %s",
+      async (_times, plannedAt, sendingAt) => {
+        vi.useFakeTimers({ shouldAdvanceTime: true });
+        const planned = resultDelivery({
+          delivery_attempts: 1,
+          next_delivery_at: "2026-10-21T08:03:00Z",
+          state: "retry_scheduled",
+          updated_at: plannedAt
+        });
+        // Opened while the result was being sent; the next poll finds a new attempt planned.
+        answerSentAfterRun(resultDelivery());
+        const { rerender } = renderRun();
+        await screen.findByRole("region", { name: messages.flow_run_extras_send_heading });
+        state.routes[STATUS] = () => ({ body: makeRunSummary({ result_delivery: planned }) });
+        await act(() => vi.advanceTimersByTimeAsync(2_100));
+        expect(screen.getAllByText(/Nytt försök kl\./).length).toBeGreaterThan(0);
+
+        // Away past the app's half minute; the page opens again, and a read of its graph would
+        // answer late.
+        rerender(<div />);
+        await act(() => vi.advanceTimersByTimeAsync(31_000));
+        const release = holdAnswers(GRAPH);
+        rerender(
+          <Suspense>
+            <FlowRunPage flowId="flow-1" runId="run-1" />
+          </Suspense>
+        );
+        const region = await screen.findByRole("region", {
+          name: messages.flow_run_extras_send_heading
+        });
+        await act(() => vi.advanceTimersByTimeAsync(100));
+
+        // The attempt's time has come: the next read of the status says it is being sent.
+        state.routes[STATUS] = () => ({
+          body: makeRunSummary({
+            result_delivery: { ...planned, state: "sending", updated_at: sendingAt }
+          })
+        });
+        await act(() => vi.advanceTimersByTimeAsync(5_100));
+        expect(within(region).getByText(messages.flow_run_extras_send_sending)).toBeTruthy();
+
+        // Any late graph answers: the page stays where the newer status put it.
+        release();
+        await act(() => vi.advanceTimersByTimeAsync(100));
+        expect(within(region).getByText(messages.flow_run_extras_send_sending)).toBeTruthy();
+        expect(screen.getByText(messages.flow_runs_result_sending)).toBeTruthy();
+        expect(screen.queryAllByText(/Nytt försök kl\./)).toHaveLength(0);
+      }
+    );
+  });
+
+  /** Every read of the run that is not its status: the audited detail, steps, graph, transcripts. */
+  function otherReads() {
+    return [calls(DETAIL).length, calls(STEPS).length, calls(GRAPH).length, transcriptReads()];
+  }
+
+  function transcriptReads() {
+    return state.stub.calls.filter((call) => call.path.includes("transcript")).length;
+  }
+
+  const refreshRetry = () =>
+    screen.getByRole("button", {
+      name: messages.query_error_retry_named.replace(
+        "{section}",
+        messages.query_error_refresh_title
+      )
+    });
+
+  /** The refresh error's retry reads the result's status alone, keeps the error while it fails and clears it once read. */
+  async function retryOnlyTheStatus() {
+    expect(screen.queryByRole("button", { name: messages.flow_run_more_refresh })).toBeNull();
+    // Where the delivery last stood stays on the page.
+    expect(screen.getByText(messages.flow_runs_result_sending)).toBeTruthy();
+    const statuses = calls(STATUS).length;
+    const others = otherReads();
+
+    // Still busy: one status read, nothing else, and the error and the last state stay.
+    fireEvent.click(refreshRetry());
+    await act(() => vi.advanceTimersByTimeAsync(100));
+    expect(calls(STATUS)).toHaveLength(statuses + 1);
+    expect(screen.getByText(messages.query_error_refresh_title)).toBeTruthy();
+    expect(screen.getByText(messages.flow_runs_result_sending)).toBeTruthy();
+    expect(otherReads()).toEqual(others);
+    expect(state.announce).not.toHaveBeenCalledWith(messages.flow_run_more_refreshed);
+
+    // Answered: the error goes, again from the status alone.
+    state.routes[STATUS] = () => ({
+      body: makeRunSummary({ result_delivery: resultDelivery({ delivery_attempts: 1 }) })
+    });
+    fireEvent.click(refreshRetry());
+    await act(() => vi.advanceTimersByTimeAsync(100));
+    expect(screen.queryByText(messages.query_error_refresh_title)).toBeNull();
+    expect(calls(STATUS)).toHaveLength(statuses + 2);
+    expect(otherReads()).toEqual(others);
+    expect(screen.getByText(messages.flow_runs_result_sending)).toBeTruthy();
+    expect(state.announce).not.toHaveBeenCalledWith(messages.flow_run_more_refreshed);
+  }
+
+  const busy = () => ({ status: 503, body: { message: "Busy", code: "service_unavailable" } });
+
+  it("offers no refresh of the whole run while its result is on its way, and retries a failed status read alone", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    answerSentAfterRun(resultDelivery());
+    renderRun();
+    expect(
+      await screen.findByRole("region", { name: messages.flow_run_extras_send_heading })
+    ).toBeTruthy();
+    // The run is finished: reading it again would read the audited detail; its status follows the
+    // result on its own.
+    expect(screen.queryByRole("button", { name: messages.flow_run_more_refresh })).toBeNull();
+
+    state.routes[STATUS] = busy;
+    await act(() => vi.advanceTimersByTimeAsync(2_100));
+    expect(await screen.findByText(messages.query_error_refresh_title)).toBeTruthy();
+    await retryOnlyTheStatus();
+  });
+
+  it("says when the result's first own status read failed on a page open while the run completed, and retries it alone", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const running = makeRunSummary({ status: "running", finished_at: null, revision: 2 });
+    answerRun(running, makeRunDetail({ ...running, result: null }));
+    renderRun();
+    await screen.findByText(messages.flow_runs_result_pending);
+
+    // A poll sees the run complete; every status read after it fails.
+    answerSentAfterRun(resultDelivery());
+    const completed = state.routes[STATUS]!;
+    let answered = false;
+    state.routes[STATUS] = (init: never) => {
+      if (answered) return busy();
+      answered = true;
+      return completed(init);
+    };
+    await act(() => vi.advanceTimersByTimeAsync(2_100));
+    expect(
+      await screen.findByRole("region", { name: messages.flow_run_extras_send_heading })
+    ).toBeTruthy();
+    // The result is followed on from the status that saw the run complete: not read twice.
+    expect(calls(STATUS)).toHaveLength(2);
+
+    await act(() => vi.advanceTimersByTimeAsync(2_100));
+    expect(calls(STATUS)).toHaveLength(3);
+    expect(await screen.findByText(messages.query_error_refresh_title)).toBeTruthy();
+    await retryOnlyTheStatus();
+  });
+
+  it("uses the words for the result sent after the run as soon as the run completes, before its steps are read again", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const running = makeRunSummary({ status: "running", finished_at: null, revision: 2 });
+    answerRun(running, makeRunDetail({ ...running, result: null }));
+    renderRun();
+    await screen.findByText(messages.flow_runs_result_pending);
+
+    // The run completes and its result is on its way; the steps are not read yet.
+    answerSentAfterRun(resultDelivery());
+    const release = holdAnswers(STEPS);
+    await act(() => vi.advanceTimersByTimeAsync(2_100));
+    expect(
+      await screen.findByRole("region", { name: messages.flow_run_extras_send_heading })
+    ).toBeTruthy();
+    expect(screen.queryByText(messages.flow_run_extras_webhook_heading)).toBeNull();
+    expect(screen.queryByText(messages.flow_run_extras_webhook_retry_note)).toBeNull();
+    release();
+
+    // Followed on from there: it lands, and the page says so.
+    state.routes[STATUS] = () => ({
+      body: makeRunSummary({
+        result_delivery: resultDelivery({
+          delivery_status: "delivered",
+          delivery_attempts: 1,
+          delivered_at: "2026-10-21T08:01:09Z",
+          state: "delivered"
+        })
+      })
+    });
+    await act(() => vi.advanceTimersByTimeAsync(6_100));
+    expect(await screen.findByText(messages.flow_runs_result_delivered)).toBeTruthy();
+    expect(state.announce).toHaveBeenCalledWith(messages.flow_runs_result_delivered);
+  });
+
+  it("keeps a run complete when the result sent after it could not be sent", async () => {
+    answerSentAfterRun(
+      resultDelivery({
+        delivery_status: "dead_lettered",
+        delivery_attempts: 5,
+        dead_lettered_at: "2026-10-21T08:30:00Z",
+        state: "dead_lettered"
+      })
+    );
+    renderRun();
+    const region = await screen.findByRole("region", {
+      name: messages.flow_run_extras_send_heading
+    });
+    expect(within(region).getByText(messages.flow_run_extras_send_dead_lettered)).toBeTruthy();
+    expect(screen.getByText(messages.flow_runs_result_not_delivered)).toBeTruthy();
+    expect(screen.getAllByText(messages.flow_runs_status_completed).length).toBeGreaterThan(0);
+    expect(screen.queryByText(messages.flow_runs_status_failed)).toBeNull();
+    expect(screen.queryByText(messages.flow_run_extras_webhook_retry_note)).toBeNull();
+    // Nothing more will be tried, so no note says it will.
+    expect(screen.queryByText(messages.flow_run_extras_send_retry_note)).toBeNull();
+  });
+
   it("follows a moving run through its status alone, and reads the detail again only when it moved", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const running = makeRunSummary({ status: "running", finished_at: null, revision: 2 });
@@ -845,6 +1530,193 @@ describe("FlowRunPage", () => {
     await act(() => vi.advanceTimersByTimeAsync(20_000));
     expect(calls(STATUS)).toHaveLength(3);
   });
+
+  it("follows a moving run from the chat's card to its page without reading it again", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const running = makeRunSummary({ status: "running", finished_at: null, revision: 2 });
+    answerRun(running, makeRunDetail({ ...running, result: null }));
+    const queryClient = testQueryClient();
+    const flow = makeFlow({ published_version: 3 });
+    queryClient.setQueryData(flowKeys.flow(flow.id), flow);
+    queryClient.setQueryData(["spaces", "space-1"], makeSpace({}));
+    const { rerender } = renderInApp(
+      <FlowRunCard flowId="flow-1" flowName="A" runId="run-1" spaceRouteId="space-1" />,
+      { queryClient, appContext: testAppContext({ permissions: ["flows_view", "flows_run"] }) }
+    );
+    await screen.findByText(messages.flow_runs_status_running);
+    expect([calls(STATUS).length, calls(GRAPH).length]).toEqual([1, 1]);
+
+    // Its page opens from the card: what the card just read is the page's to start from.
+    rerender(
+      <Suspense>
+        <FlowRunPage flowId="flow-1" runId="run-1" />
+      </Suspense>
+    );
+    await screen.findByText(messages.flow_runs_result_pending);
+    await act(() => vi.advanceTimersByTimeAsync(100));
+    expect([calls(STATUS).length, calls(GRAPH).length]).toEqual([1, 1]);
+
+    // And follows the run on from there: one status and one graph per poll.
+    await act(() => vi.advanceTimersByTimeAsync(2_100));
+    expect([calls(STATUS).length, calls(GRAPH).length]).toEqual([2, 2]);
+  });
+
+  // The run's last step and the run itself complete in one commit. A graph read just before it and
+  // a status read just after it never show the run completed beside a last step still running, and
+  // the graph kept while its result is sent is one read after the run completed.
+  it("shows the last step done once the run completed, though a graph was read just before the commit", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const running = makeRunSummary({ status: "running", finished_at: null, revision: 2 });
+    answerRun(running, makeRunDetail({ ...running, result: null }));
+    const lastStepRunning = makeRunGraph([
+      { order: 1, label: "Sammanfatta", status: "completed" },
+      { order: 2, label: "Skriv svar", status: "running" }
+    ]);
+    const server = { committed: false };
+    state.routes[GRAPH] = () => ({ body: server.committed ? graph : lastStepRunning });
+    renderRun();
+    await screen.findByText(messages.flow_runs_result_pending);
+    const [details, steps] = [calls(DETAIL).length, calls(STEPS).length];
+
+    // From here, the commit lands as a status read is served: after a graph read asked beside it.
+    const completed = makeRunSummary({ revision: 3, result_delivery: resultDelivery() });
+    state.routes[STATUS] = () => ({ body: server.committed ? completed : running });
+    state.routes[DETAIL] = () => ({ body: makeRunDetail(completed) });
+    const get = state.stub.client.GET;
+    const spy = vi.spyOn(state.stub.client, "GET").mockImplementation((path, init) =>
+      `GET ${path}` === STATUS
+        ? Promise.resolve().then(() => {
+            server.committed = true;
+            return get(path, init);
+          })
+        : get(path, init)
+    );
+    onTestFinished(() => spy.mockRestore());
+    await act(() => vi.advanceTimersByTimeAsync(2_100));
+    expect(await screen.findByText("Beslutet är fattat.")).toBeTruthy();
+    const stepList = within(screen.getByRole("region", { name: messages.flow_runs_steps_heading }));
+    expect(stepList.queryAllByText(messages.flow_runs_step_status_running)).toHaveLength(0);
+    expect(stepList.getAllByText(messages.flow_runs_step_status_completed)).toHaveLength(2);
+    // The detail and steps once, for the run as it ended: none for a pair in between.
+    expect([calls(DETAIL).length, calls(STEPS).length]).toEqual([details + 1, steps + 1]);
+
+    // Its result is on its way: the status alone is followed, the graph never read again.
+    const graphs = calls(GRAPH).length;
+    const statuses = calls(STATUS).length;
+    for (let poll = 0; poll < 3; poll += 1) await act(() => vi.advanceTimersByTimeAsync(2_100));
+    expect(calls(STATUS)).toHaveLength(statuses + 3);
+    expect(calls(GRAPH)).toHaveLength(graphs);
+    expect(stepList.queryAllByText(messages.flow_runs_step_status_running)).toHaveLength(0);
+  });
+
+  // The other way round: a status read just before the commit and a graph read just after it show
+  // a running run with every step done, and the detail read for that pair already holds the result.
+  // The result follows the header: it shows once a status read says the run finished.
+  it("shows the result only once the header shows the run finished, though its detail holds it earlier", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const running = makeRunSummary({ status: "running", finished_at: null, revision: 2 });
+    const completed = makeRunSummary();
+    answerRun(
+      running,
+      makeRunDetail({
+        ...completed,
+        result_files: [makeResultFile({ file_id: "file-7", name: "underlag.docx" })]
+      })
+    );
+    renderRun();
+    await screen.findAllByText(messages.flow_runs_status_running);
+    const section = await resultSection();
+    expect(section.queryByText("Beslutet är fattat.")).toBeNull();
+    expect(section.getByText(messages.flow_runs_result_pending)).toBeTruthy();
+    expect(section.queryByRole("button", { name: messages.flow_run_more_copy_output })).toBeNull();
+    // The run's other files are listed while it runs, as they always were.
+    const earlier = section.getByRole("list", { name: messages.flow_run_more_other_files });
+    expect(within(earlier).getByText("underlag.docx")).toBeTruthy();
+
+    // The next status read says the run completed: the result shows with it, from the detail
+    // already read, while the detail is read again for the run as it ended.
+    state.routes[STATUS] = () => ({ body: completed });
+    const release = holdAnswers(DETAIL);
+    await act(() => vi.advanceTimersByTimeAsync(2_100));
+    expect(calls(DETAIL)).toHaveLength(2);
+    expect(screen.getAllByText(messages.flow_runs_status_completed).length).toBeGreaterThan(0);
+    expect(screen.queryAllByText(messages.flow_runs_status_running)).toHaveLength(0);
+    expect(section.getByText("Beslutet är fattat.")).toBeTruthy();
+    expect(section.getByRole("button", { name: messages.flow_run_more_copy_output })).toBeTruthy();
+    const files = section.getByRole("list", { name: messages.flow_run_more_other_files });
+    expect(within(files).getByText("underlag.docx")).toBeTruthy();
+    release();
+    await act(() => vi.advanceTimersByTimeAsync(100));
+  });
+
+  // The same race for a run that ends failed: the detail already says why while the header says
+  // it runs. Why it failed follows the header too.
+  it("says why the run failed only once the header shows it failed, though its detail says so earlier", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const running = makeRunSummary({ status: "running", finished_at: null, revision: 2 });
+    const failed = makeRunSummary({ status: "failed" });
+    answerRun(
+      running,
+      makeRunDetail({
+        ...failed,
+        result: null,
+        error: { code: "flow_step_timeout", message: "timed out", details: null, retryable: true }
+      } as Partial<RunDetail>)
+    );
+    state.routes[GRAPH] = () => ({
+      body: makeRunGraph([
+        { order: 1, label: "Sammanfatta", status: "completed" },
+        { order: 2, label: "Skriv svar", status: "failed" }
+      ])
+    });
+    renderRun();
+    await screen.findAllByText(messages.flow_runs_status_running);
+    await resultSection();
+    expect(screen.queryByText(messages.flow_runs_failed_title)).toBeNull();
+    expect(screen.queryByText(messages.flow_error_flow_step_timeout)).toBeNull();
+
+    state.routes[STATUS] = () => ({ body: failed });
+    await act(() => vi.advanceTimersByTimeAsync(2_100));
+    expect(await screen.findByText(messages.flow_runs_failed_title)).toBeTruthy();
+    expect(screen.getByText(messages.flow_error_flow_step_timeout)).toBeTruthy();
+    expect(screen.getAllByText(messages.flow_runs_status_failed).length).toBeGreaterThan(0);
+    expect(screen.queryAllByText(messages.flow_runs_status_running)).toHaveLength(0);
+  });
+
+  // One move of the run changes its status and graph together. Whichever of the two answers last,
+  // the audited detail and steps are read again once, for the run as it now is: never once for the
+  // new status with the old graph and again for both.
+  it.each([
+    ["the graph", GRAPH],
+    ["the status", STATUS]
+  ] as const)(
+    "reads the detail and steps again once when the run's status and graph move together, with %s answering last",
+    async (_last, late) => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const running = makeRunSummary({ status: "running", finished_at: null, revision: 2 });
+      answerRun(running, makeRunDetail({ ...running, result: null }));
+      state.routes[GRAPH] = () => ({
+        body: makeRunGraph([
+          { order: 1, label: "Sammanfatta", status: "completed" },
+          { order: 2, label: "Skriv svar", status: "running" }
+        ])
+      });
+      renderRun();
+      await screen.findByText(messages.flow_runs_result_pending);
+      const [details, steps] = [calls(DETAIL).length, calls(STEPS).length];
+
+      // The run completes: a new revision and status, and its last step done.
+      answerRun(makeRunSummary({ revision: 3 }));
+      const release = holdAnswers(late);
+      await act(() => vi.advanceTimersByTimeAsync(2_100));
+      expect([calls(DETAIL).length, calls(STEPS).length]).toEqual([details, steps]);
+
+      release();
+      expect(await screen.findByText("Beslutet är fattat.")).toBeTruthy();
+      await act(() => vi.advanceTimersByTimeAsync(20_000));
+      expect([calls(DETAIL).length, calls(STEPS).length]).toEqual([details + 1, steps + 1]);
+    }
+  );
 
   it("shows why a running step's live text was not used as soon as the graph says so", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
@@ -949,6 +1821,25 @@ describe("FlowRunPage", () => {
     await act(() => vi.advanceTimersByTimeAsync(1_000));
     expect(screen.getByRole("button", { name: messages.flow_runs_redispatch })).toBeTruthy();
     expect(calls(STATUS)).toHaveLength(reads);
+  });
+
+  it("says why a queued run has not started while its header shows it queued", async () => {
+    const queued = makeRunSummary({
+      status: "queued",
+      started_at: null,
+      finished_at: null,
+      dispatch_last_error: {
+        code: "flow_dispatch_failed",
+        kind: "execution_backend_failure",
+        message: "dispatch failed",
+        retryable: true
+      }
+    });
+    answerRun(queued, makeRunDetail({ ...queued, result: null }));
+    renderRun();
+    await screen.findByText(messages.flow_runs_result_pending);
+    expect(screen.getByText(messages.flow_runs_dispatch_problem_title)).toBeTruthy();
+    expect(screen.getByText(messages.flow_runs_dispatch_retrying)).toBeTruthy();
   });
 
   it("renders nothing again while the run's polls answer the same, and renders what moved or failed", async () => {
@@ -1095,7 +1986,8 @@ describe("FlowRunPage", () => {
       makeRunDetail({ ...running, result: { kind: "inline_text", text: "Ett första utkast." } })
     );
     renderRun();
-    expect(await screen.findByText("Ett första utkast.")).toBeTruthy();
+    // Its result shows once its status says it finished, below.
+    expect(await screen.findByText(messages.flow_runs_result_pending)).toBeTruthy();
     expect(screen.getByRole("article", { name: "Steg 1: Sammanfatta" })).toBeTruthy();
 
     // The run moved on; its detail and steps cannot be read again.
@@ -1576,6 +2468,305 @@ describe("FlowRunPage", () => {
         }
         cleanup();
       }
+    });
+
+    describe("while a finished run's result is on its way", () => {
+      const REVISIONS =
+        "GET /api/v1/flows/{id}/runs/{run_id}/transcript-corrections/{step_id}/revisions";
+      const FLOW = "GET /api/v1/flows/{id}/";
+      const asked = () => state.stub.calls.map((call) => `${call.method} ${call.path}`);
+
+      function version(revision: number) {
+        return {
+          id: `rev-${revision}`,
+          correction_set_id: "set-1",
+          created_at: "2026-10-21T09:00:00Z",
+          edited_by_principal_type: "user",
+          edited_by_user_id: "user-1",
+          edited_by_service_id: null,
+          flow_id: "flow-1",
+          flow_run_id: "run-1",
+          step_id: "step-1",
+          tenant_id: "tenant-1",
+          revision,
+          segments_hash: "hash-1",
+          occurrences_json: [],
+          speaker_edits_json: [],
+          speaker_names: {}
+        };
+      }
+
+      /**
+       * A finished audio run whose result is on its way: its first step searched knowledge, its
+       * transcript has a history of two pages, and its trace can be read.
+       */
+      function answerSendingAudioRun() {
+        answerAudioRun();
+        answerSentAfterRun(resultDelivery());
+        answerEvidence();
+        state.routes[STEPS] = () => ({
+          body: [
+            makeRunStep(1, {
+              input_payload_json: {
+                transcription: { file_ids: ["audio-1"], source: { attempt_no: 1 } },
+                rag: { status: "no_chunks" }
+              }
+            }),
+            makeRunStep(2, {
+              output_payload_json: { text: "" },
+              diagnostics: [
+                {
+                  code: "run_result_sent_after_run",
+                  message: "Sent after the run.",
+                  severity: "info"
+                }
+              ]
+            })
+          ]
+        });
+        // A saved correction: the transcript offers its history.
+        state.routes[CORRECTIONS] = () => ({
+          body: [
+            {
+              flow_run_id: "run-1",
+              step_id: "step-1",
+              created_at: "2026-10-21T09:00:00Z",
+              updated_at: "2026-10-21T09:00:00Z",
+              edited_by_principal_type: "user",
+              schema_version: 3,
+              segments_hash: "hash-1",
+              stale: false,
+              revision: 2,
+              occurrences: [],
+              speaker_edits: [],
+              speaker_names: {}
+            }
+          ]
+        });
+        state.routes[REVISIONS] = (init: { params: { query?: { after_revision?: number } } }) => {
+          const second = init.params.query?.after_revision !== undefined;
+          return {
+            body: {
+              baseline: {
+                revision: 0,
+                occurrences_json: [],
+                speaker_edits_json: [],
+                speaker_names: {}
+              },
+              truncated: false,
+              next_after_revision: second ? null : 1,
+              items: [version(second ? 2 : 1)]
+            }
+          };
+        };
+      }
+
+      /**
+       * Away past the app's 30 s and back, by the tab or the network: the requests the return
+       * made. Focus and the network are given back even when an assertion fails.
+       */
+      async function away(how: "focus" | "network") {
+        const set = (on: boolean) =>
+          how === "focus" ? focusManager.setFocused(on) : onlineManager.setOnline(on);
+        await act(() => vi.advanceTimersByTimeAsync(100));
+        const before = asked().length;
+        try {
+          act(() => set(false));
+          await act(() => vi.advanceTimersByTimeAsync(31_000));
+          expect(asked().slice(before)).toEqual([]);
+          act(() => set(true));
+          await act(() => vi.advanceTimersByTimeAsync(100));
+          return asked().slice(before);
+        } finally {
+          focusManager.setFocused(undefined);
+          onlineManager.setOnline(true);
+        }
+      }
+
+      /** Only the result's status, once, besides the flow the page frame reads. */
+      function onlyTheStatus(reads: string[]) {
+        expect(reads.filter((read) => read !== FLOW)).toEqual([STATUS]);
+      }
+
+      const delivered = () =>
+        makeRunSummary({
+          result_delivery: resultDelivery({
+            delivery_status: "delivered",
+            delivery_attempts: 1,
+            delivered_at: "2026-10-21T08:01:09Z",
+            state: "delivered"
+          })
+        });
+
+      it("reads only the result's status on return, with the transcript, its history, the trace and the knowledge open, and reads the run again once the result is delivered", async () => {
+        vi.useFakeTimers({ shouldAdvanceTime: true });
+        answerSendingAudioRun();
+        renderRun(["flows_view", "flows_manage"]);
+        await transcriptLines();
+        expect(
+          screen.getByRole("region", { name: messages.flow_run_extras_send_heading })
+        ).toBeTruthy();
+        fireEvent.click(screen.getByRole("button", { name: messages.flow_run_extras_trace_show }));
+        await screen.findByRole("button", { name: messages.flow_run_extras_debug_copy });
+        fireEvent.click(screen.getByRole("button", { name: messages.flow_runs_knowledge_heading }));
+        fireEvent.click(
+          await screen.findByRole("button", { name: messages.flow_runs_knowledge_show })
+        );
+
+        // The history opens and shows its second page while the result is on its way.
+        fireEvent.click(
+          await screen.findByRole("button", { name: messages.flow_transcript_history_heading })
+        );
+        const history = await screen.findByRole("list", {
+          name: messages.flow_transcript_history_heading
+        });
+        expect(within(history).getByText(/Version 1/)).toBeTruthy();
+        fireEvent.click(
+          screen.getByRole("button", { name: messages.flow_transcript_history_more })
+        );
+        expect(await within(history).findByText(/Version 2/)).toBeTruthy();
+        expect(calls(REVISIONS)).toHaveLength(2);
+
+        // Each return reads the result's status once, and nothing of the finished run itself.
+        const reads = { focus: await away("focus"), network: await away("network") };
+        onlyTheStatus(reads.focus);
+        onlyTheStatus(reads.network);
+
+        // Delivered, as the next poll sees: a return reads the finished run again.
+        state.routes[STATUS] = () => ({ body: delivered() });
+        // A minute in, the result's status is read every 5 s.
+        await act(() => vi.advanceTimersByTimeAsync(5_100));
+        expect(await screen.findByText(messages.flow_runs_result_delivered)).toBeTruthy();
+        const afterDelivery = await away("focus");
+        expect(afterDelivery).toContain(GRAPH);
+        expect(afterDelivery).toContain(CORRECTIONS);
+        expect(afterDelivery).toContain(REVISIONS);
+      });
+
+      it("reads the finished run again on the next stale return once the page has shown its result delivered", async () => {
+        vi.useFakeTimers({ shouldAdvanceTime: true });
+        answerSendingAudioRun();
+        const { rerender } = renderRun(["flows_view", "flows_manage"]);
+        await transcriptLines();
+
+        // Half a minute in, the result's status is read every 5 s: one window holds a poll.
+        await act(() => vi.advanceTimersByTimeAsync(31_000));
+        const polled = calls(STATUS).length;
+        await act(() => vi.advanceTimersByTimeAsync(5_100));
+        expect(calls(STATUS).length).toBeGreaterThan(polled);
+
+        // The page opens again and its status read finds the result delivered: shown, once read.
+        state.routes[STATUS] = () => ({ body: delivered() });
+        const statuses = calls(STATUS).length;
+        rerender(<div />);
+        rerender(
+          <Suspense>
+            <FlowRunPage flowId="flow-1" runId="run-1" />
+          </Suspense>
+        );
+        await transcriptLines();
+        expect(await screen.findByText(messages.flow_runs_result_delivered)).toBeTruthy();
+        await act(() => vi.advanceTimersByTimeAsync(100));
+        expect(calls(STATUS)).toHaveLength(statuses + 1);
+
+        // Settled: the next stale return reads the finished run again, its graph and corrections.
+        const reads = await away("focus");
+        expect(reads).toContain(GRAPH);
+        expect(reads).toContain(CORRECTIONS);
+      });
+
+      it("follows the result sent again after it was given up when the page opens again, through returns to its acknowledgement", async () => {
+        vi.useFakeTimers({ shouldAdvanceTime: true });
+        answerSendingAudioRun();
+        const { rerender } = renderRun(["flows_view", "flows_manage"]);
+        await transcriptLines();
+        const region = () =>
+          screen.getByRole("region", { name: messages.flow_run_extras_send_heading });
+
+        // Half a minute in, a poll finds it given up.
+        await act(() => vi.advanceTimersByTimeAsync(31_000));
+        state.routes[STATUS] = () => ({
+          body: makeRunSummary({
+            result_delivery: resultDelivery({
+              delivery_status: "dead_lettered",
+              delivery_attempts: 5,
+              dead_lettered_at: "2026-10-21T08:02:00Z",
+              updated_at: "2026-10-21T08:02:00Z",
+              state: "dead_lettered"
+            })
+          })
+        });
+        await act(() => vi.advanceTimersByTimeAsync(5_100));
+        expect(
+          await within(region()).findByText(messages.flow_run_extras_send_dead_lettered)
+        ).toBeTruthy();
+
+        // Sent again: the same row is pending once more, and its time moves on.
+        state.routes[STATUS] = () => ({
+          body: makeRunSummary({
+            result_delivery: resultDelivery({ updated_at: "2026-10-21T08:03:00Z" })
+          })
+        });
+        // The page opens again, and its status read finds the result sent again.
+        rerender(<div />);
+        rerender(
+          <Suspense>
+            <FlowRunPage flowId="flow-1" runId="run-1" />
+          </Suspense>
+        );
+        await transcriptLines();
+        await act(() => vi.advanceTimersByTimeAsync(100));
+        expect(within(region()).getByText(messages.flow_run_extras_send_sending)).toBeTruthy();
+        expect(screen.queryByText(messages.flow_run_extras_send_dead_lettered)).toBeNull();
+
+        // The result's status is followed again: one window holds a poll.
+        const statuses = calls(STATUS).length;
+        await act(() => vi.advanceTimersByTimeAsync(2_100));
+        expect(calls(STATUS).length).toBeGreaterThan(statuses);
+
+        // The history, open at its second page while the result is on its way.
+        fireEvent.click(
+          await screen.findByRole("button", { name: messages.flow_transcript_history_heading })
+        );
+        const history = await screen.findByRole("list", {
+          name: messages.flow_transcript_history_heading
+        });
+        expect(await within(history).findByText(/Version 1/)).toBeTruthy();
+        fireEvent.click(
+          screen.getByRole("button", { name: messages.flow_transcript_history_more })
+        );
+        expect(await within(history).findByText(/Version 2/)).toBeTruthy();
+
+        // Each return reads the result's status once, and nothing of the finished run itself.
+        const reads = { focus: await away("focus"), network: await away("network") };
+        onlyTheStatus(reads.focus);
+        onlyTheStatus(reads.network);
+        expect(
+          screen.getByRole("list", { name: messages.flow_runs_transcript_lines })
+        ).toBeTruthy();
+        expect(
+          within(
+            screen.getByRole("list", { name: messages.flow_transcript_history_heading })
+          ).getByText(/Version 2/)
+        ).toBeTruthy();
+
+        // The receiver has it.
+        state.routes[STATUS] = () => ({
+          body: makeRunSummary({
+            result_delivery: resultDelivery({
+              delivery_status: "delivered",
+              delivery_attempts: 1,
+              delivered_at: "2026-10-21T08:04:00Z",
+              updated_at: "2026-10-21T08:04:00Z",
+              state: "delivered"
+            })
+          })
+        });
+        await act(() => vi.advanceTimersByTimeAsync(5_100));
+        expect(
+          await within(region()).findByText(messages.flow_run_extras_send_delivered)
+        ).toBeTruthy();
+      });
     });
 
     it("shows a transcribing step's transcript as the step's result, and its text when it has no lines", async () => {

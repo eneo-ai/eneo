@@ -1651,8 +1651,19 @@ async def test_outbound_http_delivery_lifecycle_is_identical_across_public_views
     assert evidence_response.status_code == 200, evidence_response.text
     assert redacted_response.status_code == 200, redacted_response.text
     assert raw_response.status_code == 200, raw_response.text
-    expected = run_detail_response.json()["webhook_deliveries"]
-    assert len(expected) == 1
+    listed = run_detail_response.json()["webhook_deliveries"]
+    assert len(listed) == 1
+    # The detail says where the delivery stands when read; the evidence keeps
+    # the delivery's record, which does not depend on the clock.
+    assert (
+        listed[0].pop("state")
+        == {
+            FlowOutboxDeliveryStatus.PENDING: "retry_scheduled",
+            FlowOutboxDeliveryStatus.DELIVERED: "delivered",
+            FlowOutboxDeliveryStatus.DEAD_LETTERED: "dead_lettered",
+        }[delivery_status]
+    )
+    expected = listed
     assert expected[0]["delivery_status"] == delivery_status.value
     assert expected[0]["delivery_attempts"] == delivery_attempts
     assert evidence_response.json()["webhook_deliveries"] == expected

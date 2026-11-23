@@ -563,6 +563,18 @@ FLOW_ROUTE_AUDIT_CONTRACTS: dict[str, FlowAuditContract] = {
         metadata_keys=(*_RUN_METADATA, "accepted_exhaustion_rearmed"),
         idempotency="the exhausted-dispatch generation prevents a stale duplicate redrive",
     ),
+    "redeliver_flow_run_webhook_delivery": _required_transaction(
+        ActionType.FLOW_RUN_WEBHOOK_REDELIVERED,
+        owner="flow_webhook_redelivery.redeliver_run_result",
+        metadata_keys=(
+            "flow_id",
+            "run_id",
+            "delivery_id",
+            "previous_dead_lettered_at",
+            "previous_delivery_attempts",
+        ),
+        idempotency="the observed dead_lettered_at prevents a stale duplicate reset",
+    ),
     **{
         operation_id: _required_transaction(
             action,

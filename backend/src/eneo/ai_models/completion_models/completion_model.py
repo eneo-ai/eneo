@@ -45,6 +45,8 @@ class TokenUsage(BaseModel):
     The base fields accumulate reported usage across every provider request made
     by that completion. The context fields retain only the final provider request
     and response, which is the snapshot relevant to model headroom.
+    ``first_request_prompt_tokens`` is the first request alone: the one figure
+    the estimate made before the turn can be held against.
     """
 
     prompt_tokens: Optional[int] = None
@@ -52,6 +54,7 @@ class TokenUsage(BaseModel):
     reasoning_tokens: Optional[int] = None
     context_prompt_tokens: Optional[int] = None
     context_completion_tokens: Optional[int] = None
+    first_request_prompt_tokens: Optional[int] = None
 
 
 class ResponseType(str, Enum):

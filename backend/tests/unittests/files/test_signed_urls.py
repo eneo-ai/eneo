@@ -1,10 +1,12 @@
 import time
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError
 
 from eneo.authentication.signed_urls import verify_signed_token
+from eneo.files import signed_urls as signed_urls_module
 from eneo.files.file_models import ContentDisposition, SignedURLRequest
 from eneo.files.signed_urls import build_signed_download_response
 
@@ -82,3 +84,47 @@ def test_build_signed_download_response_rejects_cross_tenant_round_trip() -> Non
     token = response.url.split("token=", 1)[1]
 
     assert verify_signed_token(token, expected_tenant_id=uuid4()) is None
+
+
+def _settings(**overrides: object) -> SimpleNamespace:
+    return SimpleNamespace(**{"api_prefix": "/api/v1", **overrides})
+
+
+def test_build_signed_download_response_keeps_the_default_prefix_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(signed_urls_module, "get_settings", lambda: _settings())
+    file_id = uuid4()
+
+    response = build_signed_download_response(
+        base_url="https://app.example.com/",
+        file_id=file_id,
+        tenant_id=uuid4(),
+        signed_url_request=SignedURLRequest(expires_in=60),
+        now=0,
+    )
+
+    assert response.url.startswith(
+        f"https://app.example.com/api/v1/files/{file_id}/download/?token="
+    )
+
+
+def test_build_signed_download_response_follows_the_configured_api_prefix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        signed_urls_module, "get_settings", lambda: _settings(api_prefix="/eneo/api")
+    )
+    file_id = uuid4()
+
+    response = build_signed_download_response(
+        base_url="https://app.example.com",
+        file_id=file_id,
+        tenant_id=uuid4(),
+        signed_url_request=SignedURLRequest(expires_in=60),
+        now=0,
+    )
+
+    assert response.url.startswith(
+        f"https://app.example.com/eneo/api/files/{file_id}/download/?token="
+    )

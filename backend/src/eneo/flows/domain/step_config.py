@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+from typing import cast
+
 from eneo.flows.domain.flow import FlowPersistedJsonObject, FlowStep
+from eneo.flows.domain.step_deliverable import FLOW_STEP_DELIVERABLE_KEY
 from eneo.flows.domain.tool_input import TOOL_INPUT_CONFIG_KEY
+from eneo.flows.enums import step_can_be_deliverable, step_delivers_artifact
 from eneo.flows.http_transport.authored_config import HTTP_CONFIG_KEYS
 
 _TEMPLATE_CONFIG_KEYS = frozenset(
@@ -28,13 +32,40 @@ def clean_inactive_step_config(step: FlowStep) -> FlowStep:
     )
     if step.output_mode != "template_fill":
         output_keys = output_keys | _TEMPLATE_CONFIG_KEYS
+    if not step_can_be_deliverable(
+        output_type=step.output_type, output_mode=step.output_mode
+    ):
+        output_keys = output_keys | {FLOW_STEP_DELIVERABLE_KEY}
+    output_config = _without_keys(step.output_config, output_keys)
+    if not step_delivers_artifact(
+        output_type=step.output_type, output_mode=step.output_mode
+    ):
+        # Text is delivered under its name alone: no file to name.
+        output_config = _without_deliverable_file_name(output_config)
     return step.model_copy(
         deep=True,
         update={
             "input_config": _without_keys(step.input_config, input_keys),
-            "output_config": _without_keys(step.output_config, output_keys),
+            "output_config": output_config,
         },
     )
+
+
+def _without_deliverable_file_name(
+    config: FlowPersistedJsonObject | None,
+) -> FlowPersistedJsonObject | None:
+    deliverable = (config or {}).get(FLOW_STEP_DELIVERABLE_KEY)
+    if config is None or not isinstance(deliverable, dict):
+        return config
+    fields = cast(dict[str, object], deliverable)
+    if "file_name" not in fields:
+        return config
+    return {
+        **config,
+        FLOW_STEP_DELIVERABLE_KEY: {
+            key: value for key, value in fields.items() if key != "file_name"
+        },
+    }
 
 
 def _without_keys(

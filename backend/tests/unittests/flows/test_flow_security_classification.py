@@ -71,6 +71,7 @@ def test_rejects_model_below_previous_step_classification() -> None:
             step_order=2,
             upstream_step_orders=[1],
             output_mode="pass_through",
+            output_config=None,
             output_classification_override=None,
             prior_output_levels_by_order={1: 3},
             assistant=_assistant(model_level=2),
@@ -88,6 +89,7 @@ def test_rejects_output_override_write_down() -> None:
             step_order=2,
             upstream_step_orders=[1],
             output_mode="pass_through",
+            output_config=None,
             output_classification_override=1,
             prior_output_levels_by_order={1: 3},
             assistant=_assistant(model_level=3),
@@ -104,6 +106,7 @@ def test_returns_effective_output_level_when_security_is_compatible() -> None:
         step_order=2,
         upstream_step_orders=[1],
         output_mode="pass_through",
+        output_config=None,
         output_classification_override=4,
         prior_output_levels_by_order={1: 3},
         assistant=_assistant(model_level=4, knowledge_level=3),
@@ -121,6 +124,7 @@ def test_current_step_output_override_does_not_raise_same_step_input_floor() -> 
         step_order=1,
         upstream_step_orders=[],
         output_mode="pass_through",
+        output_config=None,
         output_classification_override=3,
         prior_output_levels_by_order={},
         assistant=_assistant(model_level=3),
@@ -139,6 +143,7 @@ def test_all_previous_steps_uses_max_prior_effective_output_level() -> None:
             step_order=4,
             upstream_step_orders=[1, 2, 3],
             output_mode="pass_through",
+            output_config=None,
             output_classification_override=None,
             prior_output_levels_by_order={1: 1, 2: 3, 3: 2},
             assistant=_assistant(model_level=2),
@@ -157,6 +162,7 @@ def test_deterministic_step_without_model_carries_input_classification() -> None
         step_order=3,
         upstream_step_orders=[1, 2],
         output_mode="render_verbatim",
+        output_config=None,
         output_classification_override=None,
         prior_output_levels_by_order={1: 1, 2: 3},
         assistant=_assistant(model_level=None),
@@ -175,6 +181,7 @@ def test_deterministic_step_still_rejects_output_override_write_down() -> None:
             step_order=2,
             upstream_step_orders=[1],
             output_mode="render_verbatim",
+            output_config=None,
             output_classification_override=1,
             prior_output_levels_by_order={1: 3},
             assistant=_assistant(model_level=None),
@@ -193,6 +200,7 @@ def test_underlag_floor_reads_only_the_steps_it_binds() -> None:
         step_order=3,
         upstream_step_orders=[2],
         output_mode="pass_through",
+        output_config=None,
         output_classification_override=None,
         prior_output_levels_by_order={1: 3, 2: 1},
         assistant=_assistant(model_level=2),
@@ -211,6 +219,7 @@ def test_completion_step_without_model_is_rejected_when_floor_exists() -> None:
             step_order=1,
             upstream_step_orders=[],
             output_mode="pass_through",
+            output_config=None,
             output_classification_override=None,
             prior_output_levels_by_order={},
             assistant=_assistant(model_level=None),
@@ -237,6 +246,7 @@ def _raise_mismatch(**overrides):
         step_id=step_id,
         upstream_step_orders=[1],
         output_mode="pass_through",
+        output_config=None,
         output_classification_override=None,
         prior_output_levels_by_order={1: 3, 2: 1},
         assistant=_assistant(model_level=2),
@@ -303,6 +313,7 @@ def test_write_down_carries_the_floor_and_the_override() -> None:
             step_id=step_id,
             upstream_step_orders=[1],
             output_mode="pass_through",
+            output_config=None,
             output_classification_override=1,
             prior_output_levels_by_order={1: 3},
             assistant=_assistant(model_level=3),
@@ -329,6 +340,7 @@ def test_messages_stay_the_ones_clients_already_read() -> None:
             step_order=3,
             upstream_step_orders=[1],
             output_mode="pass_through",
+            output_config=None,
             output_classification_override=None,
             prior_output_levels_by_order={1: 3},
             assistant=_assistant(model_level=2),
@@ -344,6 +356,7 @@ def test_messages_stay_the_ones_clients_already_read() -> None:
             step_order=2,
             upstream_step_orders=[1],
             output_mode="pass_through",
+            output_config=None,
             output_classification_override=1,
             prior_output_levels_by_order={1: 3},
             assistant=_assistant(model_level=3),
@@ -377,6 +390,7 @@ def test_a_disabled_classification_sets_no_level_and_refuses_nothing() -> None:
         step_order=2,
         upstream_step_orders=[1],
         output_mode="pass_through",
+        output_config=None,
         output_classification_override=2,
         prior_output_levels_by_order={1: None},
         assistant=assistant,
@@ -398,6 +412,7 @@ def test_a_stored_override_sets_no_output_level_while_classifications_are_off() 
         step_order=1,
         upstream_step_orders=[],
         output_mode="pass_through",
+        output_config=None,
         output_classification_override=3,
         prior_output_levels_by_order={},
         assistant=_assistant(model_level=1),
@@ -422,6 +437,7 @@ def test_tool_arguments_write_down_carries_the_steps_and_the_two_levels() -> Non
             step_id=step_id,
             upstream_step_orders=[1, 2, 3],
             output_mode="pass_through",
+            output_config=None,
             output_classification_override=None,
             prior_output_levels_by_order={1: 3, 2: 4, 3: 1},
             assistant=_assistant(model_level=4),
@@ -470,6 +486,7 @@ def test_the_raised_refusals_carry_catalog_codes() -> None:
             step_order=2,
             upstream_step_orders=[1],
             output_mode="pass_through",
+            output_config=None,
             output_classification_override=None,
             prior_output_levels_by_order={1: 3},
             assistant=_assistant(model_level=2),
@@ -482,6 +499,7 @@ def test_the_raised_refusals_carry_catalog_codes() -> None:
             step_order=2,
             upstream_step_orders=[1],
             output_mode="pass_through",
+            output_config=None,
             output_classification_override=1,
             prior_output_levels_by_order={1: 3},
             assistant=_assistant(model_level=3),
@@ -498,3 +516,49 @@ def test_the_raised_refusals_carry_catalog_codes() -> None:
         FlowApiErrorCode(write_down.value.code)
         is FlowApiErrorCode.STEP_OUTPUT_CLASSIFICATION_WRITE_DOWN
     )
+
+
+_SEND_RUN_RESULT = {
+    "url": "https://receiver.example.org/results",
+    "auth": {"mode": "none"},
+    "body": {"mode": "run_result"},
+}
+
+
+def test_a_run_result_step_asks_no_model_and_keeps_the_highest_earlier_level() -> None:
+    # The step calls no model, so its assistant's model clears nothing; what
+    # it sends carries the highest level of every earlier step, a step that
+    # is not delivered included.
+    evaluation = evaluate_step_security_classification(
+        step_order=4,
+        upstream_step_orders=[1, 2, 3],
+        output_mode="http_post",
+        output_config=_SEND_RUN_RESULT,
+        output_classification_override=None,
+        prior_output_levels_by_order={1: 3, 2: 1, 3: 1},
+        assistant=_assistant(model_level=1),
+        space=_space(1),
+        security_enabled=True,
+        external_source=None,
+    )
+
+    assert evaluation.required_model_level is None
+    assert evaluation.effective_output_level == 3
+
+
+def test_an_http_post_that_sends_its_own_answer_still_asks_a_model() -> None:
+    with pytest.raises(BadRequestException) as exc_info:
+        evaluate_step_security_classification(
+            step_order=2,
+            upstream_step_orders=[1],
+            output_mode="http_post",
+            output_config={**_SEND_RUN_RESULT, "body": {"mode": "auto"}},
+            output_classification_override=None,
+            prior_output_levels_by_order={1: 3},
+            assistant=_assistant(model_level=1),
+            space=_space(1),
+            security_enabled=True,
+            external_source=None,
+        )
+
+    assert exc_info.value.code == "flow_step_security_classification_mismatch"

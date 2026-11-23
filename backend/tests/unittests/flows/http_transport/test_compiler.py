@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import math
 
 import pytest
@@ -642,3 +643,105 @@ def test_a_literal_credential_reaches_the_request_unchanged() -> None:
     assert result.headers["X-filled"] == "{single}-and-{{ open"
     assert result.headers["X-S"] == "s3cr{et}"
     assert result.headers["X-P"] == "plain-filled"
+
+
+# --- run_result body ---
+
+
+def _run_result(
+    *,
+    url: str = "https://receiver.example.org/eneo/results",
+    custom_headers: list[CustomHeader] | None = None,
+) -> HttpAuthoredConfig:
+    return _config(
+        url=url,
+        body=HttpBody(mode=HttpBodyMode.RUN_RESULT),
+        custom_headers=custom_headers,
+    )
+
+
+def test_run_result_body_is_the_given_object_as_utf8_json_with_its_content_type() -> (
+    None
+):
+    result = compile_http_config(
+        _run_result(),
+        direction="output",
+        method="POST",
+        run_result_body={"schema": "eneo.flow_run_result.v1", "text": "Möte"},
+    )
+
+    assert result.json_body is None
+    assert json.loads(result.body or b"") == {
+        "schema": "eneo.flow_run_result.v1",
+        "text": "Möte",
+    }
+    assert "Möte".encode() in (result.body or b"")
+    assert result.headers["Content-Type"] == "application/json; charset=utf-8"
+
+
+def test_run_result_body_without_its_object_is_a_defect() -> None:
+    with pytest.raises(TypedIOValidationException) as raised:
+        compile_http_config(_run_result(), direction="output", method="POST")
+
+    assert raised.value.code == FlowApiErrorCode.TYPED_IO_HTTP_INVALID_CONFIG.value
+
+
+@pytest.mark.parametrize("name", ["Content-Type", "content-TYPE"])
+def test_run_result_body_refuses_an_own_content_type_at_the_request(
+    name: str,
+) -> None:
+    with pytest.raises(TypedIOValidationException) as raised:
+        compile_http_config(
+            _run_result(custom_headers=[CustomHeader(name=name, value="text/plain")]),
+            direction="output",
+            method="POST",
+            run_result_body={},
+        )
+
+    assert raised.value.code == FlowApiErrorCode.TYPED_IO_HTTP_INVALID_CONFIG.value
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://receiver.example.org/eneo/results",
+        "https://receiver.example.org/{{ flow_input.path }}",
+        "https://{{ flow_input.host }}/eneo/results",
+    ],
+)
+def test_run_result_body_sends_only_to_a_literal_https_url_without_credentials(
+    url: str,
+) -> None:
+    """Checked at the request too: a stored config that skipped publishing
+    must not let run data choose where the result goes."""
+    with pytest.raises(TypedIOValidationException) as raised:
+        compile_http_config(
+            _run_result(url=url),
+            direction="output",
+            method="POST",
+            variables={"flow_input": {"path": "x", "host": "attacker.example"}},
+            interpolate=lambda template, ctx: template.replace(
+                "{{ flow_input.path }}", "x"
+            ).replace("{{ flow_input.host }}", "attacker.example"),
+            run_result_body={},
+        )
+
+    assert raised.value.code == FlowApiErrorCode.TYPED_IO_HTTP_INVALID_CONFIG.value
+
+
+def test_run_result_body_refuses_a_header_name_that_becomes_content_type() -> None:
+    """An API key header name filled from run data is known only at the request."""
+    config = _run_result().model_copy(
+        update={"auth": HttpAuthApiKey(header_name="{{ flow_input.h }}", key="k")}
+    )
+
+    with pytest.raises(TypedIOValidationException) as raised:
+        compile_http_config(
+            config,
+            direction="output",
+            method="POST",
+            interpolate=lambda template, ctx: "content-type",
+            run_result_body={},
+        )
+
+    assert raised.value.code == FlowApiErrorCode.TYPED_IO_HTTP_INVALID_CONFIG.value

@@ -14,6 +14,7 @@ from eneo.flows.enums import (
     FlowInputSource,
     FlowPrimaryOutputExecutionKind,
 )
+from eneo.flows.http_transport import sends_run_result
 from eneo.flows.input_binding_contract_rules import effective_question_binding
 from eneo.flows.step_lineage import (
     build_step_ref_mapping,
@@ -100,7 +101,20 @@ def build_graph_from_steps(
         step_id = str(step.get("step_id") or step.get("id"))
         label = step.get("user_description") or f"Steg {step['step_order']}"
         output_mode = step.get("output_mode")
-        node_type = "assembly" if output_mode in _ASSEMBLY_OUTPUT_MODES else "llm"
+        # A step is "llm" unless its output is deterministic. A step that
+        # sends the run's finished result asks no model: it is assembly too.
+        node_type = (
+            "assembly"
+            if output_mode in _ASSEMBLY_OUTPUT_MODES
+            or (
+                output_mode == "http_post"
+                and sends_run_result(
+                    output_mode,
+                    cast("dict[str, object] | None", step.get("output_config")),
+                )
+            )
+            else "llm"
+        )
         nodes.append(
             GraphNode(
                 id=step_id,

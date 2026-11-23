@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import io
+import time
+from dataclasses import replace
 from datetime import date, datetime, timezone
 from pathlib import PureWindowsPath
 from unittest.mock import patch
@@ -8,12 +10,18 @@ from uuid import uuid4
 
 import pytest
 from docx import Document
+from pydantic import ValidationError
 
 from eneo.flows.domain.runtime import RuntimeStep
+from eneo.flows.domain.step_deliverable import FlowStepDeliverable
+from eneo.flows.flow_run_redaction import redact_string
 from eneo.flows.runtime.document_rendering.service import (
     default_document_render_service,
 )
-from eneo.flows.runtime.generated_file_names import GeneratedFileNames
+from eneo.flows.runtime.generated_file_names import (
+    MAX_FILE_NAME_BYTES,
+    GeneratedFileNames,
+)
 
 # Templates are read and documents rendered in the shared tool runtime.
 pytestmark = pytest.mark.usefixtures("shared_document_runtime")
@@ -40,7 +48,7 @@ def _step(step_order: int, output_type: str, name: str | None = None) -> Runtime
 
 def _names(flow_name: str, *steps: RuntimeStep) -> GeneratedFileNames:
     return GeneratedFileNames.for_run(
-        flow_name=flow_name, steps=steps, run_created_at=RUN_CREATED_AT
+        flow_name=flow_name, steps=steps, run_created_at=RUN_CREATED_AT, form_values={}
     )
 
 
@@ -58,6 +66,7 @@ def test_a_named_and_dated_run_names_its_documents_after_itself() -> None:
         flow_name="Generell mötesantecknare med talare",
         steps=steps,
         run_created_at=RUN_CREATED_AT,
+        form_values={},
         run_label="Testmöte 2",
         run_date=date(2026, 10, 1),
     )
@@ -83,6 +92,7 @@ def test_a_runs_name_and_day_each_stand_in_for_the_flows_and_the_run_day(
         flow_name="Nämndmöte",
         steps=(_step(1, "pdf", "Protokoll"),),
         run_created_at=RUN_CREATED_AT,
+        form_values={},
         run_label=run_label,
         run_date=run_date,
     )
@@ -95,6 +105,7 @@ def test_a_named_runs_documents_of_one_type_still_carry_their_steps() -> None:
         flow_name="Nämndmöte",
         steps=(_step(1, "pdf", "Protokoll"), _step(2, "pdf", "Beslut")),
         run_created_at=RUN_CREATED_AT,
+        form_values={},
         run_label="Testmöte 2",
         run_date=date(2026, 10, 1),
     )
@@ -266,3 +277,440 @@ async def test_a_noncharacter_leaves_a_title_a_docx_can_carry(
     )
 
     assert Document(io.BytesIO(blob)).core_properties.title == "Möte 2026-09-23"
+
+
+def _own(
+    step_order: int, output_type: str, file_name: str, name: str | None = None
+) -> RuntimeStep:
+    return replace(
+        _step(step_order, output_type, name),
+        deliverable=FlowStepDeliverable(label=name or "Dokument", file_name=file_name),
+    )
+
+
+def _own_names(
+    *steps: RuntimeStep, form_values: dict[str, object] | None = None
+) -> GeneratedFileNames:
+    return GeneratedFileNames.for_run(
+        flow_name="Möte",
+        steps=steps,
+        run_created_at=RUN_CREATED_AT,
+        form_values=form_values or {},
+    )
+
+
+def test_an_own_file_name_takes_the_place_of_the_flows() -> None:
+    names = _own_names(
+        _own(1, "docx", "Standup {{ flow_input.Team }}"),
+        form_values={"Team": "Eneo"},
+    )
+
+    assert names.name(step_order=1, output_type="docx") == (
+        "Standup Eneo 2026-09-23.docx"
+    )
+
+
+def test_an_own_name_replaces_the_step_name_beside_other_documents() -> None:
+    names = _own_names(
+        _own(1, "pdf", "Brukarversion", "Skapa PDF"), _step(2, "pdf", "Slutversion")
+    )
+
+    assert names.name(step_order=1, output_type="pdf") == (
+        "Brukarversion 2026-09-23.pdf"
+    )
+    assert names.name(step_order=2, output_type="pdf") == (
+        "Möte Slutversion 2026-09-23.pdf"
+    )
+
+
+def test_two_equal_own_names_are_numbered() -> None:
+    names = _own_names(_own(1, "pdf", "Protokoll"), _own(2, "pdf", "protokoll"))
+
+    assert names.name(step_order=1, output_type="pdf") == (
+        "Protokoll Steg 1 2026-09-23.pdf"
+    )
+    assert names.name(step_order=2, output_type="pdf") == (
+        "protokoll Steg 2 2026-09-23.pdf"
+    )
+
+
+def test_an_own_name_equal_to_a_default_name_is_numbered() -> None:
+    names = _own_names(_own(1, "docx", "Möte Beslut"), _step(2, "docx", "Beslut"))
+
+    assert names.name(step_order=1, output_type="docx") == (
+        "Möte Beslut Steg 1 2026-09-23.docx"
+    )
+    assert names.name(step_order=2, output_type="docx") == (
+        "Möte Beslut Steg 2 2026-09-23.docx"
+    )
+
+
+def test_a_long_own_name_is_cut_to_255_bytes() -> None:
+    names = _own_names(
+        _own(1, "pdf", "ö{{ flow_input.Text }}"), form_values={"Text": "å" * 400}
+    )
+
+    name = names.name(step_order=1, output_type="pdf")
+
+    assert len(name.encode("utf-8")) <= MAX_FILE_NAME_BYTES
+    assert name.endswith(" 2026-09-23.pdf")
+    assert name.startswith("öåå")
+
+
+@pytest.mark.parametrize(
+    ("file_name", "form_values"),
+    [
+        ("{{ flow_input.Team }}", {}),
+        ("{{ flow_input.Team }}", {"Team": ""}),
+        ("{{ flow_input.Team }}", {"Team": "  "}),
+        ("{{ flow_input.Team }}", {"Team": None}),
+        ("{{ flow_input.Team }}", {"Team": {"name": "Eneo"}}),
+        ("{{ flow_input.Team }}", {"Team": "///"}),
+        ("{{ step_1.output }}", {}),
+        ("{{ datum }}", {}),
+        ("{{ flow_input.Team", {"Team": "Eneo"}),
+    ],
+)
+def test_an_own_name_that_holds_nothing_falls_back_to_its_label(
+    file_name: str, form_values: dict[str, object]
+) -> None:
+    names = _own_names(_own(1, "pdf", file_name, "Protokoll"), form_values=form_values)
+
+    assert names.name(step_order=1, output_type="pdf") == "Protokoll 2026-09-23.pdf"
+
+
+def test_a_label_that_holds_nothing_falls_back_to_neutral_words() -> None:
+    names = _own_names(_own(1, "pdf", "{{ flow_input.Team }}", "///"))
+
+    assert names.name(step_order=1, output_type="pdf") == "Dokument 2026-09-23.pdf"
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (0, "Möte 0"),
+        (2.5, "Möte 2.5"),
+        (True, "Möte"),
+        (False, "Möte"),
+        (float("nan"), "Möte"),
+        (float("inf"), "Möte"),
+        (["Anna", "", "Bo"], "Möte Anna, Bo"),
+        (("Anna", 3), "Möte Anna, 3"),
+        (["Anna", True, None, {"a": 1}, ["x"]], "Möte Anna"),
+        ([], "Möte"),
+    ],
+)
+def test_a_form_value_is_written_as_text(value: object, expected: str) -> None:
+    names = _own_names(
+        _own(1, "pdf", "Möte {{ flow_input.Val }}"), form_values={"Val": value}
+    )
+
+    assert names.name(step_order=1, output_type="pdf") == f"{expected} 2026-09-23.pdf"
+
+
+def test_a_number_too_long_to_write_takes_the_label() -> None:
+    # Past Python's digit limit for int-to-text conversion, so longer than
+    # masking judges.
+    names = _own_names(
+        _own(1, "pdf", "Möte {{ flow_input.Val }}", "Protokoll"),
+        form_values={"Val": 10**5000},
+    )
+
+    assert names.name(step_order=1, output_type="pdf") == "Protokoll 2026-09-23.pdf"
+
+
+def test_a_field_name_with_spaces_and_swedish_letters_is_read() -> None:
+    names = _own_names(
+        _own(1, "pdf", "{{ flow_input.Mötets namn }}"),
+        form_values={"Mötets namn": "Årsmöte"},
+    )
+
+    assert names.name(step_order=1, output_type="pdf") == "Årsmöte 2026-09-23.pdf"
+
+
+def test_characters_a_file_cannot_hold_leave_a_form_value() -> None:
+    names = _own_names(
+        _own(1, "pdf", "Möte {{ flow_input.Val }}"),
+        form_values={"Val": 'a\r\nb "c"/d {{ e }}\u0000‮f'},
+    )
+
+    assert names.name(step_order=1, output_type="pdf") == (
+        "Möte a b c d {{ e }} f 2026-09-23.pdf"
+    )
+
+
+def test_names_do_not_depend_on_the_order_they_are_asked_in() -> None:
+    steps = (
+        _own(1, "pdf", "Protokoll {{ flow_input.Team }}"),
+        _own(2, "pdf", "Protokoll {{ flow_input.Team }}"),
+        _step(3, "pdf", "Slut"),
+    )
+    form_values: dict[str, object] = {"Team": "Eneo"}
+    first = _own_names(*steps, form_values=form_values)
+    second = _own_names(*steps, form_values=form_values)
+
+    forward = [first.name(step_order=order, output_type="pdf") for order in (1, 2, 3)]
+    backward = [second.name(step_order=order, output_type="pdf") for order in (3, 2, 1)]
+
+    assert forward == backward[::-1]
+    assert forward[0] == "Protokoll Eneo Steg 1 2026-09-23.pdf"
+
+
+def test_a_retry_in_the_run_gets_the_same_name() -> None:
+    steps = (_own(1, "docx", "Standup {{ flow_input.Team }}"),)
+
+    first = _own_names(*steps, form_values={"Team": "Eneo"})
+    retried = _own_names(*steps, form_values={"Team": "Eneo"})
+
+    assert first.name(step_order=1, output_type="docx") == retried.name(
+        step_order=1, output_type="docx"
+    )
+
+
+SECRET_MARKER = "MARKER7f3a"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("api_token", SECRET_MARKER),
+        ("Team", f"token={SECRET_MARKER}"),
+        ("Team", f"Bearer {SECRET_MARKER}{SECRET_MARKER}{SECRET_MARKER}"),
+        ("Team", f"https://user:{SECRET_MARKER}@example.com/"),
+    ],
+)
+def test_a_value_masking_would_change_never_reaches_a_name(
+    field: str, value: str
+) -> None:
+    names = _own_names(
+        _own(1, "pdf", "Möte {{ flow_input.%s }}" % field),
+        form_values={field: value},
+    )
+
+    assert redact_string(value, key=field) != value
+    assert SECRET_MARKER not in names.name(step_order=1, output_type="pdf")
+    assert SECRET_MARKER not in names.stem(step_order=1, output_type="pdf")
+
+
+def test_a_clean_value_that_completes_a_credential_never_reaches_a_name() -> None:
+    # Each value is clean on its own; with the fixed text around it, the name
+    # reads as a credential.
+    names = _own_names(
+        _own(1, "pdf", "token={{ flow_input.Team }}", "Protokoll"),
+        form_values={"Team": SECRET_MARKER},
+    )
+
+    assert redact_string(SECRET_MARKER, key="Team") == SECRET_MARKER
+    assert names.name(step_order=1, output_type="pdf") == "Protokoll 2026-09-23.pdf"
+
+
+@pytest.mark.parametrize(
+    ("file_name", "value"),
+    [
+        # Masked as written; cleaning would turn the separator into a space.
+        ("password:{{ flow_input.Team }}", SECRET_MARKER),
+        # Clean as written; cleaning makes them a credential.
+        ("{{ flow_input.Team }}", f"Bearer/{SECRET_MARKER}"),
+        ("{{ flow_input.Team }}", f"password\u200b={SECRET_MARKER}"),
+    ],
+)
+def test_a_name_masking_would_change_before_or_after_cleaning_takes_the_label(
+    file_name: str, value: str
+) -> None:
+    # The run's own name can be the same form value; the label is fixed text.
+    names = GeneratedFileNames.for_run(
+        flow_name="Möte",
+        steps=(_own(1, "pdf", file_name, "Protokoll"),),
+        run_created_at=RUN_CREATED_AT,
+        form_values={"Team": value},
+        run_label=value,
+    )
+
+    assert names.name(step_order=1, output_type="pdf") == "Protokoll 2026-09-23.pdf"
+    assert names.stem(step_order=1, output_type="pdf") == "Protokoll 2026-09-23"
+
+
+def test_a_credential_starting_before_the_length_limit_takes_the_label() -> None:
+    # Each value is clean on its own; the cut at 255 bytes would keep only
+    # "toke" of the credential they make, which masking leaves alone.
+    form_values: dict[str, object] = {"A": "x" * 250, "B": SECRET_MARKER}
+    names = _own_names(
+        _own(1, "pdf", "{{ flow_input.A }} token={{ flow_input.B }}", "Protokoll"),
+        form_values=form_values,
+    )
+
+    for field, value in form_values.items():
+        assert redact_string(str(value), key=field) == value
+    assert len(" ".join(["x" * 250, "toke"]).encode("utf-8")) == MAX_FILE_NAME_BYTES
+    assert names.name(step_order=1, output_type="pdf") == "Protokoll 2026-09-23.pdf"
+
+
+# A URL whose user information runs past the first thousand characters: cut
+# there, it loses the `@` that makes masking see a credential.
+LONG_USER_INFO = f"{SECRET_MARKER}{'a' * 1000}"
+LONG_URL = f"https://{LONG_USER_INFO}@example.com/"
+
+
+@pytest.mark.parametrize(
+    ("file_name", "value"),
+    [
+        ("Möte {{ flow_input.Team }}", LONG_URL),
+        ("Möte https://{{ flow_input.Team }}", f"{LONG_USER_INFO}@example.com/"),
+        ("Möte {{ flow_input.Team }}", [LONG_URL]),
+    ],
+)
+def test_a_value_longer_than_masking_judges_takes_the_label(
+    file_name: str, value: object
+) -> None:
+    names = _own_names(
+        _own(1, "pdf", file_name, "Protokoll"), form_values={"Team": value}
+    )
+
+    assert redact_string(LONG_URL, key=None) != LONG_URL
+    assert names.name(step_order=1, output_type="pdf") == "Protokoll 2026-09-23.pdf"
+
+
+def test_values_that_make_a_name_longer_than_masking_judges_take_the_label() -> None:
+    # Each value is clean and under the limit on its own; with the fixed text
+    # they make a URL whose `@` lies past it.
+    form_values: dict[str, object] = {
+        "A": f"{SECRET_MARKER}{'a' * 600}",
+        "B": f"{'a' * 600}@example.com/",
+    }
+    names = _own_names(
+        _own(1, "pdf", "https://{{ flow_input.A }}{{ flow_input.B }}", "Protokoll"),
+        form_values=form_values,
+    )
+
+    for field, value in form_values.items():
+        assert redact_string(str(value), key=field) == value
+    assert names.name(step_order=1, output_type="pdf") == "Protokoll 2026-09-23.pdf"
+
+
+def test_a_user_name_whose_at_sign_is_in_a_value_too_long_to_judge_takes_the_label() -> (
+    None
+):
+    # Leaving the second value out would drop the `@` that marks the first as
+    # a URL's user information.
+    names = _own_names(
+        _own(1, "pdf", "https://{{ flow_input.A }}{{ flow_input.B }}", "Protokoll"),
+        form_values={"A": "SAMPLE", "B": f"@example.com/{'p' * 1000}"},
+    )
+
+    assert names.name(step_order=1, output_type="pdf") == "Protokoll 2026-09-23.pdf"
+    assert names.stem(step_order=1, output_type="pdf") == "Protokoll 2026-09-23"
+
+
+# Every credential form masking knows, each with the secret in it; masked as
+# written or once cleaned.
+_CREDENTIALS = [
+    f"Bearer {SECRET_MARKER}",
+    f"Bearer/{SECRET_MARKER}",
+    f"Basic {SECRET_MARKER}",
+    f"Digest {SECRET_MARKER}",
+    f"token={SECRET_MARKER}",
+    f"password:{SECRET_MARKER}",
+    f"password\u200b={SECRET_MARKER}",
+    f"api_key={SECRET_MARKER}",
+    f'"client_secret": "{SECRET_MARKER}"',
+    f"https://{SECRET_MARKER}@example.com/",
+    f"https://user:{SECRET_MARKER}@example.com/",
+    f"https://example.com/?code={SECRET_MARKER}",
+]
+_PADDING = "a" * 1000
+# Where the fixed text stands beside the two form fields.
+_LAYOUTS = [("text", "A", "B"), ("A", "text", "B"), ("A", "B", "text")]
+
+
+def _cuts(credential: str) -> list[int]:
+    """Every place in ``credential``, but only a few inside the padding."""
+    start = credential.find(_PADDING)
+    if start < 0:
+        return list(range(len(credential) + 1))
+    end = start + len(_PADDING)
+    inside = [start + 1, start + len(_PADDING) // 2, end - 1]
+    outside = [cut for cut in range(len(credential) + 1) if cut <= start or cut >= end]
+    return sorted(outside + inside)
+
+
+@pytest.mark.parametrize("credential", _CREDENTIALS)
+@pytest.mark.parametrize("padded", [False, True], ids=["short", "padded"])
+@pytest.mark.parametrize("layout", _LAYOUTS, ids=lambda layout: "-".join(layout))
+@pytest.mark.parametrize("second_field", ["B", "B as a list", "api_token"])
+def test_a_credential_split_anywhere_across_the_name_takes_the_label(
+    credential: str,
+    padded: bool,
+    layout: tuple[str, str, str],
+    second_field: str,
+) -> None:
+    # The credential is cut into three parts at every pair of places and
+    # spread over the fixed text and two form fields, the second one also as
+    # a list or under a field name masking refuses.
+    if padded:
+        credential = credential.replace(SECRET_MARKER, SECRET_MARKER + _PADDING)
+    field_b = "api_token" if second_field == "api_token" else "B"
+    expression = {"A": "{{ flow_input.A }}", "B": "{{ flow_input.%s }}" % field_b}
+    cuts = _cuts(credential)
+    named: list[tuple[str, dict[str, object], str]] = []
+    tried = 0
+    for first in cuts:
+        for second in (cut for cut in cuts if cut >= first):
+            parts = dict(
+                zip(
+                    layout,
+                    (credential[:first], credential[first:second], credential[second:]),
+                )
+            )
+            file_name = "".join(
+                parts["text"] if slot == "text" else expression[slot] for slot in layout
+            )
+            form_values: dict[str, object] = {
+                "A": parts["A"],
+                field_b: [parts["B"]] if second_field == "B as a list" else parts["B"],
+            }
+            try:
+                step = _own(1, "pdf", file_name, "Protokoll")
+            except ValidationError:
+                # Not one line of at most 200 characters: no run is named by it.
+                continue
+            tried += 1
+            names = _own_names(step, form_values=form_values)
+            name = names.name(step_order=1, output_type="pdf")
+            stem = names.stem(step_order=1, output_type="pdf")
+            if (name, stem) != ("Protokoll 2026-09-23.pdf", "Protokoll 2026-09-23"):
+                named.append((file_name, form_values, name))
+
+    leaked = [case for case in named if SECRET_MARKER in case[2]]
+    assert tried
+    assert not named, (
+        f"{len(named)} names were not the label, {len(leaked)} with the secret: "
+        f"{(leaked or named)[:3]!r:.2000}"
+    )
+
+
+@pytest.mark.parametrize("field", ["Team", "api_token"])
+@pytest.mark.parametrize("value", ["", None, [], "MISSING"])
+def test_an_empty_form_field_is_filled_in_as_empty(field: str, value: object) -> None:
+    form_values: dict[str, object] = {} if value == "MISSING" else {field: value}
+    names = _own_names(
+        _own(1, "pdf", "Möte {{ flow_input.%s }}" % field, "Protokoll"),
+        form_values=form_values,
+    )
+
+    assert names.name(step_order=1, output_type="pdf") == "Möte 2026-09-23.pdf"
+
+
+def test_a_megabyte_form_value_takes_the_label_in_well_under_a_second() -> None:
+    # The masking patterns take time quadratic in a long run of word
+    # characters, so a value past the limit is never judged, nor written.
+    value = "token" * 200_000
+    steps = (
+        _own(1, "pdf", "Möte {{ flow_input.Team }} {{ flow_input.Team }}", "Protokoll"),
+    )
+
+    started = time.perf_counter()
+    names = _own_names(*steps, form_values={"Team": value})
+    elapsed = time.perf_counter() - started
+
+    assert elapsed < 1.0
+    assert names.name(step_order=1, output_type="pdf") == "Protokoll 2026-09-23.pdf"

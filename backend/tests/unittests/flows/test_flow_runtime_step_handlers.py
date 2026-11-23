@@ -164,6 +164,11 @@ class _OutputOnlyHandler:
         return StepExecutionResult(output=_step_output())
 
 
+class _RefusingHandler(_OutputOnlyHandler):
+    async def execute(self, **_kwargs: object) -> StepExecutionResult:
+        raise AssertionError("This handler must not run.")
+
+
 @pytest.mark.parametrize(
     ("mode", "expected_type"),
     [
@@ -227,6 +232,33 @@ async def test_http_post_handler_emits_exactly_one_webhook_intent() -> None:
     assert intent.attempt_no == 3
     assert intent.idempotency_key
     assert isinstance(intent.payload, WebhookPayloadRef)
+
+
+@pytest.mark.asyncio
+async def test_a_run_result_step_holds_no_content_and_asks_nothing() -> None:
+    """The step that sends the run's result reads nothing and asks no model:
+    the body is built from the run's deliverables once the run has
+    completed."""
+    step = replace(
+        _step(output_mode="http_post"),
+        output_config={
+            "url": "https://receiver.example.org/results",
+            "auth": {"mode": "none"},
+            "body": {"mode": "run_result"},
+        },
+    )
+    handler = HttpPostStepHandler(completion_handler=_RefusingHandler())
+
+    result = await handler.execute(
+        step=step, run=_run(), state=_state(), version_metadata=None, attempt_no=1
+    )
+
+    output = result.output
+    assert (output.input_text, output.full_text, output.persisted_text) == ("", "", "")
+    assert output.generated_file_ids == []
+    assert output.effective_prompt == ""
+    assert [item.code for item in output.diagnostics] == ["run_result_sent_after_run"]
+    assert len(result.delivery_intents) == 1
 
 
 @pytest.mark.asyncio

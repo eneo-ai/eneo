@@ -2,24 +2,31 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import date, datetime
-from typing import Annotated, Any, Literal, Self, TypeAlias, cast
+from typing import Annotated, Any, Literal, NotRequired, Self, TypeAlias, cast
 from uuid import UUID
 
 from pydantic import (
     AliasChoices,
     AliasPath,
+    AwareDatetime,
     BaseModel,
     BeforeValidator,
     ConfigDict,
     Field,
+    GetPydanticSchema,
+    PlainSerializer,
     StrictInt,
     StringConstraints,
+    ValidatorFunctionWrapHandler,
     WithJsonSchema,
+    WrapValidator,
     computed_field,
     field_validator,
     model_validator,
+    with_config,
 )
 from pydantic.config import JsonDict
+from typing_extensions import TypedDict
 
 from eneo.ai_models.completion_models.completion_model import (
     CompletionModelSparse,
@@ -46,6 +53,12 @@ from eneo.flows.api.flow_run_contract_models import (
 )
 from eneo.flows.api.flow_run_contract_models import (
     FlowRunContractPublic as FlowRunContractPublic,
+)
+from eneo.flows.api.flow_run_contract_models import (
+    FlowRunDeliverable as FlowRunDeliverable,
+)
+from eneo.flows.api.flow_run_contract_models import (
+    FlowRunDeliverablePublic as FlowRunDeliverablePublic,
 )
 from eneo.flows.api.flow_run_contract_models import (
     FlowRunResultPublic as FlowRunResultPublic,
@@ -90,6 +103,7 @@ from eneo.flows.domain.flow_step_attempt_input import (
     attempt_tool_call_state,
     parse_flow_step_attempt_input,
 )
+from eneo.flows.domain.flow_webhook_delivery import FlowWebhookDeliveryState
 from eneo.flows.domain.live_fallback import LiveFallbackReason
 from eneo.flows.domain.long_material import LongMaterialConfig, LongMaterialCoverage
 from eneo.flows.domain.one_line_text import ONE_LINE_TEXT_MAX_CHARS
@@ -106,6 +120,10 @@ from eneo.flows.domain.review_reject_reason import (
     normalize_review_reject_reason,
 )
 from eneo.flows.domain.runtime import StepDiagnosticSeverity
+from eneo.flows.domain.step_deliverable import (
+    FLOW_STEP_DELIVERABLE_KEY,
+    FlowStepDeliverable,
+)
 from eneo.flows.domain.step_output import StepMaterialReference, parse_step_text_aliases
 from eneo.flows.domain.text_processing import TextProcessingConfig
 from eneo.flows.domain.transcript_corrections import FlowTranscriptCorrectionRevision
@@ -216,14 +234,44 @@ def _validate_flow_step_output_config(value: object) -> object:
     return value
 
 
+@with_config(ConfigDict(extra="allow"))
+class _FlowStepOutputConfigShape(TypedDict):
+    deliverable: NotRequired[FlowStepDeliverable]
+
+
+def _keep_as_sent(value: object, check: ValidatorFunctionWrapHandler) -> object:
+    check(value)
+    return value
+
+
+# The deliverable is checked as a model, so an error is placed at its field
+# (`output_config.deliverable.label`), where an editor shows it; the dict is
+# kept, and dumped, as sent, so the stored config is unchanged.
 FlowStepOutputConfigRequest: TypeAlias = Annotated[
     dict[str, Any],
+    GetPydanticSchema(
+        lambda _source, handler: handler.generate_schema(_FlowStepOutputConfigShape)
+    ),
+    WrapValidator(_keep_as_sent),
+    PlainSerializer(lambda value: value, return_type=dict[str, Any]),
     BeforeValidator(_validate_flow_step_output_config),
     WithJsonSchema(
         {
             "type": "object",
             "properties": {
-                "retrieval_policy": FlowStepRetrievalPolicy.model_json_schema()
+                "retrieval_policy": FlowStepRetrievalPolicy.model_json_schema(),
+                FLOW_STEP_DELIVERABLE_KEY: {
+                    **FlowStepDeliverable.model_json_schema(),
+                    "description": (
+                        "Marks this step as one of the run's deliverables: text "
+                        "or a document a client lists with its label in "
+                        "`deliverables` on the run contract and the run. Only a "
+                        "step whose output is text or a document of its own can "
+                        "carry it, and only a document step a `file_name`: "
+                        "saving any other step removes what it cannot carry, "
+                        "and publishing or importing one refuses it."
+                    ),
+                },
             },
             "additionalProperties": True,
         }
@@ -417,6 +465,7 @@ FLOW_RUN_PUBLIC_EXAMPLE: dict[str, Any] = {
     "max_speakers": None,
     "result": None,
     "result_files": [],
+    "deliverables": [],
     "token_usage": None,
     "transcription_usage": None,
 }
@@ -433,6 +482,32 @@ FLOW_RUN_WEBHOOK_DELIVERY_EXAMPLE: dict[str, Any] = {
     "dead_lettered_at": None,
     "created_at": "2026-03-17T10:05:30Z",
     "updated_at": "2026-03-17T10:05:31Z",
+}
+
+FLOW_RUN_WEBHOOK_DELIVERY_STATE_EXAMPLE: dict[str, Any] = {
+    **FLOW_RUN_WEBHOOK_DELIVERY_EXAMPLE,
+    "state": "delivered",
+}
+
+FLOW_RUN_STATUS_PUBLIC_EXAMPLE: dict[str, Any] = {
+    **FLOW_RUN_SUMMARY_PUBLIC_EXAMPLE,
+    "status": "completed",
+    "dispatch_pending_since": None,
+    "dispatch_attempt_count": 1,
+    "dispatch_last_attempt_at": "2026-03-17T10:05:00Z",
+    "dispatch_next_attempt_at": None,
+    "dispatched_at": "2026-03-17T10:05:00Z",
+    "started_at": "2026-03-17T10:05:01Z",
+    "finished_at": "2026-03-17T10:05:30Z",
+    "updated_at": "2026-03-17T10:05:30Z",
+    "result_delivery": {
+        **FLOW_RUN_WEBHOOK_DELIVERY_EXAMPLE,
+        "next_delivery_at": "2026-03-17T10:06:30Z",
+        "delivery_status": "pending",
+        "delivered_at": None,
+        "updated_at": "2026-03-17T10:05:31Z",
+        "state": "retry_scheduled",
+    },
 }
 
 FLOW_RUN_QUEUED_AFTER_DISPATCH_EXAMPLE: dict[str, object] = {
@@ -522,7 +597,7 @@ FLOW_RUN_REVIEW_CHECKPOINT_PUBLIC_EXAMPLE: dict[str, Any] = {
     "flow_id": "00000000-0000-0000-0000-000000000001",
     "flow_run_id": "00000000-0000-0000-0000-000000000301",
     "step_id": "00000000-0000-0000-0000-000000000103",
-    "step_order": 2,
+    "step_order": 3,
     "attempt_no": 1,
     "state": "awaiting_review",
     "revision": 1,
@@ -753,7 +828,11 @@ class FlowStepCreateRequest(BaseModel):
     input_bindings: dict[str, Any] | None = None
     output_classification_override: int | None = None
     input_config: FlowStepInputConfigValue | None = None
-    output_config: FlowStepOutputConfigRequest | None = None
+    # Set: pydantic leaves a field's title out when its schema checks a typed
+    # dict, and the published schema keeps the title it had.
+    output_config: FlowStepOutputConfigRequest | None = Field(
+        default=None, title="Output Config"
+    )
     review_policy: FlowStepReviewPolicy | None = Field(
         default=None,
         description=FLOW_STEP_REVIEW_POLICY_DESCRIPTION,
@@ -1811,6 +1890,21 @@ class FlowRunPublic(FlowRunSummaryPublic):
             "using its `file_id`, and only when its `availability` is `available`."
         ),
     )
+    deliverables: list[FlowRunDeliverable] = Field(
+        default_factory=lambda: cast(list[FlowRunDeliverable], []),
+        description=(
+            "Every text and document the run delivered, in step order, each "
+            "with its label: the run contract's `deliverables` for this run. "
+            "Branch on `kind`: an `artifact` lists its files, a `text` has no "
+            "`files` and its text is the step's output. Read `result` for the "
+            "terminal output alone. An `artifact` lists only the step's "
+            "document files, while `result.files` lists every current file of "
+            "the last step. Download a file with its `file_id` through "
+            "`POST {api_prefix}/flows/{id}/runs/{run_id}/artifacts/{file_id}/signed-url/`, "
+            "and only when its `availability` is `available`. Empty until the "
+            "run has completed."
+        ),
+    )
     transcription_usage: FlowRunTranscriptionUsagePublic | None = Field(
         default=None,
         description=(
@@ -1850,6 +1944,51 @@ class FlowRunWebhookDeliveryPublic(BaseModel):
     dead_lettered_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class FlowRunWebhookDeliveryStatePublic(FlowRunWebhookDeliveryPublic):
+    """A delivery as it stands when read. The run's evidence keeps the
+    delivery's record without it."""
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        extra="forbid",
+        json_schema_extra={"example": FLOW_RUN_WEBHOOK_DELIVERY_STATE_EXAMPLE},
+    )
+
+    state: FlowWebhookDeliveryState = Field(
+        description=(
+            "Where the delivery stands when read. `sending`: not tried yet, "
+            "an attempt is being sent, or the next one is due. "
+            "`retry_scheduled`: an attempt failed and the next is at "
+            "`next_delivery_at`, still ahead. `delivered` and "
+            "`dead_lettered` are final, as in `delivery_status`. Branch on "
+            "this rather than on `delivery_attempts`, which counts an "
+            "attempt while it is being sent."
+        ),
+    )
+
+
+class FlowRunStatusPublic(FlowRunSummaryPublic):
+    """A run's status as polled: its lifecycle and where its outbound
+    delivery stands, without run content."""
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        extra="forbid",
+        json_schema_extra={"example": FLOW_RUN_STATUS_PUBLIC_EXAMPLE},
+    )
+
+    result_delivery: FlowRunWebhookDeliveryStatePublic | None = Field(
+        default=None,
+        description=(
+            "The latest delivery of the run's last step when that step sends "
+            "over HTTP (the run's result, or its own answer with a plain POST); "
+            "null when the run has none yet or its last step sends nothing. "
+            "It names no address, header or content. The same delivery is "
+            "last in the detail's `webhook_deliveries`."
+        ),
+    )
 
 
 FLOW_RUN_ERROR_PUBLIC_EXAMPLE: dict[str, Any] = {
@@ -1986,19 +2125,84 @@ class FlowRunEvidenceAccessPublic(BaseModel):
     )
 
 
+def _completed_run_document_example(
+    *, step: int, file: int, name: str
+) -> dict[str, Any]:
+    return {
+        "flow_run_id": "00000000-0000-0000-0000-000000000301",
+        "flow_id": "00000000-0000-0000-0000-000000000001",
+        "tenant_id": "00000000-0000-0000-0000-000000000010",
+        "step_result_id": f"00000000-0000-0000-0000-00000000045{step}",
+        "step_id": f"00000000-0000-0000-0000-00000000010{step}",
+        "step_order": step,
+        "attempt_no": 1,
+        "file_id": f"00000000-0000-0000-0000-00000000070{file}",
+        "ordinal": 0,
+        "source": "declared_artifact",
+        "name": name,
+        "checksum": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+        "size": 14012,
+        "mimetype": (
+            "application/pdf"
+            if name.endswith(".pdf")
+            else "application/vnd.openxmlformats-officedocument."
+            "wordprocessingml.document"
+        ),
+        "file_type": "document",
+        "availability": "available",
+    }
+
+
+_SUMMARY_DOCUMENT_EXAMPLE = _completed_run_document_example(
+    step=2, file=2, name="Summary Alex Example 2026-03-17.pdf"
+)
+_REPORT_DOCUMENT_EXAMPLE = _completed_run_document_example(
+    step=4, file=3, name="Report Alex Example 2026-03-17.docx"
+)
+
+FLOW_RUN_DETAIL_PUBLIC_EXAMPLE: dict[str, Any] = {
+    **FLOW_RUN_PUBLIC_EXAMPLE,
+    "status": "completed",
+    "dispatch_pending_since": None,
+    "dispatch_attempt_count": 1,
+    "dispatch_last_attempt_at": "2026-03-17T10:05:01Z",
+    "dispatch_next_attempt_at": None,
+    "dispatched_at": "2026-03-17T10:05:01Z",
+    "started_at": "2026-03-17T10:05:02Z",
+    "finished_at": "2026-03-17T10:06:10Z",
+    "updated_at": "2026-03-17T10:06:10Z",
+    "result": {"kind": "artifact", "files": [_REPORT_DOCUMENT_EXAMPLE]},
+    "result_files": [_SUMMARY_DOCUMENT_EXAMPLE, _REPORT_DOCUMENT_EXAMPLE],
+    "deliverables": [
+        {
+            "kind": "artifact",
+            "step_id": _SUMMARY_DOCUMENT_EXAMPLE["step_id"],
+            "step_order": 2,
+            "label": "Summary",
+            "output_type": "pdf",
+            "files": [_SUMMARY_DOCUMENT_EXAMPLE],
+        },
+        {
+            "kind": "artifact",
+            "step_id": _REPORT_DOCUMENT_EXAMPLE["step_id"],
+            "step_order": 4,
+            "label": "Report",
+            "output_type": "docx",
+            "files": [_REPORT_DOCUMENT_EXAMPLE],
+        },
+    ],
+    "webhook_deliveries": [FLOW_RUN_WEBHOOK_DELIVERY_STATE_EXAMPLE],
+    "evidence_access": FLOW_RUN_EVIDENCE_ACCESS_PUBLIC_EXAMPLE,
+}
+
+
 class FlowRunDetailPublic(FlowRunPublic):
     model_config = ConfigDict(
         from_attributes=True,
-        json_schema_extra={
-            "example": {
-                **FLOW_RUN_PUBLIC_EXAMPLE,
-                "webhook_deliveries": [FLOW_RUN_WEBHOOK_DELIVERY_EXAMPLE],
-                "evidence_access": FLOW_RUN_EVIDENCE_ACCESS_PUBLIC_EXAMPLE,
-            }
-        },
+        json_schema_extra={"example": FLOW_RUN_DETAIL_PUBLIC_EXAMPLE},
     )
 
-    webhook_deliveries: list[FlowRunWebhookDeliveryPublic] = Field(
+    webhook_deliveries: list[FlowRunWebhookDeliveryStatePublic] = Field(
         description=(
             "Secret-free outbound HTTP delivery attempts for this run. The field is always "
             "present and is empty unless the flow's final step was authored with outbound "
@@ -2475,6 +2679,22 @@ class FlowRunRedispatchRequest(BaseModel):
             "redriving accepted-delivery exhaustion so a retried request cannot rearm "
             "a later exhausted dispatch epoch. Omit it for ordinary due queued "
             "redispatch."
+        ),
+    )
+
+
+class FlowRunWebhookRedeliveryRequest(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "example": {"expected_dead_lettered_at": "2026-07-22T08:30:00Z"}
+        },
+    )
+
+    expected_dead_lettered_at: AwareDatetime = Field(
+        description=(
+            "The delivery's `dead_lettered_at` as read from the run. Only that "
+            "dead letter is reset, so a retried request cannot reset a later one."
         ),
     )
 
@@ -3292,7 +3512,7 @@ FLOW_RUN_EVIDENCE_EXPORT_BUNDLE_EXAMPLE: dict[str, Any] = {
     "run": {
         key: value
         for key, value in FLOW_RUN_PUBLIC_EXAMPLE.items()
-        if key != "started_by"
+        if key not in {"started_by", "deliverables"}
     },
     "definition_integrity": {
         "status": "verified",

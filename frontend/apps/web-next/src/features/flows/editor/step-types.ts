@@ -20,6 +20,10 @@ export type InputType = Schemas["FlowInputType"];
 export type OutputMode = Schemas["FlowOutputMode"];
 export type OutputType = Schemas["FlowOutputType"];
 export type ReviewPolicy = Schemas["FlowStepReviewPolicy"];
+/** `output_config.deliverable` (`FlowStepDeliverable` in the core). */
+export type StepDeliverable = NonNullable<
+  NonNullable<Schemas["FlowStepUpdateRequest"]["output_config"]>["deliverable"]
+>;
 export type ModelKwargs = Schemas["ModelKwargs"];
 export type Collection = Schemas["CollectionPublic"];
 export type Website = Schemas["WebsitePublic"];
@@ -140,6 +144,19 @@ function canonicalJson(value: unknown): string {
 /** True when two values are stored as the same JSON, whatever order an object's keys come in. */
 export function sameJson(left: unknown, right: unknown): boolean {
   return canonicalJson(left) === canonicalJson(right);
+}
+
+/**
+ * True when a step field's two values save the same. Empty output settings
+ * are no output settings: an older step stored `{}` where the editor writes
+ * null once the last key is removed, so a setting turned on and off again
+ * changes nothing.
+ */
+export function sameStepField(field: keyof StepConfig, left: unknown, right: unknown): boolean {
+  if (field !== "output_config") return sameJson(left, right);
+  const none = (value: unknown) =>
+    isJsonObject(value) && Object.keys(value).length === 0 ? null : value;
+  return sameJson(none(left), none(right));
 }
 
 export function sortedIds(items: readonly { id: string }[]): string[] {

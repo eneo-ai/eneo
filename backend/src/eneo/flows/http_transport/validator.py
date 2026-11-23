@@ -67,7 +67,9 @@ def validate_authored_config(
         errors.append(HttpTransportError.MISSING_AUTH_CREDENTIALS)
 
     # Body validation
-    if method.upper() == "GET" and config.body.mode not in (
+    if config.body.mode == HttpBodyMode.RUN_RESULT:
+        errors.extend(_run_result_errors(config, direction=direction, method=method))
+    elif method.upper() == "GET" and config.body.mode not in (
         HttpBodyMode.NONE,
         HttpBodyMode.AUTO,
     ):
@@ -88,6 +90,94 @@ def validate_authored_config(
         errors.append(HttpTransportError.INVALID_HEADER_NAME)
 
     return errors
+
+
+# What the author changes for a defect whose code alone does not say it.
+AUTHOR_ACTIONS: dict[HttpTransportError, str] = {
+    HttpTransportError.RUN_RESULT_REQUIRES_HTTP_POST: (
+        "The run result body is sent only by an http_post step; choose another "
+        "body mode here."
+    ),
+    HttpTransportError.RUN_RESULT_TAKES_NO_TEMPLATE: (
+        "Remove the body template: the run result body is built by Eneo."
+    ),
+    HttpTransportError.RUN_RESULT_REQUIRES_FIXED_HTTPS_URL: (
+        "Enter a fixed https address without variables: run data must not "
+        "choose where the result is sent."
+    ),
+    HttpTransportError.RUN_RESULT_NOT_TESTABLE: (
+        "A run result is sent when a run has completed; start a run to try "
+        "the receiver."
+    ),
+    HttpTransportError.CONTENT_TYPE_SET_BY_BODY: (
+        "Remove the Content-Type header: the run result body sends application/json."
+    ),
+}
+
+
+def run_result_url_is_fixed(url: str) -> bool:
+    """Whether the URL is one literal https address: no template in any part,
+    so run data can neither choose the receiver nor change the path or query
+    it is sent to."""
+    if _contains_template_marker(url):
+        return False
+    try:
+        parse_credential_http_url(url)
+    except InvalidHttpUrl:
+        return False
+    return True
+
+
+def content_type_field(config: HttpAuthoredConfig) -> str | None:
+    """The config path of the first header the author names Content-Type, in
+    any case: an API key's header name or a sent custom header."""
+    auth = config.auth
+    if (
+        isinstance(auth, HttpAuthApiKey)
+        and auth.header_name.strip().lower() == "content-type"
+    ):
+        return "auth.header_name"
+    return next(
+        (
+            f"custom_headers[{index}]"
+            for index, header in enumerate(config.custom_headers)
+            if header.sent and header.name.strip().lower() == "content-type"
+        ),
+        None,
+    )
+
+
+def _run_result_errors(
+    config: HttpAuthoredConfig, *, direction: str, method: str
+) -> list[HttpTransportError]:
+    errors: list[HttpTransportError] = []
+    if direction != "output" or method.upper() != "POST":
+        errors.append(HttpTransportError.RUN_RESULT_REQUIRES_HTTP_POST)
+    if config.body.template:
+        errors.append(HttpTransportError.RUN_RESULT_TAKES_NO_TEMPLATE)
+    if config.url.strip() and not run_result_url_is_fixed(config.url):
+        errors.append(HttpTransportError.RUN_RESULT_REQUIRES_FIXED_HTTPS_URL)
+    if content_type_field(config) is not None:
+        errors.append(HttpTransportError.CONTENT_TYPE_SET_BY_BODY)
+    return errors
+
+
+def error_field(config: HttpAuthoredConfig, error: HttpTransportError) -> str | None:
+    """The config path, below the config, of the field a defect is in, where
+    the code alone does not name it."""
+    match error:
+        case HttpTransportError.INVALID_HEADER_NAME:
+            return invalid_header_name_field(config)
+        case HttpTransportError.RUN_RESULT_REQUIRES_HTTP_POST:
+            return "body.mode"
+        case HttpTransportError.RUN_RESULT_TAKES_NO_TEMPLATE:
+            return "body.template"
+        case HttpTransportError.RUN_RESULT_REQUIRES_FIXED_HTTPS_URL:
+            return "url"
+        case HttpTransportError.CONTENT_TYPE_SET_BY_BODY:
+            return content_type_field(config)
+        case _:
+            return None
 
 
 def invalid_header_name_field(config: HttpAuthoredConfig) -> str | None:

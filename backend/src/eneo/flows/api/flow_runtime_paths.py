@@ -30,6 +30,9 @@ FLOW_RUN_STATUS_PATH: Final[str] = "/{id}/runs/{run_id}/status/"
 FLOW_RUN_CANCEL_PATH: Final[str] = "/{id}/runs/{run_id}/cancel/"
 FLOW_RUN_REDISPATCH_PATH: Final[str] = "/{id}/runs/{run_id}/redispatch/"
 FLOW_RUN_RETRY_PATH: Final[str] = "/{id}/runs/{run_id}/retry/"
+FLOW_RUN_WEBHOOK_REDELIVER_PATH: Final[str] = (
+    "/{id}/runs/{run_id}/webhook-deliveries/{delivery_id}/redeliver/"
+)
 
 FLOW_REVIEW_ACTIVE_PATH: Final[str] = "/{id}/runs/{run_id}/review-checkpoints/active/"
 FLOW_REVIEW_CHECKPOINT_PATH: Final[str] = (

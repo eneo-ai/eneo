@@ -12,8 +12,12 @@ from uuid import UUID
 
 from eneo.authentication.api_key_resolver import resolve_effective_resource_permission
 from eneo.authentication.auth_models import ApiKeyPermission
+from eneo.database.tables.flow_tables import FlowOutboxDeliveryStatus
 from eneo.files.file_repo import FileRepository
-from eneo.flows.api.flow_run_contract_models import FlowFinalOutputContractPublic
+from eneo.flows.api.flow_run_contract_models import (
+    FlowRunOutputContract,
+    final_step_delivery_status,
+)
 from eneo.flows.application.flow_run_access_policy import (
     FlowRunAccessKind,
     FlowRunAccessPolicy,
@@ -66,7 +70,7 @@ from eneo.flows.flow_input_limits import (
     resolve_flow_input_limits_from_source,
 )
 from eneo.flows.flow_run_contract_service import (
-    build_final_output_contract,
+    build_run_output_contract,
     settle_max_speakers,
     speaker_labels_option,
     speaker_service_gap,
@@ -243,11 +247,21 @@ class FlowRunWithResultFilesAndUsage:
     result_files: Sequence[FlowRunStepResultFile]
     token_usage: FlowRunTokenUsage | None
     transcription_usage: FlowRunTranscriptionUsage | None = None
-    final_output: FlowFinalOutputContractPublic | None = None
+    outputs: FlowRunOutputContract | None = None
+    # The latest delivery of the final step, for a run whose result is sent.
+    final_delivery_status: FlowOutboxDeliveryStatus | None = None
 
 
 @dataclass(frozen=True, slots=True)
-class FlowRunDetailView(FlowRunWithResultFilesAndUsage):
+class FlowRunDetailView:
+    """A run's detail. Its result's delivery status is decided from
+    ``webhook_deliveries`` where the detail is projected."""
+
+    run: FlowRun
+    result_files: Sequence[FlowRunStepResultFile]
+    token_usage: FlowRunTokenUsage | None
+    transcription_usage: FlowRunTranscriptionUsage | None = None
+    outputs: FlowRunOutputContract | None = None
     webhook_deliveries: Sequence[FlowRunWebhookDeliveryRead] = ()
 
 
@@ -972,6 +986,21 @@ class FlowRunService:
             history=history,
         )
 
+    async def latest_webhook_delivery(
+        self, *, run_id: UUID
+    ) -> FlowRunWebhookDeliveryRead | None:
+        """The latest outbound delivery of a run the caller has been given
+        access to, or None. Only its last step sends, so this is that step's
+        highest-numbered attempt, whatever order the rows are read in."""
+        deliveries = await self.webhook_delivery_repo.list_run_delivery_statuses(
+            run_id=run_id, tenant_id=self.user.tenant_id
+        )
+        return max(
+            deliveries,
+            key=lambda delivery: (delivery.step_order, delivery.attempt_no),
+            default=None,
+        )
+
     async def list_run_statuses(
         self,
         *,
@@ -1116,21 +1145,6 @@ class FlowRunService:
             speaker_labels=speaker_labels,
         )
 
-    async def get_run_with_result_files_and_usage(
-        self,
-        *,
-        flow_id: UUID,
-        run_id: UUID,
-        history: bool = False,
-    ) -> FlowRunWithResultFilesAndUsage:
-        run = await self.get_run(
-            run_id=run_id,
-            flow_id=flow_id,
-            access_kind="content",
-            history=history,
-        )
-        return await self.enrich_run_with_result_files_and_usage(run=run)
-
     async def get_run_detail_with_result_files_and_usage(
         self,
         *,
@@ -1138,14 +1152,16 @@ class FlowRunService:
         run_id: UUID,
         history: bool = False,
     ) -> FlowRunDetailView:
-        run_view = await self.get_run_with_result_files_and_usage(
-            flow_id=flow_id,
+        run = await self.get_run(
             run_id=run_id,
+            flow_id=flow_id,
+            access_kind="content",
             history=history,
         )
+        [run_view] = await self._runs_with_result_files_and_usage(runs=(run,))
         webhook_deliveries = (
             await self.webhook_delivery_repo.list_run_delivery_statuses(
-                run_id=run_view.run.id,
+                run_id=run.id,
                 tenant_id=self.user.tenant_id,
             )
         )
@@ -1153,7 +1169,8 @@ class FlowRunService:
             run=run_view.run,
             result_files=run_view.result_files,
             token_usage=run_view.token_usage,
-            final_output=run_view.final_output,
+            transcription_usage=run_view.transcription_usage,
+            outputs=run_view.outputs,
             webhook_deliveries=tuple(webhook_deliveries),
         )
 
@@ -1162,8 +1179,23 @@ class FlowRunService:
         *,
         run: FlowRun,
     ) -> FlowRunWithResultFilesAndUsage:
-        views = await self._runs_with_result_files_and_usage(runs=(run,))
-        return views[0]
+        [view] = await self._runs_with_result_files_and_usage(runs=(run,))
+        # Only a completed run has a result whose delivery is reported.
+        if view.outputs is None:
+            return view
+        deliveries = await self.webhook_delivery_repo.list_run_delivery_statuses(
+            run_id=run.id, tenant_id=self.user.tenant_id
+        )
+        return replace(
+            view,
+            final_delivery_status=final_step_delivery_status(
+                view.outputs,
+                [
+                    (delivery.step_id, delivery.attempt_no, delivery.delivery_status)
+                    for delivery in deliveries
+                ],
+            ),
+        )
 
     async def _runs_with_result_files_and_usage(
         self, *, runs: Sequence[FlowRun]
@@ -1190,7 +1222,7 @@ class FlowRunService:
             )
         )
         result_files_by_run_id = _result_files_by_run_id(result_files)
-        final_output_by_version_ref = await self._final_outputs_for_runs(runs=runs)
+        outputs_by_version_ref = await self._outputs_for_runs(runs=runs)
         return tuple(
             FlowRunWithResultFilesAndUsage(
                 run=run,
@@ -1200,16 +1232,14 @@ class FlowRunService:
                     usage_by_run_id.get(run.id),
                     recording_seconds_by_run_id.get(run.id),
                 ),
-                final_output=final_output_by_version_ref.get(
-                    (run.flow_id, run.flow_version)
-                ),
+                outputs=outputs_by_version_ref.get((run.flow_id, run.flow_version)),
             )
             for run in runs
         )
 
-    async def _final_outputs_for_runs(
+    async def _outputs_for_runs(
         self, *, runs: Sequence[FlowRun]
-    ) -> dict[tuple[UUID, int], FlowFinalOutputContractPublic]:
+    ) -> dict[tuple[UUID, int], FlowRunOutputContract]:
         version_refs = tuple(
             dict.fromkeys(
                 (run.flow_id, run.flow_version)
@@ -1223,7 +1253,7 @@ class FlowRunService:
             version_refs=version_refs,
             tenant_id=self.user.tenant_id,
         )
-        final_outputs: dict[tuple[UUID, int], FlowFinalOutputContractPublic] = {}
+        outputs_by_version_ref: dict[tuple[UUID, int], FlowRunOutputContract] = {}
         for version_ref, flow_version in versions_by_ref.items():
             definition = parse_verified_published_definition(
                 flow_version.definition_json,
@@ -1231,14 +1261,14 @@ class FlowRunService:
                 expected_checksum=flow_version.definition_checksum,
                 flow_version=flow_version.version,
             )
-            final_output = build_final_output_contract(definition.runtime_steps())
-            if final_output is None:
+            outputs = build_run_output_contract(definition.runtime_steps())
+            if outputs is None:
                 raise FlowPublishedDefinitionWithoutExecutableStepsError(
                     flow_id=flow_version.flow_id,
                     flow_version=flow_version.version,
                 )
-            final_outputs[version_ref] = final_output
-        return final_outputs
+            outputs_by_version_ref[version_ref] = outputs
+        return outputs_by_version_ref
 
     async def list_step_results_with_files(
         self,

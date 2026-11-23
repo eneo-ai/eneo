@@ -146,6 +146,9 @@ function stepProblemText(
       const key = `flow_error_${problem.violation.code}`;
       return t.has(key) ? t(key) : problem.violation.message;
     }
+    case "run_result_no_deliverables":
+      // The sentence publishing refuses with, so both say the same.
+      return t("flow_error_flow_run_result_no_deliverables");
   }
 }
 

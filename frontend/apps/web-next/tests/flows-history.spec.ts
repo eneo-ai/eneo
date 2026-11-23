@@ -148,8 +148,7 @@ async function completedRun(
   const path = `/flows/${flow.id}/runs/${run.id}`;
   await expect
     .poll(
-      async () =>
-        (await apiRequest<Schema<"FlowRunSummaryPublic">>(page, `${path}/status/`)).status,
+      async () => (await apiRequest<Schema<"FlowRunStatusPublic">>(page, `${path}/status/`)).status,
       { timeout: 60_000 }
     )
     .toBe("completed");

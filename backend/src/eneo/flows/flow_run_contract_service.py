@@ -10,20 +10,31 @@ from eneo.flows.api.flow_live_transcription_models import (
     FlowLiveTranscriptionAvailabilityPublic,
 )
 from eneo.flows.api.flow_run_contract_models import (
+    FlowDeliverableContractPublic,
     FlowFinalOutputContractPublic,
     FlowMaxSpeakersOptionPublic,
     FlowReviewStepContractPublic,
+    FlowRunContractDeliverable,
     FlowRunContractPublic,
+    FlowRunDeliverable,
+    FlowRunDeliverablePublic,
+    FlowRunOutputContract,
+    FlowRunTextDeliverablePublic,
     FlowRuntimeInputContractPublic,
     FlowSecurityClassificationPublic,
     FlowSpeakerLabelsOptionPublic,
     FlowTemplateReadinessPublic,
+    FlowTextDeliverableContractPublic,
     FlowTextProcessingStepPublic,
     FlowTranscriptionContractPublic,
     FormFieldPublic,
     default_runtime_upload_policy_public,
 )
 from eneo.flows.domain.flow import Flow, FlowPersistedJsonObject, FlowTemplateAsset
+from eneo.flows.domain.run_deliverables import (
+    StepDeliverableFacts,
+    deliverable_positions,
+)
 from eneo.flows.domain.runtime import RuntimeStep
 from eneo.flows.domain.runtime_input import build_runtime_input_config
 from eneo.flows.domain.speaker_mapping_config import (
@@ -34,12 +45,15 @@ from eneo.flows.domain.speaker_mapping_config import (
 from eneo.flows.domain.step_mapped_execution import single_mapped_array_key
 from eneo.flows.domain.text_processing import text_processing_config
 from eneo.flows.enums import (
+    FlowOutputDelivery,
     FlowOutputMode,
     FlowOutputType,
+    FlowRunStatus,
     FlowRuntimeInputFormat,
     FlowTemplateAssetStatus,
     final_output_delivery,
     final_step_output_type,
+    step_delivers_artifact,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowValidationException
@@ -50,6 +64,8 @@ from eneo.flows.flow_run_step_inputs import (
     RuntimeStepInputSpec,
     aggregate_runtime_file_limit,
 )
+from eneo.flows.flow_run_step_result_file import FlowRunStepResultFile
+from eneo.flows.http_transport.step_configs import sends_run_result
 from eneo.flows.published_definition import (
     PublishedFlowDefinition,
 )
@@ -103,12 +119,14 @@ class FlowRunContractService:
             intent=FlowRuntimePublicationIntent.RUN_CONTRACT,
         )
         published = runtime_inputs.published
+        outputs = build_run_output_contract(runtime_inputs.steps)
 
         return FlowRunContractPublic(
             flow_id=published.flow_id,
             published_flow_version=published.published_version,
             text_processing_steps=_text_processing_contracts(runtime_inputs.steps),
-            final_output=build_final_output_contract(runtime_inputs.steps),
+            final_output=outputs.final_output if outputs is not None else None,
+            deliverables=list(outputs.deliverables) if outputs is not None else [],
             form_fields=_published_form_fields(runtime_inputs.definition),
             steps_requiring_input=_runtime_input_contracts(
                 runtime_inputs.input_specs,
@@ -252,15 +270,17 @@ class FlowRunContractService:
         )
 
 
-def build_final_output_contract(
+def build_run_output_contract(
     steps: Sequence[RuntimeStep],
-) -> FlowFinalOutputContractPublic | None:
+) -> FlowRunOutputContract | None:
+    """What a run of ``steps`` returns: the last step's output, and in step
+    order the steps ``deliverable_positions`` chooses. None for no steps."""
     output_type = final_step_output_type([step.output_type for step in steps])
     if output_type is None:
         return None
     final_step = steps[-1]
     output_mode = FlowOutputMode(final_step.output_mode)
-    return FlowFinalOutputContractPublic(
+    final_output = FlowFinalOutputContractPublic(
         step_id=final_step.step_id,
         step_order=final_step.step_order,
         label=final_step.user_description,
@@ -271,6 +291,110 @@ def build_final_output_contract(
         ),
         output_contract=final_step.output_contract,
     )
+    positions = deliverable_positions(
+        [
+            StepDeliverableFacts(
+                output_type=step.output_type,
+                output_mode=step.output_mode,
+                marked=step.deliverable is not None,
+                sends_run_result=sends_run_result(step.output_mode, step.output_config),
+            )
+            for step in steps
+        ]
+    )
+    deliverables = tuple(
+        _deliverable_contract(steps[position]) for position in positions
+    )
+    return FlowRunOutputContract(final_output=final_output, deliverables=deliverables)
+
+
+def _deliverable_contract(step: RuntimeStep) -> FlowRunContractDeliverable:
+    label = (
+        step.deliverable.label
+        if step.deliverable is not None
+        else step.user_description
+    )
+    if step_delivers_artifact(
+        output_type=step.output_type, output_mode=step.output_mode
+    ):
+        return FlowDeliverableContractPublic(
+            kind="artifact",
+            step_id=step.step_id,
+            step_order=step.step_order,
+            label=label,
+            output_type=FlowOutputType(step.output_type),
+            output_mode=FlowOutputMode(step.output_mode),
+            delivery=FlowOutputDelivery.ARTIFACT,
+        )
+    return FlowTextDeliverableContractPublic(
+        kind="text",
+        step_id=step.step_id,
+        step_order=step.step_order,
+        label=label,
+        output_type=FlowOutputType(step.output_type),
+        output_mode=FlowOutputMode(step.output_mode),
+        delivery="payload",
+    )
+
+
+def project_run_deliverables(
+    *,
+    status: FlowRunStatus,
+    outputs: FlowRunOutputContract | None,
+    result_files: Sequence[FlowRunStepResultFile],
+) -> list[FlowRunDeliverable]:
+    """The texts and documents a run delivered, each document with the
+    document files of its step in ``result_files``, which hold each step's
+    current attempt. Only a completed run delivers: any other gives none,
+    whatever its version's contract says. A deliverable before the last step
+    may have no file; the last step's missing file is ``result``'s error to
+    report."""
+    if status is not FlowRunStatus.COMPLETED or outputs is None:
+        return []
+    return [
+        FlowRunTextDeliverablePublic(
+            kind="text",
+            step_id=deliverable.step_id,
+            step_order=deliverable.step_order,
+            label=deliverable.label,
+            output_type=deliverable.output_type,
+            delivery="payload",
+        )
+        if deliverable.kind == "text"
+        else FlowRunDeliverablePublic(
+            kind="artifact",
+            step_id=deliverable.step_id,
+            step_order=deliverable.step_order,
+            label=deliverable.label,
+            output_type=deliverable.output_type,
+            files=[
+                result_file
+                for result_file in result_files
+                if result_file.step_id == deliverable.step_id
+                and result_file.source == "declared_artifact"
+            ],
+        )
+        for deliverable in outputs.deliverables
+    ]
+
+
+def current_attempt_result_file_records(
+    result_files: Sequence[Mapping[str, object]],
+    step_results: Sequence[Mapping[str, object]],
+) -> list[Mapping[str, object]]:
+    """The result file records of each step's current attempt, as a run's
+    detail reads them, from evidence that holds every attempt's files. A step
+    result without a current attempt keeps none."""
+    current = {
+        str(step_result.get("id")): step_result.get("current_attempt_no")
+        for step_result in step_results
+    }
+    return [
+        record
+        for record in result_files
+        if record.get("attempt_no") is not None
+        and current.get(str(record.get("step_result_id"))) == record.get("attempt_no")
+    ]
 
 
 def speaker_service_gap_in_space(

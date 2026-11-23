@@ -43,9 +43,11 @@ _SPACES_USER_GROUPS = re.compile(r"\bFROM spaces_user_groups\b")
 # Warmed statements per route and reader, at the measured counts. Lower a
 # ceiling when a change saves statements; raise one only with the reason.
 # The runs list includes one batched usage aggregate for the entire page.
+# The status reads the run's outbound delivery, which says where the run's
+# result stands while the run page polls.
 _CEILINGS: dict[str, dict[str, int]] = {
     "space member": {
-        "status": 12,
+        "status": 13,
         "graph": 13,
         "published graph": 12,
         "run detail": 18,
@@ -54,7 +56,7 @@ _CEILINGS: dict[str, dict[str, int]] = {
         "evidence": 36,
     },
     "tenant admin": {
-        "status": 12,
+        "status": 13,
         "graph": 13,
         "published graph": 12,
         "run detail": 17,

@@ -7,7 +7,7 @@ from uuid import UUID
 
 from eneo.flows.api.flow_run_contract_models import (
     FlowCitationSummaryPublic,
-    FlowFinalOutputContractPublic,
+    FlowRunOutputContract,
 )
 from eneo.flows.application.citation_summary_projection import (
     build_citation_summary,
@@ -48,7 +48,7 @@ from eneo.flows.enums import (
     OPEN_FLOW_STEP_ATTEMPT_STATUSES,
     FlowRunReviewCheckpointState,
 )
-from eneo.flows.flow_run_contract_service import build_final_output_contract
+from eneo.flows.flow_run_contract_service import build_run_output_contract
 from eneo.flows.flow_run_provenance import (
     FlowAttemptProvenanceParseResult,
     FlowResolvedInputEdgesParseResult,
@@ -94,7 +94,7 @@ class EvidenceBundle:
     run: FlowRun
     version: FlowVersion
     definition_integrity: PublishedDefinitionIntegrity
-    final_output: FlowFinalOutputContractPublic | None
+    outputs: FlowRunOutputContract | None
     step_results: Sequence[FlowStepResult]
     step_attempts: Sequence[FlowStepAttempt]
     result_files: Sequence[FlowRunStepResultFile]
@@ -184,7 +184,7 @@ class EvidenceBundle:
 class RedactedEvidenceBundle:
     run: dict[str, Any]
     definition_integrity: PublishedDefinitionIntegrity
-    final_output: FlowFinalOutputContractPublic | None
+    outputs: FlowRunOutputContract | None
     definition_snapshot: dict[str, Any]
     step_results: tuple[dict[str, Any], ...]
     step_attempts: tuple[dict[str, Any], ...]
@@ -280,7 +280,7 @@ def build_evidence_bundle(
         expected_checksum=version.definition_checksum,
         flow_version=version.version,
     )
-    final_output = None
+    outputs = None
     definition = None
     if definition_integrity.status is PublishedDefinitionIntegrityStatus.VERIFIED:
         definition = parse_verified_published_definition(
@@ -289,7 +289,7 @@ def build_evidence_bundle(
             expected_checksum=version.definition_checksum,
             flow_version=version.version,
         )
-        final_output = build_final_output_contract(definition.runtime_steps())
+        outputs = build_run_output_contract(definition.runtime_steps())
     citation_summaries_by_step_id = _citation_summaries_by_step_id(
         definition_steps=definition.runtime_steps() if definition is not None else (),
         config_known=definition is not None,
@@ -301,7 +301,7 @@ def build_evidence_bundle(
         run=run,
         version=version,
         definition_integrity=definition_integrity,
-        final_output=final_output,
+        outputs=outputs,
         step_results=tuple(step_results),
         step_attempts=tuple(step_attempts),
         result_files=tuple(result_files),
@@ -462,7 +462,7 @@ def redact_evidence_bundle(bundle: EvidenceBundle) -> RedactedEvidenceBundle:
             ),
         ),
         definition_integrity=bundle.definition_integrity,
-        final_output=bundle.final_output,
+        outputs=bundle.outputs,
         definition_snapshot=cast(dict[str, Any], definition_result.value),
         step_results=step_result_section.records,
         step_attempts=step_attempt_section.records,

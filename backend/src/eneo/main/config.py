@@ -404,6 +404,12 @@ class Settings(BaseSettings):
     # model must answer from what it gathered. Parallel calls in one response
     # count once.
     max_tool_rounds: int = Field(default=40, gt=0)
+    # Tool calls one model response may run. Further calls in the same response
+    # are refused, so a burst of parallel calls cannot flood a server.
+    max_tool_calls_per_round: int = Field(default=10, gt=0)
+    # Tool calls one chat turn may run in total before the model must answer
+    # from what it gathered.
+    max_tool_calls_per_turn: int = Field(default=60, gt=0)
     # Upper bound for each wait on a completion provider: connecting, the
     # response, and in a stream each next chunk. A slow model that keeps
     # streaming is never cut off; a provider that stops answering is.
@@ -841,7 +847,10 @@ class Settings(BaseSettings):
     # TTL, after which the visitor's stored key re-mints with a fresh proof.
     widget_visitor_token_ttl_seconds: int = Field(default=900, gt=0)
     widget_visitor_token_grace_seconds: int = Field(default=900, ge=0)
-    widget_preview_token_ttl_seconds: int = Field(default=3600, gt=0)
+    # The preview token is a bearer in the admin page's DOM and iframe URL;
+    # the preview re-mints it before it expires, so it lives no longer than
+    # a visitor token.
+    widget_preview_token_ttl_seconds: int = Field(default=900, gt=0)
     # ALTCHA v2 proof of work: each attempt derives a key with `cost` hash
     # iterations and must land on `key_prefix`, so the expected work is
     # 16**len(key_prefix) * cost iterations and the attempt count is

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Final
+from typing import Any, Final
 
+from eneo.flows.domain.speaker_labels import SPEAKER_MAPPING_OUTPUT_CONTRACT
 from eneo.flows.enums import FLOW_OUTPUT_MODE_VALUES, FlowOutputMode
 
 ALLOWED_OUTPUT_MODES = set(FLOW_OUTPUT_MODE_VALUES)
@@ -121,6 +122,19 @@ def speaker_mapping_violation(
     if _enum_value(output_type) != "json":
         return f"Step {step_order}: output_mode 'speaker_mapping' requires output_type 'json'."
     return None
+
+
+def effective_output_contract(
+    *, output_mode: str | Enum, output_contract: dict[str, Any] | None
+) -> dict[str, Any] | None:
+    """The contract a step's structured output follows: the fixed one of a
+    mode that has one, otherwise the authored ``output_contract``. The run
+    validates the output against it, and publishing judges a later step's
+    question binding and compose ``source_refs`` by it. Only the authored
+    contract is stored; a speaker step's stays empty."""
+    if _enum_value(output_mode) == FlowOutputMode.SPEAKER_MAPPING.value:
+        return dict(SPEAKER_MAPPING_OUTPUT_CONTRACT)
+    return output_contract
 
 
 def text_document_pass_through_violation(

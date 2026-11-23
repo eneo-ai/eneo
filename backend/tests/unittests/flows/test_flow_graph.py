@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from uuid import UUID, uuid4
 
+import pytest
 from pydantic import BaseModel
 
 from eneo.flows.api.flow_graph import (
@@ -776,3 +777,42 @@ def test_graph_draws_every_model_free_mode_as_assembly() -> None:
         )
         for mode in FlowOutputMode
     }
+
+
+@pytest.mark.parametrize(
+    ("output_mode", "body_mode", "node_type"),
+    [
+        ("http_post", "run_result", "assembly"),
+        ("http_post", "auto", "llm"),
+        ("transcribe_only", None, "llm"),
+        ("pass_through", None, "llm"),
+        ("compose_text", None, "assembly"),
+    ],
+)
+def test_a_step_that_sends_the_runs_result_is_an_assembly_node(
+    output_mode, body_mode, node_type
+):
+    # Kills: the step that sends the run's result shown as a model step, and
+    # a plain POST or a transcription step losing its model-backed node.
+    output_config = (
+        None
+        if body_mode is None
+        else {
+            "url": "https://receiver.example.org/results",
+            "auth": {"mode": "none"},
+            "body": {"mode": body_mode},
+        }
+    )
+    step = {
+        "step_id": str(uuid4()),
+        "step_order": 1,
+        "input_source": "flow_input",
+        "input_type": "audio" if output_mode == "transcribe_only" else "text",
+        "output_type": "text",
+        "output_mode": output_mode,
+        "output_config": output_config,
+    }
+
+    [node] = [n for n in build_graph_from_steps([step])[0] if n.step_order == 1]
+
+    assert node.type == node_type

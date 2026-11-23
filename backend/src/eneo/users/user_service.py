@@ -2240,7 +2240,6 @@ class UserService:
             extra={
                 "correlation_id": correlation_id,
                 "user_id": str(user_in_db.id),
-                "user_email": user_in_db.email,
                 "user_state": user_in_db.state,
                 "tenant_id": str(user_in_db.tenant_id),
                 "tenant_state": user_in_db.tenant.state

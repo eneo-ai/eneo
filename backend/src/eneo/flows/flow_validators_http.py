@@ -15,8 +15,7 @@ from eneo.flows.http_transport import (
     secret_fields_holding_templates,
     validate_authored_config,
 )
-from eneo.flows.http_transport.errors import HttpTransportError
-from eneo.flows.http_transport.validator import invalid_header_name_field
+from eneo.flows.http_transport.validator import AUTHOR_ACTIONS, error_field
 from eneo.flows.output_modes import outside_input_mode_violation
 from eneo.main.config import get_settings
 from eneo.main.exceptions import TypedIOValidationException
@@ -111,17 +110,15 @@ def validate_authored_http_config(
     )
     if errors:
         # `http_error` names the defect so the editor can say what to change.
-        header_field = (
-            invalid_header_name_field(authored)
-            if errors[0] is HttpTransportError.INVALID_HEADER_NAME
-            else None
-        )
+        field = error_field(authored, errors[0])
+        action = AUTHOR_ACTIONS.get(errors[0])
         raise FlowStepValidationError(
-            f"Step {step_order}: {label} validation failed: {errors[0].value}",
+            f"Step {step_order}: {label} validation failed: {errors[0].value}"
+            + (f". {action}" if action else ""),
             step_order=step_order,
             code=FlowApiErrorCode.TYPED_IO_HTTP_INVALID_CONFIG.value,
             context={
-                "field": f"{label}.{header_field}" if header_field else label,
+                "field": f"{label}.{field}" if field else label,
                 "http_error": errors[0].value,
             },
         )

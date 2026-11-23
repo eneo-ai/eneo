@@ -23,10 +23,10 @@ from eneo.flows.enums import (
     FlowInputType,
     FlowOutputMode,
     FlowOutputType,
-    flow_output_mode_uses_completion_model,
 )
 from eneo.flows.flow_metadata import FlowFormSchemaParseMode, parse_flow_form_schema
 from eneo.flows.flow_validators_template import EXACT_TEMPLATE_EXPRESSION_PATTERN
+from eneo.flows.http_transport.step_configs import step_calls_completion_model
 from eneo.flows.input_binding_contract_rules import InputBindingContractError
 from eneo.flows.step_lineage import (
     INPUT_SOURCE_READ_SITE,
@@ -516,7 +516,7 @@ def run_form_field_roles(
 
 
 def uses_completion_model(step: SuggestionStep) -> bool:
-    return flow_output_mode_uses_completion_model(step.output_mode)
+    return step_calls_completion_model(step.output_mode, step.output_config)
 
 
 def exact_expression(text: str) -> str | None:

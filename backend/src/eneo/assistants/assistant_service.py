@@ -3313,10 +3313,12 @@ class AssistantService:
                         )
                         input_source = "provider"
                         assert completion_model is not None
+                        # The estimate is of the first request; the usage
+                        # totals sum every request a tool-using turn made.
                         log_token_count_drift(
                             model_name=completion_model.name,
                             predicted=response.total_token_count,
-                            actual=stream_usage.prompt_tokens,
+                            actual=stream_usage.first_request_prompt_tokens,
                         )
                     else:
                         final_skill_tokens = skill_runtime.snapshot().measurement.tokens
@@ -4039,6 +4041,10 @@ class AssistantService:
             ]
 
         if self.user.active_widget is not None:
+            # Use the assistant’s current tools within the organisation’s widget policy.
+            mcp_servers_override = self.user.active_widget.reachable_servers(
+                mcp_servers_override
+            )
             await self._inline_attachments_for_visitor(
                 assistant_to_ask, effective_completion_model, skill_composition.prompt
             )

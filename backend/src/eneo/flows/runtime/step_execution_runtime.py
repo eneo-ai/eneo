@@ -70,7 +70,6 @@ from eneo.flows.enums import (
     FlowOutputMode,
     FlowOutputType,
     FlowStepPhase,
-    flow_output_mode_uses_completion_model,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_capability_manifest import is_citation_capable_step
@@ -1256,7 +1255,7 @@ async def prepare_step_execution(
     # A step that calls no completion model sends no prompt, so its assistant
     # prompt is not resolved: it selects no earlier material, is not counted
     # against the input limit and cannot fail the step on its references.
-    uses_completion_model = flow_output_mode_uses_completion_model(step.output_mode)
+    uses_completion_model = step.may_call_completion_provider
     prompt_text = assistant.get_prompt_text() if uses_completion_model else ""
     effective_prompt = ""
     input_payload_for_result: dict[str, Any] = {

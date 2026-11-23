@@ -1,6 +1,8 @@
+import asyncio
 import contextlib
 from collections.abc import AsyncGenerator
 
+import anyio
 from sqlalchemy.ext.asyncio import (
     AsyncConnection,
     AsyncEngine,
@@ -14,6 +16,34 @@ from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
 
 logger = get_logger(__name__)
+
+_SESSION_CLOSE_BUDGET_SECONDS = 10.0
+
+
+async def _close_session(session: AsyncSession) -> None:
+    # An ARQ worker can cancel the asyncio task directly while the driver is
+    # returning the connection. Give that operation its own bounded lifetime.
+    async def close_with_deadline() -> None:
+        with anyio.move_on_after(_SESSION_CLOSE_BUDGET_SECONDS) as scope:
+            await session.close()
+        if scope.cancelled_caught:
+            logger.warning(
+                "Closing a database session exceeded %ss; its connection "
+                "is left for the pool to reclaim",
+                _SESSION_CLOSE_BUDGET_SECONDS,
+            )
+
+    with anyio.CancelScope(shield=True):
+        close_task = asyncio.create_task(close_with_deadline())
+        cancellation: asyncio.CancelledError | None = None
+        while not close_task.done():
+            try:
+                await asyncio.shield(close_task)
+            except asyncio.CancelledError as error:
+                cancellation = error
+        close_task.result()
+        if cancellation is not None:
+            raise cancellation
 
 
 class SafeAsyncSession(AsyncSession):
@@ -77,7 +107,6 @@ class DatabaseSessionManager:
             settings.db_pool_max_overflow,
             settings.db_pool_size + settings.db_pool_max_overflow,
         )
-        logger.debug(f"Database connected to {host}")
 
     async def close(self):
         if self._engine is None:
@@ -127,7 +156,7 @@ class DatabaseSessionManager:
             await session.rollback()
             raise
         finally:
-            await session.close()
+            await _close_session(session)
 
 
 sessionmanager = DatabaseSessionManager()

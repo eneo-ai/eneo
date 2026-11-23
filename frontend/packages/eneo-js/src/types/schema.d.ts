@@ -2654,7 +2654,7 @@ export interface paths {
     };
     /**
      * Get Widget Template
-     * @description A widget template. Tenant admins only.
+     * @description A widget template. Readable by everyone with the widgets permission, like the template list; only tenant admins change it.
      */
     get: operations["get_widget_template_api_v1_admin_widget_templates__id___get"];
     put?: never;
@@ -3791,7 +3791,7 @@ export interface paths {
     };
     /**
      * Get per-action audit configuration
-     * @description Retrieve all 232 actions with their enabled status for the modal UI.
+     * @description Retrieve all 236 actions with their enabled status for the modal UI.
      */
     get: operations["get_action_config_api_v1_audit_config_actions_get"];
     put?: never;
@@ -6161,6 +6161,7 @@ export interface paths {
      *         This is the routine polling contract. It contains lifecycle, timing, and bounded,
      *         secret-free dispatch diagnosis fields, but excludes accepted input, terminal errors,
      *         terminal output, result-file metadata, provider usage, and webhook-delivery content.
+     *         `result_delivery` says only where the run's latest outbound delivery stands.
      *         Poll about every 2 seconds for the first 30 seconds, then every 5 seconds, then every
      *         15 seconds, and stop when the status capability `should_poll` is false.
      *
@@ -6395,6 +6396,37 @@ export interface paths {
     get: operations["list_flow_run_transcript_correction_revisions"];
     put?: never;
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/runs/{run_id}/webhook-deliveries/{delivery_id}/redeliver/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Send a run's result again
+     * @description Send a completed run's result again after its delivery ended in dead letter.
+     *         The delivery gets a fresh attempt budget and is sent as before: the same
+     *         receiver and the same `Idempotency-Key`, so a receiver that already stored
+     *         the result can recognise it. Only a `run_result` delivery can be sent again.
+     *
+     *         Send the delivery's observed `dead_lettered_at` as `expected_dead_lettered_at`.
+     *         Only that dead letter is reset, so a retried request cannot reset a later one.
+     *         The audit record and the reset commit together, and it is written even when
+     *         the tenant has turned that audit action off; a failed audit write prevents
+     *         the redelivery.
+     *
+     *         Requires the right to edit the flow. Service keys cannot send a result again.
+     */
+    post: operations["redeliver_flow_run_webhook_delivery"];
     delete?: never;
     options?: never;
     head?: never;
@@ -12405,7 +12437,7 @@ export interface paths {
     head?: never;
     /**
      * Update Widget
-     * @description Update a widget's configuration. Changes to allowed origins, limits, privacy or bot protection invalidate outstanding visitor tokens. A value outside the tenant's widget policy is refused with `widget_policy_violation` (listing `violations`); an edit that would leave an active widget unable to serve is refused with `widget_serving_blocked` (listing `blockers`).
+     * @description Update a widget's configuration. Changes to allowed origins, limits, privacy or bot protection invalidate outstanding visitor tokens. A value outside the tenant's widget policy is refused with `widget_policy_violation` (listing `violations`); an edit that would leave an active widget unable to serve is refused with `widget_serving_blocked` (listing `blockers`). On an active widget, a change to allowed origins, privacy or bot protection is for tenant admins (`admin_required_while_active`, listing `fields`); editors pause the widget first.
      */
     patch: operations["update_widget_api_v1_widgets__id___patch"];
     trace?: never;
@@ -12421,7 +12453,7 @@ export interface paths {
     put?: never;
     /**
      * Activate Widget
-     * @description Activate a widget so it serves visitors. Tenant admins only. Fails with `widget_policy_violation` (listing `violations`) when settings are outside the tenant's widget policy and with `widget_serving_blocked` (listing `blockers`) when the configuration is incomplete.
+     * @description Activate a widget so it serves visitors. Tenant admins only. Fails with `widget_policy_violation` (listing `violations`) when settings are outside the tenant's widget policy, with `widget_serving_blocked` (listing `blockers`) when the configuration is incomplete.
      */
     post: operations["activate_widget_api_v1_widgets__id__activate__post"];
     delete?: never;
@@ -12461,7 +12493,7 @@ export interface paths {
     put?: never;
     /**
      * Detach Widget Template
-     * @description Stop following the template. The widget keeps its current texts, appearance and language and every part becomes editable again.
+     * @description Stop following the template. The widget keeps its current texts, appearance and language and every part becomes editable again. On an active widget this is for tenant admins (`admin_required_while_active`); editors pause the widget first.
      */
     post: operations["detach_widget_template_api_v1_widgets__id__detach_template__post"];
     delete?: never;
@@ -12481,7 +12513,7 @@ export interface paths {
     put?: never;
     /**
      * Link Widget Template
-     * @description Make the widget follow a published template. Its texts, appearance and language are copied now; the release's locked groups are then written onto the widget with every publication and cannot be edited on the widget. Refused with `widget_serving_blocked` when the release would leave an active widget unable to serve.
+     * @description Make the widget follow a published template. Its texts, appearance and language are copied now; the release's locked groups are then written onto the widget with every publication and cannot be edited on the widget. Refused with `widget_serving_blocked` when the release would leave an active widget unable to serve. Switching an active widget to another template is for tenant admins (`admin_required_while_active`); editors pause the widget first.
      */
     post: operations["link_widget_template_api_v1_widgets__id__link_template__post"];
     delete?: never;
@@ -12521,7 +12553,7 @@ export interface paths {
     put?: never;
     /**
      * Create Widget Preview Token
-     * @description Mint a visitor token for the live preview on the admin page. Admits the embed page for draft and paused widgets; each call is a fresh pseudonymous visitor.
+     * @description Mint a visitor token for the live preview on the admin page. Admits the embed page for a draft widget; refused for a paused one with `preview_unavailable_while_paused`. Each call is a fresh pseudonymous visitor and is recorded in the audit log.
      */
     post: operations["create_widget_preview_token_api_v1_widgets__id__preview_token__post"];
     delete?: never;
@@ -12986,6 +13018,8 @@ export interface components {
       | "flow_run_completed"
       | "flow_run_failed"
       | "flow_run_redispatched"
+      | "flow_run_webhook_redelivered"
+      | "flow_run_result_sending"
       | "flow_run_cancelled"
       | "flow_run_audit_delivery_redriven"
       | "flow_classification_override"
@@ -13070,6 +13104,8 @@ export interface components {
       | "widget_archived"
       | "widget_policy_updated"
       | "widget_budget_exhausted"
+      | "widget_preview_token_minted"
+      | "widget_external_tool_called"
       | "widget_template_created"
       | "widget_template_updated"
       | "widget_template_deleted"
@@ -13099,7 +13135,7 @@ export interface components {
      * @description Categorize who performed the action
      * @enum {string}
      */
-    ActorType: "user" | "system" | "api_key";
+    ActorType: "user" | "system" | "api_key" | "widget_visitor";
     /** AddSpaceGroupMemberRequest */
     AddSpaceGroupMemberRequest: {
       /**
@@ -15206,7 +15242,7 @@ export interface components {
      * @example {
      *       "categories": [
      *         {
-     *           "action_count": 75,
+     *           "action_count": 77,
      *           "category": "admin_actions",
      *           "enabled": true,
      *           "example_actions": [
@@ -15216,7 +15252,7 @@ export interface components {
      *           ]
      *         },
      *         {
-     *           "action_count": 93,
+     *           "action_count": 95,
      *           "category": "user_actions",
      *           "enabled": true,
      *           "example_actions": [
@@ -15695,7 +15731,7 @@ export interface components {
      *     Display text is intentionally omitted: the frontend translates ``category``
      *     by key (``audit_category_{category}`` / ``_description``).
      * @example {
-     *       "action_count": 75,
+     *       "action_count": 77,
      *       "category": "admin_actions",
      *       "enabled": true,
      *       "example_actions": [
@@ -18352,6 +18388,35 @@ export interface components {
       /** Tenant Id */
       tenant_id: string;
     };
+    /** EvidenceDeliverableFileSummary */
+    EvidenceDeliverableFileSummary: {
+      /**
+       * Availability
+       * @enum {string}
+       */
+      availability: "available" | "content_purged";
+      /** File Id */
+      file_id: string;
+      /** Name */
+      name: string;
+    };
+    /**
+     * EvidenceDeliverableSummary
+     * @description A document the run delivered, as the run's ``deliverables`` lists it.
+     */
+    EvidenceDeliverableSummary: {
+      /** Files */
+      files: components["schemas"]["EvidenceDeliverableFileSummary"][];
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "artifact";
+      /** Label */
+      label: string | null;
+      /** Step Order */
+      step_order: number;
+    };
     /** EvidenceExportManifest */
     EvidenceExportManifest: {
       /** Actor */
@@ -18442,6 +18507,14 @@ export interface components {
       };
       /** Completed Steps */
       completed_steps: number;
+      /**
+       * Deliverables
+       * @description Texts and documents the run delivered, in step order, each document with its step's current document files. Empty until the run has completed. Kept out of the hashed bundle.
+       */
+      deliverables?: (
+        | components["schemas"]["EvidenceDeliverableSummary"]
+        | components["schemas"]["EvidenceTextDeliverableSummary"]
+      )[];
       /** Duration Ms */
       duration_ms?: number | null;
       /** Failed Steps */
@@ -18717,6 +18790,22 @@ export interface components {
       /** Events */
       events: components["schemas"]["EvidenceStepReviewEvent"][];
       last_event?: components["schemas"]["EvidenceStepReviewEvent"] | null;
+    };
+    /**
+     * EvidenceTextDeliverableSummary
+     * @description A text the run delivered, by its step and label; the text itself is
+     *     the step's output in the bundle.
+     */
+    EvidenceTextDeliverableSummary: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "text";
+      /** Label */
+      label: string | null;
+      /** Step Order */
+      step_order: number;
     };
     /**
      * ExpiringKeySummaryItem
@@ -19163,6 +19252,9 @@ export interface components {
       | "flow_run_concurrency_limit_reached"
       | "flow_run_redispatch_conflict"
       | "flow_run_redispatch_audit_unavailable"
+      | "flow_run_webhook_redelivery_conflict"
+      | "flow_run_result_no_deliverables"
+      | "flow_run_webhook_redelivery_audit_unavailable"
       | "flow_run_invalid_step_inputs"
       | "flow_run_unknown_step_input"
       | "flow_run_step_input_max_files_exceeded"
@@ -19754,6 +19846,39 @@ export interface components {
        * Format: uuid
        */
       space_id: string;
+    };
+    /**
+     * FlowDeliverableContractPublic
+     * @description A document every successful run of this version delivers.
+     */
+    FlowDeliverableContractPublic: {
+      /** @description How a client receives the document. Always `artifact`: a file downloaded from the run. */
+      delivery: components["schemas"]["FlowOutputDelivery"];
+      /**
+       * @description Discriminator: `artifact` is a document to download, `text` is text the step wrote. Other kinds may be added later; a client should skip one it does not know. (enum property replaced by openapi-typescript)
+       * @enum {string}
+       */
+      kind: "artifact";
+      /**
+       * Label
+       * @description What a client calls the document: the label the author gave it, or for the last step without one, the step's name. Null when the last step has no name.
+       */
+      label?: string | null;
+      /** @description Output mode of the step, as for `final_output`. */
+      output_mode: components["schemas"]["FlowOutputMode"];
+      /** @description `docx` or `pdf`. */
+      output_type: components["schemas"]["FlowOutputType"];
+      /**
+       * Step Id
+       * Format: uuid
+       * @description Published step that produces the document. Unique in the list; it matches `FlowRunPublic.deliverables[].step_id` and the step of each file in `result_files`.
+       */
+      step_id: string;
+      /**
+       * Step Order
+       * @description Published order of the step, from 1.
+       */
+      step_order: number;
     };
     /**
      * FlowDocumentRenderLimitsPublic
@@ -22057,13 +22182,33 @@ export interface components {
      * FlowRunContractPublic
      * @example {
      *       "aggregate_max_files": 1,
+     *       "deliverables": [
+     *         {
+     *           "delivery": "artifact",
+     *           "kind": "artifact",
+     *           "label": "Summary",
+     *           "output_mode": "render_verbatim",
+     *           "output_type": "pdf",
+     *           "step_id": "00000000-0000-0000-0000-000000000102",
+     *           "step_order": 2
+     *         },
+     *         {
+     *           "delivery": "artifact",
+     *           "kind": "artifact",
+     *           "label": "Report",
+     *           "output_mode": "pass_through",
+     *           "output_type": "docx",
+     *           "step_id": "00000000-0000-0000-0000-000000000104",
+     *           "step_order": 4
+     *         }
+     *       ],
      *       "final_output": {
      *         "delivery": "artifact",
      *         "label": "Create Word report",
      *         "output_mode": "pass_through",
      *         "output_type": "docx",
      *         "step_id": "00000000-0000-0000-0000-000000000104",
-     *         "step_order": 3
+     *         "step_order": 4
      *       },
      *       "flow_id": "00000000-0000-0000-0000-000000000001",
      *       "form_fields": [
@@ -22119,18 +22264,10 @@ export interface components {
      *           "output_type": "json",
      *           "review_mode": "edit",
      *           "step_id": "00000000-0000-0000-0000-000000000103",
-     *           "step_order": 2
+     *           "step_order": 3
      *         }
      *       ],
-     *       "template_readiness": [
-     *         {
-     *           "can_download": false,
-     *           "can_edit": false,
-     *           "published_flow_version": 3,
-     *           "status": "unavailable",
-     *           "step_id": "00000000-0000-0000-0000-000000000102"
-     *         }
-     *       ],
+     *       "template_readiness": [],
      *       "transcription": {
      *         "live": {
      *           "available": true
@@ -22150,6 +22287,14 @@ export interface components {
        * @description Total number of files a caller may attach across all runtime-input steps for this published flow version. `0` means no published steps currently require runtime files. `null` means at least one runtime file-input step is intentionally unbounded, so clients should enforce the per-step limits in `steps_requiring_input` instead.
        */
       aggregate_max_files?: number | null;
+      /**
+       * Deliverables
+       * @description Texts and documents a successful run delivers, in step order: each step the author marked as a deliverable, and the last step when its output is text or a document (the step before it when the last step sends the run's result). Branch on `kind`: an `artifact` is a file, a `text` has no `files`. Use it to show everything a run returns, each with its label; read `final_output` and `FlowRunPublic.result` for the terminal output alone. Empty when the flow delivers nothing.
+       */
+      deliverables?: (
+        | components["schemas"]["FlowDeliverableContractPublic"]
+        | components["schemas"]["FlowTextDeliverableContractPublic"]
+      )[];
       /** @description Published terminal output contract for this flow version. API consumers should use this before starting a run to decide whether their app will display output or offer a generated file download. After success, branch on `FlowRunPublic.result.kind`, including exact `inline_text` and `file_backed_text` for terminal text. */
       final_output?: components["schemas"]["FlowFinalOutputContractPublic"] | null;
       /**
@@ -22781,12 +22926,102 @@ export interface components {
       step_order?: number | null;
     };
     /**
+     * FlowRunDeliverablePublic
+     * @description A document the run delivered, with its files.
+     */
+    FlowRunDeliverablePublic: {
+      /**
+       * Files
+       * @description The document files of the step's current attempt (`source` `declared_artifact`), never a transcript or text written beside them. Download one with its `file_id` through the run's signed-url endpoint while its `availability` is `available`. Empty when the step produced no document file.
+       */
+      files: components["schemas"]["FlowRunStepResultFile"][];
+      /**
+       * @description Discriminator: `artifact` is a document to download, `text` is text the step wrote. Other kinds may be added later; a client should skip one it does not know. (enum property replaced by openapi-typescript)
+       * @enum {string}
+       */
+      kind: "artifact";
+      /**
+       * Label
+       * @description What a client calls the document, as in the run contract's `deliverables`. Null when an unmarked step has no name.
+       */
+      label?: string | null;
+      /** @description `docx` or `pdf`. */
+      output_type: components["schemas"]["FlowOutputType"];
+      /**
+       * Step Id
+       * Format: uuid
+       * @description Published step that produced the document. Unique in the list: several files from one step are listed under one entry.
+       */
+      step_id: string;
+      /**
+       * Step Order
+       * @description Published order of the step, from 1.
+       */
+      step_order: number;
+    };
+    /**
      * FlowRunDetailPublic
      * @example {
      *       "created_at": "2026-03-17T10:05:00Z",
-     *       "dispatch_attempt_count": 0,
-     *       "dispatch_next_attempt_at": "2026-03-17T10:05:00Z",
-     *       "dispatch_pending_since": "2026-03-17T10:05:00Z",
+     *       "deliverables": [
+     *         {
+     *           "files": [
+     *             {
+     *               "attempt_no": 1,
+     *               "availability": "available",
+     *               "checksum": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+     *               "file_id": "00000000-0000-0000-0000-000000000702",
+     *               "file_type": "document",
+     *               "flow_id": "00000000-0000-0000-0000-000000000001",
+     *               "flow_run_id": "00000000-0000-0000-0000-000000000301",
+     *               "mimetype": "application/pdf",
+     *               "name": "Summary Alex Example 2026-03-17.pdf",
+     *               "ordinal": 0,
+     *               "size": 14012,
+     *               "source": "declared_artifact",
+     *               "step_id": "00000000-0000-0000-0000-000000000102",
+     *               "step_order": 2,
+     *               "step_result_id": "00000000-0000-0000-0000-000000000452",
+     *               "tenant_id": "00000000-0000-0000-0000-000000000010"
+     *             }
+     *           ],
+     *           "kind": "artifact",
+     *           "label": "Summary",
+     *           "output_type": "pdf",
+     *           "step_id": "00000000-0000-0000-0000-000000000102",
+     *           "step_order": 2
+     *         },
+     *         {
+     *           "files": [
+     *             {
+     *               "attempt_no": 1,
+     *               "availability": "available",
+     *               "checksum": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+     *               "file_id": "00000000-0000-0000-0000-000000000703",
+     *               "file_type": "document",
+     *               "flow_id": "00000000-0000-0000-0000-000000000001",
+     *               "flow_run_id": "00000000-0000-0000-0000-000000000301",
+     *               "mimetype": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+     *               "name": "Report Alex Example 2026-03-17.docx",
+     *               "ordinal": 0,
+     *               "size": 14012,
+     *               "source": "declared_artifact",
+     *               "step_id": "00000000-0000-0000-0000-000000000104",
+     *               "step_order": 4,
+     *               "step_result_id": "00000000-0000-0000-0000-000000000454",
+     *               "tenant_id": "00000000-0000-0000-0000-000000000010"
+     *             }
+     *           ],
+     *           "kind": "artifact",
+     *           "label": "Report",
+     *           "output_type": "docx",
+     *           "step_id": "00000000-0000-0000-0000-000000000104",
+     *           "step_order": 4
+     *         }
+     *       ],
+     *       "dispatch_attempt_count": 1,
+     *       "dispatch_last_attempt_at": "2026-03-17T10:05:01Z",
+     *       "dispatched_at": "2026-03-17T10:05:01Z",
      *       "evidence_access": {
      *         "can_export_raw": false,
      *         "can_export_redacted": true,
@@ -22795,6 +23030,7 @@ export interface components {
      *         "read_refusal_code": null,
      *         "redacted_export_refusal_code": null
      *       },
+     *       "finished_at": "2026-03-17T10:06:10Z",
      *       "flow_id": "00000000-0000-0000-0000-000000000001",
      *       "flow_version": 3,
      *       "id": "00000000-0000-0000-0000-000000000301",
@@ -22804,19 +23040,80 @@ export interface components {
      *       "job_id": "00000000-0000-0000-0000-000000000401",
      *       "principal_type": "user",
      *       "purpose": "production",
-     *       "result_files": [],
+     *       "result": {
+     *         "files": [
+     *           {
+     *             "attempt_no": 1,
+     *             "availability": "available",
+     *             "checksum": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+     *             "file_id": "00000000-0000-0000-0000-000000000703",
+     *             "file_type": "document",
+     *             "flow_id": "00000000-0000-0000-0000-000000000001",
+     *             "flow_run_id": "00000000-0000-0000-0000-000000000301",
+     *             "mimetype": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+     *             "name": "Report Alex Example 2026-03-17.docx",
+     *             "ordinal": 0,
+     *             "size": 14012,
+     *             "source": "declared_artifact",
+     *             "step_id": "00000000-0000-0000-0000-000000000104",
+     *             "step_order": 4,
+     *             "step_result_id": "00000000-0000-0000-0000-000000000454",
+     *             "tenant_id": "00000000-0000-0000-0000-000000000010"
+     *           }
+     *         ],
+     *         "kind": "artifact"
+     *       },
+     *       "result_files": [
+     *         {
+     *           "attempt_no": 1,
+     *           "availability": "available",
+     *           "checksum": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+     *           "file_id": "00000000-0000-0000-0000-000000000702",
+     *           "file_type": "document",
+     *           "flow_id": "00000000-0000-0000-0000-000000000001",
+     *           "flow_run_id": "00000000-0000-0000-0000-000000000301",
+     *           "mimetype": "application/pdf",
+     *           "name": "Summary Alex Example 2026-03-17.pdf",
+     *           "ordinal": 0,
+     *           "size": 14012,
+     *           "source": "declared_artifact",
+     *           "step_id": "00000000-0000-0000-0000-000000000102",
+     *           "step_order": 2,
+     *           "step_result_id": "00000000-0000-0000-0000-000000000452",
+     *           "tenant_id": "00000000-0000-0000-0000-000000000010"
+     *         },
+     *         {
+     *           "attempt_no": 1,
+     *           "availability": "available",
+     *           "checksum": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+     *           "file_id": "00000000-0000-0000-0000-000000000703",
+     *           "file_type": "document",
+     *           "flow_id": "00000000-0000-0000-0000-000000000001",
+     *           "flow_run_id": "00000000-0000-0000-0000-000000000301",
+     *           "mimetype": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+     *           "name": "Report Alex Example 2026-03-17.docx",
+     *           "ordinal": 0,
+     *           "size": 14012,
+     *           "source": "declared_artifact",
+     *           "step_id": "00000000-0000-0000-0000-000000000104",
+     *           "step_order": 4,
+     *           "step_result_id": "00000000-0000-0000-0000-000000000454",
+     *           "tenant_id": "00000000-0000-0000-0000-000000000010"
+     *         }
+     *       ],
      *       "revision": 1,
      *       "run_label": "Case 123",
+     *       "started_at": "2026-03-17T10:05:02Z",
      *       "started_by": {
      *         "display_name": "Alex Example",
      *         "email": "alex.example@example.com",
      *         "id": "00000000-0000-0000-0000-000000000030",
      *         "principal_type": "user"
      *       },
-     *       "status": "queued",
+     *       "status": "completed",
      *       "tenant_id": "00000000-0000-0000-0000-000000000010",
      *       "trace_id": "00000000-0000-0000-0000-000000000302",
-     *       "updated_at": "2026-03-17T10:05:00Z",
+     *       "updated_at": "2026-03-17T10:06:10Z",
      *       "webhook_deliveries": [
      *         {
      *           "attempt_no": 1,
@@ -22825,6 +23122,7 @@ export interface components {
      *           "delivery_attempts": 1,
      *           "delivery_status": "delivered",
      *           "id": "00000000-0000-0000-0000-000000000601",
+     *           "state": "delivered",
      *           "step_id": "00000000-0000-0000-0000-000000000101",
      *           "step_order": 1,
      *           "updated_at": "2026-03-17T10:05:31Z"
@@ -22844,6 +23142,14 @@ export interface components {
        * @description When the run row was created.
        */
       created_at: string;
+      /**
+       * Deliverables
+       * @description Every text and document the run delivered, in step order, each with its label: the run contract's `deliverables` for this run. Branch on `kind`: an `artifact` lists its files, a `text` has no `files` and its text is the step's output. Read `result` for the terminal output alone. An `artifact` lists only the step's document files, while `result.files` lists every current file of the last step. Download a file with its `file_id` through `POST {api_prefix}/flows/{id}/runs/{run_id}/artifacts/{file_id}/signed-url/`, and only when its `availability` is `available`. Empty until the run has completed.
+       */
+      deliverables?: (
+        | components["schemas"]["FlowRunDeliverablePublic"]
+        | components["schemas"]["FlowRunTextDeliverablePublic"]
+      )[];
       /**
        * Dispatch Attempt Count
        * @description Broker dispatch attempts claimed in the most recent queue-entry dispatch epoch.
@@ -23002,7 +23308,7 @@ export interface components {
        * Webhook Deliveries
        * @description Secret-free outbound HTTP delivery attempts for this run. The field is always present and is empty unless the flow's final step was authored with outbound HTTP delivery. Eneo has no inbound webhook subscription surface, so this reports deliveries the flow author configured, never callbacks a client registered.
        */
-      webhook_deliveries: components["schemas"]["FlowRunWebhookDeliveryPublic"][];
+      webhook_deliveries: components["schemas"]["FlowRunWebhookDeliveryStatePublic"][];
     };
     /**
      * FlowRunDispatchError
@@ -23750,7 +24056,7 @@ export interface components {
      *             "state": "resumed",
      *             "step_id": "00000000-0000-0000-0000-000000000103",
      *             "step_label": "Review transcription",
-     *             "step_order": 2,
+     *             "step_order": 3,
      *             "tenant_id": "00000000-0000-0000-0000-000000000010",
      *             "updated_at": "2026-03-17T10:05:30Z"
      *           }
@@ -23836,7 +24142,7 @@ export interface components {
      *           }
      *         ]
      *       },
-     *       "content_hash": "80c48fd41127875b330cd1342521885ab81c98c520ca43476d755769ba13c65d",
+     *       "content_hash": "9a108ff7ef46fdb5eb4ec83a7af89ec0e01aeac5450854ebeec8d0518e98bd4e",
      *       "generated_at": "2026-03-31T12:00:00Z",
      *       "manifest": {
      *         "actor": {
@@ -23872,7 +24178,7 @@ export interface components {
      *           "total_size_bytes": 14012,
      *           "tracking_state": "tracked"
      *         },
-     *         "content_hash": "80c48fd41127875b330cd1342521885ab81c98c520ca43476d755769ba13c65d",
+     *         "content_hash": "9a108ff7ef46fdb5eb4ec83a7af89ec0e01aeac5450854ebeec8d0518e98bd4e",
      *         "content_hash_input": "redacted",
      *         "detail_mode": "redacted",
      *         "export_reason": "support_debug",
@@ -24467,13 +24773,14 @@ export interface components {
      *           "state": "resumed",
      *           "step_id": "00000000-0000-0000-0000-000000000103",
      *           "step_label": "Review transcription",
-     *           "step_order": 2,
+     *           "step_order": 3,
      *           "tenant_id": "00000000-0000-0000-0000-000000000010",
      *           "updated_at": "2026-03-17T10:05:30Z"
      *         }
      *       ],
      *       "run": {
      *         "created_at": "2026-03-17T10:05:00Z",
+     *         "deliverables": [],
      *         "dispatch_attempt_count": 0,
      *         "dispatch_next_attempt_at": "2026-03-17T10:05:00Z",
      *         "dispatch_pending_since": "2026-03-17T10:05:00Z",
@@ -24947,12 +25254,12 @@ export interface components {
     FlowRunOutboundHttpResultPublic: {
       /**
        * Delivery Status
-       * @description Stable delivery receipt for a successfully completed outbound step. Destination configuration and request payload are never exposed.
-       * @constant
+       * @description Where the run's outbound delivery stands. A step that sends the run result is sent when the run has completed, so a completed run can still be `pending`, or `dead_lettered` when every attempt failed. Destination configuration and request payload are never exposed.
+       * @enum {string}
        */
-      delivery_status: "delivered";
+      delivery_status: "pending" | "delivered" | "dead_lettered";
       /**
-       * @description Discriminator for a completed outbound HTTP delivery. (enum property replaced by openapi-typescript)
+       * @description A result sent to an outbound HTTP receiver; `delivery_status` says where the delivery stands. (enum property replaced by openapi-typescript)
        * @enum {string}
        */
       kind: "outbound_http";
@@ -24961,6 +25268,7 @@ export interface components {
      * FlowRunPublic
      * @example {
      *       "created_at": "2026-03-17T10:05:00Z",
+     *       "deliverables": [],
      *       "dispatch_attempt_count": 0,
      *       "dispatch_next_attempt_at": "2026-03-17T10:05:00Z",
      *       "dispatch_pending_since": "2026-03-17T10:05:00Z",
@@ -25000,6 +25308,14 @@ export interface components {
        * @description When the run row was created.
        */
       created_at: string;
+      /**
+       * Deliverables
+       * @description Every text and document the run delivered, in step order, each with its label: the run contract's `deliverables` for this run. Branch on `kind`: an `artifact` lists its files, a `text` has no `files` and its text is the step's output. Read `result` for the terminal output alone. An `artifact` lists only the step's document files, while `result.files` lists every current file of the last step. Download a file with its `file_id` through `POST {api_prefix}/flows/{id}/runs/{run_id}/artifacts/{file_id}/signed-url/`, and only when its `availability` is `available`. Empty until the run has completed.
+       */
+      deliverables?: (
+        | components["schemas"]["FlowRunDeliverablePublic"]
+        | components["schemas"]["FlowRunTextDeliverablePublic"]
+      )[];
       /**
        * Dispatch Attempt Count
        * @description Broker dispatch attempts claimed in the most recent queue-entry dispatch epoch.
@@ -25190,6 +25506,7 @@ export interface components {
      *       "redispatched_count": 1,
      *       "run": {
      *         "created_at": "2026-03-17T10:05:00Z",
+     *         "deliverables": [],
      *         "dispatch_attempt_count": 1,
      *         "dispatch_last_attempt_at": "2026-03-17T10:05:01Z",
      *         "dispatch_next_attempt_at": "2026-03-17T10:05:31Z",
@@ -25567,6 +25884,7 @@ export interface components {
      *       ],
      *       "run": {
      *         "created_at": "2026-03-17T10:05:00Z",
+     *         "deliverables": [],
      *         "dispatch_attempt_count": 1,
      *         "dispatch_last_attempt_at": "2026-03-17T10:05:01Z",
      *         "dispatch_next_attempt_at": "2026-03-17T10:05:31Z",
@@ -25813,7 +26131,7 @@ export interface components {
      *       "state": "resumed",
      *       "step_id": "00000000-0000-0000-0000-000000000103",
      *       "step_label": "Review transcription",
-     *       "step_order": 2,
+     *       "step_order": 3,
      *       "tenant_id": "00000000-0000-0000-0000-000000000010",
      *       "updated_at": "2026-03-17T10:05:30Z"
      *     }
@@ -25960,7 +26278,7 @@ export interface components {
      *       "state": "awaiting_review",
      *       "step_id": "00000000-0000-0000-0000-000000000103",
      *       "step_label": "Review transcription",
-     *       "step_order": 2,
+     *       "step_order": 3,
      *       "tenant_id": "00000000-0000-0000-0000-000000000010",
      *       "updated_at": "2026-03-17T10:05:30Z"
      *     }
@@ -26153,12 +26471,13 @@ export interface components {
      *         "state": "resumed",
      *         "step_id": "00000000-0000-0000-0000-000000000103",
      *         "step_label": "Review transcription",
-     *         "step_order": 2,
+     *         "step_order": 3,
      *         "tenant_id": "00000000-0000-0000-0000-000000000010",
      *         "updated_at": "2026-03-17T10:05:30Z"
      *       },
      *       "run": {
      *         "created_at": "2026-03-17T10:05:00Z",
+     *         "deliverables": [],
      *         "dispatch_attempt_count": 0,
      *         "dispatch_next_attempt_at": "2026-03-17T10:05:00Z",
      *         "dispatch_pending_since": "2026-03-17T10:05:00Z",
@@ -26401,6 +26720,175 @@ export interface components {
        * @description Listed runs with status `running`, within `mine` and `search` and before any `status` filter.
        */
       running: number;
+    };
+    /**
+     * FlowRunStatusPublic
+     * @description A run's status as polled: its lifecycle and where its outbound
+     *     delivery stands, without run content.
+     * @example {
+     *       "created_at": "2026-03-17T10:05:00Z",
+     *       "dispatch_attempt_count": 1,
+     *       "dispatch_last_attempt_at": "2026-03-17T10:05:00Z",
+     *       "dispatched_at": "2026-03-17T10:05:00Z",
+     *       "finished_at": "2026-03-17T10:05:30Z",
+     *       "flow_id": "00000000-0000-0000-0000-000000000001",
+     *       "flow_version": 3,
+     *       "id": "00000000-0000-0000-0000-000000000301",
+     *       "job_id": "00000000-0000-0000-0000-000000000401",
+     *       "principal_type": "user",
+     *       "purpose": "production",
+     *       "result_delivery": {
+     *         "attempt_no": 1,
+     *         "created_at": "2026-03-17T10:05:30Z",
+     *         "delivery_attempts": 1,
+     *         "delivery_status": "pending",
+     *         "id": "00000000-0000-0000-0000-000000000601",
+     *         "next_delivery_at": "2026-03-17T10:06:30Z",
+     *         "state": "retry_scheduled",
+     *         "step_id": "00000000-0000-0000-0000-000000000101",
+     *         "step_order": 1,
+     *         "updated_at": "2026-03-17T10:05:31Z"
+     *       },
+     *       "revision": 1,
+     *       "run_label": "Case 123",
+     *       "started_at": "2026-03-17T10:05:01Z",
+     *       "started_by": {
+     *         "display_name": "Alex Example",
+     *         "email": "alex.example@example.com",
+     *         "id": "00000000-0000-0000-0000-000000000030",
+     *         "principal_type": "user"
+     *       },
+     *       "status": "completed",
+     *       "tenant_id": "00000000-0000-0000-0000-000000000010",
+     *       "trace_id": "00000000-0000-0000-0000-000000000302",
+     *       "updated_at": "2026-03-17T10:05:30Z"
+     *     }
+     */
+    FlowRunStatusPublic: {
+      /**
+       * Cancelled At
+       * @description When the run was cancelled. Null unless `status` is `cancelled`.
+       */
+      cancelled_at?: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       * @description When the run row was created.
+       */
+      created_at: string;
+      /**
+       * Dispatch Attempt Count
+       * @description Broker dispatch attempts claimed in the most recent queue-entry dispatch epoch.
+       */
+      dispatch_attempt_count: number;
+      /**
+       * Dispatch Exhausted At
+       * @description Timestamp when bounded attempts were exhausted for this dispatch epoch.
+       */
+      dispatch_exhausted_at?: string | null;
+      /**
+       * Dispatch Last Attempt At
+       * @description Timestamp of the latest claimed broker dispatch attempt.
+       */
+      dispatch_last_attempt_at?: string | null;
+      /** @description Last bounded, secret-free diagnosis for the most recent dispatch epoch. A later successful dispatch preserves this diagnostic. */
+      dispatch_last_error?: components["schemas"]["FlowRunDispatchError"] | null;
+      /**
+       * Dispatch Next Attempt At
+       * @description Sole dispatch eligibility clock. It remains set while a queued broker delivery awaits worker claim or bounded recovery, and becomes null after claim, exhaustion, or another lifecycle transition.
+       */
+      dispatch_next_attempt_at?: string | null;
+      /**
+       * Dispatch Pending Since
+       * @description Stable timestamp when the most recent queue-entry dispatch epoch began. It does not move when dispatch is retried.
+       */
+      dispatch_pending_since?: string | null;
+      /**
+       * Dispatched At
+       * @description Timestamp when this dispatch epoch first became possibly accepted: either the broker confirmed acceptance or a later claim proved an earlier attempt ended without a durable rejection receipt.
+       */
+      dispatched_at?: string | null;
+      /**
+       * Finished At
+       * @description When the run reached a terminal status. Null while non-terminal.
+       */
+      finished_at?: string | null;
+      /**
+       * Flow Id
+       * Format: uuid
+       * @description Identifier of the flow that owns this run.
+       */
+      flow_id: string;
+      /**
+       * Flow Version
+       * @description Published flow version this run is pinned to. It is the version the run executes against even after the flow is republished.
+       */
+      flow_version: number;
+      /**
+       * Id
+       * Format: uuid
+       * @description Durable run identifier. Use it as the `{run_id}` path segment for polling, review, cancel, and artifact requests.
+       */
+      id: string;
+      /**
+       * Job Id
+       * @description Background job that owns the current execution attempt. Diagnostic only; it is not addressable through the public API.
+       */
+      job_id?: string | null;
+      /** @description Principal kind that created the run, once resolved. Service-key callers only see runs their own key created. */
+      principal_type?: components["schemas"]["PrincipalType"] | null;
+      /**
+       * Purpose
+       * @description Immutable purpose recorded when the run was created.
+       * @enum {string}
+       */
+      purpose: "production" | "test";
+      /** @description The latest delivery of the run's last step when that step sends over HTTP (the run's result, or its own answer with a plain POST); null when the run has none yet or its last step sends nothing. It names no address, header or content. The same delivery is last in the detail's `webhook_deliveries`. */
+      result_delivery?: components["schemas"]["FlowRunWebhookDeliveryStatePublic"] | null;
+      /**
+       * Revision
+       * @description Monotonic run lifecycle compare token.
+       */
+      revision: number;
+      /**
+       * Run Date
+       * @description The day the run is about (a meeting's), from the value of the flow's form field with the role `run_date`. Run metadata like `run_label`; null when the flow has no such field or it was left empty.
+       * @example 2026-10-01
+       */
+      run_date?: string | null;
+      /**
+       * Run Label
+       * @description The run's name, as the caller supplied it on creation or else the value of the flow's form field with the role `run_label` (NFC, trimmed, one line). It also heads the names of the documents the run generates. It is run metadata, not run content: it is returned by the content-free list and status reads and matched by the list's `search`, so it should name the run (a case number, a meeting), not carry what the run is about. Null when the run has none.
+       * @example Case 123
+       */
+      run_label?: string | null;
+      /**
+       * Started At
+       * @description When a worker began executing the first step. Null while queued.
+       */
+      started_at?: string | null;
+      /** @description Who started the run, by id and name. It is shown to every caller who may see the run: the starter, tenant admins, and admins and owners of the flow's space. A service key sees only runs it started, so only its own name. Null when the run has no resolved principal. */
+      started_by?: components["schemas"]["FlowRunStartedByPublic"] | null;
+      /** @description Current lifecycle status. `queued` and `running` are active, `awaiting_review` means a human review checkpoint is open and the run will not advance until it is approved and resumed, and `completed`, `failed`, and `cancelled` are terminal. Call `GET {api_prefix}/flows/runs/status-capabilities/` for the machine-readable matrix that says which statuses to keep polling, cancel, or redispatch. */
+      status: components["schemas"]["FlowRunStatus"];
+      /**
+       * Tenant Id
+       * Format: uuid
+       * @description Tenant that owns the run and its data.
+       */
+      tenant_id: string;
+      /**
+       * Trace Id
+       * Format: uuid
+       * @description Correlation id shared by this run's audit and evidence records. Quote it in support requests.
+       */
+      trace_id: string;
+      /**
+       * Updated At
+       * Format: date-time
+       * @description When the run row last changed. It moves on every status change.
+       */
+      updated_at: string;
     };
     /**
      * FlowRunStepInputFilePublic
@@ -26841,157 +27329,6 @@ export interface components {
       /** @description Opaque authored JSON value produced by the published final step. Interpret it with `output_contract` and the enclosing run's `flow_version`. */
       value: components["schemas"]["JsonValue"];
     };
-    /**
-     * FlowRunSummaryPublic
-     * @example {
-     *       "created_at": "2026-03-17T10:05:00Z",
-     *       "dispatch_attempt_count": 0,
-     *       "dispatch_next_attempt_at": "2026-03-17T10:05:00Z",
-     *       "dispatch_pending_since": "2026-03-17T10:05:00Z",
-     *       "flow_id": "00000000-0000-0000-0000-000000000001",
-     *       "flow_version": 3,
-     *       "id": "00000000-0000-0000-0000-000000000301",
-     *       "job_id": "00000000-0000-0000-0000-000000000401",
-     *       "principal_type": "user",
-     *       "purpose": "production",
-     *       "revision": 1,
-     *       "run_label": "Case 123",
-     *       "started_by": {
-     *         "display_name": "Alex Example",
-     *         "email": "alex.example@example.com",
-     *         "id": "00000000-0000-0000-0000-000000000030",
-     *         "principal_type": "user"
-     *       },
-     *       "status": "queued",
-     *       "tenant_id": "00000000-0000-0000-0000-000000000010",
-     *       "trace_id": "00000000-0000-0000-0000-000000000302",
-     *       "updated_at": "2026-03-17T10:05:00Z"
-     *     }
-     */
-    FlowRunSummaryPublic: {
-      /**
-       * Cancelled At
-       * @description When the run was cancelled. Null unless `status` is `cancelled`.
-       */
-      cancelled_at?: string | null;
-      /**
-       * Created At
-       * Format: date-time
-       * @description When the run row was created.
-       */
-      created_at: string;
-      /**
-       * Dispatch Attempt Count
-       * @description Broker dispatch attempts claimed in the most recent queue-entry dispatch epoch.
-       */
-      dispatch_attempt_count: number;
-      /**
-       * Dispatch Exhausted At
-       * @description Timestamp when bounded attempts were exhausted for this dispatch epoch.
-       */
-      dispatch_exhausted_at?: string | null;
-      /**
-       * Dispatch Last Attempt At
-       * @description Timestamp of the latest claimed broker dispatch attempt.
-       */
-      dispatch_last_attempt_at?: string | null;
-      /** @description Last bounded, secret-free diagnosis for the most recent dispatch epoch. A later successful dispatch preserves this diagnostic. */
-      dispatch_last_error?: components["schemas"]["FlowRunDispatchError"] | null;
-      /**
-       * Dispatch Next Attempt At
-       * @description Sole dispatch eligibility clock. It remains set while a queued broker delivery awaits worker claim or bounded recovery, and becomes null after claim, exhaustion, or another lifecycle transition.
-       */
-      dispatch_next_attempt_at?: string | null;
-      /**
-       * Dispatch Pending Since
-       * @description Stable timestamp when the most recent queue-entry dispatch epoch began. It does not move when dispatch is retried.
-       */
-      dispatch_pending_since?: string | null;
-      /**
-       * Dispatched At
-       * @description Timestamp when this dispatch epoch first became possibly accepted: either the broker confirmed acceptance or a later claim proved an earlier attempt ended without a durable rejection receipt.
-       */
-      dispatched_at?: string | null;
-      /**
-       * Finished At
-       * @description When the run reached a terminal status. Null while non-terminal.
-       */
-      finished_at?: string | null;
-      /**
-       * Flow Id
-       * Format: uuid
-       * @description Identifier of the flow that owns this run.
-       */
-      flow_id: string;
-      /**
-       * Flow Version
-       * @description Published flow version this run is pinned to. It is the version the run executes against even after the flow is republished.
-       */
-      flow_version: number;
-      /**
-       * Id
-       * Format: uuid
-       * @description Durable run identifier. Use it as the `{run_id}` path segment for polling, review, cancel, and artifact requests.
-       */
-      id: string;
-      /**
-       * Job Id
-       * @description Background job that owns the current execution attempt. Diagnostic only; it is not addressable through the public API.
-       */
-      job_id?: string | null;
-      /** @description Principal kind that created the run, once resolved. Service-key callers only see runs their own key created. */
-      principal_type?: components["schemas"]["PrincipalType"] | null;
-      /**
-       * Purpose
-       * @description Immutable purpose recorded when the run was created.
-       * @enum {string}
-       */
-      purpose: "production" | "test";
-      /**
-       * Revision
-       * @description Monotonic run lifecycle compare token.
-       */
-      revision: number;
-      /**
-       * Run Date
-       * @description The day the run is about (a meeting's), from the value of the flow's form field with the role `run_date`. Run metadata like `run_label`; null when the flow has no such field or it was left empty.
-       * @example 2026-10-01
-       */
-      run_date?: string | null;
-      /**
-       * Run Label
-       * @description The run's name, as the caller supplied it on creation or else the value of the flow's form field with the role `run_label` (NFC, trimmed, one line). It also heads the names of the documents the run generates. It is run metadata, not run content: it is returned by the content-free list and status reads and matched by the list's `search`, so it should name the run (a case number, a meeting), not carry what the run is about. Null when the run has none.
-       * @example Case 123
-       */
-      run_label?: string | null;
-      /**
-       * Started At
-       * @description When a worker began executing the first step. Null while queued.
-       */
-      started_at?: string | null;
-      /** @description Who started the run, by id and name. It is shown to every caller who may see the run: the starter, tenant admins, and admins and owners of the flow's space. A service key sees only runs it started, so only its own name. Null when the run has no resolved principal. */
-      started_by?: components["schemas"]["FlowRunStartedByPublic"] | null;
-      /** @description Current lifecycle status. `queued` and `running` are active, `awaiting_review` means a human review checkpoint is open and the run will not advance until it is approved and resumed, and `completed`, `failed`, and `cancelled` are terminal. Call `GET {api_prefix}/flows/runs/status-capabilities/` for the machine-readable matrix that says which statuses to keep polling, cancel, or redispatch. */
-      status: components["schemas"]["FlowRunStatus"];
-      /**
-       * Tenant Id
-       * Format: uuid
-       * @description Tenant that owns the run and its data.
-       */
-      tenant_id: string;
-      /**
-       * Trace Id
-       * Format: uuid
-       * @description Correlation id shared by this run's audit and evidence records. Quote it in support requests.
-       */
-      trace_id: string;
-      /**
-       * Updated At
-       * Format: date-time
-       * @description When the run row last changed. It moves on every status change.
-       */
-      updated_at: string;
-    };
     /** FlowRunTemplateFill */
     FlowRunTemplateFill: {
       /**
@@ -27020,6 +27357,42 @@ export interface components {
        * @description The step the field reads from, when the binding names one.
        */
       source_step?: number | null;
+    };
+    /**
+     * FlowRunTextDeliverablePublic
+     * @description A text the run delivered. Only what names it: the text is the step's
+     *     output.
+     */
+    FlowRunTextDeliverablePublic: {
+      /**
+       * Delivery
+       * @description `payload`: the text is the step's output, read with the step's result. A run result sent to a receiver carries it whole.
+       * @constant
+       */
+      delivery: "payload";
+      /**
+       * @description Discriminator: `artifact` is a document to download, `text` is text the step wrote. Other kinds may be added later; a client should skip one it does not know. (enum property replaced by openapi-typescript)
+       * @enum {string}
+       */
+      kind: "text";
+      /**
+       * Label
+       * @description What a client calls the text, as in the run contract's `deliverables`. Null when an unmarked step has no name.
+       */
+      label?: string | null;
+      /** @description `text`. */
+      output_type: components["schemas"]["FlowOutputType"];
+      /**
+       * Step Id
+       * Format: uuid
+       * @description Published step that wrote the text. Unique in the list.
+       */
+      step_id: string;
+      /**
+       * Step Order
+       * @description Published order of the step, from 1.
+       */
+      step_order: number;
     };
     /** FlowRunTokenUsagePublic */
     FlowRunTokenUsagePublic: {
@@ -27125,6 +27498,85 @@ export interface components {
        * Format: date-time
        */
       updated_at: string;
+    };
+    /**
+     * FlowRunWebhookDeliveryStatePublic
+     * @description A delivery as it stands when read. The run's evidence keeps the
+     *     delivery's record without it.
+     * @example {
+     *       "attempt_no": 1,
+     *       "created_at": "2026-03-17T10:05:30Z",
+     *       "delivered_at": "2026-03-17T10:05:31Z",
+     *       "delivery_attempts": 1,
+     *       "delivery_status": "delivered",
+     *       "id": "00000000-0000-0000-0000-000000000601",
+     *       "state": "delivered",
+     *       "step_id": "00000000-0000-0000-0000-000000000101",
+     *       "step_order": 1,
+     *       "updated_at": "2026-03-17T10:05:31Z"
+     *     }
+     */
+    FlowRunWebhookDeliveryStatePublic: {
+      /** Attempt No */
+      attempt_no: number;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /** Dead Lettered At */
+      dead_lettered_at?: string | null;
+      /** Delivered At */
+      delivered_at?: string | null;
+      /**
+       * Delivery Attempts
+       * @description Persisted delivery attempts charged when the sender claims work.
+       */
+      delivery_attempts: number;
+      /**
+       * Delivery Status
+       * @enum {string}
+       */
+      delivery_status: "pending" | "delivered" | "dead_lettered";
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Next Delivery At */
+      next_delivery_at?: string | null;
+      /**
+       * State
+       * @description Where the delivery stands when read. `sending`: not tried yet, an attempt is being sent, or the next one is due. `retry_scheduled`: an attempt failed and the next is at `next_delivery_at`, still ahead. `delivered` and `dead_lettered` are final, as in `delivery_status`. Branch on this rather than on `delivery_attempts`, which counts an attempt while it is being sent.
+       * @enum {string}
+       */
+      state: "sending" | "retry_scheduled" | "delivered" | "dead_lettered";
+      /**
+       * Step Id
+       * Format: uuid
+       */
+      step_id: string;
+      /** Step Order */
+      step_order: number;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
+    /**
+     * FlowRunWebhookRedeliveryRequest
+     * @example {
+     *       "expected_dead_lettered_at": "2026-07-22T08:30:00Z"
+     *     }
+     */
+    FlowRunWebhookRedeliveryRequest: {
+      /**
+       * Expected Dead Lettered At
+       * Format: date-time
+       * @description The delivery's `dead_lettered_at` as read from the run. Only that dead letter is reset, so a retried request cannot reset a later one.
+       */
+      expected_dead_lettered_at: string;
     };
     /** FlowRuntimeAuditOutboxSummary */
     FlowRuntimeAuditOutboxSummary: {
@@ -28544,7 +28996,8 @@ export interface components {
       | "review"
       | "fetch_http"
       | "tool"
-      | "send_http";
+      | "send_http"
+      | "send_run_result";
     /**
      * FlowStepKindConfigurationPublic
      * @description A kind's starting configuration at its place. It is valid as
@@ -28600,7 +29053,7 @@ export interface components {
       input_type: components["schemas"]["FlowInputType"];
       /**
        * Output Config
-       * @description The speaker mapping for `speakers`, the HTTP request for `send_http` (its `url` empty for the author to enter), otherwise null.
+       * @description The speaker mapping for `speakers`, the HTTP request for `send_http` and `send_run_result` (its `url` empty for the author to enter), otherwise null.
        * @example null
        */
       output_config: {
@@ -28662,7 +29115,7 @@ export interface components {
       /** @description The configuration the kind starts with here: of the new step, or the saved step's new configuration (its name and assistant stay). */
       configuration: components["schemas"]["FlowStepKindConfigurationPublic"];
       /**
-       * @description What the step does: `ai` (a model writes text), `structured` (a model writes JSON), `compose` (text put together without a model), `document` (text rendered as a Word document; `pdf` is the other output type it takes), `template` (a Word template filled in), `transcribe` (an uploaded recording transcribed), `speakers` (the speakers of the transcript before it named, confirmed by a person), `review` (a person reviews and may edit what the step before it gave), `fetch_http` (text fetched with an HTTP GET), `tool` (an MCP tool's answer), `send_http` (the result sent with an HTTP POST).
+       * @description What the step does: `ai` (a model writes text), `structured` (a model writes JSON), `compose` (text put together without a model), `document` (text rendered as a Word document; `pdf` is the other output type it takes), `template` (a Word template filled in), `transcribe` (an uploaded recording transcribed), `speakers` (the speakers of the transcript before it named, confirmed by a person), `review` (a person reviews and may edit what the step before it gave), `fetch_http` (text fetched with an HTTP GET), `tool` (an MCP tool's answer), `send_http` (the result sent with an HTTP POST), `send_run_result` (the finished run's result sent with an HTTP POST once the run has completed; only last, after a step).
        * @example ai
        */
       kind: components["schemas"]["FlowStepKind"];
@@ -29151,6 +29604,22 @@ export interface components {
       /** Output Config */
       output_config?:
         | ({
+            /**
+             * FlowStepDeliverable
+             * @description Marks this step as one of the run's deliverables: text or a document a client lists with its label in `deliverables` on the run contract and the run. Only a step whose output is text or a document of its own can carry it, and only a document step a `file_name`: saving any other step removes what it cannot carry, and publishing or importing one refuses it.
+             */
+            deliverable?: {
+              /**
+               * File Name
+               * @description Only for a document. The name it is saved under, without extension: fixed text mixed with `{{ flow_input.<field> }}` for a field of the flow's form. The run's day is added after it, and equal names are numbered. One line of at most 200 characters. Left out, the document is named as before.
+               */
+              file_name?: string | null;
+              /**
+               * Label
+               * @description What a client calls this text or document, for example `Standup Eneo`. One line of at most 120 characters, shown as written: publishing refuses `{{` or `}}` in it.
+               */
+              label: string;
+            };
             /**
              * FlowStepRetrievalPolicy
              * @description Versioned policy embedded in the existing per-step output config JSON.
@@ -29948,6 +30417,43 @@ export interface components {
       /** Template Name */
       template_name?: string | null;
     };
+    /**
+     * FlowTextDeliverableContractPublic
+     * @description A text every successful run of this version delivers.
+     */
+    FlowTextDeliverableContractPublic: {
+      /**
+       * Delivery
+       * @description `payload`: the text is the step's output, not a file. A run result sent to a receiver carries it whole.
+       * @constant
+       */
+      delivery: "payload";
+      /**
+       * @description Discriminator: `artifact` is a document to download, `text` is text the step wrote. Other kinds may be added later; a client should skip one it does not know. (enum property replaced by openapi-typescript)
+       * @enum {string}
+       */
+      kind: "text";
+      /**
+       * Label
+       * @description What a client calls the text: the label the author gave it, or for the last step without one, the step's name. Null when the last step has no name.
+       */
+      label?: string | null;
+      /** @description Output mode of the step, as for `final_output`. */
+      output_mode: components["schemas"]["FlowOutputMode"];
+      /** @description `text`. */
+      output_type: components["schemas"]["FlowOutputType"];
+      /**
+       * Step Id
+       * Format: uuid
+       * @description Published step that writes the text. Unique in the list; it matches `FlowRunPublic.deliverables[].step_id`.
+       */
+      step_id: string;
+      /**
+       * Step Order
+       * @description Published order of the step, from 1.
+       */
+      step_order: number;
+    };
     /** FlowTextProcessingStepPublic */
     FlowTextProcessingStepPublic: {
       /** Item Schema */
@@ -30334,6 +30840,7 @@ export interface components {
      *       "first_regenerated_step_id": "00000000-0000-0000-0000-000000000102",
      *       "run": {
      *         "created_at": "2026-03-17T10:05:00Z",
+     *         "deliverables": [],
      *         "dispatch_attempt_count": 0,
      *         "dispatch_next_attempt_at": "2026-03-17T10:05:00Z",
      *         "dispatch_pending_since": "2026-03-17T10:05:00Z",
@@ -31131,7 +31638,7 @@ export interface components {
      * HttpBodyMode
      * @enum {string}
      */
-    HttpBodyMode: "auto" | "json_template" | "text_template" | "none";
+    HttpBodyMode: "auto" | "json_template" | "text_template" | "none" | "run_result";
     /** HttpRequestPreview */
     HttpRequestPreview: {
       /** Body Preview */
@@ -31259,7 +31766,12 @@ export interface components {
       | "HTTP_RESPONSE_TOO_LARGE"
       | "HTTP_STATUS_ERROR"
       | "HTTP_CREDENTIALS_REQUIRE_HTTPS"
-      | "HTTP_INVALID_HEADER_NAME";
+      | "HTTP_INVALID_HEADER_NAME"
+      | "HTTP_RUN_RESULT_REQUIRES_HTTP_POST"
+      | "HTTP_RUN_RESULT_TAKES_NO_TEMPLATE"
+      | "HTTP_RUN_RESULT_REQUIRES_FIXED_HTTPS_URL"
+      | "HTTP_CONTENT_TYPE_SET_BY_BODY"
+      | "HTTP_RUN_RESULT_NOT_TESTABLE";
     /** IconPublic */
     IconPublic: {
       /** Created At */
@@ -35614,6 +36126,22 @@ export interface components {
       /** Output Config */
       output_config?:
         | ({
+            /**
+             * FlowStepDeliverable
+             * @description Marks this step as one of the run's deliverables: text or a document a client lists with its label in `deliverables` on the run contract and the run. Only a step whose output is text or a document of its own can carry it, and only a document step a `file_name`: saving any other step removes what it cannot carry, and publishing or importing one refuses it.
+             */
+            deliverable?: {
+              /**
+               * File Name
+               * @description Only for a document. The name it is saved under, without extension: fixed text mixed with `{{ flow_input.<field> }}` for a field of the flow's form. The run's day is added after it, and equal names are numbered. One line of at most 200 characters. Left out, the document is named as before.
+               */
+              file_name?: string | null;
+              /**
+               * Label
+               * @description What a client calls this text or document, for example `Standup Eneo`. One line of at most 120 characters, shown as written: publishing refuses `{{` or `}}` in it.
+               */
+              label: string;
+            };
             /**
              * FlowStepRetrievalPolicy
              * @description Versioned policy embedded in the existing per-step output config JSON.
@@ -43590,6 +44118,33 @@ export interface components {
       /** Revision */
       revision: number;
     };
+    /** WidgetExternalToolPublic */
+    WidgetExternalToolPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+    };
+    /**
+     * WidgetExternalToolServerPublic
+     * @description An MCP server outside Eneo, configured in the widget's space, with the
+     *     tools the assistant has switched on there. Restrictions at run time can
+     *     narrow what a turn calls.
+     */
+    WidgetExternalToolServerPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Tools */
+      tools: components["schemas"]["WidgetExternalToolPublic"][];
+    };
     /**
      * WidgetFeedback
      * @description A visitor's vote on the answer, with an optional comment.
@@ -43682,6 +44237,11 @@ export interface components {
        * @description The budget in force: the widget's, capped by the tenant policy.
        */
       daily_token_budget: number;
+      /**
+       * External Tools
+       * @description Names of the assistant's MCP servers outside Eneo with a tool switched on.
+       */
+      external_tools: string[];
       /**
        * Helpful 30D
        * @description Thumbs up on conversations started in the last 30 days.
@@ -43785,6 +44345,11 @@ export interface components {
     WidgetPolicyPublic: {
       /** Allow Bot Protection None */
       allow_bot_protection_none: boolean;
+      /**
+       * Allow External Tools
+       * @description Whether widgets may publish assistants with tools switched on at MCP servers outside Eneo. Default true; off, such widgets cannot be activated, and live ones serve visitors without those tools and are flagged in the overview.
+       */
+      allow_external_tools: boolean;
       /** Max Daily Token Budget */
       max_daily_token_budget: number;
       /** Max Retention Days */
@@ -43796,6 +44361,8 @@ export interface components {
     WidgetPolicyUpdate: {
       /** Allow Bot Protection None */
       allow_bot_protection_none?: boolean | null;
+      /** Allow External Tools */
+      allow_external_tools?: boolean | null;
       /** Max Daily Token Budget */
       max_daily_token_budget?: number | null;
       /** Max Retention Days */
@@ -43857,6 +44424,11 @@ export interface components {
       created_at: string;
       /** Created By User Id */
       created_by_user_id?: string | null;
+      /**
+       * External Tools
+       * @description The assistant’s enabled tools on external MCP servers.
+       */
+      external_tools: components["schemas"]["WidgetExternalToolServerPublic"][];
       /**
        * Id
        * Format: uuid
@@ -66369,6 +66941,7 @@ export interface operations {
            *       ],
            *       "run": {
            *         "created_at": "2026-03-17T10:05:00Z",
+           *         "deliverables": [],
            *         "dispatch_attempt_count": 1,
            *         "dispatch_last_attempt_at": "2026-03-17T10:05:01Z",
            *         "dispatch_next_attempt_at": "2026-03-17T10:05:31Z",
@@ -66679,7 +67252,7 @@ export interface operations {
            *       "state": "edited",
            *       "step_id": "00000000-0000-0000-0000-000000000103",
            *       "step_label": "Review transcription",
-           *       "step_order": 2,
+           *       "step_order": 3,
            *       "tenant_id": "00000000-0000-0000-0000-000000000010",
            *       "updated_at": "2026-03-17T10:05:30Z"
            *     }
@@ -66817,12 +67390,13 @@ export interface operations {
            *         "state": "resumed",
            *         "step_id": "00000000-0000-0000-0000-000000000103",
            *         "step_label": "Review transcription",
-           *         "step_order": 2,
+           *         "step_order": 3,
            *         "tenant_id": "00000000-0000-0000-0000-000000000010",
            *         "updated_at": "2026-03-17T10:05:30Z"
            *       },
            *       "run": {
            *         "created_at": "2026-03-17T10:05:00Z",
+           *         "deliverables": [],
            *         "dispatch_attempt_count": 0,
            *         "dispatch_next_attempt_at": "2026-03-17T10:05:00Z",
            *         "dispatch_pending_since": "2026-03-17T10:05:00Z",
@@ -66995,7 +67569,7 @@ export interface operations {
            *       "state": "approved",
            *       "step_id": "00000000-0000-0000-0000-000000000103",
            *       "step_label": "Review transcription",
-           *       "step_order": 2,
+           *       "step_order": 3,
            *       "tenant_id": "00000000-0000-0000-0000-000000000010",
            *       "updated_at": "2026-03-17T10:05:30Z"
            *     }
@@ -67237,7 +67811,7 @@ export interface operations {
            *       "state": "rejected",
            *       "step_id": "00000000-0000-0000-0000-000000000103",
            *       "step_label": "Review transcription",
-           *       "step_order": 2,
+           *       "step_order": 3,
            *       "tenant_id": "00000000-0000-0000-0000-000000000010",
            *       "updated_at": "2026-03-17T10:05:30Z"
            *     }
@@ -67375,12 +67949,13 @@ export interface operations {
            *         "state": "resumed",
            *         "step_id": "00000000-0000-0000-0000-000000000103",
            *         "step_label": "Review transcription",
-           *         "step_order": 2,
+           *         "step_order": 3,
            *         "tenant_id": "00000000-0000-0000-0000-000000000010",
            *         "updated_at": "2026-03-17T10:05:30Z"
            *       },
            *       "run": {
            *         "created_at": "2026-03-17T10:05:00Z",
+           *         "deliverables": [],
            *         "dispatch_attempt_count": 0,
            *         "dispatch_next_attempt_at": "2026-03-17T10:05:00Z",
            *         "dispatch_pending_since": "2026-03-17T10:05:00Z",
@@ -67503,7 +68078,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["FlowRunSummaryPublic"];
+          "application/json": components["schemas"]["FlowRunStatusPublic"];
         };
       };
       /** @description Forbidden. Caller scope, tenant or space permission, and run visibility are evaluated before returning Flow runtime data. Machine-readable codes include `insufficient_scope`, `flow_run_access_denied`, and `flow_service_key_principal_not_supported`. */
@@ -67775,6 +68350,7 @@ export interface operations {
            *       "first_regenerated_step_id": "00000000-0000-0000-0000-000000000102",
            *       "run": {
            *         "created_at": "2026-03-17T10:05:00Z",
+           *         "deliverables": [],
            *         "dispatch_attempt_count": 0,
            *         "dispatch_next_attempt_at": "2026-03-17T10:05:00Z",
            *         "dispatch_pending_since": "2026-03-17T10:05:00Z",
@@ -68189,6 +68765,115 @@ export interface operations {
            *       "message": "Evidence audit logging is unavailable."
            *     }
            */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  redeliver_flow_run_webhook_delivery: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the flow that owns the run. */
+        id: string;
+        /** @description Identifier of the completed run. */
+        run_id: string;
+        /** @description Identifier of the dead-lettered delivery to send again. */
+        delivery_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FlowRunWebhookRedeliveryRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRunWebhookDeliveryPublic"];
+        };
+      };
+      /** @description The run's published snapshot failed integrity verification, so the delivery was not reset. The machine-readable code is `flow_definition_checksum_mismatch`; do not retry. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "flow_definition_checksum_mismatch",
+           *       "eneo_error_code": 9007,
+           *       "message": "Published flow definition checksum does not match the stored snapshot. Do not retry this pinned version. Publish a valid version and start a new run."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Caller lacks permission to edit this flow. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "space_membership"
+           *       },
+           *       "eneo_error_code": 9001,
+           *       "message": "Insufficient permissions."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description The run or the delivery was not found for this flow and tenant. A deleted flow cannot be run or changed, so it is not found. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "not_found",
+           *       "eneo_error_code": 9000,
+           *       "message": "Flow run webhook delivery not found."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description The delivery cannot be sent again. `context.reason` says why: `not_run_result`, `run_not_completed`, `not_dead_lettered` or `dead_lettered_at_changed`. Refresh the run before retrying. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Required audit logging is unavailable, so the delivery was not reset. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
           "application/json": components["schemas"]["GeneralError"];
         };
       };

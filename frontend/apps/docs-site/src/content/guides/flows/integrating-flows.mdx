@@ -190,13 +190,33 @@ Response:
   "published_flow_version": 3,
   "final_output": {
     "step_id": "00000000-0000-0000-0000-000000000104",
-    "step_order": 3,
+    "step_order": 4,
     "label": "Create Word report",
     "output_type": "docx",
     "output_mode": "pass_through",
     "delivery": "artifact",
     "output_contract": null
   },
+  "deliverables": [
+    {
+      "kind": "artifact",
+      "step_id": "00000000-0000-0000-0000-000000000102",
+      "step_order": 2,
+      "label": "Summary",
+      "output_type": "pdf",
+      "output_mode": "render_verbatim",
+      "delivery": "artifact"
+    },
+    {
+      "kind": "artifact",
+      "step_id": "00000000-0000-0000-0000-000000000104",
+      "step_order": 4,
+      "label": "Report",
+      "output_type": "docx",
+      "output_mode": "pass_through",
+      "delivery": "artifact"
+    }
+  ],
   "form_fields": [
     {
       "name": "employee_name",
@@ -227,7 +247,7 @@ Response:
   "steps_requiring_review": [
     {
       "step_id": "00000000-0000-0000-0000-000000000103",
-      "step_order": 2,
+      "step_order": 3,
       "label": "Review transcription",
       "review_mode": "edit",
       "output_type": "json",
@@ -243,20 +263,7 @@ Response:
     }
   ],
   "aggregate_max_files": 1,
-  "template_readiness": [
-    {
-      "step_id": "00000000-0000-0000-0000-000000000102",
-      "template_asset_id": null,
-      "template_file_id": null,
-      "template_name": null,
-      "checksum": null,
-      "published_flow_version": 3,
-      "status": "unavailable",
-      "can_edit": false,
-      "can_download": false,
-      "message_code": null
-    }
-  ],
+  "template_readiness": [],
   "transcription": {
     "live": { "available": true, "reason": null },
     "speaker_labels": {
@@ -393,8 +400,9 @@ GET /api/v1/flows/{id}/runs/{run_id}/status/
 ```
 
 The content-free summary reports lifecycle and bounded dispatch diagnostics. It
-does not return accepted input, terminal errors, results, files, usage, or
-webhook deliveries.
+does not return accepted input, terminal errors, results, files or usage.
+`result_delivery` tells where the latest delivery stands, without the
+address, headers or content.
 
 Response:
 
@@ -448,7 +456,7 @@ Response:
   "flow_id": "00000000-0000-0000-0000-000000000001",
   "flow_run_id": "00000000-0000-0000-0000-000000000301",
   "step_id": "00000000-0000-0000-0000-000000000103",
-  "step_order": 2,
+  "step_order": 3,
   "attempt_no": 1,
   "state": "awaiting_review",
   "revision": 1,
@@ -527,7 +535,7 @@ Response:
   "flow_id": "00000000-0000-0000-0000-000000000001",
   "flow_run_id": "00000000-0000-0000-0000-000000000301",
   "step_id": "00000000-0000-0000-0000-000000000103",
-  "step_order": 2,
+  "step_order": 3,
   "attempt_no": 1,
   "state": "edited",
   "revision": 2,
@@ -603,7 +611,7 @@ Response:
   "flow_id": "00000000-0000-0000-0000-000000000001",
   "flow_run_id": "00000000-0000-0000-0000-000000000301",
   "step_id": "00000000-0000-0000-0000-000000000103",
-  "step_order": 2,
+  "step_order": 3,
   "attempt_no": 1,
   "state": "approved",
   "revision": 3,
@@ -694,7 +702,7 @@ Response:
     "flow_id": "00000000-0000-0000-0000-000000000001",
     "flow_run_id": "00000000-0000-0000-0000-000000000301",
     "step_id": "00000000-0000-0000-0000-000000000103",
-    "step_order": 2,
+    "step_order": 3,
     "attempt_no": 1,
     "state": "resumed",
     "revision": 4,
@@ -823,12 +831,12 @@ Response:
         "tenant_id": "00000000-0000-0000-0000-000000000010",
         "step_result_id": "00000000-0000-0000-0000-000000000504",
         "step_id": "00000000-0000-0000-0000-000000000104",
-        "step_order": 3,
+        "step_order": 4,
         "attempt_no": 1,
         "file_id": "00000000-0000-0000-0000-000000000702",
         "ordinal": 0,
-        "source": "generated_output",
-        "name": "annual-review-report.docx",
+        "source": "declared_artifact",
+        "name": "Report Alex Example 2026-03-17.docx",
         "checksum": "sha256:annual-review-report",
         "size": 24576,
         "mimetype": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -842,14 +850,32 @@ Response:
       "flow_run_id": "00000000-0000-0000-0000-000000000301",
       "flow_id": "00000000-0000-0000-0000-000000000001",
       "tenant_id": "00000000-0000-0000-0000-000000000010",
+      "step_result_id": "00000000-0000-0000-0000-000000000502",
+      "step_id": "00000000-0000-0000-0000-000000000102",
+      "step_order": 2,
+      "attempt_no": 1,
+      "file_id": "00000000-0000-0000-0000-000000000703",
+      "ordinal": 0,
+      "source": "declared_artifact",
+      "name": "Summary Alex Example 2026-03-17.pdf",
+      "checksum": "sha256:annual-review-summary",
+      "size": 18432,
+      "mimetype": "application/pdf",
+      "file_type": "document",
+      "availability": "available"
+    },
+    {
+      "flow_run_id": "00000000-0000-0000-0000-000000000301",
+      "flow_id": "00000000-0000-0000-0000-000000000001",
+      "tenant_id": "00000000-0000-0000-0000-000000000010",
       "step_result_id": "00000000-0000-0000-0000-000000000504",
       "step_id": "00000000-0000-0000-0000-000000000104",
-      "step_order": 3,
+      "step_order": 4,
       "attempt_no": 1,
       "file_id": "00000000-0000-0000-0000-000000000702",
       "ordinal": 0,
-      "source": "generated_output",
-      "name": "annual-review-report.docx",
+      "source": "declared_artifact",
+      "name": "Report Alex Example 2026-03-17.docx",
       "checksum": "sha256:annual-review-report",
       "size": 24576,
       "mimetype": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -865,6 +891,111 @@ Response:
   "updated_at": "2026-03-17T10:06:15Z"
 }
 ```
+
+#### What a run delivers
+
+A run delivers texts and documents. The flow author marks each text, Word or
+PDF step whose output the run returns with `output_config.deliverable`, and
+gives it a label. The last step counts too when its output is text or a
+document; when the last step sends the run's result
+([Sending the run result to a receiver](#sending-the-run-result-to-a-receiver)),
+the step before it counts in its place. The run contract lists them in
+`deliverables` before the run starts, and a completed run lists them, in step
+order, in `deliverables`. Each entry has a `kind`:
+
+```json
+{
+  "deliverables": [
+    {
+      "kind": "text",
+      "step_id": "00000000-0000-0000-0000-000000000101",
+      "step_order": 1,
+      "label": "Notes",
+      "output_type": "text",
+      "delivery": "payload"
+    },
+    {
+      "kind": "artifact",
+      "step_id": "00000000-0000-0000-0000-000000000102",
+      "step_order": 2,
+      "label": "Summary",
+      "output_type": "pdf",
+      "files": [
+        {
+          "file_id": "00000000-0000-0000-0000-000000000703",
+          "name": "Summary Alex Example 2026-03-17.pdf"
+        }
+      ]
+    },
+    {
+      "kind": "artifact",
+      "step_id": "00000000-0000-0000-0000-000000000104",
+      "step_order": 4,
+      "label": "Report",
+      "output_type": "docx",
+      "files": [
+        {
+          "file_id": "00000000-0000-0000-0000-000000000702",
+          "name": "Report Alex Example 2026-03-17.docx"
+        }
+      ]
+    }
+  ]
+}
+```
+
+Each `files` entry has the same fields as `result_files`; the example shortens
+them. Fetch each one with its `file_id` as in step 11.
+
+- `kind` is `text` or `artifact`. Switch on it, and skip a kind you do not
+  know: more may be added.
+- A `text` entry names the text and has no `files`: the text is the step's
+  output, read with the step's result (step 10). `delivery` is `payload`.
+- `deliverables` is empty until the run completes, and empty for a flow that
+  delivers no text or document.
+- An `artifact` entry's `files` holds only the step's documents from its
+  current attempt. `result.files` keeps every current file of the last step,
+  which can include a text file beside the document.
+- A marked document step whose document is missing is listed with
+  `files: []`. On the last step, reading the run fails, as before, only when
+  the step left no file at all; when it left only a text file, `result.files`
+  holds that file and its deliverable lists `files: []`.
+- `result` and `result_files` are unchanged, so a client that reads only the
+  last document keeps working.
+
+To mark a step, set `output_config.deliverable` on a text, Word or PDF step:
+
+```json
+{
+  "output_config": {
+    "deliverable": {
+      "label": "Standup",
+      "file_name": "Standup {{ flow_input.Team }}"
+    }
+  }
+}
+```
+
+- `label` is one line of at most 120 characters, shown as written, so it
+  cannot hold `{{` or `}}`.
+- `file_name` is optional, and only for a Word or PDF step: one line of at
+  most 200 characters of fixed text
+  and `{{ flow_input.<field> }}` for fields of the flow's form. Nothing else
+  between `{{ }}` is allowed, nor a field whose name marks it as sensitive,
+  such as `password` or `token`, nor the form's run-date field: the run's day
+  is already in every name. Publishing also refuses fixed text that reads as
+  a credential for an ordinary form value, such as `Basic plan` or `token=`.
+- The run's day is added after the name, as for every document:
+  `Standup Eneo 2026-11-19.docx`. Characters a file name cannot hold become
+  spaces. When a value, or the whole filled-in name, reads as a credential or
+  is longer than 1,000 characters, or nothing is left, the document is named
+  by its label and the day: `Standup 2026-11-19.docx`. A label with nothing
+  a file name can hold, such as `///`, gives `Dokument 2026-11-19.docx`. An
+  empty field is filled in as empty.
+- Documents of one type that would share a name all carry `Steg <n>`.
+- Saving a step whose output cannot be a deliverable (JSON, a mapping of
+  speakers, or a request the step sends) drops the mark, and saving a text
+  step drops its `file_name`; publishing or importing either refuses it.
 
 ### 10. List and filter step output
 
@@ -888,7 +1019,7 @@ Response:
     "flow_id": "00000000-0000-0000-0000-000000000001",
     "tenant_id": "00000000-0000-0000-0000-000000000010",
     "step_id": "00000000-0000-0000-0000-000000000104",
-    "step_order": 3,
+    "step_order": 4,
     "assistant_id": "00000000-0000-0000-0000-000000000201",
     "status": "completed",
     "input_payload_json": {
@@ -903,12 +1034,12 @@ Response:
         "tenant_id": "00000000-0000-0000-0000-000000000010",
         "step_result_id": "00000000-0000-0000-0000-000000000504",
         "step_id": "00000000-0000-0000-0000-000000000104",
-        "step_order": 3,
+        "step_order": 4,
         "attempt_no": 1,
         "file_id": "00000000-0000-0000-0000-000000000702",
         "ordinal": 0,
-        "source": "generated_output",
-        "name": "annual-review-report.docx",
+        "source": "declared_artifact",
+        "name": "Report Alex Example 2026-03-17.docx",
         "checksum": "sha256:annual-review-report",
         "size": 24576,
         "mimetype": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -1115,7 +1246,7 @@ Drive the UI from the typed final result, step details, artifact links, and stat
 2. Treat `structured.value` as authored data governed by that run's `flow_version` and `structured.output_contract`; do not infer another envelope inside it.
 3. For `artifact`, use the file id from `result.files`, then call `runtime_paths.artifact_signed_url_template` to get a short-lived download URL.
 4. Use `inline_text` as complete exact text. A `file_backed_text` preview is only a bounded prefix. Download `file` through `runtime_paths.artifact_signed_url_template` only when its availability is `available`; when it is `content_purged`, the complete text is unavailable and the artifact request returns `410`.
-5. Treat `outbound_http.delivery_status: delivered` as a receipt, not as a copy of destination configuration or payload data.
+5. Read `outbound_http.delivery_status` as where the delivery stands (`pending`, `delivered` or `dead_lettered`), not as a copy of destination configuration or payload data.
 6. Call `runtime_paths.list_steps_template` only when the UI needs intermediate results, diagnostics, or step progress.
 7. `output_payload_json.text` is complete only when `output_payload_json.text_overflow` is absent; when present, `text` is a bounded preview and its single `generated_file_ids` entry identifies the current-attempt `generated_output` item in `result_files`.
 8. Download that file only when `availability` is `available`; `content_purged` leaves the preview incomplete and the artifact endpoint returns `410`. Final-result consumers should prefer the run-level `result`.
@@ -1643,7 +1774,7 @@ export type RunResult =
   | { kind: "file_backed_text"; file: ResultFile; preview: string }
   | { kind: "structured"; value: unknown; output_contract: unknown | null }
   | { kind: "artifact"; files: ResultFile[] }
-  | { kind: "outbound_http"; delivery_status: "delivered" };
+  | { kind: "outbound_http"; delivery_status: "pending" | "delivered" | "dead_lettered" };
 
 export interface FlowRun {
   id: string;
@@ -1972,6 +2103,154 @@ export class EneoFlows {
 }
 ```
 
+## Sending the run result to a receiver
+
+An HTTP POST step whose body mode is `run_result` sends the run's result to one
+fixed HTTPS address. It is sent once the run has completed, so a failing
+receiver never fails the run. The sending step reads nothing and holds no
+content: it calls no model, and what it sends is what the run delivers
+([What a run delivers](#what-a-run-delivers)).
+
+```json
+{
+  "url": "https://receiver.example.org/eneo/results",
+  "auth": { "mode": "bearer_token", "token": "<secret>" },
+  "body": { "mode": "run_result" }
+}
+```
+
+The request is `application/json` with the schema `eneo.flow_run_result.v1`:
+
+```json
+{
+  "schema": "eneo.flow_run_result.v1",
+  "flow_id": "00000000-0000-0000-0000-000000000001",
+  "run_id": "00000000-0000-0000-0000-000000000101",
+  "run_created_at": "2026-11-20T08:00:00+00:00",
+  "run_completed_at": "2026-11-20T08:05:00+00:00",
+  "run_label": "Weekly stand-up",
+  "run_date": "2026-11-20",
+  "deliverables": [
+    {
+      "kind": "text",
+      "step_id": "00000000-0000-0000-0000-000000000201",
+      "step_order": 2,
+      "label": "Minutes",
+      "output_type": "text",
+      "text": "# Minutes\n\n- Decision: ship on Friday"
+    },
+    {
+      "kind": "artifact",
+      "step_id": "00000000-0000-0000-0000-000000000202",
+      "step_order": 3,
+      "label": "Minutes for the archive",
+      "output_type": "docx",
+      "files": [
+        {
+          "file_id": "00000000-0000-0000-0000-000000000301",
+          "name": "Minutes for the archive 2026-11-20.docx",
+          "mimetype": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          "size": 18234,
+          "checksum": "3f9a5c1e0b7d4a2f8c6e1d9b0a4f7e2c5b8d1a6f3e0c9b2d7a4f1e8c5b2a9d6f",
+          "content_base64": "UEsDBBQ..."
+        }
+      ]
+    }
+  ]
+}
+```
+
+- `run_label` is the run's name, or `null` when it has none. `run_date` is the
+  run's day: the date it was given, otherwise the UTC day it was created. The
+  run's file names carry the same day.
+- `deliverables` lists, in step order, what the run delivers, as the run's
+  `deliverables` does, but with the content inline. Switch on `kind` and skip
+  a kind you do not know. `label` is `null` for an unmarked step without a
+  name.
+- A `text` entry carries the step's whole text in `text`, and has no `files`.
+  Each text is sent whole, also a text too long to keep inline in its step
+  result, which Eneo keeps in a file.
+- An `artifact` entry carries the step's document files. Each file has
+  `file_id`, `name`, `mimetype`, `size`, `checksum` (SHA-256 of the bytes, as
+  64 lowercase hex digits) and the bytes in `content_base64`. Check each file
+  against its `size` and `checksum`.
+- The texts and files of one result hold at most 20 MiB together, counted
+  before base64. Base64 makes a file about a third larger, so a body of files
+  at the 20 MiB cap is about 28 MB. Texts grow when they are written as JSON:
+  a quote, a backslash or a line break takes two bytes, and most other control
+  characters six. A result with long texts can therefore be larger than 28 MB.
+- A result is never sent in part. A result over 20 MiB, a document step that
+  left no file, or a file whose bytes are corrupt dead-letters the delivery
+  without a request, and Eneo does not try again. A file whose bytes are
+  missing from the store spends one attempt without a request. If attempts
+  remain, the next one dead-letters the delivery; found on the last attempt,
+  the delivery is dead-lettered at once. A store that does not answer spends an
+  attempt, and the delivery is tried again later.
+- Headers may read run data; the address may not. Content-Type is set by the
+  mode and cannot be authored.
+- The sending step's `output_type` is `text`; saving, publishing or importing
+  refuses any other type. It takes no upload: saving or publishing it with
+  `input_config.runtime_input` answers `400`, naming that field.
+
+**Publishing.** The sending step needs something to send: a text or document
+step marked as a deliverable, or a text or document step right before it.
+Without one, publishing answers `400` with `flow_run_result_no_deliverables`,
+and `context.step_order` names the sending step. Mark a text or document step
+as a deliverable, or add one right before that step, then publish again. A
+draft without one can still be saved.
+
+**Receiver contract.** Answer `2xx` once the result is stored. Delivery is at
+least once: the same result can arrive again with the same `Idempotency-Key`
+header, which stays the same on every attempt and on a redelivery. A `4xx`
+other than `408` and `429` refuses the result: the delivery ends in dead
+letter at once. A `5xx`, `408`, `429`, a redirect (it is not followed), or no
+answer within the step's timeout (30 seconds unless the author set another)
+is retried: five attempts in all, waiting 30, 120, 300 and 900 seconds
+between them. After the last failed attempt the delivery ends in dead letter.
+A dead-lettered result is one Eneo has no confirmation of: the receiver may
+have stored it while its answer was lost. An audit row is written before every
+request is sent, with the receiver's host, the delivery and its attempt, and the
+`step_ids` and `file_ids` it sends. It holds no label, file name or content.
+
+### Receiving the result
+
+A common receiver is a team page that keeps one record per meeting:
+
+- **Token.** Compare the token Eneo sends with the one you expect in constant
+  time. The step sends a bearer token (`bearer_token`), an API key in a header
+  you name (`api_key`, `X-API-Key` unless set) or basic auth (`basic_auth`).
+  Agree on one with the flow author.
+- **Duplicates.** Skip a result whose `run_id` you already have, and answer
+  `200`. The `Idempotency-Key` header is the same for every attempt of one
+  delivery and on a redelivery, so it works as a key too.
+- **What to store.** Store each text by its `step_id` (or `step_order`), and
+  each file by its `file_id`, after checking its `size` and `checksum`.
+  `label`, `run_label` and file names are for display only: two of them can be
+  equal. Skip a `kind` you do not know.
+- **Answer.** Store the result and answer `2xx` within the step's timeout; do
+  slow work afterwards. Answer `5xx` for a problem that will pass. A `4xx`
+  other than `408` and `429` is final: Eneo does not send the result again.
+- **Body size.** Size the limit at the receiver and at any proxy in front of
+  it for the content you expect, counted as above. A `413` for a body over
+  the limit is final, so Eneo does not send that result again.
+
+**Where it stands.** `FlowRunPublic.result.delivery_status` is `pending`,
+`delivered` or `dead_lettered`, and `webhook_deliveries` on the run detail
+lists each delivery with its number of attempts. To poll without reading
+content, `GET /runs/{run_id}/status/` carries the latest delivery as
+`result_delivery`, with a `state`: `sending` (not tried yet, being sent, or
+the next attempt is due), `retry_scheduled` (an attempt failed and the next is
+at `next_delivery_at`), `delivered` or `dead_lettered`. The detail's
+`webhook_deliveries` carry the same `state`. A dead-lettered result can be sent again with
+`POST /api/v1/flows/{id}/runs/{run_id}/webhook-deliveries/{delivery_id}/redeliver/`
+and the body `{"expected_dead_lettered_at": "<dead_lettered_at from the run>"}`.
+It needs edit access to the flow and returns the delivery, now pending again
+with a fresh set of attempts. A delivery that is not dead-lettered, or whose
+dead letter has changed since it was read, answers `409`
+(`flow_run_webhook_redelivery_conflict`, with the reason in `context.reason`).
+A run whose pinned version fails its integrity check answers `400`
+(`flow_definition_checksum_mismatch`); do not retry it.
+
 ## Testing an authored HTTP step
 
 `POST /api/v1/flows/{id}/http-test` requires the saved `step_id` and authored
@@ -1992,6 +2271,10 @@ an unavailable encryption key returns `503`. A missing or wrong key cannot
 resolve a stored credential and no request is sent. Stored auth credentials and
 headers marked secret are encrypted with authenticated Fernet encryption; public
 Flow configurations expose stored-secret references instead of the values.
+
+A step whose body mode is `run_result` cannot be tested this way: the test
+answers `success: false` with `HTTP_RUN_RESULT_NOT_TESTABLE` and sends nothing.
+Start a run to try the receiver.
 
 The test returns status, elapsed time and a request preview with whole secret
 header values redacted. Credential-bearing tests do not read or preview the
@@ -2017,13 +2300,13 @@ A finished run exposes its output in two places, and which one you use depends o
 
 `run.result` is the typed final result and is the value to render. It is a closed discriminated union on `kind`:
 
-| `result.kind`      | What it means                                                          | How to consume it                                                                                                                                                             |
-| ------------------ | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `inline_text`      | Plain text small enough to be returned in the response                 | Read `text` directly                                                                                                                                                          |
-| `file_backed_text` | Plain text too large to inline; it was written to a file instead       | `preview` is a bounded prefix, never the whole text. Check `file.availability`, then download `file` through the signed-URL endpoint                                          |
-| `structured`       | JSON matching the final step's output contract                         | Read `value`. `output_contract` is the schema that value satisfies, interpreted with the run's pinned `flow_version`                                                          |
-| `artifact`         | One or more generated files, typically DOCX or PDF                     | For each entry in `files`, check `availability`, then request a signed URL and `GET` it with no auth header                                                                   |
-| `outbound_http`    | The flow posted the result to a destination the flow author configured | Nothing to download. `delivery_status` is always `delivered`, because the result only exists once delivery succeeded; use `webhook_deliveries` on the run for attempt history |
+| `result.kind`      | What it means                                                          | How to consume it                                                                                                                                                                                                                                                                                             |
+| ------------------ | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `inline_text`      | Plain text small enough to be returned in the response                 | Read `text` directly                                                                                                                                                                                                                                                                                          |
+| `file_backed_text` | Plain text too large to inline; it was written to a file instead       | `preview` is a bounded prefix, never the whole text. Check `file.availability`, then download `file` through the signed-URL endpoint                                                                                                                                                                          |
+| `structured`       | JSON matching the final step's output contract                         | Read `value`. `output_contract` is the schema that value satisfies, interpreted with the run's pinned `flow_version`                                                                                                                                                                                          |
+| `artifact`         | One or more generated files, typically DOCX or PDF                     | For each entry in `files`, check `availability`, then request a signed URL and `GET` it with no auth header                                                                                                                                                                                                   |
+| `outbound_http`    | The flow posted the result to a destination the flow author configured | Nothing to download. `delivery_status`: `delivered` means the receiver accepted the result, `pending` means sending is still going on (`result_delivery.state` on `/status/`), `dead_lettered` means Eneo has no confirmation that it arrived. The run is complete in all three. Attempt history is in `webhook_deliveries` on the run |
 
 `result.kind` is predictable before the run starts: the run contract's `final_output.output_type` (`text`, `json`, `pdf`, `docx`) and `final_output.delivery` tell you which branch to build the UI for.
 

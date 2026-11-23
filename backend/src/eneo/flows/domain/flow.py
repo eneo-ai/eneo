@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Annotated, Any, Literal, Optional, Self, TypeAlias, cast
 from uuid import UUID
 
@@ -144,10 +144,15 @@ class FlowStep(BaseModel):
 
     @field_validator("output_config")
     @classmethod
-    def _validate_retrieval_policy(
+    def _validate_output_config(
         cls, value: FlowPersistedJsonObject | None
     ) -> FlowPersistedJsonObject | None:
+        # Imported here: the deliverable reads template expressions, and the
+        # module that owns their pattern loads this one.
+        from eneo.flows.domain.step_deliverable import parse_flow_step_deliverable
+
         parse_flow_step_retrieval_policy(value)
+        parse_flow_step_deliverable(value)
         return value
 
 
@@ -280,6 +285,17 @@ class FlowRunStatusSnapshot(BaseModel):
         cls, value: object
     ) -> FlowRunDispatchError | None:
         return parse_flow_run_dispatch_error(value)
+
+
+def flow_run_day(*, run_date: date | None, created_at: datetime) -> date:
+    """The day a run is filed under: its own day, from the form field with
+    that role, else the day it was created. Its documents' names and its sent
+    result both carry it."""
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
+    # Eneo has no user or tenant time zone: a run without a day of its own is
+    # dated by its UTC day.
+    return run_date or created_at.astimezone(timezone.utc).date()
 
 
 class FlowRun(FlowRunStatusSnapshot):

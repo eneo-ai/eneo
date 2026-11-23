@@ -332,6 +332,7 @@ def build_flow_executor(user, *, runtime_actor: FlowRunActor | None = None):
         flow_name="Nämndmöte",
         steps=(),
         run_created_at=datetime(2026, 9, 23, 12, tzinfo=timezone.utc),
+        form_values={},
     )
     return executor, flow_repo, flow_run_repo, flow_version_repo
 
@@ -440,6 +441,7 @@ def build_step_executor(
         flow_name="Nämndmöte",
         steps=(),
         run_created_at=datetime(2026, 9, 23, 12, tzinfo=timezone.utc),
+        form_values={},
     )
     return executor, flow_repo, flow_run_repo, flow_version_repo
 

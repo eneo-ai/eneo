@@ -150,6 +150,15 @@ describe("flowRefusalMessage", () => {
     expect(message).toBe(`Steg 2: Skriv svar: ${t("flow_error_typed_io_tool_not_allowed")}`);
   });
 
+  it("says nothing is chosen to send on the step that sends, as the draft check does", () => {
+    const code = "flow_run_result_no_deliverables";
+    const error = refusal(code, { issue_code: code, step_order: 2 });
+    expect(flowRefusalMessage(error, steps, t)).toBe(
+      "Steg 2: Skriv svar: Inget är valt att skicka. Välj eller lägg till ett steg som skapar text eller dokument före utskicket."
+    );
+    expect(refusalStep(error, steps)).toEqual({ step: steps[1], anchor: null });
+  });
+
   it("says a publication refusal in the editor's words for the issue the core names", () => {
     // The core's own message is English: "Step 2: output_config must be an object…".
     const error = refusal(

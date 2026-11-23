@@ -1,3 +1,5 @@
+import type { components } from "@/lib/api/schema";
+
 import {
   isJsonObject,
   objectOf,
@@ -5,7 +7,8 @@ import {
   type JsonObject,
   type OutputMode,
   type ReviewPolicy,
-  type StepConfig
+  type StepConfig,
+  type StepDeliverable
 } from "./step-types";
 
 /**
@@ -252,13 +255,18 @@ export function withLongMaterial(inputConfig: unknown, on: boolean): JsonObject 
 
 /**
  * Whether the core accepts long material on the step: a completion step
- * (`pass_through` or `http_post`) that does not read its material by
- * section, per item or per file (`step_mapped_execution.py`).
+ * (`pass_through` or `http_post` with a model) that does not read its
+ * material by section, per item or per file (`step_mapped_execution.py`).
  */
 export function longMaterialEligibility(
-  step: Pick<StepConfig, "output_mode" | "input_config">
+  step: Pick<StepConfig, "output_mode" | "input_config" | "output_config">
 ): "eligible" | "output" | "text_processing" | "mapped" {
-  if (step.output_mode !== "pass_through" && step.output_mode !== "http_post") return "output";
+  if (
+    (step.output_mode !== "pass_through" && step.output_mode !== "http_post") ||
+    !usesCompletionModel(step)
+  ) {
+    return "output";
+  }
   const config = objectOf(step.input_config);
   if (config.text_processing !== undefined && config.text_processing !== null) {
     return "text_processing";
@@ -287,7 +295,8 @@ export function isSecretSentinel(value: unknown): value is SecretSentinel {
 }
 
 export type HttpAuthMode = "none" | "bearer_token" | "api_key" | "basic_auth";
-export type HttpBodyMode = "auto" | "json_template" | "text_template" | "none";
+/** `run_result` sends the finished run's result, built by Eneo, once the run is complete. */
+export type HttpBodyMode = components["schemas"]["HttpBodyMode"];
 
 export const HTTP_CONFIG_KEYS = [
   "url",
@@ -302,6 +311,69 @@ export type HttpHeader = { name: string; value: SecretValue; secret: boolean };
 
 /** A row the author left without a name is no header: it is not sent, checked or counted. */
 export const headerSent = (header: HttpHeader) => header.name.trim() !== "";
+
+/** True when the URL is https:// with its host written out: the core sends a credential only there. */
+export function httpsHostFixed(url: string): boolean {
+  return /^https:\/\/[^/?#{]+(?:[/?#]|$)/i.test(url.trim());
+}
+
+/**
+ * True when a body that sends the run's result may go to the URL: one fixed
+ * https address with no variable anywhere, so run data cannot choose where
+ * the result goes (the core's rule).
+ */
+export function runResultUrlFixed(url: string): boolean {
+  return httpsHostFixed(url) && !url.includes("{{");
+}
+
+/**
+ * The message for what is wrong with a call's address, or null. A step that
+ * sends the run's result names its own rule for any address it cannot send
+ * to: the general one (http:// when the step does not sign in) does not hold
+ * for it.
+ */
+export function httpUrlProblemKey(
+  url: string,
+  sendsRunResult: boolean
+):
+  | "flow_step_editor_http_url_missing"
+  | "flow_step_editor_http_url_invalid"
+  | "flow_step_editor_http_run_result_url_fixed"
+  | null {
+  const problem = httpUrlProblem(url);
+  if (problem === "missing") return "flow_step_editor_http_url_missing";
+  if (sendsRunResult && (problem || !runResultUrlFixed(url))) {
+    return "flow_step_editor_http_run_result_url_fixed";
+  }
+  return problem ? "flow_step_editor_http_url_invalid" : null;
+}
+
+/**
+ * Whether the step sends the run's result: an outbound call whose body Eneo
+ * builds once the run is complete (the core's `sends_run_result`). It sends
+ * the run's deliverables once the run has completed.
+ */
+export function sendsRunResult(step: {
+  output_mode: OutputMode;
+  output_config?: unknown;
+}): boolean {
+  return (
+    step.output_mode === "http_post" &&
+    readHttpConfig(step.output_config, "output").body.mode === "run_result"
+  );
+}
+
+/**
+ * Where the call names a Content-Type header, which a body that sends the
+ * run's result sets itself: the API key's header name, or a header that is sent.
+ */
+export function contentTypeHeaderPart(http: HttpConfig): "auth" | "more" | null {
+  const isContentType = (name: string) => name.trim().toLowerCase() === "content-type";
+  if (http.auth.mode === "api_key" && isContentType(http.auth.header_name)) return "auth";
+  return http.custom_headers.some((header) => headerSent(header) && isContentType(header.name))
+    ? "more"
+    : null;
+}
 
 export type HttpConfig = {
   url: string;
@@ -379,7 +451,8 @@ export function readHttpConfig(config: unknown, direction: "input" | "output"): 
         bodyMode === "auto" ||
         bodyMode === "json_template" ||
         bodyMode === "text_template" ||
-        bodyMode === "none"
+        bodyMode === "none" ||
+        bodyMode === "run_result"
           ? bodyMode
           : defaults.body.mode,
       template: typeof body.template === "string" ? body.template : null
@@ -412,8 +485,11 @@ export function withHttpConfig(config: unknown, http: HttpConfig): JsonObject {
   next.url = http.url;
   next.auth = { ...http.auth };
   next.timeout_seconds = http.timeout_seconds;
+  // Eneo builds the body that sends the run's result; the core refuses a template there.
   next.body =
-    http.body.template === undefined || http.body.template === null
+    http.body.template === undefined ||
+    http.body.template === null ||
+    http.body.mode === "run_result"
       ? { mode: http.body.mode }
       : { mode: http.body.mode, template: http.body.template };
   next.custom_headers = http.custom_headers.map((header) => ({ ...header }));
@@ -706,12 +782,26 @@ export function withSpeakerMapping(outputConfig: unknown, mapping: SpeakerMappin
 // Citations and the retrieval policy: both only for AI-written output.
 // ---------------------------------------------------------------------------
 
-export function outputModeUsesCompletionModel(mode: OutputMode): boolean {
-  return mode === "pass_through" || mode === "http_post" || mode === "speaker_mapping";
+/**
+ * Whether the step calls an AI model: its mode answers with one, unless it
+ * sends the run's result, which Eneo builds without one. The one owner of
+ * the rule; the core keeps the same (`may_call_completion_provider`).
+ */
+export function usesCompletionModel(step: {
+  output_mode: OutputMode;
+  output_config?: unknown;
+}): boolean {
+  const mode = step.output_mode;
+  return (
+    (mode === "pass_through" || mode === "http_post" || mode === "speaker_mapping") &&
+    !sendsRunResult(step)
+  );
 }
 
-export function supportsCitations(step: Pick<StepConfig, "output_type" | "output_mode">): boolean {
-  return step.output_type === "text" && outputModeUsesCompletionModel(step.output_mode);
+export function supportsCitations(
+  step: Pick<StepConfig, "output_type" | "output_mode" | "output_config">
+): boolean {
+  return step.output_type === "text" && usesCompletionModel(step);
 }
 
 export function readCitationsOn(outputConfig: unknown): boolean {
@@ -744,6 +834,94 @@ export function withRetrievalPolicy(
   const next = objectOf(outputConfig);
   if (mode === null) delete next.retrieval_policy;
   else next.retrieval_policy = { version: 1, mode };
+  return Object.keys(next).length > 0 ? next : null;
+}
+
+// ---------------------------------------------------------------------------
+// Deliverable: `output_config.deliverable` marks a step whose text or
+// document is one of the run's results, with a label and, for a document, an
+// optional file name.
+// ---------------------------------------------------------------------------
+
+/** The core's bounds for a deliverable's label and file name, in characters. */
+export const DELIVERABLE_LABEL_MAX = 120;
+export const DELIVERABLE_FILE_NAME_MAX = 200;
+
+/**
+ * `value` made one line as the core makes a deliverable's label (`one_line_start`):
+ * NFC, characters that break the line or cannot be seen go, whitespace
+ * collapses to single spaces, and the text is cut to `max` characters.
+ */
+export function oneLineStart(value: string, max = DELIVERABLE_LABEL_MAX): string {
+  const visible = Array.from(value.normalize("NFC"))
+    .filter((char) => /\s/u.test(char) || !/[\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}]/u.test(char))
+    .join("");
+  const line = visible.trim().split(/\s+/u).join(" ");
+  return Array.from(line).slice(0, max).join("").trimEnd();
+}
+
+/**
+ * Whether the step's output can be one of the run's deliverables: text or a
+ * document of its own, never a request it sends or a mapping of speakers
+ * (the core's `step_can_be_deliverable`).
+ */
+export function stepCanBeDeliverable(
+  step: Pick<StepConfig, "output_type" | "output_mode">
+): boolean {
+  return (
+    ["text", "docx", "pdf"].includes(step.output_type) &&
+    step.output_mode !== "http_post" &&
+    step.output_mode !== "speaker_mapping"
+  );
+}
+
+/**
+ * Whether the step's output is a file of the run: a deliverable document,
+ * the only kind that has a file name (the core's `step_delivers_artifact`).
+ */
+export function stepDeliversArtifact(
+  step: Pick<StepConfig, "output_type" | "output_mode">
+): boolean {
+  return stepCanBeDeliverable(step) && step.output_type !== "text";
+}
+
+/**
+ * `output_config` with the deliverable's name and file name made one line,
+ * as a save sends them (not cut: a name over the bound is refused and said).
+ */
+export function withTidyDeliverable(outputConfig: unknown): unknown {
+  const deliverable = readDeliverable(outputConfig);
+  if (!deliverable) return outputConfig;
+  const tidy = (value: string) => oneLineStart(value, Number.POSITIVE_INFINITY);
+  const label = tidy(deliverable.label);
+  const fileName = deliverable.file_name ? tidy(deliverable.file_name) : undefined;
+  if (label === deliverable.label && fileName === (deliverable.file_name || undefined)) {
+    return outputConfig;
+  }
+  return withDeliverable(outputConfig, fileName ? { label, file_name: fileName } : { label });
+}
+
+export function readDeliverable(outputConfig: unknown): StepDeliverable | null {
+  const stored = objectOf(outputConfig).deliverable;
+  if (!isJsonObject(stored)) return null;
+  const label = typeof stored.label === "string" ? stored.label : "";
+  return typeof stored.file_name === "string" && stored.file_name
+    ? { label, file_name: stored.file_name }
+    : { label };
+}
+
+/** `output_config` with the deliverable set, or removed for null; an empty file name is left out. */
+export function withDeliverable(
+  outputConfig: unknown,
+  deliverable: StepDeliverable | null
+): JsonObject | null {
+  const next = objectOf(outputConfig);
+  if (deliverable === null) delete next.deliverable;
+  else {
+    next.deliverable = deliverable.file_name
+      ? { label: deliverable.label, file_name: deliverable.file_name }
+      : { label: deliverable.label };
+  }
   return Object.keys(next).length > 0 ? next : null;
 }
 

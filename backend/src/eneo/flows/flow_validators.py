@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Set as AbstractSet
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from enum import Enum, StrEnum
@@ -29,10 +30,21 @@ from eneo.flows.domain.flow_step_validation import (
     FlowStepValidationView,
     flow_step_validation_views_from_flow_steps,
 )
+from eneo.flows.domain.run_deliverables import (
+    StepDeliverableFacts,
+    deliverable_positions,
+)
 from eneo.flows.domain.runtime_input import build_runtime_input_config
 from eneo.flows.domain.speaker_mapping_config import (
     speaker_mapping_without_transcript,
     validate_speaker_mapping_output_config,
+)
+from eneo.flows.domain.step_deliverable import (
+    FLOW_STEP_DELIVERABLE_KEY,
+    FlowStepDeliverableError,
+    file_name_expressions,
+    form_field_read_by,
+    parse_flow_step_deliverable,
 )
 from eneo.flows.domain.step_mapped_execution import (
     FlowStepMappedExecutionConfigurationError,
@@ -52,7 +64,8 @@ from eneo.flows.enums import (
     FLOW_OUTPUT_TYPE_VALUES,
     FlowInputSource,
     FlowRuntimeInputFormat,
-    flow_output_mode_uses_completion_model,
+    step_can_be_deliverable,
+    step_delivers_artifact,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_authoring_spec import MAX_FLOW_AUTHORING_STEPS
@@ -69,6 +82,7 @@ from eneo.flows.flow_metadata import (
 )
 from eneo.flows.flow_review_policy import parse_flow_step_review_policy
 from eneo.flows.flow_run_input_envelope import FLOW_INPUT_TRANSCRIPTION_KEY
+from eneo.flows.flow_run_redaction import is_sensitive_key
 from eneo.flows.flow_validators_form import (
     validate_form_schema,
     validate_variable_alias_collisions,
@@ -90,7 +104,11 @@ from eneo.flows.flow_variable_definitions import (
     runtime_variable_shape,
     runtime_variables_for_step,
 )
-from eneo.flows.http_transport.step_configs import sends_http_config
+from eneo.flows.http_transport.step_configs import (
+    sends_http_config,
+    sends_run_result,
+    step_calls_completion_model,
+)
 from eneo.flows.input_binding_contract_rules import (
     FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
     InputBindingContractError,
@@ -122,6 +140,7 @@ from eneo.flows.output_processing import (
     validate_against_contract,
     validate_schema_syntax,
 )
+from eneo.flows.runtime.generated_file_names import file_name_reads_as_credential
 from eneo.flows.runtime.output_formats import resolve_format_spec
 from eneo.flows.source_identity import has_required_runtime_managed_source_fields
 from eneo.flows.step_chain_rules import iter_step_chain_violations
@@ -309,6 +328,9 @@ def publish_step_refusals(
             require_complete_template_fill_config=True,
         )
     ]
+    empty_result = _run_result_without_deliverables(steps)
+    if empty_result is not None:
+        refusals.append(empty_result)
     if not steps:
         code = FlowGraphIssueCode.FLOW_HAS_NO_STEPS.value
         refusals.append(
@@ -323,6 +345,41 @@ def publish_step_refusals(
     except BadRequestException as exc:
         refusals.append(exc)
     return refusals
+
+
+def _run_result_without_deliverables(
+    steps: Sequence[FlowStep],
+) -> FlowStepValidationError | None:
+    """The refusal of a flow whose last step sends the run's result while
+    the run delivers nothing for it to send. Only publish refuses it: a
+    draft may be saved before its steps are chosen."""
+    ordered = sorted(steps, key=lambda step: step.step_order)
+    if not ordered:
+        return None
+    sender = ordered[-1]
+    if not sends_run_result(sender.output_mode, sender.output_config):
+        return None
+    facts = [
+        StepDeliverableFacts(
+            output_type=step.output_type,
+            output_mode=step.output_mode,
+            marked=isinstance(step.output_config, Mapping)
+            and FLOW_STEP_DELIVERABLE_KEY in step.output_config,
+            sends_run_result=step is sender,
+        )
+        for step in ordered
+    ]
+    if deliverable_positions(facts):
+        return None
+    code = FlowApiErrorCode.RUN_RESULT_NO_DELIVERABLES.value
+    return FlowStepValidationError(
+        f"Step {sender.step_order} sends the run's result, but nothing is "
+        "chosen to send. Choose a text or document step, or add one, before "
+        "this step.",
+        step_order=sender.step_order,
+        code=code,
+        context={"issue_code": code, "step_order": sender.step_order},
+    )
 
 
 def collect_step_graph_issues(
@@ -404,6 +461,11 @@ def collect_step_graph_issues(
         {field.name: field.type.value for field in form_schema.fields}
         if form_schema is not None
         else {}
+    )
+    run_date_field_names = frozenset(
+        field.name
+        for field in (form_schema.fields if form_schema is not None else ())
+        if field.role == "run_date"
     )
     run_input = flow_run_input(
         form_fields=bool(form_field_names),
@@ -556,6 +618,21 @@ def collect_step_graph_issues(
                     step_order=step.step_order,
                 )
             )
+        # A step that sends the run's result holds no content of its own;
+        # another output type would ask it to parse or render one.
+        if step.output_type != "text" and sends_run_result(
+            step.output_mode, step.output_config
+        ):
+            issues.append(
+                _flow_step_issue(
+                    code=FlowGraphIssueCode.FLOW_STEP_INVALID,
+                    message=(
+                        f"Step {step.step_order}: a step that sends the run's "
+                        "result requires output_type 'text'."
+                    ),
+                    step_order=step.step_order,
+                )
+            )
         text_document_pass_through_error = text_document_pass_through_violation(
             step_order=step.step_order,
             input_type=step.input_type,
@@ -696,7 +773,10 @@ def collect_step_graph_issues(
                     lambda: _validate_output_contract_compatibility(step=step),
                 )
 
-        if step.input_bindings is not None:
+        # A step that sends the run's result reads no step input.
+        if step.input_bindings is not None and not sends_run_result(
+            step.output_mode, step.output_config
+        ):
             input_bindings = step.input_bindings
             if require_complete_template_fill_config:
                 _capture_flow_step_validation(
@@ -731,6 +811,17 @@ def collect_step_graph_issues(
                     publish_strict=require_complete_template_fill_config,
                 ),
             )
+        _capture_flow_step_validation(
+            issues,
+            FlowGraphIssueCode.FLOW_STEP_INVALID,
+            lambda: _validate_deliverable(
+                step,
+                form_field_names=(
+                    form_field_names if require_complete_template_fill_config else None
+                ),
+                run_date_field_names=run_date_field_names,
+            ),
+        )
         if require_complete_template_fill_config:
             _capture_flow_step_validation(
                 issues,
@@ -1019,6 +1110,108 @@ def _validate_review_policy(step: FlowStepValidationView) -> None:
         ) from exc
 
 
+_DELIVERABLE_PATH = f"output_config.{FLOW_STEP_DELIVERABLE_KEY}"
+_DELIVERABLE_LABEL_PATH = f"{_DELIVERABLE_PATH}.label"
+_DELIVERABLE_FILE_NAME_PATH = f"{_DELIVERABLE_PATH}.file_name"
+
+
+def _validate_deliverable(
+    step: FlowStepValidationView,
+    *,
+    form_field_names: AbstractSet[str] | None,
+    run_date_field_names: AbstractSet[str],
+) -> None:
+    """A deliverable sits on a step whose text or document can be delivered,
+    a file name only on a document, and the file name reads only fields of
+    the form that may name a file. The fields are
+    judged when ``form_field_names`` is given, which publishing and importing
+    do; a missing form then has no field to read."""
+
+    def refuse(message: str, *, path: str) -> FlowStepValidationError:
+        return FlowStepValidationError(
+            f"Step {step.step_order}: {path} {message}",
+            step_order=step.step_order,
+            context={"field": path},
+        )
+
+    try:
+        deliverable = parse_flow_step_deliverable(step.output_config)
+    except FlowStepDeliverableError as exc:
+        raise FlowStepValidationError(
+            f"Step {step.step_order}: {exc}",
+            step_order=step.step_order,
+            context={"field": exc.field},
+        ) from exc
+    if deliverable is None:
+        return
+    if not step_can_be_deliverable(
+        output_type=step.output_type, output_mode=step.output_mode
+    ):
+        raise refuse(
+            "is only for a step whose output is text or a document of its own "
+            "(not JSON, a mapping of speakers or a request it sends). Remove it, "
+            "or change the step's output.",
+            path=_DELIVERABLE_PATH,
+        )
+    if deliverable.file_name is not None and not step_delivers_artifact(
+        output_type=step.output_type, output_mode=step.output_mode
+    ):
+        raise refuse(
+            "names a file, and only a document step has one. Remove it; text "
+            "is delivered under its label.",
+            path=_DELIVERABLE_FILE_NAME_PATH,
+        )
+    if "{{" in deliverable.label or "}}" in deliverable.label:
+        raise refuse(
+            "is shown as written and never filled in, so it cannot hold `{{` or "
+            "`}}`. Write the label as plain text; a form value belongs in "
+            "`file_name`.",
+            path=_DELIVERABLE_LABEL_PATH,
+        )
+    if deliverable.file_name is None or form_field_names is None:
+        return
+    expressions = file_name_expressions(deliverable.file_name)
+    if expressions is None:
+        raise refuse(
+            "has an unmatched `{{` or `}}`. Close the expression or remove the brace.",
+            path=_DELIVERABLE_FILE_NAME_PATH,
+        )
+    for expression in expressions:
+        field = form_field_read_by(expression)
+        if field is None:
+            raise refuse(
+                f"can read only a form field, as `{{{{ flow_input.<field> }}}}`; "
+                f"`{{{{ {expression} }}}}` is not one. Use a field of the "
+                "flow's form or fixed text.",
+                path=_DELIVERABLE_FILE_NAME_PATH,
+            )
+        if field not in form_field_names:
+            raise refuse(
+                f"reads `{field}`, which is not a field of the form. Add the "
+                "field to the form or remove it from the file name.",
+                path=_DELIVERABLE_FILE_NAME_PATH,
+            )
+        if field in run_date_field_names:
+            raise refuse(
+                f"reads `{field}`, the field that holds the run's date, and the "
+                "run's day is already added to every file name. Remove it from "
+                "the file name.",
+                path=_DELIVERABLE_FILE_NAME_PATH,
+            )
+        if is_sensitive_key(field):
+            raise refuse(
+                f"reads `{field}`, whose name marks it as sensitive, and a file "
+                "name stays visible in lists and downloads. Use another field.",
+                path=_DELIVERABLE_FILE_NAME_PATH,
+            )
+    if file_name_reads_as_credential(deliverable.file_name):
+        raise refuse(
+            "reads as a credential (such as `Basic …`, `Bearer …` or "
+            "`token=…`) for an ordinary form value. Reword the fixed text.",
+            path=_DELIVERABLE_FILE_NAME_PATH,
+        )
+
+
 def _validate_retrieval_policy(step: FlowStepValidationView) -> None:
     try:
         parse_flow_step_retrieval_policy(
@@ -1273,6 +1466,9 @@ def _validate_template_fill_config(
     # The syntax validator above establishes an object of exact expressions or
     # explicit empty values. Publishing additionally requires a known scalar.
     bindings = cast(dict[str, str], (step.output_config or {})["bindings"])
+    # The authored contract: a speaker step's fixed one has no scalar to fill a
+    # placeholder, and its walk would trade the placeholder's not-a-scalar
+    # refusal for an unknown-field one.
     output_contracts_by_order = {
         order: source.output_contract for order, source in steps_by_order.items()
     }
@@ -2114,7 +2310,12 @@ def _validate_binding_references(
             if referenced_order is not None
             else None
         )
-        if referenced_step is None or referenced_step.output_contract is None:
+        contract = (
+            referenced_step.effective_output_contract
+            if referenced_step is not None
+            else None
+        )
+        if contract is None:
             raise FlowStepValidationError(
                 f"Input binding path '{expression}' requires the referenced step to declare output_contract.",
                 code=FlowGraphIssueCode.FLOW_INPUT_BINDING_UNSUPPORTED_KEY.value,
@@ -2125,7 +2326,7 @@ def _validate_binding_references(
                 step_order=current_step_order,
             )
         _source_ref_schema(
-            contract=referenced_step.output_contract,
+            contract=contract,
             field_path=structured_path,
             current_step_order=current_step_order,
             path_label=f"input binding path '{expression}'",
@@ -2323,7 +2524,12 @@ def _validate_source_ref_contracts(
             steps_by_order=steps_by_order,
             step_ref_mapping=step_ref_mapping,
         )
-        if referenced_step is None or referenced_step.output_contract is None:
+        contract = (
+            referenced_step.effective_output_contract
+            if referenced_step is not None
+            else None
+        )
+        if contract is None:
             raise FlowStepValidationError(
                 f"Step {step.step_order}: compose_text structured source_refs require "
                 "the referenced step to declare output_contract.",
@@ -2332,7 +2538,7 @@ def _validate_source_ref_contracts(
                 step_order=step.step_order,
             )
         target_schema = _source_ref_schema(
-            contract=referenced_step.output_contract,
+            contract=contract,
             field_path=ref.field_path,
             current_step_order=step.step_order,
             path_label=f"source_ref field_path '{'.'.join(ref.field_path)}'",
@@ -2407,6 +2613,8 @@ def _validate_structured_source_ref(
             context=context,
             step_order=step.step_order,
         )
+    # The authored contract, as for a prompt: the run lowers these refs to the
+    # step's question, which resolves an array index (`speakers.0.name`).
     if producer.output_contract is not None and ref.field_path:
         _source_ref_schema(
             contract=producer.output_contract,
@@ -2531,6 +2739,16 @@ def _validate_runtime_input_publish_rules(*, step: FlowStepValidationView) -> No
     if not runtime_input.enabled:
         return
 
+    # A step that sends the run's result sends its deliverables and never reads
+    # an upload, so the run would ask for a file it drops.
+    if sends_run_result(step.output_mode, step.output_config):
+        raise FlowStepValidationError(
+            f"Step {step.step_order}: a step that sends the run's result cannot "
+            "take uploaded files (input_config.runtime_input).",
+            step_order=step.step_order,
+            context={"field": "input_config.runtime_input"},
+        )
+
     if step.output_mode == "transcribe_only" and runtime_input.input_format != "audio":
         raise FlowStepValidationError(
             f"Step {step.step_order}: transcribe_only steps require runtime_input.input_format 'audio'.",
@@ -2632,11 +2850,16 @@ def _validate_run_input_alias_reads(
 
     if run_input.free_text:
         return
-    sites = [
-        ("input_bindings.question", question_binding(step.input_bindings)),
-        ("prompt", step.prompt_template),
-        ("output_config", _template_text(step.output_config)),
-    ]
+    sites = (
+        []
+        if sends_run_result(step.output_mode, step.output_config)
+        # A step that sends the run's result reads no step input or prompt.
+        else [
+            ("input_bindings.question", question_binding(step.input_bindings)),
+            ("prompt", step.prompt_template),
+        ]
+    )
+    sites.append(("output_config", _template_text(step.output_config)))
     if step.input_source == "http_get":
         # The fetch's URL, headers and body are interpolated with the run
         # context like a question is.
@@ -2685,7 +2908,7 @@ def _validate_template_reads(
     template fills and tool arguments by theirs."""
 
     sites: list[tuple[str, str, int, frozenset[str]]] = []
-    if flow_output_mode_uses_completion_model(step.output_mode):
+    if step_calls_completion_model(step.output_mode, step.output_config):
         sites.append(
             (
                 "prompt",
@@ -2782,6 +3005,9 @@ def _validate_template_read(
             context={"field": field, "key": reference.expression},
             step_order=step_order,
         )
+    # The authored contract, not the effective one: the run resolves an array
+    # index in a prompt or request (`speakers.0.name`), which the contract walk
+    # below refuses, so a speaker step's fixed contract is not applied here.
     if producer.output_contract is not None and reference.structured_path:
         _source_ref_schema(
             contract=producer.output_contract,

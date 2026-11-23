@@ -172,6 +172,33 @@ describe("FlowRunCard", () => {
     expect(calls(STATUS)).toHaveLength(reads);
   });
 
+  it("stops at a finished run whose result is still being sent: its page follows that", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    answerRun(
+      makeRunSummary({
+        result_delivery: {
+          id: "delivery-1",
+          step_id: "step-1",
+          step_order: 1,
+          attempt_no: 1,
+          delivery_status: "pending",
+          delivery_attempts: 0,
+          next_delivery_at: null,
+          delivered_at: null,
+          dead_lettered_at: null,
+          created_at: "2026-10-21T08:01:07Z",
+          updated_at: "2026-10-21T08:01:07Z",
+          state: "sending"
+        }
+      }),
+      [{ order: 1, label: "Skicka", status: "completed" }]
+    );
+    renderCard();
+    await screen.findByText(messages.flow_runs_status_completed);
+    await act(() => vi.advanceTimersByTimeAsync(60_000));
+    expect([calls(STATUS).length, calls(GRAPH).length]).toEqual([1, 1]);
+  });
+
   it("shows a finished run's result, with a copy and the way to the whole run", async () => {
     answerRun(makeRunSummary(), [
       { order: 1, label: "Sammanfatta", status: "completed" },

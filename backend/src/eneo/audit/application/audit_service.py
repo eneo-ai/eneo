@@ -27,6 +27,8 @@ from eneo.jobs.task_models import TaskParams
 from eneo.main.request_context import get_request_context
 
 if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
     from eneo.feature_flag.feature_flag_service import FeatureFlagService
     from eneo.users.user import UserInDB
 
@@ -80,11 +82,14 @@ class AuditService:
         repository: AuditLogRepository,
         audit_config_service: Optional[AuditConfigService] = None,
         feature_flag_service: Optional["FeatureFlagService"] = None,
+        session: Optional["AsyncSession"] = None,
     ):
         super().__init__()
         self.repository = repository
         self.audit_config_service = audit_config_service
         self.feature_flag_service = feature_flag_service
+        # The session the two services above read through, when there is one.
+        self._session = session
 
     async def _should_log_action(self, tenant_id: UUID, action: ActionType) -> bool:
         """
@@ -105,6 +110,16 @@ class AuditService:
         if action in ALWAYS_AUDITED_ACTIONS:
             return True
 
+        session = self._session
+        if session is None or session.in_transaction():
+            return await self._configured_to_log(tenant_id, action)
+        # Autobegin is off. An event logged while a response streams comes
+        # after the request's transaction closed, so the reads need their own;
+        # without one they fail and the tenant's settings are not consulted.
+        async with session.begin():
+            return await self._configured_to_log(tenant_id, action)
+
+    async def _configured_to_log(self, tenant_id: UUID, action: ActionType) -> bool:
         # Stage 1: Check global feature flag
         if self.feature_flag_service:
             try:
@@ -204,7 +219,7 @@ class AuditService:
         if actor_type == ActorType.API_KEY:
             if actor_api_key_id is None:
                 raise ValueError("actor_api_key_id required for api_key actions")
-        elif actor_type != ActorType.SYSTEM and actor_id is None:
+        elif actor_type.requires_actor_id and actor_id is None:
             raise ValueError("actor_id required for non-system actions")
         metadata = _with_actor_snapshot(
             metadata, user=user, actor_type=actor_type, action=action
@@ -380,7 +395,7 @@ class AuditService:
         if actor_type == ActorType.API_KEY:
             if actor_api_key_id is None:
                 raise ValueError("actor_api_key_id required for api_key actions")
-        elif actor_type != ActorType.SYSTEM and actor_id is None:
+        elif actor_type.requires_actor_id and actor_id is None:
             raise ValueError("actor_id required for non-system actions")
         metadata = _with_actor_snapshot(
             metadata, user=user, actor_type=actor_type, action=action

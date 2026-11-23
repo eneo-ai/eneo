@@ -16,6 +16,7 @@ from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.actor_types import ActorType
 from eneo.audit.domain.audit_log import AuditLog
 from eneo.audit.domain.entity_types import EntityType
+from eneo.audit.domain.json_metadata import json_metadata
 from eneo.audit.domain.outcome import Outcome
 from eneo.audit.domain.removable_names import without_removable_names
 from eneo.audit.domain.repositories.audit_log_repository import (
@@ -122,7 +123,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
                 entity_id=audit_log.entity_id,
                 timestamp=audit_log.timestamp,
                 description=description,
-                log_metadata=metadata,
+                log_metadata=json_metadata(metadata),
                 outcome=audit_log.outcome.value,
                 ip_address=audit_log.ip_address,
                 user_agent=audit_log.user_agent,
@@ -151,7 +152,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
                 entity_id=audit_log.entity_id,
                 timestamp=audit_log.timestamp,
                 description=audit_log.description,
-                log_metadata=audit_log.metadata,
+                log_metadata=json_metadata(audit_log.metadata),
                 outcome=audit_log.outcome.value,
                 ip_address=audit_log.ip_address,
                 user_agent=audit_log.user_agent,

@@ -158,6 +158,8 @@ class ActionType(str, Enum):
     FLOW_RUN_COMPLETED = "flow_run_completed"
     FLOW_RUN_FAILED = "flow_run_failed"
     FLOW_RUN_REDISPATCHED = "flow_run_redispatched"
+    FLOW_RUN_WEBHOOK_REDELIVERED = "flow_run_webhook_redelivered"
+    FLOW_RUN_RESULT_SENDING = "flow_run_result_sending"
     FLOW_RUN_CANCELLED = "flow_run_cancelled"
     FLOW_RUN_AUDIT_DELIVERY_REDRIVEN = "flow_run_audit_delivery_redriven"
     FLOW_CLASSIFICATION_OVERRIDE = "flow_classification_override"
@@ -264,6 +266,10 @@ class ActionType(str, Enum):
     WIDGET_ARCHIVED = "widget_archived"
     WIDGET_POLICY_UPDATED = "widget_policy_updated"
     WIDGET_BUDGET_EXHAUSTED = "widget_budget_exhausted"
+    WIDGET_PREVIEW_TOKEN_MINTED = "widget_preview_token_minted"
+    # A visitor turn was approved to attempt an external tool. The proxy
+    # may refuse it locally. Recorded regardless of widget retention.
+    WIDGET_EXTERNAL_TOOL_CALLED = "widget_external_tool_called"
     WIDGET_TEMPLATE_CREATED = "widget_template_created"
     WIDGET_TEMPLATE_UPDATED = "widget_template_updated"
     WIDGET_TEMPLATE_DELETED = "widget_template_deleted"
@@ -273,7 +279,9 @@ class ActionType(str, Enum):
 # Logged whatever the tenant's audit configuration says: a tenant admin can
 # switch off categories, actions and the whole audit log, and none of those may
 # hide a change to how the organisation signs in, a session renewing itself,
-# which account a sign-in identity reaches, or an admin re-opening that.
+# which account a sign-in identity reaches, an admin re-opening that, the
+# operator taking a token to act as someone, or an anonymous widget visitor's
+# turn calling a tool outside Eneo.
 ALWAYS_AUDITED_ACTIONS: frozenset[ActionType] = frozenset(
     {
         ActionType.FEDERATION_UPDATED,
@@ -283,5 +291,6 @@ ALWAYS_AUDITED_ACTIONS: frozenset[ActionType] = frozenset(
         ActionType.IDENTITY_REBINDING_UPDATED,
         ActionType.IDENTITY_MIGRATION_WINDOW_UPDATED,
         ActionType.USER_ACCESS_TOKEN_ISSUED,
+        ActionType.WIDGET_EXTERNAL_TOOL_CALLED,
     }
 )

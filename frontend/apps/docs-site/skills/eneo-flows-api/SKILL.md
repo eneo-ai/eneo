@@ -57,7 +57,7 @@ Do not recreate server-owned response objects as broad maps or `any`. Generate t
 
 ## Protect the sensitive-content boundary
 
-- Poll `.../status/` for routine progress. It intentionally omits inputs, results, files, terminal errors, usage, and outbound-delivery details.
+- Poll `.../status/` for routine progress. It intentionally omits inputs, results, files, terminal errors and usage. `result_delivery` tells where the latest delivery stands, without the address, headers or content.
 - Treat run detail, review content, evidence, provider calls, and signed artifact access as sensitive reads. They are audited and may fail closed with `503` if required audit persistence is unavailable.
 - Do not assume retention policy means deletion. Flow retention records eligibility and review decisions; this release has no scheduled Flow-owned purge and no public admin purge endpoint.
 - Delete abandoned runtime uploads explicitly before run creation. Once attached to a run, their lifecycle belongs to that run.

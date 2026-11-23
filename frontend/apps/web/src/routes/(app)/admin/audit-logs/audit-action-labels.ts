@@ -613,6 +613,14 @@ const ACTION_MESSAGES = {
     name: m.audit_action_flow_run_redispatched,
     description: m.audit_action_flow_run_redispatched_description
   },
+  flow_run_webhook_redelivered: {
+    name: m.audit_action_flow_run_webhook_redelivered,
+    description: m.audit_action_flow_run_webhook_redelivered_description
+  },
+  flow_run_result_sending: {
+    name: m.audit_action_flow_run_result_sending,
+    description: m.audit_action_flow_run_result_sending_description
+  },
   flow_run_cancelled: {
     name: m.audit_action_flow_run_cancelled,
     description: m.audit_action_flow_run_cancelled_description
@@ -916,6 +924,14 @@ const ACTION_MESSAGES = {
   widget_budget_exhausted: {
     name: m.audit_action_widget_budget_exhausted,
     description: m.audit_action_widget_budget_exhausted_description
+  },
+  widget_preview_token_minted: {
+    name: m.audit_action_widget_preview_token_minted,
+    description: m.audit_action_widget_preview_token_minted_description
+  },
+  widget_external_tool_called: {
+    name: m.audit_action_widget_external_tool_called,
+    description: m.audit_action_widget_external_tool_called_description
   },
   widget_template_created: {
     name: m.audit_action_widget_template_created,

@@ -11,6 +11,7 @@ from eneo.flows.domain.flow_step_attempt_input import (
     FlowStepAttemptMappedAdmission,
     FlowStepAttemptStart,
 )
+from eneo.flows.domain.step_deliverable import FlowStepDeliverable
 from eneo.flows.domain.step_output import (
     OUTPUT_TEXT_OVERFLOW_KEY,
     FileBackedStepText,
@@ -20,11 +21,11 @@ from eneo.flows.domain.step_output import (
 from eneo.flows.domain.step_output import (
     ResolvedStepMaterial as ResolvedStepMaterial,
 )
-from eneo.flows.enums import flow_output_mode_uses_completion_model
 from eneo.flows.flow_review_policy import FlowStepReviewPolicy
 from eneo.flows.flow_run_provenance import (
     FlowResolvedInputEdge,
 )
+from eneo.flows.http_transport.step_configs import step_calls_completion_model
 
 if TYPE_CHECKING:
     from eneo.collections.domain.collection import Collection
@@ -111,11 +112,12 @@ class RuntimeStep:
     assistant_snapshot: dict[str, Any] | None = None
     review_policy: FlowStepReviewPolicy | None = None
     retrieval_policy: FlowStepRetrievalPolicy | None = None
+    deliverable: FlowStepDeliverable | None = None
     timeout_seconds: int | None = None
 
     @property
     def may_call_completion_provider(self) -> bool:
-        return flow_output_mode_uses_completion_model(self.output_mode)
+        return step_calls_completion_model(self.output_mode, self.output_config)
 
 
 StepDiagnosticSeverity: TypeAlias = Literal["info", "warning", "error"]

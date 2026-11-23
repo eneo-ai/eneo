@@ -17,7 +17,7 @@ test(
         response.url().endsWith("/status/") &&
         response.ok()
       ) {
-        statuses.push(((await response.json()) as Schema<"FlowRunSummaryPublic">).status);
+        statuses.push(((await response.json()) as Schema<"FlowRunStatusPublic">).status);
       }
     });
     await page.goto(flow.url);

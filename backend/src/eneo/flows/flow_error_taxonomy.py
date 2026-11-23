@@ -351,6 +351,26 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         consumer_action="Retry later with the same observed dispatch_exhausted_at value.",
         user_action="Wait and try redispatch again later.",
     ),
+    FlowApiErrorCode.RUN_WEBHOOK_REDELIVERY_CONFLICT: _entry(
+        category="Run lifecycle",
+        surfaced_through="API error response",
+        cause=(
+            "The delivery is not a dead-lettered run result of a completed run, "
+            "or it was dead-lettered again."
+        ),
+        consumer_action=(
+            "Refresh the run and retry only for a dead-lettered run result, with "
+            "its current dead_lettered_at value."
+        ),
+        user_action="Reload the run before sending the result again.",
+    ),
+    FlowApiErrorCode.RUN_WEBHOOK_REDELIVERY_AUDIT_UNAVAILABLE: _entry(
+        category="Run lifecycle",
+        surfaced_through="API error response",
+        cause="Required audit logging was unavailable, so the delivery was not reset.",
+        consumer_action="Retry later with the same observed dead_lettered_at value.",
+        user_action="Wait and try sending the result again later.",
+    ),
     FlowApiErrorCode.RUN_INVALID_STEP_INPUTS: _entry(
         category="Run input",
         surfaced_through="API error response",
@@ -840,6 +860,20 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         cause="An authoring request carried more bytes than a flow's steps may take.",
         consumer_action="Send fewer or shorter steps, then send the request again.",
         user_action="Shorten the longest prompts or split the work into several flows.",
+    ),
+    FlowApiErrorCode.RUN_RESULT_NO_DELIVERABLES: _entry(
+        category="Published definition",
+        surfaced_through="API error response",
+        cause=(
+            "A flow whose last step sends the run's result was published with "
+            "no text or document for it to send."
+        ),
+        consumer_action=(
+            "Mark a text or document step as a deliverable, or put one right "
+            "before the step named by `step_order` in the error context, then "
+            "publish again."
+        ),
+        user_action="Choose a text or document step to send, or add one before it.",
     ),
     FlowApiErrorCode.STEP_LIMIT_EXCEEDED: _entry(
         category="Published definition",

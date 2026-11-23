@@ -16,6 +16,7 @@ from eneo.flows.step_lineage import (
     resolve_step_upstream_orders,
     resolve_tool_argument_orders,
     resolve_upstream_step_orders,
+    step_reads_by_channel,
 )
 from eneo.flows.template_reference_analyzer import (
     TemplateReference,
@@ -484,6 +485,20 @@ def test_upstream_orders_read_what_an_http_post_templates(
     assert orders == [1]
 
 
+def test_a_run_result_step_reads_every_earlier_step() -> None:
+    """A run result sends every deliverable, which may come from any earlier
+    step, so its classification counts each of them."""
+    config = {
+        "url": "https://receiver.example.org/results",
+        "auth": {"mode": "none"},
+        "body": {"mode": "run_result"},
+    }
+
+    orders = _upstream(output_mode=FlowOutputMode.HTTP_POST, output_config=config)
+
+    assert orders == [1, 2]
+
+
 @pytest.mark.parametrize("config", _HTTP_TEMPLATE_CARRIERS)
 def test_upstream_orders_read_what_an_http_get_templates(
     config: dict[str, object],
@@ -833,3 +848,26 @@ def test_upstream_orders_read_a_source_ref_as_the_runtime_does(step_ref: str) ->
     bindings = {"source_refs": [{"step_ref": step_ref, "output": "text"}]}
 
     assert _upstream(input_bindings=bindings) == [2]
+
+
+def test_a_run_result_step_reads_no_prompt_or_step_input() -> None:
+    """The step sends the run's deliverables; a prompt or step input left from
+    an earlier mode reaches no model, so neither is a read of it."""
+    reads = step_reads_by_channel(
+        input_source=FlowInputSource.PREVIOUS_STEP,
+        step_order=3,
+        input_bindings={"question": "{{ step_1.output.text }}"},
+        prompt_template="{{ step_2.output.text }}",
+        output_mode=FlowOutputMode.HTTP_POST,
+        input_config=None,
+        output_config={
+            "url": "https://receiver.example.org/results",
+            "auth": {"mode": "none"},
+            "body": {"mode": "run_result"},
+        },
+        step_ref_mapping={},
+        max_prior_step_order=2,
+    )
+
+    assert {read.channel for read in reads} == {"config"}
+    assert sorted(read.step_order for read in reads) == [1, 2]

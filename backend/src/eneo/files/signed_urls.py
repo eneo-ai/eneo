@@ -5,8 +5,7 @@ from uuid import UUID
 
 from eneo.authentication.signed_urls import generate_signed_token
 from eneo.files.file_models import SignedURLRequest, SignedURLResponse
-
-_SIGNED_FILE_DOWNLOAD_PATH_TEMPLATE = "/api/v1/files/{file_id}/download/"
+from eneo.main.config import get_settings
 
 
 def build_signed_download_response(
@@ -27,8 +26,7 @@ def build_signed_download_response(
         issued_at=issued_at,
     )
     url = (
-        f"{base_url.rstrip('/')}"
-        f"{_SIGNED_FILE_DOWNLOAD_PATH_TEMPLATE.format(file_id=file_id)}"
-        f"?token={token}"
+        f"{base_url.rstrip('/')}{get_settings().api_prefix}"
+        f"/files/{file_id}/download/?token={token}"
     )
     return SignedURLResponse(url=url, expires_at=expires_at)

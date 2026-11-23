@@ -15,6 +15,7 @@ from eneo.flows.domain.flow_step_validation import (
     flow_step_validation_view_from_flow_step,
     flow_step_validation_views_from_flow_steps,
 )
+from eneo.flows.domain.speaker_labels import SPEAKER_MAPPING_OUTPUT_CONTRACT
 from eneo.flows.enums import FlowOutputMode, FlowOutputType
 from eneo.flows.flow_metadata import normalize_flow_metadata_for_write
 from eneo.flows.flow_review_policy import (
@@ -28,6 +29,8 @@ from eneo.flows.flow_validators import (
     _is_plain_tree,
     _validate_step_mapped_execution,
     collect_step_graph_issues,
+    draft_step_refusals,
+    publish_step_refusals,
     template_bound_path_made_ok,
     template_bound_path_ok,
     validate_form_schema,
@@ -4405,4 +4408,551 @@ def test_publish_accepts_section_step_reading_one_material(
         steps,
         metadata_json=_audio_metadata(),
         require_complete_template_fill_config=True,
+    )
+
+
+_DELIVERABLE_FORM = {
+    "form_schema": {
+        "fields": [
+            {"name": "Team", "type": "text"},
+            {"name": "Mötets namn", "type": "text"},
+            {"name": "Ämnen", "type": "multiselect", "options": ["a", "b"]},
+            {"name": "Dag", "type": "date", "role": "run_date"},
+            {"name": "Annan dag", "type": "date"},
+            {"name": "password", "type": "text"},
+        ]
+    }
+}
+
+
+def _document_step(deliverable: object, **updates) -> FlowStep:
+    return _step(
+        output_mode="render_verbatim",
+        output_type="pdf",
+        output_config={"deliverable": deliverable},
+        **updates,
+    )
+
+
+def _publish(*steps: FlowStep, metadata_json: dict | None = _DELIVERABLE_FORM) -> None:
+    validate_steps(
+        list(steps),
+        metadata_json=metadata_json,
+        require_complete_template_fill_config=True,
+    )
+
+
+@pytest.mark.parametrize(
+    "file_name",
+    [
+        None,
+        "Standup",
+        "Standup {{ flow_input.Team }}",
+        "{{flow_input.Mötets namn}} {{ flow_input.Ämnen }}",
+        "{{ flow_input.Annan dag }}",
+    ],
+)
+def test_deliverable_with_a_file_name_from_form_fields_publishes(
+    file_name: str | None,
+) -> None:
+    deliverable = {"label": "Standup Eneo"}
+    if file_name is not None:
+        deliverable["file_name"] = file_name
+
+    _publish(_document_step(deliverable))
+
+
+@pytest.mark.parametrize(
+    ("output_mode", "output_type"),
+    [("pass_through", "json")],
+)
+def test_deliverable_on_a_step_that_cannot_be_one_is_refused(
+    output_mode: str, output_type: str
+) -> None:
+    step = _step(
+        output_mode=output_mode,
+        output_type=output_type,
+        output_config={"deliverable": {"label": "Standup"}},
+    )
+
+    with pytest.raises(BadRequestException) as caught:
+        _publish(step)
+
+    assert "output_config.deliverable" in str(caught.value)
+    assert caught.value.context["field"] == "output_config.deliverable"
+
+
+@pytest.mark.parametrize(
+    ("output_mode", "input_type"),
+    [("compose_text", "text"), ("pass_through", "text")],
+)
+def test_a_text_step_marked_as_a_deliverable_publishes(
+    output_mode: str, input_type: str
+) -> None:
+    _publish(
+        _step(
+            output_mode=output_mode,
+            input_type=input_type,
+            output_type="text",
+            output_config={"deliverable": {"label": "Sammanfattning"}},
+        )
+    )
+
+
+def test_a_transcription_marked_as_a_deliverable_publishes() -> None:
+    _publish(
+        _step(
+            output_mode="transcribe_only",
+            input_type="audio",
+            output_type="text",
+            output_config={"deliverable": {"label": "Transkription"}},
+        ),
+        metadata_json=_audio_metadata(),
+    )
+
+
+def test_a_file_name_on_a_text_deliverable_is_refused_at_the_file_name() -> None:
+    step = _step(
+        output_mode="compose_text",
+        output_type="text",
+        output_config={
+            "deliverable": {"label": "Sammanfattning", "file_name": "Standup"}
+        },
+    )
+
+    with pytest.raises(BadRequestException) as caught:
+        _publish(step)
+
+    assert caught.value.context["field"] == "output_config.deliverable.file_name"
+
+
+@pytest.mark.parametrize(
+    ("file_name", "says"),
+    [
+        ("{{ step_1.output.text }}", "flow_input.<field>"),
+        ("{{ datum }}", "flow_input.<field>"),
+        ("{{ flow.input.Team }}", "flow_input.<field>"),
+        ("{{ flow_input.text }}", "not a field of the form"),
+        ("{{ flow_input.Team.name }}", "flow_input.<field>"),
+        ("{{ flow_input.Saknas }}", "not a field of the form"),
+        ("{{ flow_input.Dag }}", "run's day is already added"),
+        ("{{ flow_input.password }}", "sensitive"),
+        ("Standup {{ flow_input.Team", "unmatched"),
+        ("Standup }}", "unmatched"),
+        ("Basic plan {{ flow_input.Team }}", "reads as a credential"),
+        ("Weekly digest {{ flow_input.Team }}", "reads as a credential"),
+        ("token={{ flow_input.Team }}", "reads as a credential"),
+        ("Bearer/{{ flow_input.Team }}", "reads as a credential"),
+    ],
+)
+def test_deliverable_file_name_reads_only_fields_of_the_form(
+    file_name: str, says: str
+) -> None:
+    step = _document_step({"label": "Standup", "file_name": file_name})
+
+    with pytest.raises(BadRequestException) as caught:
+        _publish(step)
+
+    assert says in str(caught.value)
+    assert "output_config.deliverable.file_name" in str(caught.value)
+    assert caught.value.context["field"] == "output_config.deliverable.file_name"
+
+
+@pytest.mark.parametrize("metadata_json", [None, {}, {"form_schema": {"fields": []}}])
+def test_deliverable_file_name_needs_a_form_that_has_the_field(
+    metadata_json: dict | None,
+) -> None:
+    step = _document_step({"label": "Standup", "file_name": "{{ flow_input.Team }}"})
+
+    with pytest.raises(BadRequestException, match="not a field of the form"):
+        _publish(step, metadata_json=metadata_json)
+
+
+def _run_result_step(output_type: str) -> FlowStep:
+    return _step(
+        output_mode="http_post",
+        output_type=output_type,
+        output_config={
+            "url": "https://example.test/hook",
+            "auth": {"mode": "none"},
+            "body": {"mode": "run_result"},
+        },
+    )
+
+
+@pytest.mark.parametrize("output_type", ["json", "docx", "pdf"])
+def test_validate_steps_rejects_a_run_result_step_whose_output_is_not_text(
+    output_type: str,
+) -> None:
+    _assert_validate_steps_rejects(
+        [_run_result_step(output_type)],
+        expected_type=FlowStepValidationError,
+        match="sends the run's result requires output_type 'text'",
+        step_order=1,
+    )
+
+
+def test_validate_steps_accepts_a_run_result_step_whose_output_is_text() -> None:
+    validate_steps([_run_result_step("text")])
+
+
+@pytest.mark.parametrize(
+    ("deliverable", "field"),
+    [
+        ({"label": " Standup"}, "label"),
+        ({}, "label"),
+        ({"label": "Standup", "file_name": "a\nb"}, "file_name"),
+        ({"label": "Standup", "file_name": "x" * 201}, "file_name"),
+    ],
+)
+def test_a_malformed_deliverable_is_refused_at_its_field(
+    deliverable: dict[str, object], field: str
+) -> None:
+    # A step copied without validation (as a rewrite of its references makes
+    # it) reaches publish unchecked.
+    with pytest.raises(BadRequestException) as caught:
+        _publish(_document_step(deliverable))
+
+    assert caught.value.context["field"] == f"output_config.deliverable.{field}"
+
+
+@pytest.mark.parametrize(
+    "label", ["Report {{ flow_input.text }}", "Report {{", "Report }}"]
+)
+def test_a_deliverable_label_with_braces_is_refused_at_the_label(label: str) -> None:
+    # A label is shown as written and never filled in.
+    with pytest.raises(BadRequestException) as caught:
+        _publish(_document_step({"label": label}))
+
+    assert caught.value.context["field"] == "output_config.deliverable.label"
+    assert "shown as written" in str(caught.value)
+
+
+def test_a_deliverable_label_of_plain_text_publishes() -> None:
+    _publish(_document_step({"label": "Rapport: vecka 47 (utkast) – 50 %"}))
+
+
+_SEND_RUN_RESULT = {
+    "url": "https://receiver.example.org/results",
+    "auth": {"mode": "none"},
+    "body": {"mode": "run_result"},
+}
+
+
+@pytest.mark.parametrize(
+    "steps",
+    [
+        # A step that sends the run's result and nothing before it.
+        [
+            _step(
+                1,
+                output_mode="http_post",
+                output_type="text",
+                output_config=_SEND_RUN_RESULT,
+            )
+        ],
+        # The step before it holds JSON, which is never delivered.
+        [
+            _step(1, output_mode="compose_text", output_type="text"),
+            _step(2),
+            _step(
+                3,
+                output_mode="http_post",
+                output_type="text",
+                output_config=_SEND_RUN_RESULT,
+            ),
+        ],
+    ],
+)
+def test_a_result_with_nothing_to_send_is_saved_and_refused_at_publish(
+    steps: list[FlowStep],
+) -> None:
+    sender = steps[-1].step_order
+
+    assert draft_step_refusals(steps, metadata_json=None) == []
+    [refusal] = publish_step_refusals(steps, metadata_json=None, prompt_templates={})
+
+    assert refusal.code == "flow_run_result_no_deliverables"
+    assert refusal.context is not None
+    assert refusal.context["step_order"] == sender
+
+
+def test_a_result_with_something_to_send_publishes() -> None:
+    steps = [
+        _step(1, output_mode="compose_text", output_type="text"),
+        _step(
+            2,
+            output_mode="http_post",
+            output_type="text",
+            output_config=_SEND_RUN_RESULT,
+        ),
+    ]
+
+    assert publish_step_refusals(steps, metadata_json=None, prompt_templates={}) == []
+
+
+def test_a_marked_text_earlier_in_the_flow_is_something_to_send() -> None:
+    # The step before the sender holds JSON, which is never delivered; the
+    # marked text two steps back is.
+    steps = [
+        _step(
+            1,
+            output_mode="compose_text",
+            output_type="text",
+            output_config={"deliverable": {"label": "Sammanfattning"}},
+        ),
+        _step(2),
+        _step(
+            3,
+            output_mode="http_post",
+            output_type="text",
+            output_config=_SEND_RUN_RESULT,
+        ),
+    ]
+
+    assert publish_step_refusals(steps, metadata_json=None, prompt_templates={}) == []
+
+
+def test_a_step_that_sends_the_run_result_takes_no_upload() -> None:
+    # It sends the run's deliverables and never reads an upload, so a run
+    # would ask for a file it drops.
+    steps = [
+        _step(1, output_mode="compose_text", output_type="text"),
+        _step(
+            2,
+            output_mode="http_post",
+            output_type="text",
+            input_config=_UPLOAD_RUN,
+            output_config=_SEND_RUN_RESULT,
+        ),
+    ]
+
+    [saved] = draft_step_refusals(steps, metadata_json=None)
+    [published] = publish_step_refusals(steps, metadata_json=None, prompt_templates={})
+
+    for refusal in (saved, published):
+        assert refusal.context is not None
+        assert refusal.context["field"] == "input_config.runtime_input"
+        assert refusal.context["step_order"] == 2
+
+
+# A read of a step the flow does not have, and of free-text run input the run
+# form does not collect.
+_STALE_READS = "{{ step_99.output.text }} {{ flow_input.text }}"
+
+
+def test_a_run_result_step_is_not_judged_on_a_prompt_or_input_it_never_reads() -> None:
+    # The step sends the run's deliverables: a prompt and step input left from
+    # an earlier mode are never read, so a stale read in them refuses nothing.
+    steps = [
+        _step(1, output_mode="compose_text", output_type="text"),
+        _step(
+            2,
+            output_mode="http_post",
+            output_type="text",
+            input_bindings={"question": _STALE_READS},
+            output_config=_SEND_RUN_RESULT,
+        ),
+    ]
+
+    assert draft_step_refusals(steps, metadata_json=_DELIVERABLE_FORM) == []
+    assert (
+        publish_step_refusals(
+            steps, metadata_json=_DELIVERABLE_FORM, prompt_templates={2: _STALE_READS}
+        )
+        == []
+    )
+
+
+def test_a_run_result_step_is_still_judged_on_its_headers() -> None:
+    steps = [
+        _step(1, output_mode="compose_text", output_type="text"),
+        _step(
+            2,
+            output_mode="http_post",
+            output_type="text",
+            output_config={
+                **_SEND_RUN_RESULT,
+                "custom_headers": [
+                    {"name": "X-Case", "value": "{{ step_99.output.text }}"}
+                ],
+            },
+        ),
+    ]
+
+    [refusal] = publish_step_refusals(
+        steps, metadata_json=_DELIVERABLE_FORM, prompt_templates={}
+    )
+
+    assert refusal.code == "flow_input_binding_unknown_step_order"
+    assert refusal.context is not None
+    assert refusal.context["field"] == "output_config.custom_headers.0.value"
+
+
+# A speaker step stores no output_contract: its contract is fixed, and the run
+# validates the step's output against it. Publishing judges a later step's
+# question binding and compose source_refs by the same contract; its other
+# reads are judged as before.
+def _publish_after_speakers(
+    reader: FlowStep, *, prompts: dict[int, str] | None = None
+) -> None:
+    validate_steps(
+        [_transcript(1), _speaker_mapping(2), reader],
+        metadata_json=_audio_metadata(),
+        require_complete_template_fill_config=True,
+        prompt_templates=prompts,
+    )
+
+
+def _speaker_compose(**updates) -> FlowStep:
+    return _step(3, output_mode="compose_text", output_type="text", **updates)
+
+
+def _speakers_ref(**updates) -> dict:
+    return {
+        "source_refs": [
+            {
+                "step_ref": "step_2",
+                "output": "structured",
+                "field_path": "speakers",
+                **updates,
+            }
+        ]
+    }
+
+
+@pytest.mark.parametrize(
+    "reference",
+    ["step_2.output.structured.speakers", "step_2.output.structured"],
+)
+def test_publish_accepts_a_text_step_reading_the_named_speakers(
+    reference: str,
+) -> None:
+    _publish_after_speakers(_speaker_compose(**_question("{{" + reference + "}}")))
+
+
+@pytest.mark.parametrize(
+    ("reference", "message"),
+    [
+        pytest.param(
+            "step_2.output.structured.names",
+            "references unknown field 'names'",
+            id="unknown-key",
+        ),
+        pytest.param(
+            "step_2.output.structured.speakers.0.name",
+            "does not resolve through an object contract",
+            id="array-index",
+        ),
+    ],
+)
+def test_publish_refuses_a_text_step_reading_what_the_speaker_contract_lacks(
+    reference: str, message: str
+) -> None:
+    with pytest.raises(FlowStepValidationError, match=message) as refused:
+        _publish_after_speakers(_speaker_compose(**_question("{{" + reference + "}}")))
+
+    assert refused.value.code == FlowGraphIssueCode.FLOW_INPUT_BINDING_UNSUPPORTED_KEY
+    assert refused.value.step_order == 3
+
+
+def test_publish_accepts_a_name_list_from_the_speakers_with_an_item_template() -> None:
+    _publish_after_speakers(
+        _speaker_compose(input_bindings=_speakers_ref(item_template="{name}"))
+    )
+
+
+def test_publish_refuses_the_speaker_array_as_underlag_without_an_item_template() -> (
+    None
+):
+    with pytest.raises(
+        FlowStepValidationError,
+        match="structured array source_refs require item_template",
+    ):
+        _publish_after_speakers(_speaker_compose(input_bindings=_speakers_ref()))
+
+
+@pytest.mark.parametrize(
+    "declared",
+    [
+        pytest.param(
+            SPEAKER_MAPPING_OUTPUT_CONTRACT["properties"]["speakers"], id="array"
+        ),
+        pytest.param({"type": "string"}, id="string"),
+    ],
+)
+def test_publish_judges_a_json_projection_of_the_speakers_as_before(
+    declared: dict,
+) -> None:
+    with pytest.raises(FlowStepValidationError) as refused:
+        _publish_after_speakers(
+            _step(
+                3,
+                input_type="json",
+                input_bindings=_speakers_ref(),
+                input_contract={
+                    "type": "object",
+                    "properties": {"speakers": declared},
+                    "required": ["speakers"],
+                    "additionalProperties": False,
+                },
+            )
+        )
+
+    assert refused.value.code == FlowGraphIssueCode.FLOW_INPUT_BINDING_UNSUPPORTED_KEY
+    assert refused.value.context == {
+        "field": "input_bindings",
+        "key": "source_refs",
+        "issue_code": "flow_input_binding_unsupported_key",
+        "step_order": 3,
+    }
+
+
+@pytest.mark.parametrize(
+    "field",
+    [pytest.param("speakers", id="array"), pytest.param("names", id="missing-key")],
+)
+def test_publish_still_refuses_a_word_field_bound_to_a_speaker_value(
+    field: str,
+) -> None:
+    # The editor names the placeholder from this code and context.
+    with pytest.raises(FlowStepValidationError) as refused:
+        _publish_after_speakers(
+            _step(
+                3,
+                output_type="docx",
+                output_mode="template_fill",
+                output_config={
+                    "template_asset_id": str(uuid4()),
+                    "bindings": {
+                        "Deltagare": "{{step_2.output.structured." + field + "}}"
+                    },
+                },
+            )
+        )
+
+    assert refused.value.code == FlowGraphIssueCode.TEMPLATE_BINDING_NOT_SCALAR.value
+    assert refused.value.context is not None
+    assert refused.value.context["placeholder"] == "Deltagare"
+
+
+def test_publish_keeps_a_prompt_that_reads_a_speaker_by_index() -> None:
+    # The run resolves an array index in a prompt; the contract walk that
+    # judges bindings has no index, so the prompt stays judged as before.
+    _publish_after_speakers(
+        _step(3, output_type="text"),
+        prompts={3: "Ordförande: {{ step_2.output.structured.speakers.0.name }}"},
+    )
+
+
+@pytest.mark.parametrize("field_path", ["speakers", "speakers.0.name"])
+def test_publish_accepts_the_speakers_as_underlag_of_a_model_step(
+    field_path: str,
+) -> None:
+    # A text step's source_refs become its question, which the run resolves
+    # with an array index too, so they are judged as a prompt is.
+    _publish_after_speakers(
+        _step(
+            3, output_type="text", input_bindings=_speakers_ref(field_path=field_path)
+        )
     )

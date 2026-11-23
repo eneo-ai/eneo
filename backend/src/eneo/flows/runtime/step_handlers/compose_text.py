@@ -86,8 +86,8 @@ class ComposeTextStepHandler:
             diagnostic=StepDiagnostic(
                 code="compose_text_used",
                 message=(
-                    f"Step {step.step_order}: compose_text mode persisted resolved "
-                    "text without calling the assistant."
+                    f"Step {step.step_order}: compose_text mode persisted "
+                    "resolved text without calling the assistant."
                 ),
                 severity="info",
             ),

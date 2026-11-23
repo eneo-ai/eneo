@@ -136,6 +136,26 @@ describe("HttpFields", () => {
     expect(shown).toMatch(/användarnamn eller lösenord/);
   });
 
+  it("says on leaving the address that the run's result goes only to a fixed https address", () => {
+    for (const url of [
+      "https://hook.example.org/{{flow_input.team}}",
+      "http://hook.example.org/",
+      "ftp://hook.example.org/",
+      "https://anna:hemligt@hook.example.org/"
+    ]) {
+      renderFields({ url, body: { mode: "run_result" } }, "output");
+      const address = screen.getByRole("textbox", {
+        name: new RegExp(messages.flow_step_editor_http_url_run_result)
+      });
+      expect(screen.queryByText(messages.flow_step_editor_http_run_result_url_fixed)).toBeNull();
+      fireEvent.blur(address);
+      expect(address.getAttribute("aria-invalid")).toBe("true");
+      expect(screen.getByText(messages.flow_step_editor_http_run_result_url_fixed)).toBeTruthy();
+      expect(screen.queryByText(messages.flow_step_editor_http_url_invalid)).toBeNull();
+      cleanup();
+    }
+  });
+
   it("says a refused header name once, at the row, after a refused save", () => {
     const headers = [{ name: "X Ärende", value: "1", secret: false }];
     const refused = {

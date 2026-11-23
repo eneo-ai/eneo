@@ -16,6 +16,7 @@ from eneo.ai_models.completion_models.completion_model import (
     GeneratedFile,
     ModelKwargs,
     ResponseType,
+    TokenUsage,
     ToolCallMetadata,
 )
 from eneo.completion_models.domain.model_kwargs_capabilities import (
@@ -595,6 +596,36 @@ async def test_non_streaming_uses_adapter_cumulative_input_estimate():
     )
 
     assert response.total_token_count == 321
+
+
+async def test_token_drift_compares_only_the_first_request_when_later_usage_is_missing():
+    model = _make_completion_model()
+    adapter = _DummyAdapter(model=model)
+    adapter.get_response = AsyncMock(
+        return_value=Completion(
+            text="done",
+            input_token_estimate=120,
+            usage=TokenUsage(first_request_prompt_tokens=20),
+        )
+    )
+    builder = _DummyContextBuilder()
+    with patch.object(
+        builder, "build_context", return_value=Context(input="hi", token_count=20)
+    ):
+        service = CompletionService(
+            context_builder=builder,
+            tenant=SimpleNamespace(id=uuid4()),
+            session=AsyncMock(),
+        )
+        service._get_adapter = AsyncMock(return_value=adapter)
+        with patch(
+            "eneo.completion_models.infrastructure.completion_service.log_token_count_drift"
+        ) as drift:
+            response = await service.get_response(model=model, text_input="hi")
+    drift.assert_called_once_with(
+        model_name=adapter.get_model_route(), predicted=20, actual=20
+    )
+    assert response.total_token_count == 120
 
 
 async def test_generated_image_chunks_pass_through_tool_call_handling():

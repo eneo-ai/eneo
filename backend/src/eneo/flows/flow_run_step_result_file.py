@@ -78,6 +78,30 @@ class FlowRunStepResultFile(BaseModel):
         return self.availability == "available"
 
 
+def text_overflow_files(
+    result_files: Sequence[FlowRunStepResultFile],
+    *,
+    run_id: UUID,
+    flow_id: UUID,
+    tenant_id: UUID,
+    step_id: UUID,
+    file_id: UUID,
+) -> list[FlowRunStepResultFile]:
+    """The files of ``result_files`` that can hold the whole text a step's
+    result keeps in ``file_id``: that step's own generated file in that run.
+    A caller reads the text only from exactly one."""
+    return [
+        result_file
+        for result_file in result_files
+        if result_file.flow_run_id == run_id
+        and result_file.flow_id == flow_id
+        and result_file.tenant_id == tenant_id
+        and result_file.step_id == step_id
+        and result_file.file_id == file_id
+        and result_file.source == "generated_output"
+    ]
+
+
 def build_step_result_file_references(
     *,
     generated_file_ids: Sequence[UUID],

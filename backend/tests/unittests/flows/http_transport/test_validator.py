@@ -478,3 +478,173 @@ def test_a_header_name_refusal_names_the_field(
         "field": field,
         "http_error": "HTTP_INVALID_HEADER_NAME",
     }
+
+
+# --- run_result body ---
+
+
+def _run_result_config(**overrides: object) -> HttpAuthoredConfig:
+    payload: dict[str, object] = {
+        "url": "https://receiver.example.org/eneo/results",
+        "auth": {"mode": "none"},
+        "body": {"mode": "run_result"},
+        **overrides,
+    }
+    return HttpAuthoredConfig.model_validate(payload)
+
+
+def test_run_result_body_on_a_fixed_https_post_is_valid() -> None:
+    assert _validate(_run_result_config()) == []
+
+
+def test_run_result_body_is_refused_outside_http_post() -> None:
+    errors = validate_authored_config(
+        _run_result_config(), direction="input", method="GET", max_timeout=120
+    )
+
+    assert HttpTransportError.RUN_RESULT_REQUIRES_HTTP_POST in errors
+
+
+def test_run_result_body_takes_no_template() -> None:
+    errors = _validate(_run_result_config(body={"mode": "run_result", "template": "x"}))
+
+    assert errors == [HttpTransportError.RUN_RESULT_TAKES_NO_TEMPLATE]
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://receiver.example.org/eneo/results",
+        "https://{{ flow_input.host }}/results",
+        "https://receiver.example.org/{{ flow_input.path }}",
+        "https://receiver.example.org/results?page={{ flow_input.page }}",
+    ],
+)
+def test_run_result_body_needs_a_literal_https_url_without_credentials(
+    url: str,
+) -> None:
+    """Run data must never choose or change where a run's result is sent."""
+    errors = _validate(_run_result_config(url=url))
+
+    assert HttpTransportError.RUN_RESULT_REQUIRES_FIXED_HTTPS_URL in errors
+
+
+@pytest.mark.parametrize("name", ["Content-Type", "content-type", "CONTENT-TYPE"])
+def test_run_result_body_refuses_an_own_content_type(name: str) -> None:
+    config = _run_result_config(
+        custom_headers=[{"name": name, "value": "text/plain", "secret": False}]
+    )
+
+    assert _validate(config) == [HttpTransportError.CONTENT_TYPE_SET_BY_BODY]
+
+
+def test_an_own_content_type_stays_allowed_for_a_text_template() -> None:
+    config = _config(
+        body=HttpBody(mode=HttpBodyMode.TEXT_TEMPLATE, template="{{ text }}")
+    ).model_copy(
+        update={
+            "custom_headers": [
+                CustomHeader(name="Content-Type", value="text/markdown; charset=utf-8")
+            ]
+        }
+    )
+
+    assert _validate(config) == []
+
+
+@pytest.mark.parametrize(
+    ("overrides", "field", "http_error", "advice"),
+    [
+        (
+            {"url": "https://receiver.example.org/{{ flow_input.path }}"},
+            "output_config.url",
+            "HTTP_RUN_RESULT_REQUIRES_FIXED_HTTPS_URL",
+            "fixed https address",
+        ),
+        (
+            {"body": {"mode": "run_result", "template": "{{ text }}"}},
+            "output_config.body.template",
+            "HTTP_RUN_RESULT_TAKES_NO_TEMPLATE",
+            "Remove the body template",
+        ),
+        (
+            {
+                "custom_headers": [
+                    {"name": "X-Trace", "value": "1", "secret": False},
+                    {"name": "content-type", "value": "text/plain", "secret": False},
+                ]
+            },
+            "output_config.custom_headers[1]",
+            "HTTP_CONTENT_TYPE_SET_BY_BODY",
+            "Remove the Content-Type header",
+        ),
+    ],
+)
+def test_publishing_a_run_result_body_names_the_field_and_what_to_change(
+    overrides: dict[str, object], field: str, http_error: str, advice: str
+) -> None:
+    config = {
+        "url": "https://receiver.example.org/eneo/results",
+        "auth": {"mode": "none"},
+        "body": {"mode": "run_result"},
+        **overrides,
+    }
+
+    with pytest.raises(BadRequestException, match=advice) as raised:
+        validate_authored_http_config(
+            step_order=3,
+            label="output_config",
+            config=config,
+            method="POST",
+            direction="output",
+        )
+
+    assert raised.value.context == {"field": field, "http_error": http_error}
+
+
+def test_publishing_a_run_result_body_on_an_input_names_the_body_mode() -> None:
+    with pytest.raises(BadRequestException, match="http_post") as raised:
+        validate_authored_http_config(
+            step_order=1,
+            label="input_config",
+            config={
+                "url": "https://receiver.example.org/eneo/results",
+                "auth": {"mode": "none"},
+                "body": {"mode": "run_result"},
+            },
+            method="GET",
+            direction="input",
+        )
+
+    assert raised.value.context == {
+        "field": "input_config.body.mode",
+        "http_error": "HTTP_RUN_RESULT_REQUIRES_HTTP_POST",
+    }
+
+
+def test_run_result_body_refuses_content_type_as_the_api_key_header() -> None:
+    config = _run_result_config(
+        auth={"mode": "api_key", "header_name": "content-type", "key": "k"}
+    )
+
+    assert _validate(config) == [HttpTransportError.CONTENT_TYPE_SET_BY_BODY]
+
+
+def test_publishing_content_type_as_the_api_key_header_names_that_field() -> None:
+    with pytest.raises(BadRequestException) as raised:
+        validate_authored_http_config(
+            step_order=2,
+            label="output_config",
+            config={
+                "url": "https://receiver.example.org/eneo/results",
+                "auth": {"mode": "api_key", "header_name": "Content-Type", "key": "k"},
+                "body": {"mode": "run_result"},
+            },
+            method="POST",
+            direction="output",
+        )
+
+    assert raised.value.context == {
+        "field": "output_config.auth.header_name",
+        "http_error": "HTTP_CONTENT_TYPE_SET_BY_BODY",
+    }

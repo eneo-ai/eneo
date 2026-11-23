@@ -11,6 +11,10 @@ from eneo.flows.domain.speaker_mapping_config import (
     speaker_mapping_participants_field,
     speaker_mapping_speaker_count_field,
 )
+from eneo.flows.domain.step_deliverable import (
+    DELIVERABLE_FILE_NAME_READ_SITE,
+    deliverable_file_name_fields,
+)
 from eneo.flows.domain.tool_input import tool_reference_sites
 from eneo.flows.enums import FlowInputSource, FlowOutputMode
 from eneo.flows.flow_run_input_envelope import FLOW_INPUT_TRANSCRIPTION_KEY
@@ -20,6 +24,7 @@ from eneo.flows.http_transport import (
     HttpAuthoredConfig,
     is_authored_config,
     sends_http_config,
+    sends_run_result,
 )
 from eneo.flows.http_transport.authored_config import ConfigPath
 from eneo.flows.input_binding_contract_rules import (
@@ -193,9 +198,24 @@ def step_reads_by_channel(
     written; configuration reads follow, ``output_config`` before
     ``input_config``. ``input_source`` and ``output_mode`` fail closed as in
     the resolvers.
+
+    A step that sends the run's result reaches no model: its prompt and step
+    input are not read, and its body reads every earlier step, since any of
+    them may be a deliverable.
     """
-    reads = list(
-        _model_channel_reads(
+    source = FlowInputSource(input_source)
+    mode = FlowOutputMode(output_mode)
+    configs: tuple[tuple[ConfigColumn, Mapping[str, object] | None], ...] = (
+        ("output_config", output_config),
+        ("input_config", input_config),
+    )
+    if sends_run_result(mode, output_config):
+        reads = [
+            StepRead("config", order, (), "output_config.body")
+            for order in range(1, max_prior_step_order + 1)
+        ]
+    else:
+        reads = _model_channel_reads(
             input_source=input_source,
             step_order=step_order,
             input_bindings=input_bindings,
@@ -203,13 +223,6 @@ def step_reads_by_channel(
             step_ref_mapping=step_ref_mapping,
             max_prior_step_order=max_prior_step_order,
         )
-    )
-    source = FlowInputSource(input_source)
-    mode = FlowOutputMode(output_mode)
-    configs: tuple[tuple[ConfigColumn, Mapping[str, object] | None], ...] = (
-        ("output_config", output_config),
-        ("input_config", input_config),
-    )
     for column, config in configs:
         channel = config_channel(
             column=column,
@@ -479,6 +492,11 @@ def step_form_field_reads(
                 text,
                 ".".join((column, *(str(segment) for segment in path))),
             )
+    reads.extend(
+        FormFieldRead("config", name, DELIVERABLE_FILE_NAME_READ_SITE)
+        for name in deliverable_file_name_fields(output_config)
+        if name in fields
+    )
     if mode is FlowOutputMode.SPEAKER_MAPPING:
         # Speaker mapping reads the participant list and the speaker count
         # from the form fields its configuration names, not from a template.

@@ -87,13 +87,13 @@ The ticket request returns `409 flow_live_transcription_unavailable` with the re
 
 On a completed run, `result` has exactly one `kind`:
 
-| Kind               | Meaning                                                  | Consumer action                                                         |
-| ------------------ | -------------------------------------------------------- | ----------------------------------------------------------------------- |
-| `inline_text`      | Complete text is inline.                                 | Render `text`.                                                          |
-| `file_backed_text` | Inline text is only a bounded preview.                   | If the file is available, request its signed URL for the complete text. |
-| `structured`       | Authored JSON value plus the historical output contract. | Validate/render `value` using that run's `output_contract`.             |
-| `artifact`         | One or more generated files.                             | Show metadata and request signed URLs on demand.                        |
-| `outbound_http`    | A Flow-authored terminal delivery succeeded.             | Render the delivery receipt; no destination or payload is exposed.      |
+| Kind               | Meaning                                                                                            | Consumer action                                                                                                                         |
+| ------------------ | -------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `inline_text`      | Complete text is inline.                                                                           | Render `text`.                                                                                                                          |
+| `file_backed_text` | Inline text is only a bounded preview.                                                             | If the file is available, request its signed URL for the complete text.                                                                 |
+| `structured`       | Authored JSON value plus the historical output contract.                                           | Validate/render `value` using that run's `output_contract`.                                                                             |
+| `artifact`         | One or more generated files.                                                                       | Show metadata and request signed URLs on demand.                                                                                        |
+| `outbound_http`    | A Flow-authored terminal delivery: `delivery_status` is `pending`, `delivered` or `dead_lettered`. | Render where the delivery stands; follow `result_delivery.state` on status while it is `pending`. No destination or payload is exposed. |
 
 Use an exhaustive branch. `result` is null before successful completion.
 

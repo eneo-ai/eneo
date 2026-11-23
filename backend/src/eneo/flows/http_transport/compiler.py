@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import json
 from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol
 
@@ -26,6 +27,7 @@ from eneo.flows.http_transport.effective_url import (
 )
 from eneo.flows.http_transport.errors import HttpCredentialTransportError
 from eneo.flows.http_transport.json_template import render_json_template
+from eneo.flows.http_transport.validator import run_result_url_is_fixed
 from eneo.flows.variable_resolver import (
     FlowVariableContext,
     FlowVariableInterpolation,
@@ -52,8 +54,9 @@ class EffectiveHttpRequest:
     method: HttpMethod
     url: str
     headers: dict[str, str] = field(repr=False)
-    body: bytes | None
-    json_body: JsonValue | None
+    # The body may carry file content: never in a repr.
+    body: bytes | None = field(repr=False)
+    json_body: JsonValue | None = field(repr=False)
     timeout: float
     secret_header_names: frozenset[str]
     secret_values: frozenset[str] = field(repr=False)
@@ -69,6 +72,7 @@ def compile_http_config(
     interpolate: Callable[[str, dict[str, Any]], str] | None = None,
     interpolate_with_evidence: InterpolateWithEvidenceFn | None = None,
     resolve_value: Callable[[str, dict[str, Any]], object] | None = None,
+    run_result_body: JsonValue | None = None,
 ) -> EffectiveHttpRequest:
     """Pure function. Compiles authored config into an effective request.
 
@@ -80,6 +84,8 @@ def compile_http_config(
         interpolate: Function to interpolate ``{{ }}`` expressions in strings.
         resolve_value: Function giving the value an expression names, for a
             reference that stands outside quotes in a JSON body template.
+        run_result_body: The document a ``run_result`` body sends; the caller
+            builds it from the finished run.
 
     Returns:
         An ``EffectiveHttpRequest`` ready for the HTTP client.
@@ -157,6 +163,26 @@ def compile_http_config(
         value for name, value in headers.items() if name.lower() in secret_header_names
     )
 
+    sends_run_result = authored.body.mode == HttpBodyMode.RUN_RESULT
+    if sends_run_result:
+        # Checked again at the request: a stored config that never passed
+        # publishing must not let run data choose where the result goes.
+        if not run_result_url_is_fixed(authored.url):
+            raise TypedIOValidationException(
+                "The run result body is sent only to a fixed https address "
+                "without variables.",
+                code=FlowApiErrorCode.TYPED_IO_HTTP_INVALID_CONFIG.value,
+            )
+        # Read from the headers as filled: an API key's header name may come
+        # from run data.
+        if any(name.strip().lower() == "content-type" for name in headers):
+            raise TypedIOValidationException(
+                "The run result body sets its own Content-Type; remove the "
+                "custom Content-Type header.",
+                code=FlowApiErrorCode.TYPED_IO_HTTP_INVALID_CONFIG.value,
+            )
+        headers["Content-Type"] = "application/json; charset=utf-8"
+
     # URL interpolation
     url_interpolation = _interpolate_evidenced(
         authored.url,
@@ -188,16 +214,30 @@ def compile_http_config(
             raise HttpCredentialTransportError()
 
     # Body -> payload
-    body_bytes, json_body, body_edges = _compile_body(
-        authored,
-        direction,
-        _interpolate_evidenced,
-        (
-            None
-            if resolve_value is None
-            else lambda expression: resolve_value(expression, ctx)
-        ),
-    )
+    if sends_run_result:
+        if run_result_body is None:
+            raise TypedIOValidationException(
+                "The run result body was not built for the request.",
+                code=FlowApiErrorCode.TYPED_IO_HTTP_INVALID_CONFIG.value,
+            )
+        # Serialized once, so the bytes sent are the bytes the Content-Type
+        # above describes.
+        body_bytes: bytes | None = json.dumps(
+            run_result_body, ensure_ascii=False
+        ).encode("utf-8")
+        json_body: JsonValue | None = None
+        body_edges: tuple[FlowResolvedInputEdge, ...] = ()
+    else:
+        body_bytes, json_body, body_edges = _compile_body(
+            authored,
+            direction,
+            _interpolate_evidenced,
+            (
+                None
+                if resolve_value is None
+                else lambda expression: resolve_value(expression, ctx)
+            ),
+        )
 
     return EffectiveHttpRequest(
         method=method,

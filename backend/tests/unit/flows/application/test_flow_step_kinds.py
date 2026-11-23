@@ -406,6 +406,25 @@ def test_a_step_added_first_takes_the_run_input_over() -> None:
     )
 
 
+def test_a_document_fits_before_a_result_sender_that_follows_structured_data() -> None:
+    # The sender sends the run's deliverables, not the step before it, so the
+    # type that step gives decides nothing about what may stand before it.
+    structured = _step(1, output_type="json")
+    sender = insertion_change(
+        _flow([structured]),
+        FlowStepKind.SEND_RUN_RESULT,
+        position=2,
+        values=StepKindValues(url=_URL),
+    ).configuration
+    flow = _flow([structured, _step(2, **sender)])
+
+    answer = step_kind_answer(flow, prompts={}, positions=[2], step_ids=[])
+
+    by_kind = {option.kind: option for option in answer.insertions[0].options}
+    for kind in (FlowStepKind.DOCUMENT, FlowStepKind.TEMPLATE):
+        assert by_kind[kind].refusals == (), kind
+
+
 def test_the_update_carries_the_revision_its_caller_read() -> None:
     # The caller read revision 1; the draft has moved on to 3 since. The
     # update is saved against what the caller read, so the save refuses it
@@ -917,3 +936,79 @@ def test_an_example_is_read_as_text_or_as_an_object() -> None:
 
     assert as_text["output_contract"] == as_object["output_contract"]
     assert as_text["output_contract"] is not None
+
+
+async def test_a_run_result_sender_is_saved_last_as_the_step_that_sends_the_run_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """send_run_result is a recipe for an HTTP POST of the finished run's
+    result: no model is asked, and the address is the one value it takes."""
+    from eneo.flows.http_transport.step_configs import (
+        sends_run_result,
+        step_calls_completion_model,
+    )
+
+    flow = _flow(
+        [_step(1), _step(2, output_type="docx", output_mode="render_verbatim")]
+    )
+
+    step = await _added(flow, FlowStepKind.SEND_RUN_RESULT, {"url": _URL}, monkeypatch)
+
+    assert (step.output_mode, step.output_type) == ("http_post", "text")
+    assert step.output_config is not None
+    assert step.output_config["url"] == _URL
+    assert sends_run_result(step.output_mode, step.output_config)
+    assert not step_calls_completion_model(step.output_mode, step.output_config)
+
+
+@pytest.mark.parametrize(
+    ("values", "message"),
+    [
+        ({"url": _URL, "instruction": "Skicka."}, "not use instruction"),
+        ({"url": _URL, "http": {"body": {"mode": "auto"}}}, "not use http"),
+        ({}, "needs url"),
+    ],
+)
+def test_a_run_result_sender_takes_only_its_address(
+    values: dict[str, Any], message: str
+) -> None:
+    with pytest.raises(BadRequestException) as refused:
+        check_step_kind_values(
+            FlowStepKind.SEND_RUN_RESULT, StepKindValues.model_validate(values)
+        )
+
+    assert message in str(refused.value)
+    assert "A send_run_result step takes url." in str(refused.value)
+
+
+@pytest.mark.parametrize(
+    "steps",
+    [[], [_step(1)], [_step(1), _step(2)]],
+    ids=["empty draft", "one step", "two steps"],
+)
+def test_a_run_result_sender_never_stands_first(steps: list[FlowStep]) -> None:
+    flow = _flow(steps)
+    answer = step_kind_answer(
+        flow,
+        prompts={},
+        positions=[1, len(steps) + 1],
+        step_ids=[step.id for step in steps[:1] if step.id is not None],
+    )
+
+    def sender(place: Any) -> StepKindOption:
+        return next(
+            option
+            for option in place.options
+            if option.kind is FlowStepKind.SEND_RUN_RESULT
+        )
+
+    first, *_last = answer.insertions
+    first_places = [first, *answer.steps]
+    for place in first_places:
+        assert "typed_io_invalid_input_source_position" in {
+            refusal.issue_code for refusal in sender(place).refusals
+        }, place
+    if steps:
+        # Last, after a step, it may stand.
+        (last,) = _last
+        assert sender(last).allowed, sender(last).refusals

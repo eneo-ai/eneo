@@ -21,6 +21,7 @@ import {
   readTemplateFill,
   readTextProcessingMode,
   readToolConfig,
+  sendsRunResult,
   toolArguments
 } from "./editor/step-configs";
 import {
@@ -41,6 +42,7 @@ import {
   type ToolOption
 } from "./editor/step-types";
 import type { FlowPublic, FlowStep } from "./flows-api";
+import { flowDeliverables } from "./flow-deliverables";
 import { tokensOf } from "./flow-steps";
 import {
   flowTakesAudio,
@@ -81,7 +83,9 @@ export type StepProblem =
   | { code: "model_missing" }
   /** Every reference in one field of the step that reads nothing the run has. */
   | { code: "reference"; anchor: FieldAnchor; reads: UnreadReference[] }
-  | { code: "classification"; violation: NonNullable<StepClassification["violation"]> };
+  | { code: "classification"; violation: NonNullable<StepClassification["violation"]> }
+  /** The last step sends the run's result, and the run delivers nothing for it to send. */
+  | { code: "run_result_no_deliverables" };
 
 export type FlowProblem =
   | { code: "no_steps" }
@@ -141,6 +145,7 @@ export function problemAnchor(problem: StepProblem): FieldAnchor | null {
     case "model_missing":
       return "completion_model";
     case "classification":
+    case "run_result_no_deliverables":
       return null;
   }
 }
@@ -168,8 +173,9 @@ function unreadReferences(
       place: { sectionIndex: readTextProcessingMode(step.input_config) === "process_each_section" }
     });
   }
-  const bindings = readInputBindings(step.input_bindings);
-  if (bindings.status === "valid") {
+  // The step that sends the run's result reads no underlag: Eneo builds what it sends.
+  const bindings = sendsRunResult(step) ? null : readInputBindings(step.input_bindings);
+  if (bindings?.status === "valid") {
     sites.push({
       anchor: "input_bindings",
       tokens: [...tokensOf(bindings.question), ...bindings.sourceRefs.map((ref) => ref.stepRef)],
@@ -407,6 +413,11 @@ function stepProblems(
     problems.push({ code: "model_missing" });
   }
   problems.push(...unreadReferences(step, flow, assistant));
+
+  if (sendsRunResult(step) && isLast) {
+    const run = flowDeliverables(ordered);
+    if (run.deliverables.length === 0) problems.push({ code: "run_result_no_deliverables" });
+  }
 
   const classification =
     facts.classification?.find((item) => item.step_id === step.id) ??

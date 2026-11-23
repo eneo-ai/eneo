@@ -2,6 +2,7 @@ import { useAnnounce } from "@astryxdesign/core/hooks";
 import { Check, ChevronRight, Copy, ExternalLink, FileText } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useCallback, useMemo, useRef, useState } from "react";
+import { sanitizeWebHref } from "@/lib/safe-url";
 import type { PersonaView } from "../persona";
 import { linkHost } from "../urls";
 import {
@@ -17,8 +18,6 @@ import { WidgetAnswer } from "./widget-answer";
 import { WidgetPersonaByline } from "./widget-persona-byline";
 import { WidgetQuestionBubble } from "./widget-question-bubble";
 import { WidgetToolActivity } from "./widget-tool-activity";
-
-const HTTP_URL = /^https?:\/\//i;
 
 export function WidgetMessage({
   message,
@@ -164,7 +163,9 @@ export function WidgetMessage({
                 {expanded && (
                   <ol id={listId} className="mt-2 flex flex-col gap-1.5 text-sm">
                     {sources.map((source, sourceIndex) => {
-                      const href = source.url && HTTP_URL.test(source.url) ? source.url : null;
+                      // A stored source address links out, so only an absolute
+                      // http(s) URL is one.
+                      const href = sanitizeWebHref(source.url);
                       return (
                         <li
                           key={source.id}

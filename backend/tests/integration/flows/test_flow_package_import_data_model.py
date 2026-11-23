@@ -1913,6 +1913,90 @@ async def test_word_package_late_failure_rolls_back_files_and_retry_replays_one_
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+@pytest.mark.parametrize(
+    "deliverable",
+    [
+        {"label": "Rapport: vecka 47 (utkast)"},
+        {"label": "Rapport", "file_name": "Rapport {{ flow_input.Team }}"},
+    ],
+    ids=["label-only", "with-file-name"],
+)
+async def test_word_package_deliverable_reaches_the_published_definition(
+    deliverable: dict[str, str],
+    db_container,
+    completion_model_factory,
+    space_factory,
+    admin_user,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Through template materialization, the draft save and publication, the
+    # deliverable is stored as the package wrote it.
+    from eneo.flow_packages.domain.flow_package_envelope import FlowPackageEnvelope
+    from eneo.flow_packages.infrastructure.flow_package_zip_writer import (
+        write_flow_package,
+    )
+    from eneo.flows.flow_authoring_spec import FormFieldSpec
+    from eneo.server.dependencies.container import load_container_upload_admission
+    from tests.unittests.flow_packages.test_flow_package_templates import (
+        _template_envelope,
+    )
+
+    source = _template_envelope()
+    spec = source.spec.model_copy(deep=True)
+    spec.steps[0].output_config["deliverable"] = deliverable
+    if "file_name" in deliverable:
+        spec.form_fields = [FormFieldSpec(name="Team", type="text", label="Team")]
+        spec.steps[0].output_config["bindings"] = {"dokument": "{{ flow_input.Team }}"}
+    envelope = FlowPackageEnvelope.build_for_export(
+        manifest_metadata=source.manifest,
+        draft=FlowPackageFlowDraft(schema_version=1, spec=spec),
+        requirements=source.requirements,
+        provenance=source.provenance,
+        template_payloads=source.template_payloads,
+    )
+    payload = _import_request(base64.b64encode(write_flow_package(envelope)).decode())
+    async with db_container() as container:
+        await load_container_upload_admission(container)
+        session = container.session()
+        space = await _create_space(
+            session=session,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+        )
+        await _add_space_membership(
+            session=session, space_id=space.id, user_id=admin_user.id
+        )
+        _patch_import_access(monkeypatch, target_space_id=space.id)
+
+        imported = await flow_package_router.import_flow_package_as_draft(
+            id=space.id,
+            import_request=payload,
+            request=_request(),
+            container=cast(Container, container),
+        )
+        assert not isinstance(imported, JSONResponse)
+
+    # A new transaction: publishing reads the template's bytes in a session of
+    # its own, which sees only the committed import.
+    async with db_container() as container:
+        service = container.flow_service()
+        flow = await service.get_flow(flow_id=imported.flow_id)
+        assert flow.steps[0].output_config["deliverable"] == deliverable
+        await service.update_flow(flow_id=imported.flow_id, steps=flow.steps)
+        published = await service.publish_flow(flow_id=imported.flow_id)
+        version = await container.flow_version_repo().get(
+            flow_id=imported.flow_id,
+            version=published.published_version,
+            tenant_id=admin_user.tenant_id,
+        )
+
+    stored_step = version.definition_json["steps"][0]
+    assert stored_step["output_config"]["deliverable"] == deliverable
+    assert stored_step["output_config"]["template_asset_id"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
 async def test_word_replacement_json_file_exceeds_multipart_text_limit(
     client,
     db_container,

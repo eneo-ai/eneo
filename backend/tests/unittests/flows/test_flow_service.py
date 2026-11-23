@@ -37,7 +37,7 @@ from eneo.flows.flow_resource_bindings import (
     ResourceSlotRef,
 )
 from eneo.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
-from eneo.flows.http_transport import SECRET_SENTINEL
+from eneo.flows.http_transport import SECRET_SENTINEL, step_calls_completion_model
 from eneo.flows.variable_resolver import iter_template_expressions
 from eneo.main.exceptions import BadRequestException, NotFoundException
 from eneo.main.models import NOT_PROVIDED
@@ -896,6 +896,8 @@ async def test_publish_flow_accepts_reads_the_run_collects(
     [
         "no_model",
         "no_model_no_ai_mode",
+        "no_model_http_post",
+        "no_model_run_result",
         "missing",
         "missing_id",
         "missing_type",
@@ -911,9 +913,43 @@ async def test_publish_flow_requires_provider_binding(user, binding):
     version_repo = AsyncMock()
     service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
     step = _step()
+    before: list[FlowStep] = []
     if binding == "no_model_no_ai_mode":
         step = step.model_copy(
             update={"output_mode": "render_verbatim", "output_type": "pdf"}
+        )
+    if binding in {"no_model_http_post", "no_model_run_result"}:
+        # An ordinary POST step sends what its model answers; a step that
+        # sends the run's result calls no model.
+        body = {"mode": "run_result" if binding == "no_model_run_result" else "auto"}
+        step = step.model_copy(
+            update={
+                "output_mode": "http_post",
+                "output_type": "text",
+                "output_config": {
+                    "url": "https://receiver.example.org/results",
+                    "auth": {"mode": "none"},
+                    "body": body,
+                },
+            }
+        )
+    if binding == "no_model_run_result":
+        # The result has a text to send: the step before the one that sends.
+        before = [
+            _step().model_copy(
+                update={
+                    "assistant_id": step.assistant_id,
+                    "output_mode": "compose_text",
+                    "output_type": "text",
+                }
+            )
+        ]
+        step = step.model_copy(
+            update={
+                "step_order": 2,
+                "input_source": "previous_step",
+                "user_description": "Step 2",
+            }
         )
     flow = Flow(
         id=uuid4(),
@@ -928,7 +964,7 @@ async def test_publish_flow_requires_provider_binding(user, binding):
         data_retention_days=None,
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
-        steps=[step],
+        steps=[*before, step],
     )
     flow_repo.get.return_value = flow
     flow_repo.allocate_next_version.return_value = 1
@@ -945,12 +981,12 @@ async def test_publish_flow_requires_provider_binding(user, binding):
         get_model_route=lambda: "openai/model-a",
         security_classification=None,
     )
-    if binding in {"no_model", "no_model_no_ai_mode"}:
+    if binding.startswith("no_model"):
         assistant.completion_model = None
     service.assistant_service.get_assistant.side_effect = None
     service.assistant_service.get_assistant.return_value = (assistant, [])
 
-    if binding == "no_model_no_ai_mode":
+    if binding in {"no_model_no_ai_mode", "no_model_run_result"}:
         await service.publish_flow(flow_id=flow.id)
         version_repo.create.assert_awaited_once()
     elif binding == "provider_backed":
@@ -995,7 +1031,7 @@ def test_only_a_model_step_without_a_model_is_refused(
     check = partial(
         require_completion_model_for_step,
         step_order=2,
-        output_mode=output_mode.value,
+        calls_completion_model=step_calls_completion_model(output_mode.value, None),
         has_completion_model=has_completion_model,
     )
     if refused:
@@ -4737,3 +4773,80 @@ async def test_a_step_timeout_within_the_maximum_saves(user):
     await _write_new_steps(service, flow_repo, [step])
 
     flow_repo.update.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("output_mode", "output_type", "kept"),
+    [
+        ("render_verbatim", "pdf", {"label": "Plan", "file_name": "Plan"}),
+        ("compose_text", "text", {"label": "Plan"}),
+        ("pass_through", "json", None),
+    ],
+)
+async def test_update_flow_keeps_a_deliverable_only_where_it_can_be_one(
+    user, output_mode, output_type, kept
+):
+    repo = AsyncMock()
+    service = _service(user=user, flow_repo=repo, version_repo=AsyncMock())
+    deliverable = {"label": "Plan", "file_name": "Plan"}
+    step = _step().model_copy(
+        update={
+            "output_mode": output_mode,
+            "output_type": output_type,
+            "output_config": {"deliverable": deliverable, "extension": "kept"},
+        }
+    )
+
+    updated = await _write_new_steps(service, repo, [step])
+
+    assert updated.steps[0].output_config == (
+        {"deliverable": kept, "extension": "kept"}
+        if kept is not None
+        else {"extension": "kept"}
+    )
+
+
+@pytest.mark.asyncio
+async def test_publish_refuses_a_run_result_with_nothing_to_send(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+    sender = _step().model_copy(
+        update={
+            "output_mode": "http_post",
+            "output_type": "text",
+            "output_config": {
+                "url": "https://receiver.example.org/results",
+                "auth": {"mode": "none"},
+                "body": {"mode": "run_result"},
+            },
+        }
+    )
+    flow = Flow(
+        id=uuid4(),
+        tenant_id=user.tenant_id,
+        space_id=uuid4(),
+        name="Publishable flow",
+        description=None,
+        created_by_user_id=user.id,
+        owner_user_id=user.id,
+        published_version=None,
+        metadata_json=None,
+        data_retention_days=None,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        steps=[sender],
+    )
+    flow_repo.get.return_value = flow
+
+    with pytest.raises(FlowStepValidationError) as caught:
+        await service.publish_flow(flow_id=flow.id)
+
+    assert caught.value.code == "flow_run_result_no_deliverables"
+    assert caught.value.step_order == 1
+    assert caught.value.context == {
+        "issue_code": "flow_run_result_no_deliverables",
+        "step_order": 1,
+    }
+    version_repo.create.assert_not_awaited()

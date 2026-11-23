@@ -124,7 +124,6 @@ function Classification({
   const listing = useQuery(securityClassificationsQueryOptions());
   // A member the list refuses still reads the names the space carries.
   const classifications = knownClassifications(listing.data?.items, space);
-  const enabled = listing.data?.enabled ?? space.security_classification !== null;
   const facts = preview.data;
   const floor = facts?.output_floor ?? space.security_classification?.security_level ?? null;
   const override = draft.output_classification_override;
@@ -143,9 +142,6 @@ function Classification({
       ? [{ value: String(override), label: levelName(override, classifications, t) }]
       : [])
   ];
-
-  // Nothing to decide where the organisation does not classify.
-  if (!enabled && override === null) return null;
 
   return (
     <Anchor formId={formId} anchor="output_classification_override">
@@ -217,6 +213,7 @@ function Classification({
 export function StepControlSection({
   formId,
   sectionId,
+  hasReview = true,
   draft,
   onChange,
   problems,
@@ -224,22 +221,40 @@ export function StepControlSection({
 }: {
   formId: string;
   sectionId: string;
+  /** False for a step nothing reviews, so the choice is left out rather than shown off. */
+  hasReview?: boolean;
   draft: StepConfig;
   onChange: (next: StepConfig) => void;
   problems: FieldProblems;
   preview: { data: StepClassification | null; isPending: boolean; error: unknown };
 }) {
   const t = useTranslations();
+  const { space } = useSpace();
+  const listing = useQuery(securityClassificationsQueryOptions());
+  // Nothing to decide where the organisation does not classify.
+  const classifies =
+    (listing.data?.enabled ?? space.security_classification !== null) ||
+    draft.output_classification_override !== null;
+  if (!hasReview && !classifies) return null;
   return (
     <EditorSection id={sectionId} title={t("flow_step_editor_control_title")}>
-      <Review formId={formId} draft={draft} onChange={onChange} problem={problems.review_policy} />
-      <Classification
-        formId={formId}
-        draft={draft}
-        onChange={onChange}
-        preview={preview}
-        problem={problems.output_classification_override}
-      />
+      {hasReview && (
+        <Review
+          formId={formId}
+          draft={draft}
+          onChange={onChange}
+          problem={problems.review_policy}
+        />
+      )}
+      {classifies && (
+        <Classification
+          formId={formId}
+          draft={draft}
+          onChange={onChange}
+          preview={preview}
+          problem={problems.output_classification_override}
+        />
+      )}
     </EditorSection>
   );
 }

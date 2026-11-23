@@ -7,9 +7,16 @@ from eneo.flows.domain.flow_step_validation import (
     FlowGraphIssueCode,
     FlowStepValidationError,
 )
-from eneo.flows.enums import FlowInputSource, FlowOutputMode
+from eneo.flows.enums import (
+    FlowInputSource,
+    FlowOutputMode,
+    flow_output_mode_uses_completion_model,
+)
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
-from eneo.flows.http_transport.authored_config import HttpAuthoredConfig
+from eneo.flows.http_transport.authored_config import (
+    HttpAuthoredConfig,
+    HttpBodyMode,
+)
 from eneo.flows.http_transport.normalizer import parse_authored_http_config
 from eneo.main.exceptions import TypedIOValidationException
 
@@ -29,6 +36,42 @@ def sends_http_config(
         return FlowInputSource(input_source) is FlowInputSource.HTTP_GET
     return (
         FlowOutputMode(output_mode) is FlowOutputMode.HTTP_POST and config is not None
+    )
+
+
+def sends_run_result(
+    output_mode: FlowOutputMode | str,
+    output_config: Mapping[str, object] | None,
+) -> bool:
+    """Whether a step sends the run's finished result: an ``http_post`` step
+    whose body mode is ``run_result``. Such a step completes the run before it
+    sends, and its delivery's outcome never changes the run. The one reading
+    the executor, the delivery worker and redelivery share.
+
+    A config the runtime cannot parse sends no run result; the request
+    compiler reports its defect."""
+    if not sends_http_config("output_config", "", output_mode, output_config):
+        return False
+    try:
+        config = parse_authored_http_config(
+            output_config, step_order=0, config_label="output_config"
+        )
+    except TypedIOValidationException:
+        return False
+    return config.body.mode is HttpBodyMode.RUN_RESULT
+
+
+def step_calls_completion_model(
+    output_mode: FlowOutputMode | str,
+    output_config: Mapping[str, object] | None,
+) -> bool:
+    """Whether a step asks its assistant's completion model: its output mode
+    answers with one, unless the step sends the run's result, which reads
+    no prompt or step input and holds no content of its own. The one rule
+    publishing, the security classification, the run's preflight and the
+    step's execution share; the editor keeps the same."""
+    return flow_output_mode_uses_completion_model(output_mode) and not (
+        sends_run_result(output_mode, output_config)
     )
 
 

@@ -6,12 +6,12 @@ import { Text } from "@astryxdesign/core/Text";
 import { TextArea } from "@astryxdesign/core/TextArea";
 import { Token } from "@astryxdesign/core/Token";
 import { useAnnounce } from "@astryxdesign/core/hooks";
-import { useMutation } from "@tanstack/react-query";
 import { CircleAlert, CircleCheck, KeyRound, Plus, Trash2 } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useId, useState } from "react";
 import { Collapsible } from "@/components/astryx/collapsible";
 import { TextInput } from "@/components/astryx/text-input";
+import { useSecretMutation } from "@/lib/api/use-secret-mutation";
 import { tokensOf } from "../flow-steps";
 import { isJsonObject } from "./step-types";
 import { testHttp, type HttpTestResponse } from "./editor-api";
@@ -20,7 +20,8 @@ import { TemplateTextArea } from "./reference-text-area";
 import { describeSaveError, HTTP_ERROR_KEYS, type FieldProblems } from "./field-problems";
 import {
   headerSent,
-  httpUrlProblem,
+  httpsHostFixed,
+  httpUrlProblemKey,
   isSecretSentinel,
   type HttpBodyMode,
   type HttpConfig,
@@ -223,6 +224,23 @@ type TestOutcome = {
 };
 
 /**
+ * The bodies a plain POST chooses from. Sending the run's result is a kind of
+ * step of its own ("Skicka körningens resultat"), not a body to switch to.
+ */
+const BODY_MODES: readonly HttpBodyMode[] = ["auto", "json_template", "text_template", "none"];
+
+type TestConfig = Parameters<typeof testHttp>[1]["config"];
+
+/**
+ * The settings as the test takes them, or null for a body that sends the
+ * run's result, which is never tested (the form leaves the test out).
+ */
+function testableConfig(config: HttpConfig): TestConfig | null {
+  const { mode } = config.body;
+  return mode === "run_result" ? null : { ...config, body: { ...config.body, mode } };
+}
+
+/**
  * One test request with the step's settings as they stand in the form. The
  * core resolves a stored credential from the saved step, so a step that has
  * never been saved cannot be tested. A URL or body with variables is filled
@@ -242,6 +260,7 @@ function HttpTest({
   const t = useTranslations();
   const announce = useAnnounce();
   const previewId = useId();
+  const testable = testableConfig(config);
   // Follows the call's references until the author edits it.
   const [editedVariables, setVariables] = useState<string | null>(null);
   const variables = editedVariables ?? sampleTestVariables(config);
@@ -254,11 +273,18 @@ function HttpTest({
     announce(next.detail ? `${next.title}. ${next.detail}` : next.title);
   }
 
-  const test = useMutation({
-    mutationFn: (testVariables: Record<string, unknown>) =>
+  // The config can carry a typed credential, so it stays out of React Query's cache.
+  const test = useSecretMutation({
+    mutationFn: ({
+      testConfig,
+      testVariables
+    }: {
+      testConfig: TestConfig;
+      testVariables: Record<string, unknown>;
+    }) =>
       testHttp(flowId, {
         step_id: stepId,
-        config,
+        config: testConfig,
         direction,
         method: direction === "input" ? "GET" : "POST",
         test_variables: testVariables
@@ -299,7 +325,7 @@ function HttpTest({
   });
 
   function run() {
-    if (test.isPending) return;
+    if (test.isPending || !testable) return;
     if (!config.url.trim()) {
       report({ ok: false, title: t("http_test_needs_url"), detail: null, preview: null });
       return;
@@ -316,7 +342,7 @@ function HttpTest({
       }
     }
     setVariablesProblem(null);
-    test.mutate(testVariables);
+    test.mutate({ testConfig: testable, testVariables });
   }
 
   return (
@@ -330,7 +356,7 @@ function HttpTest({
       >
         {t(direction === "input" ? "http_test_desc_input" : "http_test_desc_output")}
       </Text>
-      {templated && (
+      {templated && testable && (
         <TextArea
           label={t("http_test_variables_label")}
           description={t("http_test_variables_help")}
@@ -350,6 +376,7 @@ function HttpTest({
           size="sm"
           isLoading={test.isPending}
           isInterruptible
+          isDisabled={!testable}
           onClick={run}
         />
       </div>
@@ -426,10 +453,10 @@ export function HttpFields({
     config.custom_headers.some((header) => headerSent(header) && !HEADER_NAME.test(header.name));
   const bodyTemplated =
     config.body.mode === "json_template" || config.body.mode === "text_template";
+  const sendsRunResult = config.body.mode === "run_result";
   const urlId = useId();
   const moreId = useId();
   const [showUrlProblem, setShowUrlProblem] = useState(false);
-  const urlProblem = httpUrlProblem(config.url);
   const auth = config.auth;
   // A run fills a templated name, so it is known only then.
   const apiKeyHeaderInvalid =
@@ -442,14 +469,10 @@ export function HttpFields({
     (auth.mode !== "none" ||
       config.custom_headers.some((header) => header.secret && headerSent(header))) &&
     url !== "" &&
-    !/^https:\/\/[^/?#{]+(?:[/?#]|$)/i.test(url);
-  const localUrlProblem = !showUrlProblem
-    ? null
-    : urlProblem === "missing"
-      ? t("flow_step_editor_http_url_missing")
-      : urlProblem === "invalid"
-        ? t("flow_step_editor_http_url_invalid")
-        : null;
+    !httpsHostFixed(url);
+  // The save refuses it too; said here as soon as the field is left.
+  const urlProblem = httpUrlProblemKey(config.url, sendsRunResult);
+  const localUrlProblem = showUrlProblem && urlProblem ? t(urlProblem) : null;
   const urlError = problem ?? localUrlProblem;
 
   const inUse =
@@ -483,9 +506,15 @@ export function HttpFields({
           label={
             direction === "input"
               ? t("flow_step_editor_http_url_get")
-              : t("flow_step_editor_http_url_post")
+              : sendsRunResult
+                ? t("flow_step_editor_http_url_run_result")
+                : t("flow_step_editor_http_url_post")
           }
-          description={t("flow_step_editor_http_url_description")}
+          description={
+            sendsRunResult
+              ? t("flow_step_editor_http_url_run_result_description")
+              : t("flow_step_editor_http_url_description")
+          }
           value={config.url}
           onChange={(next) => onChange({ ...config, url: next })}
           onBlur={() => setShowUrlProblem(true)}
@@ -500,14 +529,17 @@ export function HttpFields({
                 : undefined
           }
         />
-        <div>
-          <VariablePicker
-            groups={groups}
-            onInsert={(token) =>
-              onChange({ ...config, url: insertToken(config.url, token, null).text })
-            }
-          />
-        </div>
+        {/* Run data may not choose where the run's result goes. */}
+        {!sendsRunResult && (
+          <div>
+            <VariablePicker
+              groups={groups}
+              onInsert={(token) =>
+                onChange({ ...config, url: insertToken(config.url, token, null).text })
+              }
+            />
+          </div>
+        )}
       </div>
 
       <Anchor formId={formId} anchor={`${base}.auth`} className="flex flex-col gap-4">
@@ -581,15 +613,12 @@ export function HttpFields({
             onChange({ ...config, response_format: value === "json" ? "json" : "text" })
           }
         />
-      ) : (
+      ) : sendsRunResult ? null : (
         <Anchor formId={formId} anchor="output_config.http.body" className="flex flex-col gap-4">
           <Selector
             label={t("flow_step_editor_http_body")}
             description={t("flow_step_editor_http_body_description")}
-            options={(["auto", "json_template", "text_template", "none"] as const).map((mode) => ({
-              value: mode,
-              label: httpBodyModeLabel(mode, t)
-            }))}
+            options={BODY_MODES.map((mode) => ({ value: mode, label: httpBodyModeLabel(mode, t) }))}
             value={config.body.mode}
             onChange={(value) =>
               onChange({ ...config, body: { ...config.body, mode: value as HttpBodyMode } })
@@ -698,7 +727,10 @@ export function HttpFields({
         </section>
       </Anchor>
 
-      <HttpTest flowId={flowId} stepId={stepId} direction={direction} config={config} />
+      {/* A body that sends the run's result has no run to send in a test. */}
+      {!sendsRunResult && (
+        <HttpTest flowId={flowId} stepId={stepId} direction={direction} config={config} />
+      )}
     </div>
   );
 }

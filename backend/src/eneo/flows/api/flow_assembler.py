@@ -8,6 +8,7 @@ from uuid import UUID
 from pydantic import ValidationError
 
 from eneo.authentication.auth_models import FlowServicePrincipalActorPublic
+from eneo.database.tables.flow_tables import FlowOutboxDeliveryStatus
 from eneo.flows.api.flow_models import (
     FlowPublic,
     FlowRunDetailPublic,
@@ -17,12 +18,12 @@ from eneo.flows.api.flow_models import (
     FlowRunPublic,
     FlowRunReviewCheckpointPublic,
     FlowRunStartedByPublic,
+    FlowRunStatusPublic,
     FlowRunStepInputFilePublic,
     FlowRunStepPublic,
-    FlowRunSummaryPublic,
     FlowRunTokenUsagePublic,
     FlowRunTranscriptionUsagePublic,
-    FlowRunWebhookDeliveryPublic,
+    FlowRunWebhookDeliveryStatePublic,
     FlowSparsePublic,
     FlowStepCreateRequest,
     FlowStepDiagnosticPublic,
@@ -31,11 +32,15 @@ from eneo.flows.api.flow_models import (
 from eneo.flows.api.flow_run_contract_models import (
     FlowFinalOutputContractPublic,
     FlowRunArtifactResultPublic,
+    FlowRunDeliverable,
     FlowRunFileBackedTextResultPublic,
     FlowRunInlineTextResultPublic,
     FlowRunOutboundHttpResultPublic,
+    FlowRunOutputContract,
     FlowRunResultPublic,
     FlowRunStructuredResultPublic,
+    OutboundHttpDeliveryStatus,
+    final_step_delivery_status,
 )
 from eneo.flows.api.flow_runtime_paths import (
     FlowRuntimePublic,
@@ -61,13 +66,17 @@ from eneo.flows.domain.step_output import (
 )
 from eneo.flows.domain.transcript_source import TranscriptSourceReference
 from eneo.flows.enums import FlowOutputDelivery, FlowOutputType, FlowRunStatus
+from eneo.flows.flow_run_contract_service import project_run_deliverables
 from eneo.flows.flow_run_input_envelope import (
     read_max_speakers,
     read_semantic_flow_input_payload,
     read_speaker_labels_choice,
 )
 from eneo.flows.flow_run_step_input_file import FlowRunStepInputFileRef
-from eneo.flows.flow_run_step_result_file import FlowRunStepResultFile
+from eneo.flows.flow_run_step_result_file import (
+    FlowRunStepResultFile,
+    text_overflow_files,
+)
 from eneo.flows.http_transport import redact_persisted_config
 from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
     FlowRunWebhookDeliveryRead,
@@ -142,16 +151,25 @@ class FlowAssembler:
         )
 
     @staticmethod
-    def to_run_result_public(
+    def to_run_outputs_public(
         *,
         run: FlowRun,
-        final_output: FlowFinalOutputContractPublic | None,
+        outputs: FlowRunOutputContract | None,
         result_files: Sequence[FlowRunStepResultFile] = (),
-    ) -> FlowRunResultPublic | None:
-        return _project_run_result(
-            run=run,
-            final_output=final_output,
-            result_files=result_files,
+        final_delivery_status: FlowOutboxDeliveryStatus | None = None,
+    ) -> tuple[FlowRunResultPublic | None, list[FlowRunDeliverable]]:
+        """``run``'s ``result`` and ``deliverables`` from one output
+        contract; ``result_files`` hold each step's current attempt."""
+        return (
+            _project_run_result(
+                run=run,
+                final_output=outputs.final_output if outputs is not None else None,
+                result_files=result_files,
+                final_delivery_status=final_delivery_status,
+            ),
+            project_run_deliverables(
+                status=run.status, outputs=outputs, result_files=result_files
+            ),
         )
 
     def to_run_public(
@@ -161,8 +179,9 @@ class FlowAssembler:
         result_files: Sequence[FlowRunStepResultFile] = (),
         token_usage: FlowRunTokenUsage | None = None,
         transcription_usage: FlowRunTranscriptionUsage | None = None,
-        final_output: FlowFinalOutputContractPublic | None = None,
+        outputs: FlowRunOutputContract | None = None,
         started_by: FlowRunStartedByPublic | None = None,
+        final_delivery_status: FlowOutboxDeliveryStatus | None = None,
     ) -> FlowRunPublic:
         public_token_usage = (
             FlowRunTokenUsagePublic.model_validate(token_usage)
@@ -174,6 +193,12 @@ class FlowAssembler:
             if transcription_usage is not None
             else None
         )
+        result, deliverables = self.to_run_outputs_public(
+            run=run,
+            outputs=outputs,
+            result_files=result_files,
+            final_delivery_status=final_delivery_status,
+        )
         return FlowRunPublic.model_validate(run).model_copy(
             update={
                 "input_payload_json": read_semantic_flow_input_payload(
@@ -181,12 +206,9 @@ class FlowAssembler:
                 ),
                 "speaker_labels": read_speaker_labels_choice(run.input_payload_json),
                 "max_speakers": read_max_speakers(run.input_payload_json),
-                "result": self.to_run_result_public(
-                    run=run,
-                    final_output=final_output,
-                    result_files=result_files,
-                ),
+                "result": result,
                 "result_files": list(result_files),
+                "deliverables": deliverables,
                 "token_usage": public_token_usage,
                 "transcription_usage": public_transcription_usage,
                 "started_by": started_by,
@@ -194,13 +216,21 @@ class FlowAssembler:
         )
 
     @staticmethod
-    def to_run_summary_public(
+    def to_run_status_public(
         run: FlowRunStatusSnapshot,
         *,
         started_by: FlowRunStartedByPublic | None = None,
-    ) -> FlowRunSummaryPublic:
-        return FlowRunSummaryPublic.model_validate(run).model_copy(
-            update={"started_by": started_by}
+        result_delivery: FlowRunWebhookDeliveryRead | None = None,
+    ) -> FlowRunStatusPublic:
+        return FlowRunStatusPublic.model_validate(run).model_copy(
+            update={
+                "started_by": started_by,
+                "result_delivery": (
+                    FlowRunWebhookDeliveryStatePublic.model_validate(result_delivery)
+                    if result_delivery is not None
+                    else None
+                ),
+            }
         )
 
     @staticmethod
@@ -234,24 +264,32 @@ class FlowAssembler:
         result_files: Sequence[FlowRunStepResultFile] = (),
         token_usage: FlowRunTokenUsage | None = None,
         transcription_usage: FlowRunTranscriptionUsage | None = None,
-        final_output: FlowFinalOutputContractPublic | None = None,
+        outputs: FlowRunOutputContract | None = None,
         webhook_deliveries: Sequence[FlowRunWebhookDeliveryRead] = (),
         started_by: FlowRunStartedByPublic | None = None,
         evidence_access: FlowRunEvidenceAccess,
     ) -> FlowRunDetailPublic:
+        final_delivery_status = final_step_delivery_status(
+            outputs,
+            [
+                (delivery.step_id, delivery.attempt_no, delivery.delivery_status)
+                for delivery in webhook_deliveries
+            ],
+        )
         run_payload = self.to_run_public(
             run,
             result_files=result_files,
             token_usage=token_usage,
             transcription_usage=transcription_usage,
-            final_output=final_output,
+            outputs=outputs,
             started_by=started_by,
+            final_delivery_status=final_delivery_status,
         ).model_dump()
         return FlowRunDetailPublic.model_validate(
             {
                 **run_payload,
                 "webhook_deliveries": [
-                    FlowRunWebhookDeliveryPublic.model_validate(delivery)
+                    FlowRunWebhookDeliveryStatePublic.model_validate(delivery)
                     for delivery in webhook_deliveries
                 ],
                 "error": (
@@ -377,6 +415,7 @@ def _project_run_result(
     run: FlowRun,
     final_output: FlowFinalOutputContractPublic | None,
     result_files: Sequence[FlowRunStepResultFile],
+    final_delivery_status: FlowOutboxDeliveryStatus | None = None,
 ) -> FlowRunResultPublic | None:
     if run.status is not FlowRunStatus.COMPLETED:
         return None
@@ -386,9 +425,16 @@ def _project_run_result(
         )
 
     if final_output.delivery is FlowOutputDelivery.OUTBOUND_HTTP:
+        # A run whose final step sends its result completes before the
+        # result is sent, so the delivery reports its own state; an earlier
+        # read without it is a run that completed on delivery.
         return FlowRunOutboundHttpResultPublic(
             kind="outbound_http",
-            delivery_status="delivered",
+            # The alias lists every member; the model refuses one added later.
+            delivery_status=cast(
+                OutboundHttpDeliveryStatus,
+                final_delivery_status or FlowOutboxDeliveryStatus.DELIVERED,
+            ),
         )
 
     if final_output.delivery is FlowOutputDelivery.ARTIFACT:
@@ -426,16 +472,14 @@ def _project_run_result(
                 "Completed text run has malformed persisted text metadata."
             ) from exc
         if isinstance(text, FileBackedStepText):
-            matching_files = [
-                result_file
-                for result_file in result_files
-                if result_file.flow_run_id == run.id
-                and result_file.flow_id == run.flow_id
-                and result_file.tenant_id == run.tenant_id
-                and result_file.step_id == final_output.step_id
-                and result_file.file_id == text.file_id
-                and result_file.source == "generated_output"
-            ]
+            matching_files = text_overflow_files(
+                result_files,
+                run_id=run.id,
+                flow_id=run.flow_id,
+                tenant_id=run.tenant_id,
+                step_id=final_output.step_id,
+                file_id=text.file_id,
+            )
             if len(matching_files) != 1:
                 raise FlowRunResultProjectionError(
                     "Completed file-backed text run must have exactly one current "

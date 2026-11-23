@@ -654,3 +654,30 @@ def test_the_same_shape_without_its_exemption_is_judged(
     code: FlowSuggestionCode, steps: list[SuggestionStep]
 ) -> None:
     assert len(_of(code, steps)) == 1
+
+
+def test_a_deliverable_file_name_reads_a_form_field_and_its_label_does_not() -> None:
+    document = _step(
+        1,
+        input_bindings={"question": "{{ flow_input.kommun }}"},
+        output_mode="render_verbatim",
+        output_type="pdf",
+        output_config={
+            "deliverable": {
+                "label": "{{ flow_input.kommun }}",
+                "file_name": "Plan {{ flow_input.ärende }}",
+            }
+        },
+    )
+    labelled = _step(
+        1,
+        input_bindings={"question": "{{ flow_input.kommun }}"},
+        output_mode="render_verbatim",
+        output_type="pdf",
+        output_config={"deliverable": {"label": "{{ flow_input.ärende }}"}},
+    )
+
+    assert _of(_FORM, [document], _METADATA) == []
+    assert [s.params for s in _of(_FORM, [labelled], _METADATA)] == [
+        {"field": "ärende"}
+    ]

@@ -24,6 +24,54 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from eneo.main.container.container import Container
 
 
+async def test_cancelling_a_task_during_close_returns_its_postgres_connection(
+    test_settings, monkeypatch
+):
+    from eneo.database import database
+
+    settings = test_settings.model_copy(
+        update={"db_pool_size": 1, "db_pool_max_overflow": 0, "db_pool_timeout": 0.15}
+    )
+    monkeypatch.setattr(database, "get_settings", lambda: settings)
+    manager = database.DatabaseSessionManager()
+    manager.init(settings.database_url)
+    closing, release = asyncio.Event(), asyncio.Event()
+    driver_close = database.SafeAsyncSession.close
+
+    async def delayed_close(session):
+        closing.set()
+        await release.wait()
+        await driver_close(session)
+
+    monkeypatch.setattr(database.SafeAsyncSession, "close", delayed_close)
+
+    async def request():
+        async with manager.session() as session:
+            await session.begin()
+            assert await session.scalar(text("SELECT 1")) == 1
+
+    task = asyncio.create_task(request())
+    try:
+        async with asyncio.timeout(8):
+            await closing.wait()
+            task.cancel()
+            await asyncio.sleep(0)
+            task.cancel()
+            with pytest.raises(SQLAlchemyTimeoutError):
+                async with manager.connect():
+                    pass
+            assert not task.done()
+            release.set()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            async with manager.connect() as reused:
+                assert await reused.scalar(text("SELECT 1")) == 1
+    finally:
+        release.set()
+        await asyncio.gather(task, return_exceptions=True)
+        await manager.close()
+
+
 async def test_session_manager_honors_configured_pool_capacity(
     test_settings, monkeypatch
 ):

@@ -48,7 +48,9 @@ from eneo.flows.http_transport.secret_codec import (
 )
 from eneo.flows.http_transport.step_configs import (
     sends_http_config,
+    sends_run_result,
     sent_step_http_configs,
+    step_calls_completion_model,
 )
 from eneo.flows.http_transport.validator import validate_authored_config
 
@@ -86,6 +88,8 @@ __all__ = [
     "redact_authored_config",
     "redact_persisted_config",
     "sends_http_config",
+    "sends_run_result",
+    "step_calls_completion_model",
     "sent_step_http_configs",
     "secret_fields_holding_templates",
     "templated_secret_fields",

@@ -29,10 +29,16 @@ import { flowQueryOptions, type FlowPublic } from "../flows-api";
 import { CopyButton } from "./run-copy";
 import { formatSeconds } from "./run-format";
 import { RunFailure } from "./run-failure";
-import { RunWebhookDeliveries } from "./run-webhooks";
+import {
+  currentDeliveries,
+  deliverySignature,
+  deliveryUnderWay,
+  RunWebhookDeliveries,
+  type Delivery
+} from "./run-webhooks";
 import { RunFiles } from "./run-files";
 import { JsonValue } from "./run-json";
-import { refusalText, runErrorText, stepWarningText } from "./run-messages";
+import { refusalText, runErrorText, stepWarningText, type Translator } from "./run-messages";
 import { outputText, progressSignature, runStepViews, type RunStepView } from "./run-progress";
 import { RunLiveProgress } from "./run-live-progress";
 import { RunKnowledge, searchedKnowledge } from "./run-knowledge";
@@ -62,16 +68,14 @@ import {
 } from "./run-status";
 import { CancelRunButton, RetryRunButton, runActions, type RunActionNotice } from "./run-actions";
 import { ReviewPanel } from "./review-panel";
+import { followsResultOnly, runProgressQueryOptions, type RunProgress } from "./run-progress-read";
 import {
   activeReviewQueryOptions,
-  getRunGraph,
-  getRunStatus,
   redispatchRun,
   runDetailQueryOptions,
   runKeys,
   runStepsQueryOptions,
   type RunDetail,
-  type RunGraph,
   type RunSummary
 } from "./runs-api";
 import { useNowAt } from "./use-now-at";
@@ -84,6 +88,25 @@ const INPUT_LOSS_CODES = new Set([
   "runtime_input_source_text_unavailable",
   "empty_prior_step_input"
 ]);
+
+/** The step's diagnostic for a step that sends the run's result once the run has completed. */
+const SENT_AFTER_RUN = "run_result_sent_after_run";
+
+/**
+ * Where the run's sent result stands, in the result's words: the same state
+ * as the delivery's own row, so the two never say different things.
+ * `retryAt` is the time of the next attempt.
+ */
+function sentResultText(t: Translator, state: Delivery["state"], retryAt: string | null): string {
+  if (state === "retry_scheduled") return t("flow_runs_result_retry_at", { time: retryAt ?? "" });
+  return t(
+    state === "delivered"
+      ? "flow_runs_result_delivered"
+      : state === "sending"
+        ? "flow_runs_result_sending"
+        : "flow_runs_result_not_delivered"
+  );
+}
 
 /** The files the run's final result carries. */
 function resultFileIds(result: RunDetail["result"]): Set<string> {
@@ -131,14 +154,18 @@ function copyableResult(result: RunDetail["result"] | undefined): unknown {
 function RunResult({
   flowId,
   run,
-  steps
+  steps,
+  delivery
 }: {
   flowId: string;
   run: RunDetail;
   steps: readonly RunStepView[];
+  /** The run's latest delivery as its status last said it: the result's own state is older. */
+  delivery: Delivery | null;
 }) {
   const t = useTranslations();
   const result = run.result;
+  const retryAt = useClientTimeText(delivery?.next_delivery_at, "time");
   if (!result) {
     const stopped = run.status === "failed" || run.status === "cancelled";
     const finished = steps.findLast((step) => step.status === "completed");
@@ -181,8 +208,13 @@ function RunResult({
           label={t("flow_runs_result_files")}
         />
       );
-    case "outbound_http":
-      return <p className="text-ax-text text-sm">{t("flow_runs_result_delivered")}</p>;
+    case "outbound_http": {
+      // A run result is sent after the run completes, so it can still be on its way or given up.
+      const state =
+        delivery?.state ??
+        (result.delivery_status === "pending" ? "sending" : result.delivery_status);
+      return <p className="text-ax-text text-sm">{sentResultText(t, state, retryAt)}</p>;
+    }
   }
 }
 
@@ -389,22 +421,26 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
   // A poll that answers the same keeps the same data, so the page does not
   // render again: the data carries no clock (`useNowAt` keeps the deadlines),
   // and reading `isFetching` or `dataUpdatedAt` here on the success path
-  // would bring back one render per poll.
+  // would bring back one render per poll. Coming back to the tab or reconnecting
+  // reads it again (`runProgressQueryOptions` says what it reads once the run has
+  // finished).
   const progress = useQuery({
-    queryKey: runKeys.progress(flowId, runId),
-    queryFn: async ({ signal }) => {
-      const [status, graph] = await Promise.all([
-        getRunStatus(flowId, runId, signal),
-        getRunGraph(flowId, runId, signal)
-      ]);
-      return { status, graph };
-    },
-    refetchInterval: pollEvery<{ status: RunSummary; graph: RunGraph }>((data) =>
-      data
-        ? clock(progressSignature(data.status, data.graph), shouldPoll(data.status.status))
-        : false
-    ),
-    refetchIntervalInBackground: false
+    ...runProgressQueryOptions(flowId, runId),
+    // One clock: while the run moves, it follows what the run shows; once the run has finished, it
+    // follows the result sent after it, its status alone, until it has landed or was given up.
+    refetchInterval: pollEvery<RunProgress>((data) => {
+      if (!data) return false;
+      const { status, graph } = data;
+      const delivery = status.result_delivery;
+      return isTerminal(status.status)
+        ? clock(deliverySignature(delivery), deliveryUnderWay(delivery))
+        : clock(progressSignature(status, graph), shouldPoll(status.status));
+    }),
+    refetchIntervalInBackground: false,
+    // Opened again while its result is on its way or was given up (it can be sent again from
+    // elsewhere, and nothing on a closed page sees it): its status is read at once, even when it
+    // was read a moment ago.
+    refetchOnMount: (query) => (followsResultOnly(query.state.data?.status) ? "always" : true)
   });
 
   const signature = progress.data
@@ -425,6 +461,8 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
     })
   );
   const settled = progress.data ? isTerminal(progress.data.status.status) : false;
+  // The run's latest delivery as its status last said it: sent after the run, it moves on without it.
+  const latestDelivery = progress.data?.status.result_delivery ?? null;
   const steps = useShownRead(
     useQuery({
       ...runStepsQueryOptions(flowId, runId, readSignature ?? "", settled),
@@ -496,7 +534,9 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
   const refresh = () => queryClient.invalidateQueries({ queryKey: runKeys.run(flowId, runId) });
   const [refreshing, setRefreshing] = useState(false);
   // Reads everything on the page again, the audited content and the transcripts
-  // included: the person asked.
+  // included: the person asked. The run's graph is the exception while a finished
+  // run's result is followed: where `runProgressQueryOptions` keeps it, its status
+  // alone is read.
   async function refreshNow() {
     if (refreshing) return;
     setRefreshing(true);
@@ -530,7 +570,9 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
   });
 
   const run = detail.data;
-  const resultCopy = copyableResult(run?.result);
+  // The result follows the header: a detail read for a status from before the run's last commit
+  // and a graph from after it already holds the result while the status still says it runs.
+  const resultCopy = settled ? copyableResult(run?.result) : null;
   const startedAt = summary ? (summary.started_at ?? summary.created_at) : null;
   const time = useClientTimeText(startedAt, "date_time");
   const title =
@@ -565,8 +607,14 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
       : [];
   const offersRedispatch = summary !== undefined && canRedispatch(summary, now);
 
-  // A finished run no longer changes: reading it again is offered only after a read failed.
-  const offersRefresh = !settled || [progress, detail, steps].some((read) => read.isError);
+  // A finished run no longer changes: reading it again is offered only after a read failed. Not
+  // for its progress read while its result is followed: the error notice retries that read, which
+  // decides by itself whether it also reads the graph, and reading the whole run again would read
+  // its audited content.
+  const offersRefresh =
+    !settled ||
+    [detail, steps].some((read) => read.isError) ||
+    (progress.isError && !followsResultOnly(summary));
 
   const actions = summary ? (
     <div className="flex flex-wrap items-center gap-2">
@@ -616,15 +664,42 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
     </div>
   ) : undefined;
 
-  const pendingDeliveries = (run?.webhook_deliveries ?? []).filter(
-    (delivery) => delivery.delivery_status === "pending"
-  );
-  const deliveryUnderWay =
-    pendingDeliveries.length === 0
-      ? null
-      : pendingDeliveries.some((delivery) => delivery.delivery_attempts > 0)
-        ? "retrying"
-        : "sending";
+  const liveDelivery = !deliveryUnderWay(latestDelivery)
+    ? null
+    : latestDelivery?.state === "retry_scheduled"
+      ? "retrying"
+      : "sending";
+  const deliveries = currentDeliveries(run?.webhook_deliveries ?? [], latestDelivery);
+  // Content-free: the step's diagnostic, read with the steps once. Until the steps are read
+  // again, a completed run whose delivery has not landed tells it too: a plain POST keeps its
+  // run running until its delivery has landed or was given up.
+  const sentAfterRun = (order: number) =>
+    (stepViews
+      .find((step) => step.order === order)
+      ?.result?.diagnostics?.some((item) => item.code === SENT_AFTER_RUN) ??
+      false) ||
+    (status === "completed" &&
+      deliveries.some(
+        (delivery) => delivery.step_order === order && delivery.state !== "delivered"
+      ));
+  // Announces where the run's sent result stands when it moves on while the page is open, as the
+  // run's status above: the result's line changes without focus going there (WCAG 4.1.3). Not
+  // where it stood on arrival, and not when only the steps' reading tells it is sent after the run.
+  const sentRetryAt = useClientTimeText(latestDelivery?.next_delivery_at, "time");
+  const sentKey = latestDelivery
+    ? `${latestDelivery.id}:${latestDelivery.state}:${latestDelivery.next_delivery_at ?? ""}`
+    : null;
+  const sentText =
+    latestDelivery && sentAfterRun(latestDelivery.step_order)
+      ? sentResultText(t, latestDelivery.state, sentRetryAt)
+      : null;
+  const lastSent = useRef<string | null>(null);
+  useEffect(() => {
+    // While its words are not known yet (the steps are being read again), a move waits for them.
+    if (!sentText || !sentKey) return;
+    if (lastSent.current && lastSent.current !== sentKey) announce(sentText);
+    lastSent.current = sentKey;
+  }, [announce, sentKey, sentText]);
   const stepsBody = summary ? (
     <>
       {blockingError(steps) ? (
@@ -636,7 +711,7 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
         />
       ) : (
         <>
-          <RunLiveProgress summary={summary} steps={stepViews} delivery={deliveryUnderWay} />
+          <RunLiveProgress summary={summary} steps={stepViews} delivery={liveDelivery} />
           <RunSteps
             flowId={flowId}
             runId={runId}
@@ -801,7 +876,8 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
             <RefreshError
               queries={[progress, detail, steps, ...(awaitingReview ? [review] : [])]}
             />
-            {run ? (
+            {/* Why it failed or was cancelled waits for the header to say so, as the result does. */}
+            {run && (settled || run.status === "queued") ? (
               <RunProblem
                 run={run}
                 flow={flow}
@@ -859,7 +935,19 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
                 />
               ) : run ? (
                 <>
-                  <RunResult flowId={flowId} run={run} steps={stepViews} />
+                  {settled ? (
+                    <RunResult
+                      flowId={flowId}
+                      run={run}
+                      steps={stepViews}
+                      delivery={latestDelivery}
+                    />
+                  ) : (
+                    <p className="text-ax-text-secondary text-sm">
+                      {t("flow_runs_result_pending")}
+                    </p>
+                  )}
+                  {/* Leaves out the result's own files, so none shows here before the result. */}
                   <RunOtherFiles flowId={flowId} run={run} />
                 </>
               ) : (
@@ -888,16 +976,19 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
                     <RunUsage run={run} />
                   </FoldSection>
                 ) : null}
-                {run.webhook_deliveries.length > 0 ? (
+                {deliveries.length > 0 ? (
                   // Open while a delivery has not landed or was given up: that is what the run waits on.
                   <FoldSection
-                    title={t("flow_run_extras_webhook_heading")}
-                    defaultIsOpen={run.webhook_deliveries.some(
-                      (delivery) => delivery.delivery_status !== "delivered"
+                    title={t(
+                      deliveries.every((delivery) => sentAfterRun(delivery.step_order))
+                        ? "flow_run_extras_send_heading"
+                        : "flow_run_extras_webhook_heading"
                     )}
+                    defaultIsOpen={deliveries.some((delivery) => delivery.state !== "delivered")}
                   >
                     <RunWebhookDeliveries
-                      deliveries={run.webhook_deliveries}
+                      deliveries={deliveries}
+                      sentAfterRun={sentAfterRun}
                       stepName={(order) =>
                         stepTitle(
                           stepViews.find((step) => step.order === order) ?? { order, label: "" },

@@ -103,7 +103,6 @@ from eneo.flows.enums import (
     FlowOutputType,
     FlowRunLifecycleSource,
     FlowStepPhase,
-    flow_output_mode_uses_completion_model,
 )
 from eneo.flows.flow_api_error_code import (
     FLOW_RUN_TERMINAL_ERROR_CODES,
@@ -118,6 +117,7 @@ from eneo.flows.flow_run_error import (
     after_possible_tool_call,
     tool_call_possible,
 )
+from eneo.flows.flow_run_input_envelope import read_semantic_flow_input_payload
 from eneo.flows.flow_run_provenance import (
     FlowResolvedInputEdge,
     FlowResolvedInputEdgeGrouping,
@@ -140,6 +140,7 @@ from eneo.flows.flow_security_classification import (
 from eneo.flows.flow_template_asset_repo import FlowTemplateAssetRepository
 from eneo.flows.http_transport import (
     credential_template_message,
+    sends_run_result,
     sent_step_http_configs,
     templated_step_credentials,
 )
@@ -936,6 +937,7 @@ class FlowRunExecutor:
                 flow_name=published_definition.name,
                 steps=steps,
                 run_created_at=run.created_at,
+                form_values=read_semantic_flow_input_payload(run.input_payload_json),
                 run_label=run.run_label,
                 run_date=run.run_date,
             )
@@ -1390,6 +1392,10 @@ class FlowRunExecutor:
                         tenant_id=tenant_id,
                         intent=delivery_intent,
                     )
+                if sends_run_result(step.output_mode, step.output_config):
+                    return await self._complete_run_then_deliver(
+                        run_id=run_id, flow_id=flow_id, tenant_id=tenant_id
+                    )
                 await self._commit()
                 await self._request_webhook_delivery(run_id=run_id)
                 return {"status": FlowRunStatus.RUNNING.value}
@@ -1693,7 +1699,7 @@ class FlowRunExecutor:
                         ),
                         mapped_execution_policy=self.mapped_execution_policy,
                         rag_evidence_policy=self.rag_evidence_policy,
-                    )
+                    ),
                 )
             case FlowOutputMode.TRANSCRIBE_ONLY:
                 return TranscribeOnlyStepHandler(
@@ -3524,7 +3530,7 @@ class FlowRunExecutor:
             )
             require_completion_model_for_step(
                 step_order=step.step_order,
-                output_mode=step.output_mode,
+                calls_completion_model=step.may_call_completion_provider,
                 has_completion_model=assistant.completion_model is not None,
             )
 
@@ -3623,7 +3629,7 @@ class FlowRunExecutor:
                 input_bindings=step.input_bindings,
                 prompt_template=(
                     assistant.get_prompt_text()
-                    if flow_output_mode_uses_completion_model(step.output_mode)
+                    if step.may_call_completion_provider
                     else None
                 ),
                 output_mode=step.output_mode,
@@ -3633,6 +3639,7 @@ class FlowRunExecutor:
                 max_prior_step_order=step.step_order - 1,
             ),
             output_mode=step.output_mode,
+            output_config=step.output_config,
             output_classification_override=step.output_classification_override,
             prior_output_levels_by_order=prior_output_levels_by_order,
             assistant=assistant,
@@ -3804,6 +3811,40 @@ class FlowRunExecutor:
             cancelled_at=cancelled_at,
             principal=self.principal,
         )
+
+    async def _complete_run_then_deliver(
+        self, *, run_id: UUID, flow_id: UUID, tenant_id: UUID
+    ) -> dict[str, Any]:
+        """Complete the run in the transaction that holds its last step's
+        result and its run result delivery row, then ask for the delivery.
+
+        The receiver gets the result of a completed run, and the delivery's
+        outcome never changes the run. A last write that does not complete
+        the run keeps nothing of it: no step result, no delivery row."""
+        try:
+            finalization = await finalize_run_from_current_results(
+                run_id=run_id,
+                tenant_id=tenant_id,
+                flow_run_repo=self.flow_run_repo,
+                terminalizer=self.flow_run_terminalizer,
+                principal=self.principal,
+            )
+        except BaseException:
+            await self.session.rollback()
+            raise
+        terminalization = finalization.terminalization
+        if (
+            terminalization is None
+            or not terminalization.did_transition
+            or terminalization.run.status != FlowRunStatus.COMPLETED
+        ):
+            await self.session.rollback()
+            return await self._return_after_terminalized_step_write(
+                run_id=run_id, flow_id=flow_id, tenant_id=tenant_id
+            )
+        await self._commit()
+        await self._request_webhook_delivery(run_id=run_id)
+        return finalization.payload
 
     async def _commit(self) -> None:
         await self.session.commit()
