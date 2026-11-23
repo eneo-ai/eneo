@@ -3,10 +3,11 @@ import { Text } from "@astryxdesign/core/Text";
 import { useTranslations } from "use-intl";
 import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
 import { StatusLabel, type StatusTone } from "@/components/composites/status-label";
-import { useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import type { Schema } from "@/lib/api/models";
 import { isTerminal } from "./run-status";
-import { runKeys, type RunSummary } from "./runs-api";
+import type { RunProgress } from "./run-progress-read";
+import { runKeys } from "./runs-api";
 
 export type Delivery = Schema<"FlowRunWebhookDeliveryStatePublic">;
 
@@ -19,65 +20,34 @@ export function deliveryUnderWay(delivery: Pick<Delivery, "state"> | null | unde
   return delivery?.state === "sending" || delivery?.state === "retry_scheduled";
 }
 
-/** A read of the run's status, and when it was read (its query's `dataUpdatedAt`). */
-export type StatusRead = {
-  summary: Pick<RunSummary, "status" | "result_delivery">;
-  readAt: number;
-};
-
 /**
- * The delivery of the run's result the page goes by. Once the run has finished, the result moves
- * on without it, and two reads see it: the run's own status (`run`) and the result's own status
- * read (`followed`), which follows it while it is on its way. The newer of the two counts: the one
- * that saw the row later (its `updated_at`, as an instant), and when both saw it at the same time,
- * the one read later; the core says whether a pending row is being sent or waits at read time.
- * While the run moves, or when it has no result to send, its own status counts.
+ * What changes when a delivery moves on; equal signatures mean nothing new. A redelivery reuses the
+ * row and starts its attempts over, so a second dead letter differs only in when it was given up.
  */
-export function currentResultDelivery(
-  run: StatusRead | null | undefined,
-  followed: StatusRead | null | undefined
-): Delivery | null {
-  const own = run?.summary.result_delivery ?? null;
-  const other = followed?.summary.result_delivery;
-  if (!run || !own || !isTerminal(run.summary.status) || !followed || !other) return own;
-  const [ownAt, otherAt] = [Date.parse(own.updated_at), Date.parse(other.updated_at)];
-  if (ownAt !== otherAt) return otherAt > ownAt ? other : own;
-  return followed.readAt > run.readAt ? other : own;
-}
-
-/**
- * `currentResultDelivery` from what the page last read: for what decides on reading, outside the
- * page's render (when to read the result's status again, and what a return reads).
- */
-export function cachedResultDelivery(
-  queryClient: QueryClient,
-  flowId: string,
-  runId: string
-): Delivery | null {
-  const run = queryClient.getQueryState<{ status: RunSummary }>(runKeys.progress(flowId, runId));
-  const followed = queryClient.getQueryState<RunSummary>(runKeys.delivery(flowId, runId));
-  return currentResultDelivery(
-    run?.data && { summary: run.data.status, readAt: run.dataUpdatedAt },
-    followed?.data && { summary: followed.data, readAt: followed.dataUpdatedAt }
-  );
+export function deliverySignature(delivery: Delivery | null | undefined): string {
+  return delivery
+    ? [
+        delivery.id,
+        delivery.state,
+        delivery.delivery_attempts,
+        delivery.next_delivery_at ?? "",
+        delivery.dead_lettered_at ?? ""
+      ].join(":")
+    : "";
 }
 
 /**
  * How a read of the run's own data behaves when the person comes back to the tab or the network
  * returns: as the app's default, except while the run has finished and its result is on its way.
- * Then only the result's status is read (`runKeys.delivery`); the run's other reads, the audited
- * ones among them, wait until the result has settled. Decided when the person comes back, from
- * what the page last read.
+ * Then only the run's status is read (its progress, `runProgressQueryOptions`); the run's other
+ * reads, the audited ones among them, wait until the result has settled. Decided when the person
+ * comes back, from what the page last read.
  */
 export function useReadsOnReturn(flowId: string, runId: string) {
   const queryClient = useQueryClient();
   const readAgain = () => {
-    const run = queryClient.getQueryData<{ status: RunSummary }>(runKeys.progress(flowId, runId));
-    return !(
-      run &&
-      isTerminal(run.status.status) &&
-      deliveryUnderWay(cachedResultDelivery(queryClient, flowId, runId))
-    );
+    const run = queryClient.getQueryData<RunProgress>(runKeys.progress(flowId, runId))?.status;
+    return !(run && isTerminal(run.status) && deliveryUnderWay(run.result_delivery));
   };
   return { refetchOnWindowFocus: readAgain, refetchOnReconnect: readAgain };
 }
