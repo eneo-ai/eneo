@@ -81,10 +81,14 @@ def test_the_queued_entry_names_a_service_key_by_its_key_id():
         _params(actor_type=ActorType.API_KEY)
 
 
-async def _write(log: str, **actor) -> None:
+async def _write(log: str, **actor) -> tuple[str, str | None]:
+    """Write one entry with ``log`` or ``log_async`` and return the actor
+    type and actor id of what was written: the row given to the repository,
+    or the params put on the queue. Exactly one write is expected."""
+    repository = AsyncMock()
     with patch("eneo.audit.application.audit_service.job_manager") as job_manager:
         job_manager.enqueue = AsyncMock()
-        await getattr(AuditService(AsyncMock()), log)(
+        await getattr(AuditService(repository), log)(
             tenant_id=uuid4(),
             action=ActionType.WIDGET_EXTERNAL_TOOL_CALLED,
             entity_type=EntityType.WIDGET,
@@ -93,6 +97,13 @@ async def _write(log: str, **actor) -> None:
             metadata={},
             **actor,
         )
+    if log == "log":
+        (created,) = repository.create.await_args_list
+        row = created.args[0]
+        return row.actor_type.value, row.actor_id
+    (enqueued,) = job_manager.enqueue.await_args_list
+    params = enqueued.args[2]
+    return params["actor_type"], params["actor_id"]
 
 
 @pytest.mark.parametrize("log", ["log", "log_async"])
@@ -108,7 +119,10 @@ async def test_both_writers_accept_an_actorless_visitor_and_refuse_an_unnamed_ac
     log, actor_type, refusal
 ):
     if refusal is None:
-        await _write(log, actor_type=actor_type, actor_id=None)
+        assert await _write(log, actor_type=actor_type, actor_id=None) == (
+            "widget_visitor",
+            None,
+        )
     else:
         with pytest.raises(ValueError, match=refusal):
             await _write(log, actor_type=actor_type, actor_id=None)
