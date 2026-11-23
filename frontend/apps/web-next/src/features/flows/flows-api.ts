@@ -1,4 +1,4 @@
-import { queryOptions, type QueryClient } from "@tanstack/react-query";
+import { queryOptions, replaceEqualDeep, type QueryClient } from "@tanstack/react-query";
 import { browserApi, type EneoClient } from "@/lib/api/browser";
 import { EneoApiError, unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
@@ -56,7 +56,17 @@ export function flowQueryOptions(api: EneoClient, flowId: string) {
   return queryOptions({
     queryKey: flowKeys.flow(flowId),
     queryFn: ({ signal }) =>
-      unwrap(api.GET("/api/v1/flows/{id}/", { params: { path: { id: flowId } }, signal }))
+      unwrap(api.GET("/api/v1/flows/{id}/", { params: { path: { id: flowId } }, signal })),
+    // A read answers what the server held when it began, so one already on
+    // its way when a newer answer was stored (a save, an add) must not lower
+    // it: the draft revision only goes up. Kept here rather than by
+    // cancelling the read, so whoever awaits the read still gets an answer.
+    structuralSharing: (cached: unknown, fresh: unknown) => {
+      const kept = cached as FlowPublic | undefined;
+      return kept && kept.draft_revision > (fresh as FlowPublic).draft_revision
+        ? kept
+        : replaceEqualDeep(kept, fresh);
+    }
   });
 }
 
