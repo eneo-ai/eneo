@@ -82,7 +82,7 @@ describe("storeFlow", () => {
   it("keeps a stored answer when a read that began before it answers an older revision", async () => {
     const queryClient = testQueryClient();
     const { api, release } = heldReads();
-    const read = queryClient.fetchQuery(flowQueryOptions(api, "flow-1"));
+    const read = queryClient.query(flowQueryOptions(api, "flow-1"));
     await settle();
 
     storeFlow(queryClient, makeFlow({ draft_revision: 5 }));
@@ -97,7 +97,7 @@ describe("storeFlow", () => {
     const queryClient = testQueryClient();
     const { api, release } = heldReads();
     queryClient.setQueryData(flowKeys.flow("flow-1"), makeFlow({ draft_revision: 6 }));
-    const read = queryClient.fetchQuery({ ...flowQueryOptions(api, "flow-1"), staleTime: 0 });
+    const read = queryClient.query({ ...flowQueryOptions(api, "flow-1"), staleTime: 0 });
     await settle();
 
     storeFlow(queryClient, makeFlow({ draft_revision: 5 }));
@@ -112,7 +112,7 @@ describe("storeFlow", () => {
     const queryClient = testQueryClient();
     const { api, release } = heldReads();
     queryClient.setQueryData(flowKeys.flow("flow-1"), makeFlow({ draft_revision: 4 }));
-    const read = queryClient.fetchQuery({ ...flowQueryOptions(api, "flow-1"), staleTime: 0 });
+    const read = queryClient.query({ ...flowQueryOptions(api, "flow-1"), staleTime: 0 });
     await settle();
 
     storeFlow(queryClient, makeFlow({ draft_revision: 5 }));
