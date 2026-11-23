@@ -969,6 +969,76 @@ describe("the open step while the flow changes", () => {
     expect(queryClient.getQueryData<FlowPublic>(flowKeys.flow("flow-1"))?.draft_revision).toBe(5);
   });
 
+  /** "Skriv svar" at `order`, reading step 1 through a saved binding. */
+  const reading = (order: number) => ({
+    ...third(order),
+    input_bindings: { question: "{{Sammanfatta}}" }
+  });
+  const reader = "Läses av Steg 3: Skriv svar.";
+  const delivery = () =>
+    screen.findByRole("region", { name: messages.flow_step_editor_delivery_title });
+  /** No reader line: neither a reader nor the next step. */
+  async function noReaderLine() {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const section = await delivery();
+    expect(within(section).queryByText(/^Läses av /)).toBeNull();
+    expect(within(section).queryByText(/^Går vidare till nästa steg/)).toBeNull();
+  }
+
+  it("names no reader while the form holds edits on an older version, and the right one after a reload", async () => {
+    withChat();
+    flow = makeFlow({ steps: [first, second, reading(3)] });
+    await renderPage("?step=step-1");
+    expect(await within(await delivery()).findByText(reader)).toBeTruthy();
+    await changeName();
+    // Changed in the chat: a step put first, so the reader now stands at place 4.
+    flow = makeFlow({
+      draft_revision: 5,
+      steps: [
+        makeStep(1, { id: "step-0", assistant_id: "assistant-0", user_description: "Hämta" }),
+        { ...first, step_order: 2 },
+        { ...second, step_order: 3 },
+        reading(4)
+      ]
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Verktyg klart" }));
+    await screen.findByText(messages.flow_step_editor_newer_title);
+    // The heading follows the page's version, the form's steps the older one.
+    await noReaderLine();
+    await click(messages.flow_step_editor_reload);
+    expect(await within(await delivery()).findByText("Läses av Steg 4: Skriv svar.")).toBeTruthy();
+  });
+
+  it("keeps the reader on screen through the editor's own save", async () => {
+    flow = makeFlow({ steps: [first, second, reading(3)] });
+    await renderPage("?step=step-1");
+    expect(await within(await delivery()).findByText(reader)).toBeTruthy();
+    api.routes["PATCH /api/v1/flows/{id}/editor/"] = () => ({
+      body: makeFlow({ draft_revision: 5, steps: [first, second, reading(3)] })
+    });
+    // The save's answer reaches the form a moment before the page: the line is
+    // there each time the page has changed, from the save to its settling.
+    let gone = false;
+    const observer = new MutationObserver(() => {
+      if (!document.body.textContent?.includes(reader)) gone = true;
+    });
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    try {
+      fireEvent.click(
+        within(await delivery()).getByRole("switch", {
+          name: new RegExp(`^${messages.flow_step_editor_deliverable_switch}`)
+        })
+      );
+      fireEvent.click(screen.getByRole("button", { name: messages.flow_step_editor_save }));
+      await screen.findByText(messages.flow_step_editor_saved);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    } finally {
+      observer.disconnect();
+    }
+    expect(gone).toBe(false);
+    expect(within(await delivery()).getByText(reader)).toBeTruthy();
+  });
+
   /** The page has taken a new revision and marked step 3's prompt to be read again. */
   const laterInvalidated = (queryClient: QueryClient) =>
     waitFor(() =>
