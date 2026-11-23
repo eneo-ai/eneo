@@ -2632,7 +2632,7 @@ describe("FlowStepEditor deliverables", () => {
   }, 20_000);
 
   // The same labels as the core's own test (test_flow_validators.py, a deliverable
-  // label with braces), so the editor refuses what publishing would.
+  // label with braces), so the editor refuses what the core would refuse on save.
   it.each<[string, boolean]>([
     ["Report {{ flow_input.text }}", false],
     ["Report {{", false],

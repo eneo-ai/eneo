@@ -852,7 +852,7 @@ function StepEditorSession({
         );
       } else if (deliverable.label.includes("{{") || deliverable.label.includes("}}")) {
         // A second copy of the core's rule (flow_validators.py, the label is shown as
-        // written and never filled in), so the field says it before publishing does.
+        // written and never filled in), so the field says it before the core refuses it on save.
         // The test with the core's own labels keeps the two alike.
         problems["output_config.deliverable.label"] = t(
           "flow_step_editor_deliverable_label_braces",
