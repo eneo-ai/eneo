@@ -28,6 +28,8 @@ logger = get_logger(__name__)
 
 DEFAULT_QUEUE_NAME = "arq:queue"
 CRAWLER_QUEUE_NAME = "arq:crawler"
+# Old workers must never execute a submission that can be redelivered after a crash.
+DURABLE_APP_FUNCTION = "run_durable_app"
 
 
 def queue_name_for_task(task: Task) -> str:
@@ -109,6 +111,15 @@ class JobManager:
     async def enqueue(self, task: Task, job_id: UUID, params: TaskParams) -> Job | None:
         return await self._enqueue(task, job_id, params)
 
+    async def redispatch_app(self, job_id: UUID, params: TaskParams) -> Job | None:
+        """Re-offer a locked, durably unstarted app job under the original ID."""
+        if self._redis is None:
+            raise NotReadyException("Job manager is not initialized!")
+        # An older worker can retain a failed ARQ result for an unknown function.
+        # The locked PostgreSQL row proves that no compatible worker started it.
+        await self._redis.delete(result_key_prefix + str(job_id))
+        return await self.enqueue(Task.RUN_APP, job_id, params)
+
     async def enqueue_jobless(self, task: Task) -> None:
         """Queue a task that takes no parameters."""
         await self._enqueue(task, uuid4())
@@ -120,7 +131,7 @@ class JobManager:
             raise NotReadyException("Job manager is not initialized!")
 
         job = await self._redis.enqueue_job(
-            task,
+            DURABLE_APP_FUNCTION if task == Task.RUN_APP else task,
             *params,
             _job_id=str(job_id),
             _queue_name=queue_name_for_task(task),

@@ -1,13 +1,17 @@
 import asyncio
 import wave
+from contextlib import suppress
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from unittest.mock import AsyncMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
+import sqlalchemy as sa
 from arq.jobs import Job as ArqJob
 from arq.jobs import JobStatus
+from arq.worker import create_worker
+from freezegun import freeze_time
 
 from eneo.ai_models.completion_models.completion_model import (
     Completion,
@@ -15,19 +19,35 @@ from eneo.ai_models.completion_models.completion_model import (
 )
 from eneo.apps.app_runs.api import app_run_worker
 from eneo.apps.app_runs.api.app_run_models import AppRunParams
+from eneo.apps.app_runs.app_run_dispatch import (
+    APP_RUN_QUEUE_TIMEOUT,
+    claim_app_job,
+    fail_expired_or_interrupted_app_runs,
+    retry_app_submissions,
+)
 from eneo.apps.app_runs.app_run_service import AppRunService
 from eneo.apps.apps.app_service import AppService
 from eneo.completion_models.infrastructure.completion_service import CompletionService
+from eneo.database.database import sessionmanager
 from eneo.database.tables.app_table import AppRuns
 from eneo.database.tables.job_table import Jobs
 from eneo.files.transcriber import Transcriber
-from eneo.jobs.job_manager import job_manager
+from eneo.jobs.job_manager import DURABLE_APP_FUNCTION, job_manager
 from eneo.jobs.job_models import JobFailureCode, Task
 from eneo.jobs.job_repo import JobRepository
 from eneo.main.models import Channel, ChannelType, RedisMessage, Status
 from eneo.worker import task_manager
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
+
+
+async def _run_app_maintenance():
+    cron = next(
+        task
+        for task in app_run_worker.worker.cron_jobs
+        if task.name == "cron:reconcile_app_run_jobs"
+    )
+    await cron.coroutine({})
 
 
 @pytest.fixture
@@ -166,7 +186,7 @@ async def test_audio_run_reaches_worker_after_commit_and_publishes_saved_result(
     async with asyncio.timeout(5):
         while (info := await delivery.info()) is None:
             await asyncio.sleep(0.01)
-    assert info.function == Task.RUN_APP.value
+    assert info.function == DURABLE_APP_FUNCTION
     [params] = info.args
     assert isinstance(params, AppRunParams)
     channel = Channel(type=ChannelType.APP_RUN_UPDATES, user_id=run.user_id)
@@ -189,6 +209,16 @@ async def test_audio_run_reaches_worker_after_commit_and_publishes_saved_result(
         try:
             async with asyncio.timeout(5):
                 await summary_started.wait()
+                audio = await client.get(f"/api/v1/files/{file_id}/", headers=headers)
+                assert audio.status_code == 200, audio.text
+                assert audio.json()["transcription"] == "meeting transcript"
+                detail = await client.get(
+                    f"/api/v1/app-runs/{run.id}/", headers=headers
+                )
+                assert (
+                    detail.json()["input"]["files"][0]["transcription"]
+                    == "meeting transcript"
+                )
                 async with db_session() as observer:
                     job = await observer.get(Jobs, run.job_id)
                     assert job is not None and job.status == Status.IN_PROGRESS.value
@@ -237,61 +267,53 @@ async def test_audio_run_reaches_worker_after_commit_and_publishes_saved_result(
 
 
 @pytest.mark.parametrize(
-    ("claimed", "can_check", "expected"),
-    [
-        (False, True, Status.FAILED),
-        (True, True, Status.IN_PROGRESS),
-        (False, False, Status.QUEUED),
-    ],
+    "retained_result", [False, True], ids=["missing-delivery", "old-worker-result"]
 )
-async def test_app_dispatch_error_fails_only_an_unclaimed_run(
-    claimed,
-    can_check,
-    expected,
+async def test_committed_run_recovers_without_its_api_callback(
     db_session,
     client,
     admin_user_api_key,
     recovery_recording,
     monkeypatch,
+    retained_result,
 ):
-    headers = {"X-API-Key": admin_user_api_key.key}
     app_url, file_id, _ = recovery_recording
-    enqueue = job_manager.enqueue
-    delivery = asyncio.get_running_loop().create_future()
-    if not can_check:
-        monkeypatch.setattr(
-            job_manager, "get_job_status", AsyncMock(side_effect=ConnectionError())
+    headers = {"X-API-Key": admin_user_api_key.key}
+    with monkeypatch.context() as stopped_api:
+        stopped_api.setattr(
+            "eneo.jobs.job_service.after_outer_transaction",
+            lambda *args, **kwargs: None,
         )
-    async with db_session() as worker:
-
-        async def lose_acknowledgement(task, job_id, params):
-            if task != Task.RUN_APP:
-                return await enqueue(task, job_id, params)
-            if claimed:
-                assert await JobRepository(worker).mark_job_started(job_id)
-            delivery.set_result((job_id, params, asyncio.current_task()))
-            raise ConnectionError("queue unavailable")
-
-        monkeypatch.setattr(job_manager, "enqueue", lose_acknowledgement)
         response = await client.post(
             f"{app_url}runs/", json={"files": [{"id": file_id}]}, headers=headers
         )
-        assert response.status_code == 203, response.text
-        job_id, params, callback = await asyncio.wait_for(delivery, 5)
-        await asyncio.wait_for(asyncio.shield(callback), 5)
-
-    detail = await client.get(f"/api/v1/app-runs/{params.id}/", headers=headers)
-    assert detail.status_code == 200, detail.text
-    assert detail.json()["status"] == expected
-    async with db_session() as session:
-        job = await session.get(Jobs, job_id)
+    assert response.status_code == 203, response.text
+    run_id = UUID(response.json()["id"])
+    async with db_session() as db:
+        run = await db.get(AppRuns, run_id)
+        assert run is not None
+        job = await db.get(Jobs, run.job_id)
         assert job is not None
-        if expected != Status.FAILED:
-            assert job.failure_code is None
-        else:
-            assert job.failure_code == JobFailureCode.DISPATCH_FAILED
-            assert job.finished_at is not None
-            assert not await JobRepository(session).mark_job_started(job_id)
+        assert job.dispatch_envelope == {"version": 1, "file_ids": [file_id]}
+        job_id = job.id
+        job.updated_at = datetime.now(timezone.utc) - timedelta(minutes=6)
+    assert await job_manager.get_job_status(job_id, Task.RUN_APP) == JobStatus.not_found
+    if retained_result:
+        from arq.constants import result_key_prefix
+
+        assert job_manager._redis is not None
+        # ARQ refuses to enqueue this ID while an older worker's result exists.
+        await job_manager._redis.set(
+            result_key_prefix + str(job_id), b"old result", ex=3600
+        )
+    await asyncio.gather(_run_app_maintenance(), _run_app_maintenance())
+    assert await job_manager.get_job_status(job_id, Task.RUN_APP) == JobStatus.queued
+    assert job_manager._redis is not None
+    delivery = ArqJob(str(job_id), redis=job_manager._redis)
+    info = await delivery.info()
+    assert info is not None
+    [params] = info.args
+    assert params.id == run_id and list(map(str, params.file_ids)) == [file_id]
 
 
 @pytest.fixture
@@ -339,6 +361,142 @@ async def app_run_fixture(
     return create
 
 
+@pytest.fixture
+async def queued_recording(client, db_session, admin_user_api_key, recovery_recording):
+    app_url, file_id, _ = recovery_recording
+    headers = {"X-API-Key": admin_user_api_key.key}
+    response = await client.post(
+        f"{app_url}runs/", json={"files": [{"id": file_id}]}, headers=headers
+    )
+    assert response.status_code == 203, response.text
+    run_id = UUID(response.json()["id"])
+    async with db_session() as db:
+        run = await db.get(AppRuns, run_id)
+        params = AppRunParams(
+            id=run.id,
+            user_id=run.user_id,
+            app_id=run.app_id,
+            file_ids=[UUID(file_id)],
+            text=None,
+        )
+        return run.job_id, params
+
+
+@pytest.mark.parametrize(
+    "provider_failed", [False, True], ids=["complete-write", "failure-write"]
+)
+async def test_failed_terminal_write_rolls_back_and_announces_persisted_failure(
+    queued_recording,
+    client,
+    db_session,
+    admin_user_api_key,
+    monkeypatch,
+    provider_failed,
+):
+    job_id, params = queued_recording
+
+    async def run_app(service, **kwargs):
+        if provider_failed:
+            raise RuntimeError("Summary unavailable")
+        await service.repo.session.execute(
+            sa.update(AppRuns)
+            .where(AppRuns.id == params.id)
+            .values(output_text="summary")
+        )
+
+    monkeypatch.setattr(AppRunService, "run_app", run_app)
+    original_update = JobRepository.update_job
+    terminal_writes = []
+
+    async def update_job(repo, id, job, **kwargs):
+        if id == job_id and job.status in (Status.COMPLETE, Status.FAILED):
+            terminal_writes.append(job.status)
+            if len(terminal_writes) == 1:
+                # A rejected statement aborts the execution transaction in PostgreSQL.
+                await repo.delegate.session.execute(sa.text("SELECT 1 / 0"))
+        return await original_update(repo, id, job, **kwargs)
+
+    monkeypatch.setattr(JobRepository, "update_job", update_job)
+    terminal_events = []
+
+    async def observe_committed_state(channel, message):
+        if message.status in (Status.COMPLETE, Status.FAILED):
+            async with db_session() as reader:
+                job = await reader.get(Jobs, job_id)
+                run = await reader.get(AppRuns, params.id)
+                terminal_events.append((message.status, job.status, run.output_text))
+
+    monkeypatch.setattr(task_manager, "publish_task_status", observe_committed_state)
+    with suppress(sa.exc.DBAPIError):
+        await app_run_worker.run_app({"job_id": str(job_id)}, params)
+
+    detail = await client.get(
+        f"/api/v1/app-runs/{params.id}/", headers={"X-API-Key": admin_user_api_key.key}
+    )
+    assert detail.status_code == 200
+    assert detail.json()["status"] == Status.FAILED
+    assert terminal_events == [(Status.FAILED, Status.FAILED, None)]
+    assert terminal_writes == [
+        Status.FAILED if provider_failed else Status.COMPLETE,
+        Status.FAILED,
+    ]
+
+
+async def test_poll_observes_status_and_summary_from_the_same_commit(
+    app_run_fixture, client, db_session, admin_user_api_key
+):
+    job_id, params, _ = await app_run_fixture(status=Status.IN_PROGRESS)
+    url = f"/api/v1/app-runs/{params.id}/"
+    headers = {"X-API-Key": admin_user_api_key.key}
+
+    async def finish_run(_driver):
+        async with db_session() as writer:
+            await writer.execute(
+                sa.update(AppRuns)
+                .where(AppRuns.id == params.id)
+                .values(output_text="summary")
+            )
+            await writer.execute(
+                sa.update(Jobs)
+                .where(Jobs.id == job_id)
+                .values(status=Status.COMPLETE.value)
+            )
+
+    committed = False
+
+    def commit_after_read(conn, cursor, statement, parameters, context, executemany):
+        nonlocal committed
+        # Finish the run after PostgreSQL has read the output, before ORM relationship loads.
+        if (
+            not committed
+            and statement.startswith("SELECT")
+            and "app_runs.output_text" in statement
+        ):
+            committed = True
+            conn.connection.dbapi_connection.run_async(finish_run)
+
+    async with db_session() as session:
+        engine = session.bind.sync_engine
+        sa.event.listen(engine, "after_cursor_execute", commit_after_read)
+        try:
+            first = await client.get(url, headers=headers)
+        finally:
+            sa.event.remove(engine, "after_cursor_execute", commit_after_read)
+    assert committed
+    assert first.status_code == 200, first.text
+    assert (first.json()["status"], first.json()["output"]) == (
+        Status.IN_PROGRESS,
+        None,
+    )
+
+    latest = await client.get(url, headers=headers)
+    assert latest.status_code == 200, latest.text
+    assert (latest.json()["status"], latest.json()["output"]) == (
+        Status.COMPLETE,
+        "summary",
+    )
+
+
 async def test_app_worker_loss_before_completion_does_not_replay_started_work(
     app_run_fixture, db_session, client, monkeypatch
 ):
@@ -370,7 +528,7 @@ async def test_claim_error_fails_only_an_unstarted_app_run(
     job_id, params, _ = await app_run_fixture()
     claim = JobRepository.mark_job_started
 
-    async def interrupted_claim(repo, id):
+    async def interrupted_claim(repo, id, **kwargs):
         if failure_point == "after_commit":
             dialect = repo.delegate.session.get_bind().dialect
             commit = dialect.do_commit
@@ -381,7 +539,7 @@ async def test_claim_error_fails_only_an_unstarted_app_run(
                 raise ConnectionError("lost commit acknowledgement")
 
             monkeypatch.setattr(dialect, "do_commit", lose_ack)
-            return await claim(repo, id)
+            return await claim(repo, id, **kwargs)
         if failure_point == "other_worker":
             async with db_session() as other_worker:
                 assert await claim(JobRepository(other_worker), id)
@@ -404,6 +562,14 @@ async def test_claim_error_fails_only_an_unstarted_app_run(
     if failure_point != "before_update":
         assert response.json()["status"] == Status.IN_PROGRESS.value
         publish.assert_not_awaited()
+        if failure_point == "after_commit":
+            async with sessionmanager.session() as recovery:
+                assert job_id not in await fail_expired_or_interrupted_app_runs(
+                    recovery, now=datetime.now(timezone.utc) + timedelta(minutes=4)
+                )
+                assert job_id in await fail_expired_or_interrupted_app_runs(
+                    recovery, now=datetime.now(timezone.utc) + timedelta(minutes=6)
+                )
     else:
         assert response.json()["status"] == Status.FAILED.value
         publish.assert_awaited_once_with(
@@ -490,18 +656,12 @@ async def test_reaper_fails_orphaned_runs_and_notifies_the_open_result(
 
     monkeypatch.setattr(app_run_worker, "publish_task_status", publish_and_wait)
 
-    # Invoke the registered maintenance entry point with its actual session wrapper.
-    cron = next(
-        task
-        for task in app_run_worker.worker.cron_jobs
-        if task.name == "cron:fail_expired_app_runs"
-    )
     async with redis_client.pubsub() as subscription:
         await subscription.subscribe(channel.channel_string)
         await subscription.get_message(timeout=2)  # Acknowledge subscription.
         async with db_session() as running:
             assert await JobRepository(running).mark_job_started(active)
-            reaping = asyncio.create_task(cron.coroutine({}))
+            reaping = asyncio.create_task(_run_app_maintenance())
             try:
                 event = await subscription.get_message(timeout=5)
                 assert event is not None
@@ -534,3 +694,497 @@ async def test_reaper_fails_orphaned_runs_and_notifies_the_open_result(
         assert (await session.get(Jobs, active)).status == Status.IN_PROGRESS.value
         assert (await session.get(Jobs, fresh)).status == Status.QUEUED.value
         assert (await session.get(Jobs, other_task)).status == Status.QUEUED.value
+
+
+async def test_slow_redispatch_does_not_block_a_different_delivered_job(
+    app_run_fixture, queued_recording, db_session, monkeypatch
+):
+    first_id, _, _ = await app_run_fixture()
+    ready_id, _ = queued_recording
+    now = datetime.now(timezone.utc)
+    async with db_session() as session:
+        await session.execute(
+            sa.update(Jobs)
+            .where(Jobs.id == first_id)
+            .values(
+                dispatch_envelope={"version": 1, "file_ids": []},
+                updated_at=now - timedelta(minutes=15),
+            )
+        )
+        await session.execute(
+            sa.update(Jobs)
+            .where(Jobs.id == ready_id)
+            .values(updated_at=now - timedelta(minutes=6))
+        )
+    async with asyncio.timeout(5):
+        while (
+            await job_manager.get_job_status(ready_id, Task.RUN_APP) != JobStatus.queued
+        ):
+            await asyncio.sleep(0.01)
+    started = asyncio.Event()
+    release = asyncio.Event()
+    retries = []
+
+    async def delayed_redispatch(job_id, params):
+        retries.append(job_id)
+        if job_id == first_id:
+            started.set()
+            await release.wait()
+
+    monkeypatch.setattr(job_manager, "redispatch_app", delayed_redispatch)
+    maintenance = asyncio.create_task(_run_app_maintenance())
+    try:
+        await asyncio.wait_for(started.wait(), 5)
+        async with db_session() as worker:
+            await worker.execute(sa.text("SET LOCAL lock_timeout = '750ms'"))
+            assert await claim_app_job(JobRepository(worker), ready_id)
+    finally:
+        release.set()
+        await asyncio.wait_for(maintenance, 10)
+    assert retries == [first_id]
+
+
+async def test_worker_claim_keeps_its_deadline_while_redispatch_holds_the_job(
+    queued_recording, app_run_fixture, db_session, monkeypatch
+):
+    job_id, _ = queued_recording
+    late_id, _, _ = await app_run_fixture()
+    async with asyncio.timeout(5):
+        while (
+            await job_manager.get_job_status(job_id, Task.RUN_APP) != JobStatus.queued
+        ):
+            await asyncio.sleep(0.01)
+
+    async with db_session() as worker, sessionmanager.session() as retry:
+        now = await worker.scalar(sa.select(sa.func.clock_timestamp()))
+        deadline = now + timedelta(seconds=3)
+        created_at = deadline - APP_RUN_QUEUE_TIMEOUT
+        async with db_session() as setup:
+            await setup.execute(
+                sa.update(Jobs)
+                .where(Jobs.id == job_id)
+                .values(created_at=created_at, updated_at=now - timedelta(minutes=6))
+            )
+            await setup.execute(
+                sa.update(Jobs)
+                .where(Jobs.id == late_id)
+                .values(
+                    created_at=created_at,
+                    dispatch_envelope={"version": 1, "file_ids": []},
+                )
+            )
+
+        redispatch_started = asyncio.Event()
+
+        async def delayed_redispatch(job_id, params):
+            redispatch_started.set()
+            await retry.execute(sa.select(sa.func.pg_sleep_until(deadline)))
+
+        monkeypatch.setattr(job_manager, "redispatch_app", delayed_redispatch)
+        repo = JobRepository(worker)
+        async with asyncio.timeout(10), asyncio.TaskGroup() as tasks:
+            tasks.create_task(retry_app_submissions(retry))
+            await redispatch_started.wait()
+            claimed = await claim_app_job(repo, job_id)
+
+        assert claimed
+        assert (await worker.get(Jobs, job_id)).updated_at >= deadline
+        # The transaction predates the cutoff, but this second claim does not.
+        assert not await claim_app_job(repo, late_id)
+
+
+async def test_retry_backlog_does_not_hide_interrupted_or_expired_results(
+    app_run_fixture, db_session, client, admin_user_api_key, monkeypatch
+):
+    from eneo.apps.app_runs.app_run_dispatch import APP_RUN_RECOVERY_BATCH
+
+    now = datetime.now(timezone.utc)
+    retry_ids = []
+    for _ in range(APP_RUN_RECOVERY_BATCH):
+        job_id, _, _ = await app_run_fixture()
+        retry_ids.append(job_id)
+    _, interrupted, _ = await app_run_fixture(
+        status=Status.IN_PROGRESS, age=timedelta(minutes=6)
+    )
+    expired_id, expired, _ = await app_run_fixture()
+    envelope = {"version": 1, "file_ids": []}
+    async with db_session() as session:
+        await session.execute(
+            sa.update(Jobs)
+            .where(Jobs.id.in_(retry_ids))
+            .values(dispatch_envelope=envelope, updated_at=now - timedelta(minutes=15))
+        )
+        await session.execute(
+            sa.update(Jobs)
+            .where(Jobs.id == expired_id)
+            .values(
+                dispatch_envelope=envelope,
+                created_at=now - timedelta(hours=2, minutes=1),
+                updated_at=now - timedelta(minutes=1),
+            )
+        )
+
+    broker = AsyncMock(side_effect=ConnectionError("broker unavailable"))
+    monkeypatch.setattr(job_manager, "redispatch_app", broker)
+    await _run_app_maintenance()
+    broker.assert_awaited_once()
+    for run in (interrupted, expired):
+        detail = await client.get(
+            f"/api/v1/app-runs/{run.id}/", headers={"X-API-Key": admin_user_api_key.key}
+        )
+        assert detail.status_code == 200
+        assert detail.json()["status"] == Status.FAILED
+
+
+async def test_maintenance_and_worker_share_the_database_deadline(
+    app_run_fixture, db_session, monkeypatch
+):
+    job_id, _, _ = await app_run_fixture()
+    async with db_session() as session:
+        database_now = (await session.execute(sa.select(sa.func.now()))).scalar_one()
+        await session.execute(
+            sa.update(Jobs)
+            .where(Jobs.id == job_id)
+            .values(
+                dispatch_envelope={"version": 1, "file_ids": []},
+                created_at=database_now - APP_RUN_QUEUE_TIMEOUT + timedelta(minutes=1),
+                updated_at=database_now - timedelta(minutes=6),
+            )
+        )
+
+    broker = AsyncMock()
+    monkeypatch.setattr(job_manager, "redispatch_app", broker)
+    with freeze_time(database_now + timedelta(minutes=2), real_asyncio=True):
+        await _run_app_maintenance()
+    async with db_session() as session:
+        assert await claim_app_job(JobRepository(session), job_id)
+        job = await session.get(Jobs, job_id)
+        assert (
+            database_now
+            <= job.dispatch_attempted_at
+            < job.created_at + APP_RUN_QUEUE_TIMEOUT
+        )
+    broker.assert_awaited_once()
+
+
+async def test_recovery_deadline_survives_redis_outage_and_refuses_late_delivery(
+    app_run_fixture, db_session, monkeypatch, client, admin_user_api_key
+):
+    job_id, params, _ = await app_run_fixture(age=timedelta(minutes=6))
+    deadline = datetime.now(timezone.utc) - timedelta(seconds=1)
+    now = deadline - timedelta(minutes=10)
+    async with db_session() as session:
+        await session.execute(
+            sa.update(Jobs)
+            .where(Jobs.id == job_id)
+            .values(
+                dispatch_envelope={"version": 1, "file_ids": []},
+                created_at=now - timedelta(minutes=110),
+                updated_at=now - timedelta(minutes=6),
+            )
+        )
+    attempt = AsyncMock(side_effect=ConnectionError("broker unavailable"))
+    monkeypatch.setattr(job_manager, "redispatch_app", attempt)
+    async with sessionmanager.session() as session:
+        assert await retry_app_submissions(session, now=now) == []
+    attempt.assert_awaited_once()
+    attempt.side_effect = None
+    async with sessionmanager.session() as session:
+        assert (
+            await retry_app_submissions(session, now=deadline - timedelta(minutes=1))
+            == []
+        )
+    assert attempt.await_count == 2
+    async with db_session() as session:
+        assert not await claim_app_job(JobRepository(session), job_id)
+    async with sessionmanager.session() as session:
+        assert await fail_expired_or_interrupted_app_runs(session, now=deadline) == [
+            job_id
+        ]
+    async with db_session() as session:
+        assert await session.scalar(
+            sa.select(Jobs.dispatch_envelope.is_(None)).where(Jobs.id == job_id)
+        )
+    assert attempt.await_count == 2
+    detail = await client.get(
+        f"/api/v1/app-runs/{params.id}/", headers={"X-API-Key": admin_user_api_key.key}
+    )
+    assert detail.status_code == 200
+    assert detail.json()["status"] == Status.FAILED
+
+
+@pytest.mark.parametrize("removed", [False, True], ids=["invalid-file", "deleted-run"])
+async def test_recovery_rejects_missing_source_without_republishing(
+    app_run_fixture, db_session, monkeypatch, removed
+):
+    job_id, params, _ = await app_run_fixture(age=timedelta(minutes=6))
+    async with db_session() as session:
+        await session.execute(
+            sa.update(Jobs)
+            .where(Jobs.id == job_id)
+            .values(
+                dispatch_envelope={"version": 1, "file_ids": [str(uuid4())]},
+                updated_at=datetime.now(timezone.utc) - timedelta(minutes=6),
+            )
+        )
+        if removed:
+            await session.execute(sa.delete(AppRuns).where(AppRuns.id == params.id))
+    broker = AsyncMock()
+    monkeypatch.setattr(job_manager, "redispatch_app", broker)
+    await _run_app_maintenance()
+    async with db_session() as session:
+        job = await session.get(Jobs, job_id)
+        assert job.status == Status.FAILED
+        assert job.failure_code == JobFailureCode.INVALID_JOB_PAYLOAD
+        assert job.dispatch_envelope is None
+    broker.assert_not_awaited()
+
+
+@pytest.mark.parametrize("committed", [False, True], ids=["rollback", "lost-ack"])
+async def test_checkpoint_failure_stops_before_summary_and_records_actual_progress(
+    client, db_session, admin_user_api_key, queued_recording, monkeypatch, committed
+):
+    from eneo.files.file_service import FileService
+    from eneo.worker.task_manager import JobCheckpointError
+
+    job_id, params = queued_recording
+    headers = {"X-API-Key": admin_user_api_key.key}
+    async with db_session() as db:
+        dialect = db.get_bind().dialect
+
+    save = FileService.save_transcription
+    commit = dialect.do_commit
+
+    async def interrupt_checkpoint(self, *args):
+        result = await save(self, *args)
+
+        def interrupted(connection):
+            monkeypatch.setattr(dialect, "do_commit", commit)
+            if committed:
+                commit(connection)
+            else:
+                connection.rollback()
+            raise ConnectionError("checkpoint acknowledgement unavailable")
+
+        monkeypatch.setattr(dialect, "do_commit", interrupted)
+        return result
+
+    monkeypatch.setattr(FileService, "save_transcription", interrupt_checkpoint)
+    monkeypatch.setattr(
+        Transcriber, "transcribe_from_filepath", AsyncMock(return_value="saved speech")
+    )
+    summary = AsyncMock()
+    monkeypatch.setattr(CompletionService, "get_response", summary)
+    with pytest.raises(JobCheckpointError):
+        await app_run_worker.run_app({"job_id": job_id}, params)
+    summary.assert_not_awaited()
+    detail = await client.get(f"/api/v1/app-runs/{params.id}/", headers=headers)
+    assert detail.json()["status"] == Status.FAILED
+    assert detail.json()["input"]["files"][0]["transcription"] == (
+        "saved speech" if committed else None
+    )
+
+
+async def test_recovery_skips_a_live_worker_between_checkpoint_transactions(
+    client,
+    db_session,
+    admin_user_api_key,
+    recovery_recording,
+    monkeypatch,
+    test_settings,
+):
+    app_url, file_id, _ = recovery_recording
+    headers = {"X-API-Key": admin_user_api_key.key}
+    submitted = await client.post(
+        f"{app_url}runs/", json={"files": [{"id": file_id}]}, headers=headers
+    )
+    assert submitted.status_code == 203, submitted.text
+    async with db_session() as db:
+        run = await db.get(AppRuns, UUID(submitted.json()["id"]))
+        params = AppRunParams(
+            id=run.id,
+            user_id=run.user_id,
+            app_id=run.app_id,
+            file_ids=[UUID(file_id)],
+            text=None,
+        )
+        job_id = run.job_id
+
+    returned_at = None
+
+    async def transcribe(*args, **kwargs):
+        nonlocal returned_at
+        returned_at = datetime.now(timezone.utc)
+        return "speech"
+
+    async def complete(self, *, model, **kwargs):
+        return CompletionModelResponse(
+            completion=Completion(text="summary"), model=model, total_token_count=1
+        )
+
+    touch = JobRepository.touch_job
+    touches = 0
+
+    async def observe_checkpoint(self, id):
+        nonlocal touches
+        touches += 1
+        if touches == 3:
+            async with db_session() as observer:
+                seen = await observer.get(Jobs, id)
+                assert returned_at is not None and seen.updated_at >= returned_at
+            async with sessionmanager.session() as recovery:
+                assert id not in await fail_expired_or_interrupted_app_runs(recovery)
+        return await touch(self, id)
+
+    monkeypatch.setattr(Transcriber, "transcribe_from_filepath", transcribe)
+    monkeypatch.setattr(CompletionService, "get_response", complete)
+    monkeypatch.setattr(JobRepository, "touch_job", observe_checkpoint)
+    from eneo.database.database import DatabaseSessionManager
+    from eneo.worker import worker as worker_module
+
+    worker_db = DatabaseSessionManager()
+    settings = test_settings.model_copy(
+        update={"db_pool_size": 1, "db_pool_max_overflow": 0, "db_pool_timeout": 2}
+    )
+    monkeypatch.setattr("eneo.database.database.get_settings", lambda: settings)
+    worker_db.init(settings.database_url)
+    monkeypatch.setattr(worker_module, "sessionmanager", worker_db)
+    try:
+        assert await app_run_worker.run_app({"job_id": job_id}, params)
+        assert touches == 3
+    finally:
+        await worker_db.close()
+
+
+async def test_deleting_a_queued_run_cancels_dispatch_and_removes_its_only_file(
+    db_session, client, admin_user_api_key, recovery_recording
+):
+    url, file_id, _ = recovery_recording
+    headers = {"X-API-Key": admin_user_api_key.key}
+    response = await client.post(
+        url + "runs/", json={"files": [{"id": file_id}]}, headers=headers
+    )
+    run_id = UUID(response.json()["id"])
+    async with db_session() as session:
+        job_id = (await session.get(AppRuns, run_id)).job_id
+    deleted = await client.delete(f"/api/v1/app-runs/{run_id}/", headers=headers)
+    assert deleted.status_code == 204, deleted.text
+    async with db_session() as session:
+        job = await session.get(Jobs, job_id)
+        assert (
+            job.status == Status.FAILED and job.failure_code == JobFailureCode.CANCELLED
+        )
+        assert job.dispatch_envelope is None
+        assert not await claim_app_job(JobRepository(session), job_id)
+    source = await client.get(f"/api/v1/files/{file_id}/", headers=headers)
+    assert source.status_code == 404, source.text
+
+
+async def test_recovered_text_run_reads_its_original_prompt_from_the_run(
+    client, db_session, admin_user_api_key, recovery_recording, monkeypatch
+):
+    from eneo.worker.arq import WorkerSettings
+
+    url, _, _ = recovery_recording
+    headers = {"X-API-Key": admin_user_api_key.key}
+    setup = await client.patch(
+        url, json={"input_fields": [{"type": "text-field"}]}, headers=headers
+    )
+    assert setup.status_code == 200, setup.text
+    prompt = "Summarize the planning meeting"
+    with monkeypatch.context() as stopped_api:
+        stopped_api.setattr(
+            "eneo.jobs.job_service.after_outer_transaction",
+            lambda *args, **kwargs: None,
+        )
+        response = await client.post(
+            url + "runs/", json={"text": prompt}, headers=headers
+        )
+    assert response.status_code == 203, response.text
+    run_id = UUID(response.json()["id"])
+    async with db_session() as session:
+        run = await session.get(AppRuns, run_id)
+        assert run.input_text == prompt
+        job = await session.get(Jobs, run.job_id)
+        assert job.dispatch_envelope == {"version": 1, "file_ids": []}
+        job_id = job.id
+        job.updated_at = datetime.now(timezone.utc) - timedelta(minutes=6)
+    async with sessionmanager.session() as session:
+        assert await retry_app_submissions(session) == []
+    assert job_manager._redis is not None
+    info = await ArqJob(str(job_id), redis=job_manager._redis).info()
+    assert info and info.args[0].text is None
+
+    async def complete(self, *, model, text_input, **kwargs):
+        assert text_input == prompt
+        return CompletionModelResponse(
+            completion=Completion(text="summary"), model=model, total_token_count=1
+        )
+
+    monkeypatch.setattr(CompletionService, "get_response", complete)
+    worker = create_worker(
+        WorkerSettings, redis_pool=job_manager._redis, handle_signals=False
+    )
+    # Consume just this delivery from the general worker's queue.
+    await worker.start_jobs([str(job_id).encode()])
+    await worker.tasks[str(job_id)]
+
+    detail = await client.get(f"/api/v1/app-runs/{run_id}/", headers=headers)
+    assert detail.status_code == 200, detail.text
+    result = detail.json()
+    assert (result["status"], result["output"]) == (Status.COMPLETE, "summary")
+
+
+@pytest.mark.parametrize("redispatch", [False, True], ids=["submission", "recovery"])
+async def test_app_delivery_returns_its_connection_after_a_broker_stall(
+    test_settings, redis_client, monkeypatch, redispatch
+):
+    from redis.asyncio.client import Pipeline
+
+    from eneo.jobs import job_manager as queues
+
+    settings = test_settings.model_copy(
+        update={
+            "redis_conn_timeout": 1,
+            "redis_retry_on_timeout": False,
+            "redis_max_connections": 1,
+        }
+    )
+    monkeypatch.setattr(queues, "get_settings", lambda: settings)
+    manager = queues.JobManager()
+    await manager.init()
+    try:
+        paused = asyncio.Event()
+        watch = Pipeline.watch
+
+        async def pause_after_watch(self, *names):
+            answer = await watch(self, *names)
+            await redis_client.execute_command("CLIENT", "PAUSE", 10_000, "ALL")
+            paused.set()
+            return answer
+
+        params = AppRunParams(
+            id=uuid4(), app_id=uuid4(), file_ids=[], user_id=uuid4(), text=None
+        )
+        # Pause the test Redis after WATCH so both the enqueue and its pipeline cleanup stall.
+        with monkeypatch.context() as stop:
+            stop.setattr(Pipeline, "watch", pause_after_watch)
+            delivery = (
+                manager.redispatch_app(uuid4(), params)
+                if redispatch
+                else manager.enqueue(Task.RUN_APP, uuid4(), params)
+            )
+            request = asyncio.create_task(delivery)
+            try:
+                await asyncio.wait_for(paused.wait(), 5)
+                done, _ = await asyncio.wait([request], timeout=4)
+            finally:
+                await redis_client.execute_command("CLIENT", "UNPAUSE")
+                await asyncio.gather(request, return_exceptions=True)
+            assert request in done
+        assert (
+            await asyncio.wait_for(manager.enqueue(Task.RUN_APP, uuid4(), params), 4)
+            is not None
+        )
+    finally:
+        await manager.close()

@@ -1,6 +1,6 @@
 ---
 title: Driftsätt Eneo
-translationSource: guides/deployment.mdx@0f429a1445a1
+translationSource: guides/deployment.mdx@b4c44681f90d
 ---
 
 import { Callout } from "nextra/components";
@@ -202,6 +202,17 @@ förut anslöt till databasen via `proxy_tier` behöver köras genom `docker exe
 eller anslutas till `eneo_data_net`.
 
 ## Uppgradera och återställ
+
+Starta de nya generella workerprocesserna innan du öppnar API:t vid uppgraderingen
+som inför återhämtning av appkörningar. De kan ta emot både gamla och nya jobb.
+Om en ny körning tappar sin plats i kön skickas samma jobb till kön igen efter
+fem minuter. Workern måste begära jobbet i databasen inom två timmar från det
+att körningen skickades in. Om workern begär jobbet i tid kan den starta det
+även om den måste vänta på att ett nytt köförsök släpper låset. Om en worker
+försvinner under arbetet markeras körningen som misslyckad vid en
+underhållskörning efter fem minuters inaktivitet. Användaren
+kan då öppna resultatet, ladda ner ett sparat transkript och använda samma
+inspelning i en ny körning.
 
 Ta databasbackup och, om objektlagrade poster finns, en matchande ögonblicksbild
 av objektlagringen medan skrivningar är stoppade. Behandla dem som en gemensam

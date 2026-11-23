@@ -12,7 +12,6 @@ tests/integration/migrations/test_object_content_deployment_policy.py
 tests/integration/migrations/test_object_content_foundation.py
 tests/integration/migrations/test_remove_legacy_module_feature_flags.py
 tests/integration/migrations/test_rerank_models_round_trip.py
-tests/integration/migrations/test_restart_safe_knowledge_jobs.py
 tests/integration/migrations/test_skills_schema_round_trip.py
 tests/integration/migrations/test_storage_admin_actor_rename.py
 tests/integration/migrations/test_unify_roles_collision.py

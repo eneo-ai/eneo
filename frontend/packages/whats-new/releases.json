@@ -13,8 +13,8 @@
             "sv": "Ladda ner transkriptet från en appkörning"
           },
           "body": {
-            "en": "You can download the recording while the app runs. The result page catches up if it misses the completion notice. You can download a saved transcript even if the app fails to generate a summary.",
-            "sv": "Du kan ladda ner inspelningen medan appen körs. Resultatsidan uppdateras även om den missar beskedet att jobbet är klart. Du kan ladda ner ett sparat transkript även om appen misslyckas med att skapa sammanfattningen."
+            "en": "You can download the recording while the app runs. Eneo saves the transcript before starting the summary. If the summary is interrupted, you can download the transcript or use the same recording in a new run.",
+            "sv": "Du kan ladda ner inspelningen medan appen körs. Eneo sparar transkriptet innan sammanfattningen börjar. Om sammanfattningen avbryts kan du ladda ner texten eller använda samma inspelning i en ny körning."
           }
         },
         {
@@ -287,8 +287,8 @@
             "sv": "Appkörningar visar när bearbetningen börjar"
           },
           "body": {
-            "en": "When you reopen an app result, you can see whether processing has started. If the worker stops, the run stays in progress until it is marked as failed. You can then start a new run.",
-            "sv": "När du öppnar ett appresultat igen ser du om bearbetningen har börjat. Om den avbryts står körningen kvar som pågående tills den markeras som misslyckad. Då kan du starta en ny körning."
+            "en": "When you reopen an app result, you can see whether processing has started. If a new run loses its place in the queue, Eneo queues it again automatically. If processing is interrupted after it starts, the result shows the failure and you can start a new run.",
+            "sv": "När du öppnar ett appresultat igen ser du om bearbetningen har börjat. Om en ny körning försvinner ur kön lägger Eneo tillbaka den automatiskt. Om bearbetningen avbryts efter start syns felet i resultatet och du kan starta en ny körning."
           }
         }
       ]
