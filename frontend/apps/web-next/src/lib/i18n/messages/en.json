@@ -8392,6 +8392,7 @@
   "flow_add_step_io_tool": "Tool",
   "flow_step_editor_added": "The step {name} is added.",
   "flow_step_editor_add_refused": "The step was not added",
+  "flow_step_editor_add_before_sender_gone": "The step that sends the run's result is no longer in the flow. Close and add the step where you want it.",
   "flow_step_editor_add_stale": "The flow was changed elsewhere since you opened it. Reload and add the step again.",
   "flow_step_editor_document_format": "Format",
   "flow_step_editor_kind_ai_name": "AI step",

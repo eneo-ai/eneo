@@ -390,8 +390,8 @@ function StepEditorSession({
   // version (the chat, another tab) changed the same field.
   const [stepBases, setStepBases] = useState<StepEdits>({});
   const [assistantBases, setAssistantBases] = useState<AssistantEdits>({});
-  // "Lägg till steg" opened from here, at that place.
-  const [addAt, setAddAt] = useState<number | null>(null);
+  // "Lägg till steg före utskicket" opened from here.
+  const [adding, setAdding] = useState(false);
   // The form kept mounted across this editor's own add: the revision it
   // moved to, and the key the form had before it.
   const [held, setHeld] = useState<{ revision: number; key: number } | null>(null);
@@ -400,13 +400,13 @@ function StepEditorSession({
   const focusAfterAdd = useRef<string | null>(null);
   useEffect(() => {
     const added = focusAfterAdd.current;
-    if (addAt !== null || added === null) return;
+    if (adding || added === null) return;
     focusAfterAdd.current = null;
     (
       document.getElementById(openStepButtonId(formId, added)) ??
       document.getElementById(sendsHeadingId(formId))
     )?.focus();
-  }, [addAt, formId]);
+  }, [adding, formId]);
 
   const latestStep = findStep(latest, stepId);
   // Files uploaded in this edit go again when it ends without saving them.
@@ -670,13 +670,13 @@ function StepEditorSession({
   const formKey = held?.revision === flow.draft_revision ? held.key : flow.draft_revision;
 
   /**
-   * A step added from here, at `position`. The edits move onto the flow the
+   * A step added from here, right before this step. The edits move onto the flow the
    * core answered only when the add was fenced on the revision they sit on
    * and left this step as saved: the next save is then fenced on the new
    * revision and sends only the edits. Any other newer revision (another
    * tab, the chat) keeps the banner and its conflict check.
    */
-  function stepAdded(updated: FlowPublic, sentRevision: number, position: number) {
+  function stepAdded(updated: FlowPublic, sentRevision: number) {
     const before = findStep(flow, stepId);
     const after = findStep(updated, stepId);
     const own =
@@ -691,7 +691,8 @@ function StepEditorSession({
       setPinned(updated);
       setHeld({ revision: updated.draft_revision, key: formKey });
     }
-    focusAfterAdd.current = updated.steps.find((step) => step.step_order === position)?.id ?? "";
+    const added = after ? after.step_order - 1 : 0;
+    focusAfterAdd.current = updated.steps.find((step) => step.step_order === added)?.id ?? "";
     onStepAdded?.(updated);
   }
 
@@ -1115,7 +1116,7 @@ function StepEditorSession({
                   onChange={changeStep}
                   problems={shownProblems}
                   onGoStep={onGoStep}
-                  onAddStepBefore={onStepAdded ? setAddAt : undefined}
+                  onAddStepBefore={onStepAdded ? () => setAdding(true) : undefined}
                 />
               ) : (
                 <>
@@ -1248,15 +1249,14 @@ function StepEditorSession({
       </div>
 
       {onStepAdded && (
-        // On the flow the edits sit on: its revision fences the add.
+        // On the flow the edits sit on: its revision fences the add. By this
+        // step's id, so an add tried again on a draft read anew still lands right before it.
         <AddStepDialog
           flow={flow}
-          position={addAt ?? stepOrder}
-          open={addAt !== null}
-          onOpenChange={(open) => {
-            if (!open) setAddAt(null);
-          }}
-          onSaved={(updated, sentRevision) => stepAdded(updated, sentRevision, addAt ?? stepOrder)}
+          position={{ before: stepId }}
+          open={adding}
+          onOpenChange={setAdding}
+          onSaved={stepAdded}
         />
       )}
 

@@ -376,6 +376,94 @@ it("keeps the banner when the add went through on a newer revision than the edit
   await waitFor(() => expect(document.activeElement).toBe(heading));
 });
 
+/**
+ * "Lägg till steg före utskicket" refused as stale while `reread` is what the core holds; the
+ * dialog reads it again and the author asks for the same row once more.
+ */
+async function addBeforeSendAfterReload(reread: FlowPublic, answer: FlowPublic | null) {
+  api.routes["GET /api/v1/flows/{id}/step-kinds/"] = (init) => {
+    const position = (init as { params: { query: { position: number } } }).params.query.position;
+    return {
+      body: {
+        flow_id: "flow-1",
+        draft_revision: 4,
+        insertions: [makeKindPlace(position, [makeKindOption("ai")])],
+        steps: []
+      }
+    };
+  };
+  const answers = [STALE, ...(answer ? [{ body: answer }] : [])];
+  api.routes["PATCH /api/v1/flows/{id}/editor/"] = () => answers.shift()!;
+  await click(messages.flow_step_editor_run_result_add_before);
+  const dialog = await screen.findByRole("dialog", { name: "Lägg till steg" });
+  fireEvent.click(await within(dialog).findByRole("radio", { name: "Sammanfatta" }));
+  fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till Sammanfatta" }));
+  flow = reread;
+  fireEvent.click(
+    await within(dialog).findByRole("button", { name: messages.flow_step_editor_reload })
+  );
+  await waitFor(() =>
+    expect(
+      within(dialog).queryByRole("button", { name: messages.flow_step_editor_reload })
+    ).toBeNull()
+  );
+  return dialog;
+}
+
+it("puts a step added again after a reload directly before the step that sends, where it is now", async () => {
+  flow = senderFlow();
+  await renderPage("?step=step-send");
+  await nameField();
+  // Another author put a step before the step that sends: it is third now.
+  const reread = withStepBeforeSend(flow, { id: "step-other", user_description: "Annat" });
+  const added = makeFlow({
+    draft_revision: 6,
+    steps: [
+      reread.steps[0]!,
+      reread.steps[1]!,
+      makeStep(3, {
+        id: "step-new",
+        assistant_id: "assistant-new",
+        user_description: "Sammanfatta"
+      }),
+      { ...reread.steps[2]!, step_order: 4 }
+    ]
+  });
+  const dialog = await addBeforeSendAfterReload(reread, added);
+  await waitFor(() => {
+    fireEvent.click(within(dialog).getByRole("radio", { name: "Sammanfatta" }));
+    expect(within(dialog).getByRole("button", { name: "Lägg till Sammanfatta" })).toBeTruthy();
+  });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till Sammanfatta" }));
+  await waitFor(() => expect(editorPatches()).toHaveLength(2));
+  expect(editorPatches()[1]).toMatchObject({
+    expected_revision: 5,
+    step_order: [
+      { step_id: "step-json" },
+      { step_id: "step-other" },
+      { new_step: 0 },
+      { step_id: "step-send" }
+    ]
+  });
+});
+
+it("adds nothing after a reload in which the step that sends is gone, and says so", async () => {
+  flow = senderFlow();
+  await renderPage("?step=step-send");
+  await nameField();
+  const reread = makeFlow({ draft_revision: 5, steps: [flow.steps[0]!] });
+  const dialog = await addBeforeSendAfterReload(reread, null);
+  expect(
+    await within(dialog).findByText(messages.flow_step_editor_add_before_sender_gone)
+  ).toBeTruthy();
+  expect(within(dialog).queryByRole("radio")).toBeNull();
+  const submit = within(dialog).getByRole("button", {
+    name: "Lägg till steg"
+  }) as HTMLButtonElement;
+  expect(submit.disabled || submit.getAttribute("aria-disabled") === "true").toBe(true);
+  expect(editorPatches()).toHaveLength(1);
+});
+
 it("keeps the banner when the add changed the step that sends", async () => {
   flow = senderFlow();
   await renderPage("?step=step-send");

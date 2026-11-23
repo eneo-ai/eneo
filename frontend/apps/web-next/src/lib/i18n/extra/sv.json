@@ -2345,6 +2345,7 @@
   "flow_add_step_io_tool": "Verktyg",
   "flow_step_editor_added": "Steget {name} är tillagt.",
   "flow_step_editor_add_refused": "Steget lades inte till",
+  "flow_step_editor_add_before_sender_gone": "Steget som skickar körningens resultat finns inte längre i flödet. Stäng och lägg till steget där du vill ha det.",
   "flow_step_editor_add_stale": "Flödet har ändrats någon annanstans sedan du öppnade det. Ladda om och lägg till steget igen.",
   "flow_step_editor_document_format": "Format",
   "flow_step_editor_kind_ai_name": "AI-steg",

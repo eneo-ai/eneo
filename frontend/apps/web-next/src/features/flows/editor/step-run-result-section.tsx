@@ -51,8 +51,8 @@ export function StepRunResultSections({
   problems: FieldProblems;
   /** Opens another step of the flow; absent, no step is offered to open. */
   onGoStep?: (stepId: string) => void;
-  /** Adds a step at this place, before the step that sends; absent, it is not offered. */
-  onAddStepBefore?: (position: number) => void;
+  /** Adds a step right before the step that sends; absent, it is not offered. */
+  onAddStepBefore?: () => void;
 }) {
   const t = useTranslations();
   const run = flowDeliverables(
@@ -156,7 +156,7 @@ export function StepRunResultSections({
                     label={t("flow_step_editor_run_result_add_before")}
                     size="sm"
                     variant="secondary"
-                    onClick={() => onAddStepBefore(stepOrder)}
+                    onClick={onAddStepBefore}
                   />
                 )
               }
