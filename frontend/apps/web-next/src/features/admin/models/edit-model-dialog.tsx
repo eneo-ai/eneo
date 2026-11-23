@@ -528,7 +528,7 @@ function EditModelForm({
                     if (!realtimeLocked) setRealtime(next);
                   }}
                   aria-disabled={realtimeLocked || undefined}
-                  className="aria-disabled:cursor-not-allowed aria-disabled:data-[state=unchecked]:bg-input/50 aria-disabled:*:opacity-50"
+                  className="aria-disabled:data-[state=unchecked]:bg-input/50 aria-disabled:cursor-not-allowed aria-disabled:*:opacity-50"
                   aria-describedby={
                     realtimeRefusal ? `${realtimeHelpId} ${realtimeUnavailableId}` : realtimeHelpId
                   }
