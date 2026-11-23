@@ -3322,6 +3322,24 @@ describe("FlowStepEditor Leverans", () => {
     expect(await within(await section()).findByText("Läses av Steg 3: Skriv svar.")).toBeTruthy();
   }, 20_000);
 
+  it("names a tool step with bindings that sends the result to its tool in an argument", async () => {
+    routeAssistants();
+    renderEditor(
+      makeFlow({
+        steps: [
+          text(1, "Sammanfatta"),
+          text(2, "Granska", { input_source: "flow_input" }),
+          text(3, "Slå upp", {
+            input_source: "tool",
+            input_bindings: { question: "{{Granska}}" },
+            input_config: { tool: { arguments: { fråga: "{{step_1.output.text}}" } } }
+          })
+        ]
+      })
+    );
+    expect(await within(await section()).findByText("Läses av Steg 3: Slå upp.")).toBeTruthy();
+  }, 20_000);
+
   it("never says no step reads the result while a later prompt cannot be read", async () => {
     routeAssistants({}, ["assistant-2"]);
     renderEditor(

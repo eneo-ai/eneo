@@ -288,9 +288,11 @@ function readFacts(step: FlowStep, steps: readonly FlowStep[], prompt = ""): Rea
   };
   const readToken = (token: string) => read(readTarget(token, step, steps));
 
-  // The prompt, a Word step's fields and an HTTP call's texts are read whatever the step's material is.
+  // The prompt, a Word step's fields, an HTTP call's texts and a tool's
+  // arguments are read whatever the step's material is: the core fills them all in.
   tokensOf(prompt).forEach(readToken);
   templateFieldTokens(step).forEach(readToken);
+  if (step.input_source === "tool") toolArgumentTokens(step).forEach(readToken);
   if (step.input_source === "http_get") callTokens(step.input_config).forEach(readToken);
   if (step.output_mode === "http_post") {
     callTokens(step.output_config).forEach((token) => read(webhookTarget(token, step, steps)));
@@ -316,7 +318,6 @@ function readFacts(step: FlowStep, steps: readonly FlowStep[], prompt = ""): Rea
       facts.extra.push({ kind: "http" });
       break;
     case "tool":
-      toolArgumentTokens(step).forEach(readToken);
       facts.extra.push({ kind: "tool" });
       break;
   }
@@ -327,7 +328,8 @@ function readFacts(step: FlowStep, steps: readonly FlowStep[], prompt = ""): Rea
  * What a step reads, each source once: earlier steps in run order first,
  * then the run's input, the web or a tool. Bindings, when the step has
  * any, decide its material alone; otherwise its input source does. What
- * its prompt reads (`prompts`, by assistant id) comes on top.
+ * its prompt (`prompts`, by assistant id), its Word fields, its HTTP calls
+ * and its tool's arguments read comes on top.
  */
 export function stepReads(
   step: FlowStep,
