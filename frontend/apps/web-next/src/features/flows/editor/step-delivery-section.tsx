@@ -238,7 +238,8 @@ const ICON = "text-ax-text-secondary mt-0.5 size-4 shrink-0";
  * whether it is one of the run's results (and under which names), and
  * whether the step that sends the run's result sends it. Readers come from
  * the saved flow; whether it is included is read with the step's draft in
- * place.
+ * place. While the form shows another version than the one the later prompts
+ * are read for (`readersHeld`), no reader line is shown.
  */
 export function StepDeliverySection({
   formId,
@@ -250,6 +251,7 @@ export function StepDeliverySection({
   onChange,
   problems,
   dirty,
+  readersHeld,
   onGoStep
 }: {
   formId: string;
@@ -262,6 +264,11 @@ export function StepDeliverySection({
   problems: FieldProblems;
   /** The step has unsaved changes, which the step that sends does not show yet. */
   dirty: boolean;
+  /**
+   * The form shows another version of the flow than the page, for which the
+   * later prompts are read: they may name steps that stand elsewhere in it.
+   */
+  readersHeld: boolean;
   /** Opens another step of the flow; absent, the step that sends is not offered. */
   onGoStep?: (stepId: string) => void;
 }) {
@@ -285,8 +292,9 @@ export function StepDeliverySection({
   // The step that sends reads it only where its headers name it. The last
   // working step has no other later step to name. "Read by no step" waits for
   // every prompt to be current: one not read, or read before a change, may name this step.
-  const readLine =
-    readers.length === 1 && readers[0]!.step_order === order + 1
+  const readLine = readersHeld
+    ? null
+    : readers.length === 1 && readers[0]!.step_order === order + 1
       ? t("flow_step_editor_delivery_read_next", { step: name(readers[0]!) })
       : readers.length > 0
         ? t("flow_step_editor_delivery_read_by", { steps: format.list(readers.map(name)) })

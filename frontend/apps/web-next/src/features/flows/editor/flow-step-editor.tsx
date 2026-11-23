@@ -1167,6 +1167,7 @@ function StepEditorSession({
                       onChange={changeStep}
                       problems={shownProblems}
                       dirty={dirty}
+                      readersHeld={flow.draft_revision !== propFlow.draft_revision}
                       onGoStep={onGoStep}
                     />
                   )}

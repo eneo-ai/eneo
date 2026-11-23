@@ -843,22 +843,40 @@ describe("the Leverans section's reader from a later prompt, while the prompts a
     });
   const reader = "Läses av Steg 3: Skriv svar.";
 
-  beforeEach(() => {
-    flow = makeFlow({ steps: [first, second, third(3)] });
+  /** The later step's prompt is `text()` when read; the others name no step. */
+  function laterPrompt(text: () => string) {
     api.routes[`GET ${ASSISTANT}`] = (init: { params: { path: { assistant_id: string } } }) => {
       const id = init.params.path.assistant_id;
       const assistant = makeAssistant();
       return {
         body: makeAssistant({
           id,
-          prompt: {
-            ...assistant.prompt!,
-            text: id === "assistant-3" ? "Jämför med {{Sammanfatta}}." : "Gör ditt jobb."
-          }
+          prompt: { ...assistant.prompt!, text: id === "assistant-3" ? text() : "Gör ditt jobb." }
         })
       };
     };
+  }
+  beforeEach(() => {
+    flow = makeFlow({ steps: [first, second, third(3)] });
+    laterPrompt(() => "Jämför med {{Sammanfatta}}.");
   });
+  /** The chat panel, whose tools finishing make the page read the flow again. */
+  function withChat() {
+    api.routes["POST /api/v1/flows/{id}/authoring-chat/"] = () => ({
+      body: {
+        flow_id: "flow-1",
+        assistant_id: "assistant-chat",
+        session_id: "session-1",
+        editing: true
+      }
+    });
+    api.routes["GET /api/v1/assistants/{id}/"] = () => ({
+      body: { id: "assistant-chat", name: "Flödesassistent", mcp_servers: [] }
+    });
+    api.routes["GET /api/v1/conversations/{session_id}/"] = () => ({
+      body: { id: "session-1", name: "", messages: [] }
+    });
+  }
 
   /** Holds the later step's prompt read until released; the other reads answer at once. */
   function holdLaterPrompt() {
@@ -939,20 +957,7 @@ describe("the Leverans section's reader from a later prompt, while the prompts a
   });
 
   it("waits after a change from the chat with the same steps, also through an own save meanwhile", async () => {
-    api.routes["POST /api/v1/flows/{id}/authoring-chat/"] = () => ({
-      body: {
-        flow_id: "flow-1",
-        assistant_id: "assistant-chat",
-        session_id: "session-1",
-        editing: true
-      }
-    });
-    api.routes["GET /api/v1/assistants/{id}/"] = () => ({
-      body: { id: "assistant-chat", name: "Flödesassistent", mcp_servers: [] }
-    });
-    api.routes["GET /api/v1/conversations/{session_id}/"] = () => ({
-      body: { id: "session-1", name: "", messages: [] }
-    });
+    withChat();
     const { queryClient } = await renderPage("?step=step-1");
     expect(await within(await delivery()).findByText(reader)).toBeTruthy();
     // An own save first, settled: what it allowed does not outlast it.
@@ -1032,18 +1037,7 @@ describe("the Leverans section's reader from a later prompt, while the prompts a
   });
 
   it("waits after a rename from the step editor, also for a prompt that reads the step by place", async () => {
-    const prompt = api.routes[`GET ${ASSISTANT}`]!;
-    api.routes[`GET ${ASSISTANT}`] = (init: { params: { path: { assistant_id: string } } }) => {
-      const answer = prompt(init as never) as { body: ReturnType<typeof makeAssistant> };
-      return init.params.path.assistant_id === "assistant-3"
-        ? {
-            body: {
-              ...answer.body,
-              prompt: { ...answer.body.prompt!, text: "Jämför med {{step_1}}." }
-            }
-          }
-        : answer;
-    };
+    laterPrompt(() => "Jämför med {{step_1}}.");
     const { queryClient } = await renderPage("?step=step-1");
     expect(await within(await delivery()).findByText(reader)).toBeTruthy();
     const release = holdLaterPrompt();
@@ -1063,5 +1057,101 @@ describe("the Leverans section's reader from a later prompt, while the prompts a
       release();
     }
     expect(await within(await delivery()).findByText(reader)).toBeTruthy();
+  });
+
+  /** The flow with a step put first, the later prompt rewritten to name this step at its new place. */
+  const inserted = () =>
+    makeFlow({
+      draft_revision: 5,
+      steps: [
+        makeStep(1, { id: "step-0", assistant_id: "assistant-0", user_description: "Hämta" }),
+        { ...first, step_order: 2 },
+        { ...second, step_order: 3 },
+        third(4)
+      ]
+    });
+  /** The later prompt has been read again as `text`, and no read is under way. */
+  const readAs = (queryClient: QueryClient, text: string) =>
+    waitFor(() => {
+      const state = queryClient.getQueryState<ReturnType<typeof makeAssistant>>(
+        flowEditorKeys.assistant("flow-1", "assistant-3")
+      );
+      expect(state?.data?.prompt?.text).toBe(text);
+      expect(state?.fetchStatus).toBe("idle");
+    });
+  /** No reader line: neither a reader nor "no later step reads it". */
+  async function noReaderLine() {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const section = await delivery();
+    expect(within(section).queryByText(/^Läses av /)).toBeNull();
+    expect(within(section).queryByText(/^Går vidare till nästa steg/)).toBeNull();
+    expect(within(section).queryByText(messages.flow_step_editor_delivery_unread_off)).toBeNull();
+    expect(
+      within(section).queryByText(messages.flow_step_editor_delivery_unread_included)
+    ).toBeNull();
+  }
+
+  it("names no reader while the form holds edits on an older version, and the right one on the newer", async () => {
+    withChat();
+    let prompt = "Jämför med {{step_1}}.";
+    laterPrompt(() => prompt);
+    const { queryClient } = await renderPage("?step=step-1");
+    expect(await within(await delivery()).findByText(reader)).toBeTruthy();
+    await changeName();
+    prompt = "Jämför med {{step_2}}.";
+    flow = inserted();
+    fireEvent.click(await screen.findByRole("button", { name: "Verktyg klart" }));
+    await screen.findByText(messages.flow_step_editor_newer_title);
+    // The prompts are read for the page's version; the form's steps are the older ones.
+    await readAs(queryClient, prompt);
+    await noReaderLine();
+    await click(messages.flow_step_editor_reload);
+    expect(await within(await delivery()).findByText("Läses av Steg 4: Skriv svar.")).toBeTruthy();
+  });
+
+  it("names no reader after a reload ahead of the page, and names it once the page has caught up", async () => {
+    withChat();
+    let prompt = "Jämför med {{step_1}}.";
+    laterPrompt(() => prompt);
+    const { queryClient } = await renderPage("?step=step-1");
+    expect(await within(await delivery()).findByText(reader)).toBeTruthy();
+    await changeName();
+    api.routes["PATCH /api/v1/flows/{id}/editor/"] = () => ({
+      status: 400,
+      body: { message: "Stale.", code: "stale_revision", eneo_error_code: 9000 }
+    });
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_step_editor_save }));
+    await screen.findByText(messages.flow_step_editor_stale_title);
+    // Changed elsewhere: the reload reads it, the page has not.
+    prompt = "Jämför med {{step_2}}.";
+    flow = inserted();
+    await click(messages.flow_step_editor_reload);
+    await waitFor(() =>
+      expect(screen.queryByText(messages.flow_step_editor_stale_title)).toBeNull()
+    );
+    expect(queryClient.getQueryData<FlowPublic>(flowKeys.flow("flow-1"))?.draft_revision).toBe(4);
+    await noReaderLine();
+    fireEvent.click(await screen.findByRole("button", { name: "Verktyg klart" }));
+    expect(await within(await delivery()).findByText("Läses av Steg 4: Skriv svar.")).toBeTruthy();
+    await readAs(queryClient, prompt);
+  });
+
+  it("keeps the reader on screen through the editor's own save", async () => {
+    await renderPage("?step=step-1");
+    expect(await within(await delivery()).findByText(reader)).toBeTruthy();
+    // Every render from the save to its settling shows the line.
+    let gone = false;
+    const observer = new MutationObserver(() => {
+      if (!document.body.textContent?.includes(reader)) gone = true;
+    });
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    try {
+      await saveSetting(5);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    } finally {
+      observer.disconnect();
+    }
+    expect(gone).toBe(false);
+    expect(within(await delivery()).getByText(reader)).toBeTruthy();
   });
 });
