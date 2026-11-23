@@ -8282,7 +8282,7 @@
   "flow_step_editor_delivery_no_address": "Inget skickas förrän utskicket har en adress.",
   "flow_step_editor_delivery_open_sender": "Öppna utskickssteget",
   "flow_step_editor_delivery_save_first": "Spara först för att se ändringen i utskicket.",
-  "flow_step_editor_delivery_json": "Steg med svar i fast format (JSON) används som underlag för senare steg och kan inte väljas som färdigt resultat.",
+  "flow_step_editor_delivery_json": "Steg med svar i fast format (JSON) används som underlag för senare steg och kan inte tas med i körningens resultat.",
   "flow_step_editor_run_result_description": "Skickar körningens resultat till mottagaren när körningen är klar. Körningen är klar även om utskicket misslyckas.",
   "flow_step_editor_run_result_sends_title": "Vad som skickas",
   "flow_step_editor_run_result_more_title": "Fler steg kan ingå",

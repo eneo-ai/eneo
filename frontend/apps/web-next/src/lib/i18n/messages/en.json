@@ -8282,7 +8282,7 @@
   "flow_step_editor_delivery_no_address": "Nothing is sent until the step that sends has an address.",
   "flow_step_editor_delivery_open_sender": "Open the step that sends",
   "flow_step_editor_delivery_save_first": "Save first to see the change in what is sent.",
-  "flow_step_editor_delivery_json": "A step that answers in a fixed format (JSON) is material for later steps and cannot be chosen as a finished result.",
+  "flow_step_editor_delivery_json": "A step that answers in a fixed format (JSON) is material for later steps and cannot be included in the run's result.",
   "flow_step_editor_run_result_description": "Sends the run's result to the recipient when the run is complete. The run is complete even if sending fails.",
   "flow_step_editor_run_result_sends_title": "What is sent",
   "flow_step_editor_run_result_more_title": "More steps can be included",
