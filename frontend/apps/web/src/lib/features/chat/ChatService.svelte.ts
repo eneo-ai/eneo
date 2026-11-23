@@ -1225,9 +1225,9 @@ export class ChatService {
         }
       }
 
-      if (this.#streamGen === streamGen) {
-        this.reloadHistory();
-      }
+      // Also for an answer whose conversation was left while it was written:
+      // that conversation is saved, and belongs in the list from then on.
+      this.reloadHistory();
 
       // The $effect in constructor now handles automatic token calculation
     }
