@@ -83,8 +83,8 @@ type StepActions = {
   onMove: (step: FlowStep, delta: -1 | 1) => void;
   /** Resolves once the removal is saved or refused. */
   onRemove: (step: FlowStep) => Promise<unknown>;
-  /** Opens the add dialog for a 1-based position. */
-  onAdd: (position: number) => void;
+  /** Opens the add dialog for a place (1-based), or for the end of the draft the add is made on. */
+  onAdd: (position: number | "end") => void;
 };
 
 /** The shortcut that adds a step naming the speakers after the step that transcribes. */
@@ -442,10 +442,9 @@ export function FlowStepList({
       label={t("flows_add_step")}
       icon={<Plus aria-hidden="true" />}
       size="sm"
-      // A last step that sends stays last: the new step goes before it.
-      onClick={() =>
-        actions.onAdd(steps.at(-1)?.output_mode === "http_post" ? steps.length : steps.length + 1)
-      }
+      // The end of the draft the add is made on, which may be read again before
+      // it saves: a last step that sends stays last there.
+      onClick={() => actions.onAdd("end")}
     />
   );
 

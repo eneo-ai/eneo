@@ -156,7 +156,7 @@ function AddStepPicker({
   pending: boolean;
   onCancel: () => void;
   onClose: () => void;
-  onSaved: (flow: FlowPublic, sentRevision: number) => void;
+  onSaved: (flow: FlowPublic, sentRevision: number, addedStepId: string | null) => void;
   onPendingChange: (pending: boolean) => void;
   onReloaded: (flow: FlowPublic) => void;
 }) {
@@ -280,7 +280,10 @@ function AddStepPicker({
     onSettled: () => onPendingChange(false),
     onSuccess: ({ updated, sent }, { task }) => {
       announce(t("flow_step_editor_added", { name: stepName(task) }));
-      onSaved(updated, sent);
+      // The core answered the revision the add was fenced on: the one step
+      // not in this flow is the added one.
+      const added = updated.steps.find((step) => !flow.steps.some((seen) => seen.id === step.id));
+      onSaved(updated, sent, added?.id ?? null);
       onClose();
     },
     onError: (error, { option }) => {
@@ -704,10 +707,12 @@ function AddStepPicker({
 }
 
 /**
- * Adds a step at `position`: a place (1-based), or before the step that sends
- * the run's result, named by its id and placed on the flow the add is fenced
- * on (a draft read again after a stale refusal included). When that step is
- * gone there, or no longer sends the run's result, there is no place. The
+ * Adds a step at `position`: a place (1-based), the end, or before the step
+ * that sends the run's result, named by its id. The end and that step are
+ * placed on the flow the add is fenced on (a draft read again after a stale
+ * refusal included); the end is before a last step that sends, which stays
+ * last. When the step it was to go before is gone there, or no longer sends
+ * the run's result, there is no place. The
  * author picks what the step does, a task or a kind of step, and the step is
  * named after it (renamed in the editor). The kinds the place allows, why the others are refused and the
  * configuration each starts with are the core's answer for the place; the
@@ -721,22 +726,30 @@ export function AddStepDialog({
   onSaved
 }: {
   flow: FlowPublic;
-  position: number | { before: string };
+  position: number | "end" | { before: string };
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** The flow the core answered, and the revision the add was fenced on. */
-  onSaved: (flow: FlowPublic, sentRevision: number) => void;
+  /** The flow the core answered, the revision the add was fenced on, and the step it added. */
+  onSaved: (flow: FlowPublic, sentRevision: number, addedStepId: string | null) => void;
 }): React.JSX.Element {
   const [pending, setPending] = useState(false);
   const { space } = useSpace();
   // A draft read again after a stale save, while the dialog stays open.
   const [reloaded, setReloaded] = useState<FlowPublic | null>(null);
   const flow = reloaded && reloaded.draft_revision >= propFlow.draft_revision ? reloaded : propFlow;
+  const last = flow.steps.reduce<FlowStep | null>(
+    (found, step) => (found && found.step_order > step.step_order ? found : step),
+    null
+  );
   const position =
-    typeof requestedPosition === "number"
-      ? Math.min(Math.max(1, Math.round(requestedPosition)), flow.steps.length + 1)
-      : (flow.steps.find((step) => step.id === requestedPosition.before && sendsRunResult(step))
-          ?.step_order ?? null);
+    requestedPosition === "end"
+      ? last?.output_mode === "http_post"
+        ? flow.steps.length
+        : flow.steps.length + 1
+      : typeof requestedPosition === "number"
+        ? Math.min(Math.max(1, Math.round(requestedPosition)), flow.steps.length + 1)
+        : (flow.steps.find((step) => step.id === requestedPosition.before && sendsRunResult(step))
+            ?.step_order ?? null);
   const kinds = useQuery({
     ...insertionKindsQueryOptions(flow.id, flow.draft_revision, position ?? 0),
     enabled: open && position !== null

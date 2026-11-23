@@ -634,6 +634,61 @@ describe("FlowPage", () => {
     );
   });
 
+  it("adds from the list before a last step that sends, also on a draft read again after another author's insert", async () => {
+    const first = makeStep(1, { user_description: "Sammanfatta" });
+    const sender = (order: number) =>
+      makeStep(order, {
+        id: "step-send",
+        user_description: "Skicka",
+        output_mode: "http_post",
+        output_config: { url: "https://mottagare.example.org/in", auth: { mode: "none" } }
+      });
+    // Another author's step, inserted before the one that sends while the dialog was open.
+    const other = makeStep(2, { id: "step-other", user_description: "Granska" });
+    const added = makeStep(3, { id: "step-new", user_description: "Sammanfatta 2" });
+    state.kinds = ok({
+      flow_id: "flow-1",
+      draft_revision: 4,
+      insertions: [makeKindPlace(2), makeKindPlace(3)],
+      steps: []
+    });
+    state.editor = refused(400, { code: "stale_revision", message: "Stale." });
+    renderPage(makeFlow({ steps: [first, sender(2)] }));
+
+    fireEvent.click(within(stepsRegion()).getByRole("button", { name: messages.flows_add_step }));
+    const dialog = await screen.findByRole("dialog", { name: messages.flow_step_editor_add_title });
+    fireEvent.click(await within(dialog).findByRole("button", { name: "Lägg till Sammanfatta" }));
+    state.flow = ok(makeFlow({ draft_revision: 5, steps: [first, other, sender(3)] }));
+    fireEvent.click(
+      await within(dialog).findByRole("button", { name: messages.flow_step_editor_reload })
+    );
+    await waitFor(() =>
+      expect(
+        within(dialog).queryByRole("button", { name: messages.flow_step_editor_reload })
+      ).toBeNull()
+    );
+    state.editor = ok(makeFlow({ draft_revision: 6, steps: [first, other, added, sender(4)] }));
+    fireEvent.click(await within(dialog).findByRole("button", { name: "Lägg till Sammanfatta" }));
+
+    await waitFor(() => expect(state.announce).toHaveBeenCalledWith("Steget lades till"));
+    const patches = api.PATCH.mock.calls.filter(([path]) => path === "/api/v1/flows/{id}/editor/");
+    expect((patches.at(-1) as unknown as [string, { body: unknown }])[1].body).toMatchObject({
+      expected_revision: 5,
+      step_order: [
+        { step_id: "step-1" },
+        { step_id: "step-other" },
+        { new_step: 0 },
+        { step_id: "step-send" }
+      ]
+    });
+    // Focus goes to the step this add made, not to the other author's.
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole("button", { name: "Redigera Steg 3: Sammanfatta 2" })
+      )
+    );
+  });
+
   it("publishes the revision on screen and puts a refusal on the step it names", async () => {
     state.publish = refused(400, {
       code: "typed_io_tool_not_allowed",

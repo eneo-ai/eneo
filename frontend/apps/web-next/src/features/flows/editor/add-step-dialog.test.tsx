@@ -54,7 +54,7 @@ function Harness({
   onSaved,
   current
 }: {
-  position: number;
+  position: number | "end";
   onSaved: (flow: FlowPublic) => void;
   current: FlowPublic;
 }) {
@@ -75,7 +75,11 @@ function Harness({
   );
 }
 
-async function openDialog(position = 2, current = flow, { rows = true, personal = false } = {}) {
+async function openDialog(
+  position: number | "end" = 2,
+  current = flow,
+  { rows = true, personal = false } = {}
+) {
   const onSaved = vi.fn();
   const queryClient = testQueryClient();
   queryClient.setQueryData(["spaces", "space-1"], makeSpace({ overrides: { personal } }));
@@ -243,7 +247,10 @@ describe("AddStepDialog", () => {
   });
 
   it("starts on the first recommendation and adds it, named after it, with its instruction", async () => {
-    const updated = makeFlow({ draft_revision: 5 });
+    const updated = makeFlow({
+      draft_revision: 5,
+      steps: [...flow.steps, makeStep({ id: "step-new", step_order: 3 })]
+    });
     api.routes[EDITOR] = () => ({ body: updated });
     const { dialog, onSaved } = await openDialog(2);
     expect(
@@ -251,8 +258,9 @@ describe("AddStepDialog", () => {
     ).toBe(true);
     fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till Gör text av data" }));
 
-    // With the revision the add was fenced on, which tells the editor it was its own.
-    await waitFor(() => expect(onSaved).toHaveBeenCalledWith(updated, 4));
+    // With the revision the add was fenced on, which tells the editor it was its own, and the
+    // step it added: the one not in the flow it was fenced on.
+    await waitFor(() => expect(onSaved).toHaveBeenCalledWith(updated, 4, "step-new"));
     expect(sent()).toEqual({
       expected_revision: 4,
       definition: {},
@@ -414,6 +422,14 @@ describe("AddStepDialog", () => {
         .getByRole("button", { name: /stegtyper går inte att lägga till här/ })
         .getAttribute("aria-expanded")
     ).toBe("true");
+  });
+
+  it("adds at the end after the last step when it does not send", async () => {
+    api.routes[KINDS] = textKinds;
+    const { dialog } = await openDialog("end", textFlow);
+    const asked = api.stub.calls.find((call) => `${call.method} ${call.path}` === KINDS);
+    expect(asked?.init.params).toEqual({ path: { id: "flow-1" }, query: { position: 2 } });
+    expect(within(dialog).getByText("Hamnar efter Steg 1: Sammanfatta")).toBeTruthy();
   });
 
   it("puts focus in the search after reloading a draft that moved on", async () => {

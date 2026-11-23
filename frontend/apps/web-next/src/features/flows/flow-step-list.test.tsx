@@ -367,7 +367,7 @@ describe("FlowStepList", () => {
     fireEvent.click(screen.getByRole("button", { name: "Redigera Steg 2: Skriv svar" }));
     expect(actions.onOpen).toHaveBeenCalledWith(steps[1]);
     fireEvent.click(screen.getByRole("button", { name: "Lägg till steg" }));
-    expect(actions.onAdd).toHaveBeenCalledWith(4);
+    expect(actions.onAdd).toHaveBeenCalledWith("end");
   });
 
   it("adds a step before a last step that sends, and offers no step after any that sends", () => {
@@ -383,8 +383,9 @@ describe("FlowStepList", () => {
       });
     for (const body of ["run_result", "auto"]) {
       const { actions } = renderList(true, null, {}, true, [steps[0]!, steps[1]!, post(3, body)]);
+      // The dialog places the end before the step that sends, on the draft it adds on.
       fireEvent.click(screen.getByRole("button", { name: messages.flows_add_step }));
-      expect(actions.onAdd).toHaveBeenLastCalledWith(3);
+      expect(actions.onAdd).toHaveBeenLastCalledWith("end");
       const trigger = screen.getByRole("button", { name: "Fler åtgärder för Steg 3: Skicka" });
       fireEvent.click(trigger);
       const menu = document.getElementById(trigger.getAttribute("aria-controls") ?? "")!;
