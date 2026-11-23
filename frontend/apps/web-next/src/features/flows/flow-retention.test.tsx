@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { useQuery } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { browserApi } from "@/lib/api/browser";
 import { EneoApiError } from "@/lib/api/errors";
@@ -240,32 +240,40 @@ describe("flow retention", () => {
       flowKeys.flow("flow-1"),
       makeFlow({ run_history_retention: byFlow(7) })
     );
-    let releaseDetail: (value: unknown) => void = () => {};
-    backend.GET.mockImplementation((path: string) =>
-      path === "/api/v1/flows/{id}/"
-        ? new Promise((resolve) => {
-            releaseDetail = resolve;
-          })
-        : Promise.resolve(settings({ days: 7 }, { days: 60 }))
-    );
-    backend.PUT.mockResolvedValue(
-      answered({
-        scope: "flow",
-        scope_id: "flow-1",
-        local_policy: { days: 3 },
-        inherited_policy: { days: 60 },
-        effective: byFlow(3)
-      })
-    );
+    // What the server holds; the first Flow read is in flight across the save, later ones
+    // answer at once.
+    let own = 7;
+    let releaseOlder: (value: unknown) => void = () => {};
+    let flowReads = 0;
+    backend.GET.mockImplementation((path: string) => {
+      if (path !== "/api/v1/flows/{id}/")
+        return Promise.resolve(settings({ days: own }, { days: 60 }));
+      flowReads += 1;
+      if (flowReads > 1)
+        return Promise.resolve(answered(makeFlow({ run_history_retention: byFlow(own) })));
+      return new Promise((resolve) => {
+        releaseOlder = resolve;
+      });
+    });
+    backend.PUT.mockImplementation(() => {
+      own = 3;
+      return Promise.resolve(
+        answered({
+          scope: "flow",
+          scope_id: "flow-1",
+          local_policy: { days: 3 },
+          inherited_policy: { days: 60 },
+          effective: byFlow(3)
+        })
+      );
+    });
     renderInApp(<CachedFlowSettings />, {
       queryClient,
       appContext: testAppContext({ permissions: ["retention_manage"] })
     });
     expect(screen.getByText(/7 dagar, satt på flödet/)).toBeTruthy();
     void queryClient.refetchQueries({ queryKey: flowKeys.flow("flow-1"), exact: true });
-    await waitFor(() =>
-      expect(backend.GET).toHaveBeenCalledWith("/api/v1/flows/{id}/", expect.anything())
-    );
+    await waitFor(() => expect(flowReads).toBe(1));
 
     fireEvent.click(screen.getByRole("button", { name: "Ändra gallring" }));
     const days = await screen.findByRole("spinbutton", { name: /Egen tid för det här flödet/ });
@@ -273,7 +281,10 @@ describe("flow retention", () => {
     fireEvent.blur(days);
     fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
     await waitFor(() => expect(screen.queryByRole("spinbutton")).toBeNull());
-    releaseDetail(answered(makeFlow({ run_history_retention: byFlow(7) })));
+    // The Flow is read again after the save; the read from before it lands last.
+    await waitFor(() => expect(flowReads).toBe(2));
+    await settle();
+    releaseOlder(answered(makeFlow({ run_history_retention: byFlow(7) })));
     await settle();
 
     expect(screen.getByText(/3 dagar, satt på flödet/)).toBeTruthy();
@@ -341,9 +352,86 @@ describe("flow retention", () => {
     expect(screen.queryByText(/30 dagar, satt på flödet/)).toBeNull();
   });
 
+  it("reads the Flow and its times again after a save, so a newer space time shows", async () => {
+    const retention = (source: "flow" | "space", days: number, space: number, flow: number) =>
+      ({
+        state: "configured",
+        source,
+        effective_days: days,
+        contributors: { space: { days: space }, flow: { days: flow } }
+      }) as const;
+    // What the server holds: another admin lowers the space's time to 7 once the save commits.
+    let space = 60;
+    let own: number | null = null;
+    const newer = () => answered(makeFlow({ run_history_retention: retention("space", 7, 7, 30) }));
+    const queryClient = testQueryClient();
+    queryClient.setQueryData(
+      flowKeys.flow("flow-1"),
+      makeFlow({ run_history_retention: configured })
+    );
+    // The first Flow read is in flight across the save; later ones answer at once.
+    let releaseOlder: (value: unknown) => void = () => {};
+    let flowReads = 0;
+    backend.GET.mockImplementation((path: string) => {
+      if (path !== "/api/v1/flows/{id}/")
+        return Promise.resolve(settings(own === null ? null : { days: own }, { days: space }));
+      flowReads += 1;
+      if (flowReads > 1) return Promise.resolve(newer());
+      return new Promise((resolve) => {
+        releaseOlder = resolve;
+      });
+    });
+    backend.PUT.mockImplementation(() => {
+      own = 30;
+      const saved = answered({
+        scope: "flow",
+        scope_id: "flow-1",
+        local_policy: { days: 30 },
+        inherited_policy: { days: space },
+        effective: retention("flow", 30, space, 30)
+      });
+      space = 7;
+      return Promise.resolve(saved);
+    });
+    renderInApp(<CachedFlowSettings />, {
+      queryClient,
+      appContext: testAppContext({ permissions: ["retention_manage"] })
+    });
+    void queryClient.refetchQueries({ queryKey: flowKeys.flow("flow-1"), exact: true });
+    await waitFor(() => expect(flowReads).toBe(1));
+
+    fireEvent.click(screen.getByRole("button", { name: "Ändra gallring" }));
+    const days = await screen.findByRole("spinbutton", { name: /Egen tid för det här flödet/ });
+    fireEvent.change(days, { target: { value: "30" } });
+    fireEvent.blur(days);
+    fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
+    await waitFor(() => expect(screen.queryByRole("spinbutton")).toBeNull());
+    // The read in flight saw the space's new time; the save's answer predates it.
+    releaseOlder(newer());
+    await settle();
+    expect(screen.getByText(/7 dagar, ärvt från ytan/)).toBeTruthy();
+    expect(screen.queryByText(/30 dagar, satt på flödet/)).toBeNull();
+
+    // Opened again, the dialog names the space's shorter time beside the saved one.
+    fireEvent.click(screen.getByRole("button", { name: "Ändra gallring" }));
+    const reopened = (await screen.findByRole("spinbutton", {
+      name: /Egen tid för det här flödet/
+    })) as HTMLInputElement;
+    expect(reopened.value).toBe("30");
+    expect(
+      within(screen.getByRole("dialog")).getByText(
+        "30 dagar sparat på flödet. Ytans kortare tid gäller."
+      )
+    ).toBeTruthy();
+  });
+
   it("keeps a saved time when an older read lands after the save", async () => {
     backend.GET.mockResolvedValue(settings(null, { days: 60 }));
-    backend.PUT.mockResolvedValue(settings({ days: 30 }, { days: 60 }));
+    // After the save the server holds 30, and the times are read again.
+    backend.PUT.mockImplementation(() => {
+      backend.GET.mockResolvedValue(settings({ days: 30 }, { days: 60 }));
+      return Promise.resolve(settings({ days: 30 }, { days: 60 }));
+    });
     const { queryClient } = renderSettings(["retention_manage"]);
     fireEvent.click(screen.getByRole("button", { name: "Ändra gallring" }));
     const days = await screen.findByRole("spinbutton", { name: /Egen tid för det här flödet/ });

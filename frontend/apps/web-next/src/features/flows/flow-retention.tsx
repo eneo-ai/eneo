@@ -163,6 +163,11 @@ function RetentionForm({
       await writeAnswer<FlowPublic>(flowKeys.flow(flow.id), (current) =>
         current ? { ...current, run_history_retention: saved.effective } : current
       );
+      // The answer is the server's as of the save, and the writes cancelled any read in
+      // flight: a read started now sees a later change, such as a shorter space time.
+      // Not awaited: the dialog closes without waiting for the reads.
+      void queryClient.invalidateQueries({ queryKey: policyKey(flow.id), exact: true });
+      void queryClient.invalidateQueries({ queryKey: flowKeys.flow(flow.id), exact: true });
       toast.success(t("flows_retention_saved"));
       onClose();
     },
