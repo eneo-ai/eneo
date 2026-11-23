@@ -190,6 +190,16 @@ class FileOwner:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class FileOrigin:
+    """Where a Flow file came from: a fact recorded on the File row when it is
+    created, never an access grant. A file a run creates also names the run."""
+
+    space_id: UUID
+    flow_id: UUID
+    flow_run_id: UUID | None = None
+
+
 class FileMetadataCreate(BaseModel):
     name: str
     file_type: FileType
@@ -200,6 +210,11 @@ class FileMetadataCreate(BaseModel):
     tenant_id: UUID
     parent_file_id: Optional[UUID] = None
     revises_file_id: Optional[UUID] = None
+    # Where a Flow file came from; None when no origin was recorded. Never
+    # an access grant.
+    origin_space_id: UUID | None = None
+    origin_flow_id: UUID | None = None
+    origin_flow_run_id: UUID | None = None
 
     @model_validator(mode="after")
     def validate_owner_identity(self) -> "FileMetadataCreate":

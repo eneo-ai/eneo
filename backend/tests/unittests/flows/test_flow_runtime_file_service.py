@@ -17,6 +17,7 @@ from eneo.files import audio, text
 from eneo.files.file_models import (
     FileDeletionPreview,
     FileInUseError,
+    FileOrigin,
     FileUsageKind,
     FileUsageSummary,
 )
@@ -204,6 +205,10 @@ def _service(
 ) -> FlowRuntimeFileService:
     session = session or _Session()
     file_service.repo = SimpleNamespace(session=session)
+    if not isinstance(file_service, FileService):
+        # The upload saves through a service bound to the flow's origin; the
+        # double stands in for both so the save assertions read the same.
+        file_service.with_origin = MagicMock(return_value=file_service)
     runtime_upload_repo = runtime_upload_repo or _runtime_upload_repo(session=session)
     runtime_upload_repo.session = session
     return FlowRuntimeFileService(
@@ -409,6 +414,9 @@ async def test_upload_runtime_file_for_step_records_flow_upload_binding(
         "audit",
         "exit",
     ]
+    file_service.with_origin.assert_called_once_with(
+        FileOrigin(space_id=flow.space_id, flow_id=flow.id)
+    )
     create_kwargs = runtime_upload_repo.create.await_args.kwargs
     assert create_kwargs["file_id"] == file_id
     assert create_kwargs["flow_id"] == flow.id
