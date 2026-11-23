@@ -95,7 +95,10 @@ an upgrade changes:
   and the three review-queue routes are gone. The Flow route, the targets,
   the holds and the three purges with `dry_run` stay.
 - A space's existing time now also decides what an explicit purge may remove
-  from its Flows. Nothing is removed automatically.
+  from its Flows. Nothing is removed automatically. Runs that
+  `review_required` kept out of a purge are no longer kept: an explicit
+  purge removes them once they pass the space's time, so run it with
+  `dry_run` (the default) first.
 - A Flow time longer than its space's is refused with 400 and code 9086
   (`retention_exceeds_space`), naming the cap.
 - Changing a shared space's time needs `retention_manage` as well as the

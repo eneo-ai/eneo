@@ -103,13 +103,10 @@ age threshold.
 
 These values never authorize scheduled deletion: the shared retention worker
 does not mutate Flow-owned data. The existing administrator settings API
-previews or explicitly purges eligible history while respecting legal holds,
-review requirements, and delivery blockers. See
+previews or explicitly purges eligible history while respecting legal holds
+and delivery blockers. See
 [Flow run-history retention](/guides/flows/retention-policy) for the purge and
 audit contract.
-
-Space `data_retention_days` remains the separate conversation/App policy and is
-not a Flow run-history fallback.
 
 ## JSONB columns
 

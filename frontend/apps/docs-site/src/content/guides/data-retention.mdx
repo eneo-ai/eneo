@@ -167,7 +167,8 @@ can still contain deleted rows; a `pg_dump` backup holds only existing rows.
 Retention does not remove Flow run and step history in this version. A space's
 time above also caps the run history of every Flow in the space, and a Flow may
 choose a shorter time of its own, never a longer one. The organization sets no
-time for Flows.
+time for Flows. A personal space's time cannot be changed, so its Flows use only
+their own time.
 
 | Scope | Time | Result |
 | --- | --- | --- |
