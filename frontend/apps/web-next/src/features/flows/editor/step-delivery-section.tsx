@@ -9,7 +9,7 @@ import { useId, useState } from "react";
 import { flushSync } from "react-dom";
 import { TextInput } from "@/components/astryx/text-input";
 import { StatusLabel } from "@/components/composites/status-label";
-import { flowDeliverables, type RunDeliverables } from "../flow-deliverables";
+import { flowDeliverables, type DeliverablePlace } from "../flow-deliverables";
 import { formFieldsOf as formFieldDrafts } from "../flow-form-fields";
 import { senderReads, stepReadersByNameOrPlace } from "../flow-steps";
 import { Anchor, EditorSection, focusAnchor, problemStatus, VariablePicker } from "./editor-fields";
@@ -55,8 +55,7 @@ function fileNameGroups(flow: FlowPublic, groups: VariableGroup[]): VariableGrou
 function DeliverableFields({
   formId,
   flow,
-  stepId,
-  run,
+  place,
   draft,
   groups,
   onChange,
@@ -64,9 +63,8 @@ function DeliverableFields({
 }: {
   formId: string;
   flow: FlowPublic;
-  stepId: string;
-  /** The run's deliverables with this step's draft in place. */
-  run: RunDeliverables<FlowStep>;
+  /** Where the step is delivered by its place; null shows the switch, its own mark alone. */
+  place: DeliverablePlace | null;
   draft: StepConfig;
   groups: VariableGroup[];
   onChange: (next: StepConfig) => void;
@@ -77,7 +75,6 @@ function DeliverableFields({
   const [customising, setCustomising] = useState(false);
   const keepId = useId();
   const resetId = useId();
-  const place = run.byPlace?.step.id === stepId ? run.byPlace.place : null;
   const deliverable = readDeliverable(draft.output_config);
   const isDocument = stepDeliversArtifact(draft);
   // What the step is named in the result until the author names it.
@@ -236,9 +233,10 @@ const ICON = "text-ax-text-secondary mt-0.5 size-4 shrink-0";
  * whether it is one of the run's results (and under which names), and
  * whether the step that sends the run's result sends it. Readers come from
  * the saved flow the form shows; whether it is included is read with the
- * step's draft in place. While the form shows another version than the page
- * (`readersHeld`), no reader line is shown: the page's heading names the
- * steps of its own version, and the reader's place could differ from it.
+ * step's draft in place. While the form holds edits on an older version than
+ * the newest (`olderVersion`), the section shows only the step's own fields:
+ * the readers, the step's place and the step that sends come from the form's
+ * version, which the newest may have moved or removed.
  */
 export function StepDeliverySection({
   formId,
@@ -250,7 +248,7 @@ export function StepDeliverySection({
   onChange,
   problems,
   dirty,
-  readersHeld,
+  olderVersion,
   onGoStep
 }: {
   formId: string;
@@ -264,11 +262,13 @@ export function StepDeliverySection({
   /** The step has unsaved changes, which the step that sends does not show yet. */
   dirty: boolean;
   /**
-   * The form shows another version of the flow than the page. The page's
-   * heading follows its version and the form's steps their own, so a reader's
-   * place in the form can differ from the one the page shows.
+   * The form holds unsaved edits on an older version of the flow than the
+   * newest, as the banner about a newer version says. What the section would
+   * take from the other steps (a reader, the step's place, the step that
+   * sends and its receiver) can be gone or moved in the newest, so none of it
+   * is shown until a reload or a save.
    */
-  readersHeld: boolean;
+  olderVersion: boolean;
   /** Opens another step of the flow; absent, the step that sends is not offered. */
   onGoStep?: (stepId: string) => void;
 }) {
@@ -278,6 +278,8 @@ export function StepDeliverySection({
     flow.steps.map((step) => (step.id === stepId ? { ...step, ...draft } : step))
   );
   const included = run.deliverables.some((step) => step.id === stepId);
+  // On an older version, the step shows its own mark, not a place it may no longer hold.
+  const place = !olderVersion && run.byPlace?.step.id === stepId ? run.byPlace.place : null;
   // Readers come from the flow's saved fields, as the form shows it: a later
   // step names this step as saved, and the core rewrites it when a new name is
   // saved. A later prompt is not read here: it lives on the step's assistant,
@@ -288,7 +290,7 @@ export function StepDeliverySection({
   const readers = self ? stepReadersByNameOrPlace(self, flow.steps) : [];
   const name = (step: FlowStep) => stepLabel(step.step_order, step.user_description, t);
   // The step that sends reads it only where its headers name it.
-  const readLine = readersHeld
+  const readLine = olderVersion
     ? null
     : readers.length === 1 && readers[0]!.step_order === order + 1
       ? t("flow_step_editor_delivery_read_next", { step: name(readers[0]!) })
@@ -296,15 +298,17 @@ export function StepDeliverySection({
         ? t("flow_step_editor_delivery_read_by", { steps: format.list(readers.map(name)) })
         : null;
 
-  const sender = run.sender;
+  const sender = olderVersion ? null : run.sender;
   const host = sender ? runResultHost(sender) : null;
-  const sendLine = !sender
-    ? t("flow_step_editor_delivery_no_sender")
-    : !host
-      ? t("flow_step_editor_delivery_no_address")
-      : included
-        ? t("flow_step_editor_delivery_sent_to", { host })
-        : t("flow_step_editor_delivery_not_sent_to", { host });
+  const sendLine = olderVersion
+    ? null
+    : !sender
+      ? t("flow_step_editor_delivery_no_sender")
+      : !host
+        ? t("flow_step_editor_delivery_no_address")
+        : included
+          ? t("flow_step_editor_delivery_sent_to", { host })
+          : t("flow_step_editor_delivery_not_sent_to", { host });
   // Left out of the result, the step's text still goes to the receiver where a
   // header of the step that sends names it: the core fills headers in as it sends.
   const headerLine =
@@ -333,8 +337,7 @@ export function StepDeliverySection({
       <DeliverableFields
         formId={formId}
         flow={flow}
-        stepId={stepId}
-        run={run}
+        place={place}
         draft={draft}
         groups={groups}
         onChange={onChange}
@@ -342,19 +345,21 @@ export function StepDeliverySection({
       />
       {/* Whether it leaves for the receiver, and how: the header line belongs
           to the line about the result, and the button to both. */}
-      <HStack gap={2} align="start">
-        <Send className={ICON} aria-hidden="true" />
-        <VStack gap={1}>
-          <Text type="supporting" size="sm" as="p" display="block" className="m-0 max-w-prose">
-            {sendLine}
-          </Text>
-          {headerLine && (
+      {sendLine && (
+        <HStack gap={2} align="start">
+          <Send className={ICON} aria-hidden="true" />
+          <VStack gap={1}>
             <Text type="supporting" size="sm" as="p" display="block" className="m-0 max-w-prose">
-              {headerLine}
+              {sendLine}
             </Text>
-          )}
-        </VStack>
-      </HStack>
+            {headerLine && (
+              <Text type="supporting" size="sm" as="p" display="block" className="m-0 max-w-prose">
+                {headerLine}
+              </Text>
+            )}
+          </VStack>
+        </HStack>
+      )}
       {senderId && onGoStep && (
         <HStack>
           <Button

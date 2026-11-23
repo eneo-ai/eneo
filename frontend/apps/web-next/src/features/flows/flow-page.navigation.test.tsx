@@ -1039,6 +1039,38 @@ describe("the open step while the flow changes", () => {
     expect(within(await delivery()).getByText(reader)).toBeTruthy();
   });
 
+  it("shows nothing of the step that sends while the form holds edits on an older version, and that none is left after a reload", async () => {
+    withChat();
+    const send = senderFlow().steps[1]!;
+    const host = new URL((send.output_config as { url: string }).url).hostname;
+    const sentTo = messages.flow_step_editor_delivery_sent_to.replace("{host}", host);
+    const openSender = { name: messages.flow_step_editor_delivery_open_sender };
+    flow = makeFlow({ steps: [first, send] });
+    await renderPage("?step=step-1");
+    const before = await delivery();
+    expect(await within(before).findByText(sentTo)).toBeTruthy();
+    expect(within(before).getByRole("button", openSender)).toBeTruthy();
+    expect(
+      within(before).getByText(messages.flow_step_editor_deliverable_place_before_send)
+    ).toBeTruthy();
+    await changeName();
+    // Changed in the chat: the step that sends is gone, so step 1 now stands last.
+    flow = makeFlow({ draft_revision: 5, steps: [first] });
+    fireEvent.click(await screen.findByRole("button", { name: "Verktyg klart" }));
+    await screen.findByText(messages.flow_step_editor_newer_title);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const pinned = await delivery();
+    expect(within(pinned).queryByText(new RegExp(host.replaceAll(".", "\\.")))).toBeNull();
+    expect(within(pinned).queryByRole("button", openSender)).toBeNull();
+    expect(
+      within(pinned).queryByText(messages.flow_step_editor_deliverable_place_before_send)
+    ).toBeNull();
+    await click(messages.flow_step_editor_reload);
+    expect(
+      await within(await delivery()).findByText(messages.flow_step_editor_delivery_no_sender)
+    ).toBeTruthy();
+  });
+
   /** The page has taken a new revision and marked step 3's prompt to be read again. */
   const laterInvalidated = (queryClient: QueryClient) =>
     waitFor(() =>
