@@ -220,12 +220,13 @@ describe("flow retention", () => {
   });
 
   it("keeps the summary's saved time when an older Flow read lands after the save", async () => {
-    const byFlow = (days: number) => ({
-      state: "configured",
-      source: "flow",
-      effective_days: days,
-      contributors: { space: { days: 60 }, flow: { days } }
-    });
+    const byFlow = (days: number) =>
+      ({
+        state: "configured",
+        source: "flow",
+        effective_days: days,
+        contributors: { space: { days: 60 }, flow: { days } }
+      }) as const;
     const queryClient = testQueryClient();
     queryClient.setQueryData(
       flowKeys.flow("flow-1"),
