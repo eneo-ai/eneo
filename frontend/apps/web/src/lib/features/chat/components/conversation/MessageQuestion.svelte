@@ -1,6 +1,5 @@
 <script lang="ts">
   import { fade, fly } from "svelte/transition";
-  import { parseTokens } from "../mentions/parseMentions";
   import { Markdown } from "$lib/components/markdown/index.js";
   import { isTableQuote, parseQuotedQuestion, quotedFileMatches } from "../../questionQuote";
   import { getChatService } from "../../ChatService.svelte";
@@ -13,7 +12,6 @@
   const contents = $derived(current().question);
   // A question may open with a passage quoted from a file preview.
   const parsed = $derived(parseQuotedQuestion(contents));
-  let tokens = $derived(parseTokens(parsed.text));
 
   // New quotes retain the exact file identity. Filename matching is only for
   // legacy quotes, and must never substitute a revision for an exact reference.
@@ -81,15 +79,11 @@
           </p>{/if}
       </div>
     {/if}
-    <p class="m-0 text-lg whitespace-pre-wrap">
-      {#each tokens as token (token)}
-        {#if token.type === "text"}
-          {token.content}
-        {:else if token.type === "mention"}
-          <span class="question-mention">@{token.handle}</span>
-        {/if}
-      {/each}
-    </p>
+    <!-- The question reads as it was written: pasted text arrives as Markdown,
+         and a mention is one of the renderer's own tokens. -->
+    {#if parsed.text}
+      <Markdown source={parsed.text} class="my-0!" />
+    {/if}
   </div>
 {/if}
 

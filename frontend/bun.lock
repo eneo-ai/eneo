@@ -53,6 +53,7 @@
         "@axe-core/playwright": "^4.10.2",
         "@eneo/eneo-js": "workspace:*",
         "@eneo/eslint-plugin": "workspace:*",
+        "@eneo/rich-paste": "workspace:*",
         "@eneo/skill-instructions": "workspace:*",
         "@eslint/js": "^9.39.4",
         "@guidepup/virtual-screen-reader": "^0.33.0",
@@ -125,6 +126,7 @@
         "@astryxdesign/theme-neutral": "0.7.5",
         "@eneo/eneo-js": "workspace:*",
         "@eneo/markdown-math": "workspace:*",
+        "@eneo/rich-paste": "workspace:*",
         "@eneo/skill-instructions": "workspace:*",
         "@eneo/whats-new": "workspace:*",
         "@modelcontextprotocol/ext-apps": "2.0.3",
@@ -249,6 +251,10 @@
       "devDependencies": {
         "prettier": "^3.9.4",
       },
+    },
+    "packages/rich-paste": {
+      "name": "@eneo/rich-paste",
+      "version": "0.0.0",
     },
     "packages/skill-instructions": {
       "name": "@eneo/skill-instructions",
@@ -495,6 +501,8 @@
     "@eneo/eslint-plugin": ["@eneo/eslint-plugin@workspace:packages/eslint-plugin"],
 
     "@eneo/markdown-math": ["@eneo/markdown-math@workspace:packages/markdown-math"],
+
+    "@eneo/rich-paste": ["@eneo/rich-paste@workspace:packages/rich-paste"],
 
     "@eneo/skill-instructions": ["@eneo/skill-instructions@workspace:packages/skill-instructions"],
 
