@@ -31,7 +31,8 @@ function model(providerType: string | null, supportsRealtime = false): Transcrip
     cost_per_minute: null,
     provider_id: "p1",
     provider_type: providerType,
-    supports_realtime: supportsRealtime
+    supports_realtime: supportsRealtime,
+    streams_live: false
   };
 }
 
