@@ -476,8 +476,7 @@ async def test_the_space_purge_accepts_a_personal_space(
         personal_space_id = personal_space.id
 
     preview = await client.post(
-        "/api/v1/settings/flow-run-retention-policy/spaces/"
-        f"{personal_space_id}/purge",
+        f"/api/v1/settings/flow-run-retention-policy/spaces/{personal_space_id}/purge",
         json={},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
