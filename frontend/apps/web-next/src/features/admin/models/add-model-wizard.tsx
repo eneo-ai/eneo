@@ -474,7 +474,10 @@ export function AddModelWizard({
               {providerDisplayName(providerType)}
             </Text>
             <Text type="supporting" display="block">
-              {t("enter_provider_credentials")} {t("provider_type_fixed_note")}
+              {t("enter_provider_credentials")}
+            </Text>
+            <Text type="supporting" display="block">
+              {t("provider_type_fixed_note")}
             </Text>
             {(providerType === "hosted_vllm" || providerType === "openai") && (
               <Text type="supporting" display="block">
