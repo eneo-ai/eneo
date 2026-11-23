@@ -181,10 +181,11 @@ function RetentionForm({
     }
   });
 
+  // The cap error shows only while it holds: a later read may give the space a longer time.
   const problem =
     refused && days !== null && !retentionDaysValid(days)
       ? t("flows_retention_days_range", { min: MIN_DAYS, max: MAX_DAYS })
-      : overCap && spaceDays !== null
+      : overCap && spaceDays !== null && days !== null && days > spaceDays
         ? t("flows_retention_cap_space", { days: spaceDays })
         : undefined;
   const applies =

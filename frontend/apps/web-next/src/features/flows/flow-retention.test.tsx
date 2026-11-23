@@ -230,6 +230,28 @@ describe("flow retention", () => {
     expect(reopened.value).toBe("30");
   });
 
+  it("drops the cap error when a later read raises the space's time above the value", async () => {
+    backend.GET.mockResolvedValue(settings(null, { days: 60 }));
+    backend.PUT.mockRejectedValue(capRefusal());
+    const { queryClient } = renderSettings(["retention_manage"]);
+    fireEvent.click(screen.getByRole("button", { name: "Ändra gallring" }));
+    const days = (await screen.findByRole("spinbutton", {
+      name: /Egen tid för det här flödet/
+    })) as HTMLInputElement;
+    fireEvent.change(days, { target: { value: "10" } });
+    fireEvent.blur(days);
+    fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
+    expect(await screen.findByText(capText)).toBeTruthy();
+    backend.GET.mockResolvedValue(settings(null, { days: 14 }));
+    await act(() => queryClient.refetchQueries({ queryKey: policyKey, exact: true }));
+    await settle();
+    expect(days.value).toBe("10");
+    expect(days.getAttribute("aria-invalid")).toBeNull();
+    expect(
+      screen.queryByText(/Ytan tillåter högst/, { ignore: "[aria-live], [aria-live] *" })
+    ).toBeNull();
+  });
+
   it("empties the flow's own time to use the space's again", async () => {
     backend.GET.mockResolvedValue(settings({ days: 90 }, { days: 60 }));
     backend.PUT.mockResolvedValue(settings(null, { days: 60 }));
