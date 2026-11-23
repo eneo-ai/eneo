@@ -1764,6 +1764,7 @@ describe("FlowStepEditor", () => {
     expect(screen.getByText(messages.flow_step_editor_run_result_sends_title)).toBeTruthy();
     expect(screen.getByText(messages.flow_step_editor_run_result_receiver_title)).toBeTruthy();
     expect((await rowValue("Sammanfatta")).textContent).toBe(messages.flow_output_type_text);
+    expect(screen.queryByText(messages.flow_step_editor_run_result_empty_title)).toBeNull();
     // Nothing the step does not use: no input, no mode or body, no review.
     expect(screen.queryByText(messages.flow_step_editor_input_title)).toBeNull();
     expect(screen.queryByText(messages.flow_step_output_mode)).toBeNull();
@@ -3387,6 +3388,20 @@ describe("FlowStepEditor Leverans", () => {
     expect(within(delivery).queryByText(messages.flow_step_editor_delivery_unread_off)).toBeNull();
   }, 20_000);
 
+  it("keeps naming a known reader while another later prompt cannot be read", async () => {
+    routeAssistants({ "assistant-3": "Jämför med {{Sammanfatta}}." }, ["assistant-2"]);
+    renderEditor(
+      makeFlow({
+        steps: [
+          text(1, "Sammanfatta"),
+          text(2, "Granska", { input_source: "flow_input" }),
+          text(3, "Skriv svar", { input_source: "flow_input" })
+        ]
+      })
+    );
+    expect(await within(await section()).findByText("Läses av Steg 3: Skriv svar.")).toBeTruthy();
+  }, 20_000);
+
   it("keeps naming the step that reads the result through its prompt while the step is renamed unsaved", async () => {
     routeAssistants({ "assistant-3": "Jämför med {{Sammanfatta}}." });
     renderEditor(
@@ -3406,9 +3421,26 @@ describe("FlowStepEditor Leverans", () => {
 
   it("says nothing about readers on the last working step, which is included by its place", async () => {
     routeAssistants();
+    renderEditor(makeFlow({ steps: [text(1, "Sammanfatta"), sender(2)] }));
+    const delivery = await section();
+    // Only the step that sends comes after it, and that step reads no result.
+    expect(
+      await within(delivery).findByText(
+        "Skickas till startsidan.example.org när körningen är klar."
+      )
+    ).toBeTruthy();
+    for (const key of [
+      "flow_step_editor_delivery_unread_included",
+      "flow_step_editor_delivery_unread_off"
+    ] as const) {
+      expect(within(delivery).queryByText(messages[key])).toBeNull();
+    }
+  }, 20_000);
+
+  it("says no step sends the run's result in a flow without one", async () => {
+    routeAssistants();
     renderEditor(makeFlow({ steps: [text(1, "Sammanfatta")] }));
     const delivery = await section();
-    // No step sends the run's result.
     expect(
       await within(delivery).findByText(messages.flow_step_editor_delivery_no_sender)
     ).toBeTruthy();

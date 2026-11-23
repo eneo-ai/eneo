@@ -440,6 +440,12 @@ it("puts a step added again after a reload directly before the step that sends, 
       { step_id: "step-send" }
     ]
   });
+  // Focus goes to the step added, directly before the step that sends where it is now.
+  await waitFor(async () =>
+    expect(document.activeElement).toBe(
+      within(await sendsRegion()).getByRole("button", { name: "Öppna steg 3 – Sammanfatta" })
+    )
+  );
 });
 
 it("adds nothing after a reload in which the step that sends is gone, and says so", async () => {
