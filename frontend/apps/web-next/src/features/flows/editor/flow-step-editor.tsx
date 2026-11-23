@@ -689,7 +689,7 @@ function StepEditorSession({
    * revision and sends only the edits. Any other newer revision (another
    * tab, the chat) keeps the banner and its conflict check.
    */
-  function stepAdded(updated: FlowPublic, sentRevision: number) {
+  function stepAdded(updated: FlowPublic, sentRevision: number, addedStepId: string | null) {
     const before = findStep(flow, stepId);
     const after = findStep(updated, stepId);
     const own =
@@ -704,8 +704,7 @@ function StepEditorSession({
       setPinned(updated);
       setHeld({ revision: updated.draft_revision, key: formKey });
     }
-    const added = after ? after.step_order - 1 : 0;
-    focusAfterAdd.current = updated.steps.find((step) => step.step_order === added)?.id ?? "";
+    focusAfterAdd.current = addedStepId ?? "";
     onStepAdded?.(updated);
   }
 
