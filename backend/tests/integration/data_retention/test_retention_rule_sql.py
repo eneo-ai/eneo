@@ -8,7 +8,13 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
-from eneo.data_retention.domain.rules import RuleTask, fewer_days
+from eneo.data_retention.domain.rules import (
+    RetentionRule,
+    RuleTask,
+    fewer_days,
+    resolve_period,
+    rule_chain,
+)
 from eneo.data_retention.infrastructure.retention_rule_sql import rule_period
 from eneo.policy_levels import LevelSetting, PolicyLevel, resolve
 
@@ -82,6 +88,42 @@ async def test_a_bounded_rule_resolves_in_sql_as_in_the_kernel(
         stricter=fewer_days,
         bounding=rule.bounding,
     )
+
+    assert (days, source) == expected
+    assert (kernel.value, kernel.origin) == expected
+
+
+FLOW = PolicyLevel.FLOW
+
+# (space, flow) for Flow run history, and the period that applies with the
+# level that chose it.
+FLOW_CASES = [
+    pytest.param(7, None, (7, SPACE), id="space only"),
+    pytest.param(None, 5, (5, FLOW), id="flow only"),
+    pytest.param(7, 3, (3, FLOW), id="flow shorter"),
+    pytest.param(7, 10, (7, SPACE), id="flow longer, space wins"),
+    pytest.param(7, 7, (7, FLOW), id="equal, the flow is the source"),
+    pytest.param(None, None, (None, None), id="neither"),
+]
+
+
+@pytest.mark.parametrize("space,flow,expected", FLOW_CASES)
+async def test_flow_run_history_resolves_in_sql_as_in_the_kernel(
+    async_session: AsyncSession,
+    space: int | None,
+    flow: int | None,
+    expected: tuple[int | None, PolicyLevel | None],
+):
+    """Mutants: the declaration the SQL reads differs from the kernel's; a
+    longer flow time loosens the space's cap; a tie credits the space."""
+    period = rule_period(
+        rule_chain(RetentionRule.FLOW_RUN_HISTORY),
+        {SPACE: _days(space), FLOW: _days(flow)},
+    )
+    days, source = (
+        await async_session.execute(sa.select(period.days, period.source))
+    ).one()
+    kernel = resolve_period(RetentionRule.FLOW_RUN_HISTORY, {SPACE: space, FLOW: flow})
 
     assert (days, source) == expected
     assert (kernel.value, kernel.origin) == expected
