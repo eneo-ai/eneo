@@ -1310,7 +1310,7 @@ async def purge_flow_run_history(
 
 _FLOW_RETENTION_HOLD_EFFECT = (
     "Until the hold is released or its end date passes, whatever the "
-    "Organization, Space or Flow policy says, the explicit purge and the "
+    "space's time or the Flow's time says, the explicit purge and the "
     "debug-evidence redaction skip held runs, and the Space cannot be deleted "
     "(space_contains_legal_hold)."
 )

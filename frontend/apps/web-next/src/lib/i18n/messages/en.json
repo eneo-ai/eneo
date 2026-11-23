@@ -5379,7 +5379,7 @@
   "audit_action_flow_unpublished": "Flow Unpublished",
   "audit_action_flow_unpublished_description": "A published flow was withdrawn from use.",
   "audit_action_flow_run_retention_policy_changed": "Flow Run Retention Policy Changed",
-  "audit_action_flow_run_retention_policy_changed_description": "An administrator replaced or cleared a Flow run-history policy at Organization, Space, or Flow level.",
+  "audit_action_flow_run_retention_policy_changed_description": "An administrator changed a Flow's run-history time, a space's time, which caps its Flows, or how far ahead a legal hold's review date may be set.",
   "audit_action_flow_run_history_purged": "Flow Run History Purged",
   "audit_action_flow_run_history_purged_description": "Eligible Flow run history was deleted by an approved purge and an immutable receipt was recorded.",
   "audit_action_flow_retention_hold_placed": "Flow Legal Hold Placed",

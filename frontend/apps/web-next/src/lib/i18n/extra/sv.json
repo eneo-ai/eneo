@@ -2783,6 +2783,7 @@
   "flow_admin_permission_flows_trace_description": "Granska flödeskörningars spårning och felsökningsexporter vid driftfelsökning.",
   "permission_retention_manage": "Gallring – hantera regler",
   "permission_retention_manage_description": "Ändra en ytas tid, som också är taket för körhistoriken i dess flöden, och ett flödes egen tid, och gallra manuellt. Bara inloggade personer, aldrig API-nycklar.",
+  "audit_action_flow_run_retention_policy_changed_description": "En administratör ändrade ett flödes tid för körhistoriken, en ytas tid, som är taket för dess flöden, eller hur långt fram en rättslig spärrs omprövningsdatum får sättas.",
   "permission_retention_holds": "Gallring – rättsliga spärrar",
   "permission_retention_holds_description": "Lägga, ompröva och häva rättsliga spärrar som stoppar gallring av flödens körningshistorik. Bara inloggade personer, aldrig API-nycklar.",
   "flow_admin_leave_title": "Lämna sidan?",

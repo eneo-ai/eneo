@@ -2783,6 +2783,7 @@
   "flow_admin_permission_flows_trace_description": "Inspect flow run traces and debug exports for operational troubleshooting.",
   "permission_retention_manage": "Retention – manage rules",
   "permission_retention_manage_description": "Change a space's time, which also caps its flows' run history, and a flow's own time, and run the manual purge. Signed-in people only, never API keys.",
+  "audit_action_flow_run_retention_policy_changed_description": "An administrator changed a Flow's run-history time, a space's time, which caps its Flows, or how far ahead a legal hold's review date may be set.",
   "permission_retention_holds": "Retention – legal holds",
   "permission_retention_holds_description": "Place, review and release legal holds that stop deletion of Flow run history. Signed-in people only, never API keys.",
   "flow_admin_leave_title": "Leave the page?",

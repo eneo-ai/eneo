@@ -5379,7 +5379,7 @@
   "audit_action_flow_unpublished": "Flöde avpublicerat",
   "audit_action_flow_unpublished_description": "Ett publicerat flöde drogs tillbaka från användning.",
   "audit_action_flow_run_retention_policy_changed": "Policy för flödens körningshistorik ändrad",
-  "audit_action_flow_run_retention_policy_changed_description": "En administratör ersatte eller rensade en policy för flödens körningshistorik på organisations-, yt- eller flödesnivå.",
+  "audit_action_flow_run_retention_policy_changed_description": "En administratör ändrade ett flödes tid för körhistoriken, en ytas tid, som är taket för dess flöden, eller hur långt fram en rättslig spärrs omprövningsdatum får sättas.",
   "audit_action_flow_run_history_purged": "Körningshistorik för flöden rensad",
   "audit_action_flow_run_history_purged_description": "Behörig körningshistorik för flöden raderades genom en godkänd rensning och ett oföränderligt kvitto registrerades.",
   "audit_action_flow_retention_hold_placed": "Rättslig spärr lagd på flöde",
