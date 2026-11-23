@@ -374,6 +374,7 @@ async def test_upload_asset_rejects_invalid_docx_before_file_persistence(
     template_asset_repo = AsyncMock()
     prepared = _prepared_template(payload)
     file_service = MagicMock()
+    file_service.with_origin.return_value = file_service
     file_service.prepare_document_upload.return_value = _prepared_context(prepared)
     file_service.save_prepared_file = AsyncMock()
     service = FlowTemplateAssetService(
@@ -594,6 +595,7 @@ async def test_upload_asset_rejects_oversized_docx_before_reading_body(
     flow_repo.get.return_value = flow
     template_asset_repo = AsyncMock()
     file_service = MagicMock()
+    file_service.with_origin.return_value = file_service
     rejected_context = MagicMock()
     rejected_context.__aenter__ = AsyncMock(
         side_effect=FileTooLargeException(

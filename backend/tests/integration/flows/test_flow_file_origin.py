@@ -94,15 +94,62 @@ async def test_an_upload_to_a_published_step_records_space_and_flow(
 async def test_an_ordinary_upload_records_no_origin(
     client, db_container, flow_process_auth_headers
 ):
+    token = flow_process_auth_headers.token
+    headers = dict(flow_process_auth_headers)
     response = await client.post(
         "/api/v1/files/",
         files={"upload_file": ("note.txt", b"An ordinary file.", "text/plain")},
-        headers=dict(flow_process_auth_headers),
+        headers=headers,
     )
     assert response.status_code == 200, response.text
     assert ORIGIN_KEYS.isdisjoint(response.json())
+    file_id = response.json()["id"]
 
-    stored = await _stored(db_container, response.json()["id"])
+    # A user then attaches the file to a step of a flow: to the step's assistant.
+    space_id = await _create_space(client, token=token)
+    flow_id = await _create_flow(client, token=token, space_id=space_id)
+    assistant = await client.post(
+        f"/api/v1/flows/{flow_id}/assistants/",
+        json={"name": f"origin-{uuid4().hex[:8]}"},
+        headers=headers,
+    )
+    assert assistant.status_code == 201, assistant.text
+    assistant_id = assistant.json()["id"]
+    with_step = await client.patch(
+        f"/api/v1/flows/{flow_id}/",
+        json={
+            "steps": [
+                {
+                    "assistant_id": assistant_id,
+                    "step_order": 1,
+                    "user_description": "Answer with the attached note",
+                    "input_source": "flow_input",
+                    "input_type": "text",
+                    "output_mode": "pass_through",
+                    "output_type": "text",
+                }
+            ]
+        },
+        headers=headers,
+    )
+    assert with_step.status_code == 200, with_step.text
+    attached = await client.patch(
+        f"/api/v1/flows/{flow_id}/assistants/{assistant_id}/",
+        json={"attachments": [{"id": file_id}]},
+        headers=headers,
+    )
+    assert attached.status_code == 200, attached.text
+
+    flow = await client.get(f"/api/v1/flows/{flow_id}/", headers=headers)
+    assert flow.status_code == 200, flow.text
+    step_assistant = await client.get(
+        f"/api/v1/flows/{flow_id}/assistants/{assistant_id}/", headers=headers
+    )
+    assert step_assistant.status_code == 200, step_assistant.text
+    assert [step["assistant_id"] for step in flow.json()["steps"]] == [assistant_id]
+    assert [file["id"] for file in step_assistant.json()["attachments"]] == [file_id]
+
+    stored = await _stored(db_container, file_id)
     assert _origin(stored) == (None, None, None)
 
 
