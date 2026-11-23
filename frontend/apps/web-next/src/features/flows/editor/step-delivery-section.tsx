@@ -233,8 +233,9 @@ function DeliverableFields({
 /**
  * Where a text or document step's result goes: which later steps read it,
  * whether it is one of the run's results (and under which names), and
- * whether the step that sends the run's result sends it. Read with the
- * step's draft in place, so a change shows here at once.
+ * whether the step that sends the run's result sends it. Readers come from
+ * the saved flow; whether it is included is read with the step's draft in
+ * place.
  */
 export function StepDeliverySection({
   formId,
