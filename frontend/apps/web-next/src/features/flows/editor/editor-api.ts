@@ -121,16 +121,32 @@ export function useStepPrompts(
   steps: readonly FlowStep[],
   enabled: boolean
 ): StepPrompts {
+  return useStepPromptsState(flowId, steps, enabled).prompts;
+}
+
+/**
+ * `useStepPrompts`, and whether every prompt is current: read, and not
+ * invalidated or refused since. A prompt kept from an earlier read can name a
+ * step the newer one no longer does, or miss one it does.
+ */
+export function useStepPromptsState(
+  flowId: string,
+  steps: readonly FlowStep[],
+  enabled: boolean
+): { prompts: StepPrompts; current: boolean } {
   const assistants = useQueries({
     queries: steps
       .filter((step) => stepUsesModel(step))
       .map((step) => ({ ...flowAssistantQueryOptions(flowId, step.assistant_id), enabled }))
   });
-  return new Map(
-    assistants.flatMap((query) =>
-      query.data ? [[query.data.id, query.data.prompt?.text ?? ""] as [string, string]] : []
-    )
-  );
+  return {
+    prompts: new Map(
+      assistants.flatMap((query) =>
+        query.data ? [[query.data.id, query.data.prompt?.text ?? ""] as [string, string]] : []
+      )
+    ),
+    current: assistants.every((query) => query.isSuccess && !query.isStale)
+  };
 }
 
 export function toolOptionsQueryOptions(flowId: string) {

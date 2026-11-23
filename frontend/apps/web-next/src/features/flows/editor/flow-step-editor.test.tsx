@@ -118,7 +118,7 @@ function renderEditor(
     />,
     { queryClient }
   );
-  return { ...view, onSaved, onCancel };
+  return { ...view, onSaved, onCancel, queryClient };
 }
 
 function httpFlow(auth: Record<string, unknown> = { mode: "none" }) {
@@ -3296,15 +3296,78 @@ describe("FlowStepEditor Leverans", () => {
     ).toBeNull();
   }, 20_000);
 
-  it("says a result no later step reads is still included when it is the last step", async () => {
+  it("says a result no later step reads is left out until its switch turns, then included", async () => {
+    routeAssistants();
+    renderEditor(
+      makeFlow({
+        steps: [text(1, "Sammanfatta"), text(2, "Granska", { input_source: "flow_input" })]
+      })
+    );
+    const delivery = await section();
+    expect(
+      await within(delivery).findByText(messages.flow_step_editor_delivery_unread_off)
+    ).toBeTruthy();
+    fireEvent.click(
+      within(delivery).getByRole("switch", {
+        name: new RegExp(`^${messages.flow_step_editor_deliverable_switch}`)
+      })
+    );
+    expect(
+      within(delivery).getByText(messages.flow_step_editor_delivery_unread_included)
+    ).toBeTruthy();
+  }, 20_000);
+
+  it("stops saying no step reads the result once a later prompt is invalidated and cannot be read again", async () => {
+    routeAssistants();
+    const flow = makeFlow({
+      steps: [text(1, "Sammanfatta"), text(2, "Granska", { input_source: "flow_input" })]
+    });
+    const { queryClient } = renderEditor(flow);
+    const delivery = await section();
+    await within(delivery).findByText(messages.flow_step_editor_delivery_unread_off);
+    routeAssistants({}, ["assistant-2"]);
+    await queryClient.invalidateQueries({
+      queryKey: flowEditorKeys.assistant(flow.id, "assistant-2")
+    });
+    await waitFor(() =>
+      expect(
+        queryClient.getQueryState(flowEditorKeys.assistant(flow.id, "assistant-2"))?.status
+      ).toBe("error")
+    );
+    expect(within(delivery).queryByText(messages.flow_step_editor_delivery_unread_off)).toBeNull();
+  }, 20_000);
+
+  it("keeps naming the step that reads the result through its prompt while the step is renamed unsaved", async () => {
+    routeAssistants({ "assistant-3": "Jämför med {{Sammanfatta}}." });
+    renderEditor(
+      makeFlow({
+        steps: [
+          text(1, "Sammanfatta"),
+          text(2, "Granska", { input_source: "flow_input" }),
+          text(3, "Skriv svar", { input_source: "flow_input" })
+        ]
+      })
+    );
+    const delivery = await section();
+    await within(delivery).findByText("Läses av Steg 3: Skriv svar.");
+    fireEvent.change(await nameField(), { target: { value: "Kort sammanfattning" } });
+    expect(within(delivery).getByText("Läses av Steg 3: Skriv svar.")).toBeTruthy();
+  }, 20_000);
+
+  it("says nothing about readers on the last working step, which is included by its place", async () => {
     routeAssistants();
     renderEditor(makeFlow({ steps: [text(1, "Sammanfatta")] }));
     const delivery = await section();
-    expect(
-      await within(delivery).findByText(messages.flow_step_editor_delivery_unread_included)
-    ).toBeTruthy();
     // No step sends the run's result.
-    expect(within(delivery).getByText(messages.flow_step_editor_delivery_no_sender)).toBeTruthy();
+    expect(
+      await within(delivery).findByText(messages.flow_step_editor_delivery_no_sender)
+    ).toBeTruthy();
+    for (const key of [
+      "flow_step_editor_delivery_unread_included",
+      "flow_step_editor_delivery_unread_off"
+    ] as const) {
+      expect(within(delivery).queryByText(messages[key])).toBeNull();
+    }
     expect(
       within(delivery).queryByRole("button", {
         name: messages.flow_step_editor_delivery_open_sender

@@ -12,7 +12,7 @@ import { StatusLabel } from "@/components/composites/status-label";
 import { flowDeliverables, type RunDeliverables } from "../flow-deliverables";
 import { formFieldsOf as formFieldDrafts } from "../flow-form-fields";
 import { stepReadersByNameOrPlace } from "../flow-steps";
-import { useStepPrompts } from "./editor-api";
+import { useStepPromptsState } from "./editor-api";
 import { Anchor, EditorSection, focusAnchor, problemStatus, VariablePicker } from "./editor-fields";
 import type { FieldProblems } from "./field-problems";
 import {
@@ -25,7 +25,6 @@ import {
   withTidyDeliverable
 } from "./step-configs";
 import { stepLabel } from "./step-labels";
-import { stepUsesModel } from "./step-rules";
 import type { FlowPublic, FlowStep, StepConfig, StepDeliverable } from "./step-types";
 import { insertToken, type VariableGroup } from "./step-variables";
 
@@ -264,32 +263,35 @@ export function StepDeliverySection({
 }) {
   const t = useTranslations();
   const format = useFormatter();
-  const steps = flow.steps.map((step) => (step.id === stepId ? { ...step, ...draft } : step));
-  const run = flowDeliverables(steps);
-  const self = steps.find((step) => step.id === stepId);
+  const run = flowDeliverables(
+    flow.steps.map((step) => (step.id === stepId ? { ...step, ...draft } : step))
+  );
+  const included = run.deliverables.some((step) => step.id === stepId);
+  // Readers come from the saved flow: a later prompt names this step as saved,
+  // and the core rewrites it when a new name is saved.
+  const self = flow.steps.find((step) => step.id === stepId);
   const order = self?.step_order ?? 0;
   // A later AI step can read this one through its prompt, which lives on its assistant.
-  const later = steps.filter((step) => step.step_order > order && !sendsRunResult(step));
-  const prompts = useStepPrompts(flow.id, later, true);
-  const promptsRead = later
-    .filter((step) => stepUsesModel(step))
-    .every((step) => prompts.has(step.assistant_id));
-  const readers = self ? stepReadersByNameOrPlace(self, steps, prompts) : [];
-  const included = run.deliverables.some((step) => step.id === stepId);
+  const later = flow.steps.filter((step) => step.step_order > order && !sendsRunResult(step));
+  const { prompts, current } = useStepPromptsState(flow.id, later, true);
+  const readers = self ? stepReadersByNameOrPlace(self, flow.steps, prompts) : [];
   const name = (step: FlowStep) => stepLabel(step.step_order, step.user_description, t);
-  // "Read by no step" waits for every prompt: one not read yet may name this step.
+  // The last working step has no later step to name. "Read by no step" waits
+  // for every prompt to be current: one not read, or read before a change, may name this step.
   const readLine =
-    readers.length === 1 && readers[0]!.step_order === order + 1
-      ? t("flow_step_editor_delivery_read_next", { step: name(readers[0]!) })
-      : readers.length > 0
-        ? t("flow_step_editor_delivery_read_by", { steps: format.list(readers.map(name)) })
-        : promptsRead
-          ? t(
-              included
-                ? "flow_step_editor_delivery_unread_included"
-                : "flow_step_editor_delivery_unread_off"
-            )
-          : null;
+    later.length === 0
+      ? null
+      : readers.length === 1 && readers[0]!.step_order === order + 1
+        ? t("flow_step_editor_delivery_read_next", { step: name(readers[0]!) })
+        : readers.length > 0
+          ? t("flow_step_editor_delivery_read_by", { steps: format.list(readers.map(name)) })
+          : current
+            ? t(
+                included
+                  ? "flow_step_editor_delivery_unread_included"
+                  : "flow_step_editor_delivery_unread_off"
+              )
+            : null;
 
   const sender = run.sender;
   const host = sender ? runResultHost(sender) : null;
