@@ -22,7 +22,10 @@ import { inspectTemplate, openWordTemplate } from "./word/inspect";
 
 /** The Python with WeasyPrint; the image installs it here, a developer may point elsewhere. */
 export const PDF_PYTHON = process.env.PDF_PYTHON ?? "/opt/pdf/bin/python3";
-const SCRIPT = fileURLToPath(new URL("../../../../scripts/render_pdf.py", import.meta.url));
+const SCRIPTS = fileURLToPath(new URL("../../../../scripts/", import.meta.url));
+const SCRIPT = join(SCRIPTS, "render_pdf.py");
+/** The sidecar script that cuts pictures out of a file (tools/pictures). */
+export const EXTRACT_IMAGES_SCRIPT = join(SCRIPTS, "extract_images.py");
 const SIDE_CAR_TIMEOUT_MS = 20_000;
 const MAX_STDERR = 2_000;
 
@@ -48,11 +51,19 @@ export async function renderPdf(
     pdf_variant: "pdf/ua-1",
   };
   await writeFile(join(directory, "job.json"), JSON.stringify(job), { mode: 0o600 });
-  const pages = await runSidecar(directory);
+  const printed = await runSidecar(
+    SCRIPT,
+    directory,
+    (detail) =>
+      new RenderError(
+        `The PDF renderer failed${detail ? `: ${detail}` : ""}. Simplify the document and retry.`,
+      ),
+  );
+  const pages = Number(printed.pages);
   const buffer = await readFile(job.output_path);
   if (buffer.subarray(0, 5).toString() !== "%PDF-")
     throw new RenderError("The PDF renderer produced no document.");
-  return { buffer, pages };
+  return { buffer, pages: Number.isInteger(pages) && pages > 0 ? pages : 1 };
 }
 
 /**
@@ -123,8 +134,17 @@ export async function preparePdf(
   return { directory, html, css: profileCss(profile) };
 }
 
-async function runSidecar(directory: string): Promise<number> {
-  const child = Bun.spawn([PDF_PYTHON, "-I", "-B", SCRIPT, join(directory, "job.json")], {
+/**
+ * Runs one sidecar script on the job file in `directory` and returns what it printed. The
+ * script gets `directory` as its home and scratch space and nothing of this process's
+ * environment; a non-zero exit becomes `failure`, given the last line it wrote to stderr.
+ */
+export async function runSidecar(
+  script: string,
+  directory: string,
+  failure: (detail: string | undefined) => Error,
+): Promise<Record<string, unknown>> {
+  const child = Bun.spawn([PDF_PYTHON, "-I", "-B", script, join(directory, "job.json")], {
     cwd: directory,
     env: {
       HOME: directory,
@@ -144,14 +164,9 @@ async function runSidecar(directory: string): Promise<number> {
       new Response(child.stderr).text(),
       child.exited,
     ]);
-    if (code !== 0) {
-      const detail = stderr.trim().split("\n").filter(Boolean).at(-1)?.slice(0, MAX_STDERR);
-      throw new RenderError(
-        `The PDF renderer failed${detail ? `: ${detail}` : ""}. Simplify the document and retry.`,
-      );
-    }
-    const pages = Number((JSON.parse(stdout) as { pages?: unknown }).pages);
-    return Number.isInteger(pages) && pages > 0 ? pages : 1;
+    if (code !== 0)
+      throw failure(stderr.trim().split("\n").filter(Boolean).at(-1)?.slice(0, MAX_STDERR));
+    return JSON.parse(stdout) as Record<string, unknown>;
   } finally {
     clearTimeout(timer);
   }

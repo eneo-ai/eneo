@@ -290,6 +290,19 @@
             "en": "When you reopen an app result, you can see whether processing has started. If the worker stops, the run stays in progress until it is marked as failed. You can then start a new run.",
             "sv": "När du öppnar ett appresultat igen ser du om bearbetningen har börjat. Om den avbryts står körningen kvar som pågående tills den markeras som misslyckad. Då kan du starta en ny körning."
           }
+        },
+        {
+          "id": "extract-pictures-from-documents",
+          "type": "new",
+          "area": "chat",
+          "title": {
+            "en": "Reuse the pictures in an attached document",
+            "sv": "Återanvänd bilderna i ett bifogat dokument"
+          },
+          "body": {
+            "en": "An assistant with the Ask a file function can take the pictures out of an attached PDF, Word or PowerPoint file and place them in a new document, for example when moving content into your organisation's template. Charts and diagrams drawn as vector graphics cannot be taken out.",
+            "sv": "En assistent med funktionen Fråga fil kan ta ut bilderna ur en bifogad PDF-, Word- eller PowerPoint-fil och placera dem i ett nytt dokument, till exempel när innehåll flyttas till organisationens mall. Diagram och figurer som är ritade som vektorgrafik kan inte tas ut."
+          }
         }
       ]
     },

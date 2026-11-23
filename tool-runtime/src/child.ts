@@ -7,6 +7,7 @@ import type { ComputeJob } from "./tools/compute/ports";
 import type { IngestJob, QueryJob } from "./tools/tabular/ports";
 import type { BuiltinTemplateJob, InspectJob, RenderJob } from "./tools/documents/ports";
 import type { ChartJob } from "./tools/charts/ports";
+import type { ExtractImagesJob } from "./tools/pictures/ports";
 
 export type SandboxJob =
   | { job: ComputeJob; config: ComputeConfig }
@@ -16,6 +17,7 @@ export type SandboxJob =
   | { job: InspectJob }
   | { job: BuiltinTemplateJob }
   | { job: ChartJob }
+  | { job: ExtractImagesJob }
   | { job: { kind: "env" } }
   | { job: { kind: "confinement" } };
 
@@ -53,6 +55,10 @@ async function execute(input: SandboxJob): Promise<Record<string, unknown>> {
     case "render_chart": {
       const { executeChart } = await import("./tools/charts/execute");
       return { ...(await executeChart(input.job)) };
+    }
+    case "extract_images": {
+      const { executeExtractImages } = await import("./tools/pictures/execute");
+      return { ...(await executeExtractImages(input.job)) };
     }
     case "env":
       // Test probe: the variable names the child inherited, never their values.
