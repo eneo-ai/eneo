@@ -109,15 +109,20 @@ async def _create_transcription_model(
     endpoint: str,
     supports_realtime: bool,
     provider_type: str = "vllm",
+    endpoint_in: str = "config",
 ) -> dict[str, str]:
+    # A request resolves the endpoint from credentials first, then config.
+    credentials: dict[str, str] = {"api_key": PROVIDER_API_KEY}
+    config: dict[str, str] = {}
+    (credentials if endpoint_in == "credentials" else config)["endpoint"] = endpoint
     provider = await client.post(
         "/api/v1/admin/model-providers/",
         headers=headers,
         json={
             "name": f"{provider_type}-{uuid4().hex[:8]}",
             "provider_type": provider_type,
-            "credentials": {"api_key": PROVIDER_API_KEY},
-            "config": {"endpoint": endpoint},
+            "credentials": credentials,
+            "config": config,
         },
     )
     assert provider.status_code == 200, provider.text
@@ -193,6 +198,7 @@ async def _draft_flow(
     endpoint: str = UNREACHABLE_ENDPOINT,
     supports_realtime: bool = True,
     provider_type: str = "vllm",
+    endpoint_in: str = "config",
     audio: bool = True,
     input_required: bool = True,
     wizard: Mapping[str, object] | None = None,
@@ -209,6 +215,7 @@ async def _draft_flow(
         endpoint=endpoint,
         supports_realtime=supports_realtime,
         provider_type=provider_type,
+        endpoint_in=endpoint_in,
     )
     await _add_to_space(db_container, space_id, model["id"])
 
@@ -825,6 +832,55 @@ async def test_a_gateway_registered_as_openai_streams_live_text(
         "type": "session.update",
         "model": flow.model_name,
     }
+
+
+async def test_a_gateway_endpoint_saved_in_credentials_streams_live_text(
+    client, app, flow_process_auth_headers, db_container
+):
+    # Saved through the API in credentials, not config: the provider list, the
+    # model, admission and the socket must all read the same endpoint.
+    headers = dict(flow_process_auth_headers)
+    async with (
+        fake_realtime_server() as model_server,
+        _served(app) as (base_url, _server),
+    ):
+        flow = await _published_flow(
+            client,
+            headers,
+            db_container,
+            provider_type="openai",
+            endpoint=_provider_endpoint(model_server),
+            endpoint_in="credentials",
+        )
+        model = next(
+            item
+            for item in (
+                await client.get("/api/v1/transcription-models/", headers=headers)
+            ).json()["items"]
+            if item["id"] == flow.model_id
+        )
+        providers = (
+            await client.get("/api/v1/admin/model-providers/", headers=headers)
+        ).json()
+        provider = next(p for p in providers if p["id"] == model["provider_id"])
+        assert provider["config"] == {}
+        assert provider["realtime_eligibility"] == "eligible"
+        assert model["streams_live"] is True
+
+        stack = LiveStack(client, headers, flow, model_server, base_url, _server)
+        session = await stack.open_session()
+        async with connect(
+            stack.socket_url(session), subprotocols=_subprotocols(session["ticket"])
+        ) as socket:
+            assert json.loads(await socket.recv())["type"] == "ready"
+            await socket.send(TENTH_OF_A_SECOND)
+            await socket.send(TENTH_OF_A_SECOND)
+            await socket.send(json.dumps({"type": "stop"}))
+            events = [json.loads(message) async for message in socket]
+
+    assert events[-1] == {"type": "transcript.done", "text": "Hej världen"}
+    assert model_server.path == "/v1/realtime"
+    assert model_server.authorization == f"Bearer {PROVIDER_API_KEY}"
 
 
 async def test_flows_switched_off_after_admission_ends_the_session(
