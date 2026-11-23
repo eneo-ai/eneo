@@ -406,7 +406,6 @@ def test_from_applications_projection_maps_authorized_sparse_items(
                 insight_enabled=False,
             ),
         ),
-        group_chats=(),
         apps=(),
         services=(),
     )

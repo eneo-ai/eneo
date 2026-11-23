@@ -8,6 +8,7 @@ from eneo.apps.app_runs.app_run_dispatch import (
     fail_interrupted_app_runs,
     retry_app_submissions,
 )
+from eneo.apps.app_runs.app_run_repo import get_update_targets_for_jobs
 from eneo.database.database import AsyncSession
 from eneo.jobs.job_manager import DURABLE_APP_FUNCTION
 from eneo.main.container.container import Container
@@ -69,9 +70,7 @@ async def reconcile_app_run_jobs(container: Container) -> None:
         if not failed_ids:
             continue
         async with session.begin():
-            targets = await container.app_run_repo().get_update_targets_for_jobs(
-                failed_ids
-            )
+            targets = await get_update_targets_for_jobs(session, failed_ids)
 
         logger.warning(
             "App run reconciliation marked jobs failed",

@@ -27,6 +27,7 @@ from eneo.database.database import sessionmanager
 from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.sessions_table import Sessions
 from eneo.mcp_servers.domain.model_tool_identity import ModelToolIdentity
+from eneo.questions.question import ToolCallInfo
 from eneo.questions.questions_repo import QuestionRepository
 from eneo.sessions.session_service import (
     persist_final_skill_runtime_state,
@@ -276,6 +277,17 @@ async def test_persist_partial_question_answer_writes_via_fresh_session(
         question_id=question_id,
         answer="partial reply before the user pressed ESC",
         num_tokens_answer=9,
+        tool_calls=[
+            ToolCallInfo(
+                server_name="policy",
+                tool_name="read",
+                result="Recorded policy",
+                upload_free_reference_ids=(),
+            ),
+            ToolCallInfo(
+                server_name="unknown", tool_name="read", result="Unverified result"
+            ),
+        ],
         completion_model_id=None,
     )
 
@@ -284,6 +296,17 @@ async def test_persist_partial_question_answer_writes_via_fresh_session(
     assert row.question == "why did it stop?"
     assert row.answer == "partial reply before the user pressed ESC"
     assert row.num_tokens_answer == 9
+
+    async with db_container() as container:
+        repo = QuestionRepository(container.session(), include_user_uploads=False)
+        saved = await repo.get_for_tenant(
+            id=question_id, tenant_id=default_user.tenant_id
+        )
+        assert saved is not None
+        assert [step.result for step in saved.tool_calls or []] == [
+            "Recorded policy",
+            None,
+        ]
 
 
 @pytest.mark.integration

@@ -139,6 +139,8 @@ def _response_tool_call(tool_call_id: str, arguments: str, name: str = "server__
 
 
 class _FakeMCPProxy:
+    tool_context_without_uploads = True
+
     def model_result_text(self, text):
         return text
 
@@ -689,9 +691,11 @@ async def test_prepare_streaming_returns_explicit_context_wrapper():
 
 
 @pytest.mark.asyncio
-async def test_non_streaming_supports_multiple_tool_rounds():
+@pytest.mark.parametrize("upload_free", [False, True])
+async def test_non_streaming_supports_multiple_tool_rounds(upload_free):
     adapter = _make_completion_adapter()
     mcp_proxy = _ResourceMCPProxy()
+    mcp_proxy.tool_context_without_uploads = upload_free
     responses = [
         _response(
             tool_calls=[_response_tool_call("call_1", '{"q":"first"}')],
@@ -727,6 +731,10 @@ async def test_non_streaming_supports_multiple_tool_rounds():
         "call_1",
         "call_2",
     }
+    for step, source in zip(
+        completion.tool_calls_metadata, completion.mcp_tool_references, strict=True
+    ):
+        assert step.upload_free_reference_ids == ((source.id,) if upload_free else None)
     assert {ref.uri for ref in completion.mcp_tool_references} == {
         "https://example.test/shared"
     }
@@ -1181,7 +1189,10 @@ async def test_iterate_stream_tracks_each_parallel_tool_call(second_id):
         for e in _tool_call_events(completions)
         if e.tool_calls_metadata[0].result_status == "pending"
     ]
-    assert pending_ids == ["call_1", second_id]
+    assert len(pending_ids) == len(set(pending_ids)) == 2
+    assert pending_ids[0] == "call_1"
+    if second_id != "call_1":
+        assert pending_ids[1] == second_id
     assert mcp_proxy.calls == [
         [("server__tool", {"q": "a"}), ("server__tool", {"other": "b"})]
     ]
@@ -1193,7 +1204,7 @@ async def test_iterate_stream_tracks_each_parallel_tool_call(second_id):
     ]
     assert [(call.tool_call_id, call.arguments) for call in results] == [
         ("call_1", {"q": "a"}),
-        (second_id, {"other": "b"}),
+        (pending_ids[1], {"other": "b"}),
     ]
 
 
@@ -1711,9 +1722,13 @@ async def test_iterate_stream_timeout_yields_timeout_event_and_auto_denies():
 
 
 @pytest.mark.asyncio
-async def test_iterate_stream_denied_tools_produce_structured_denial_payload():
+@pytest.mark.parametrize("upload_free", [False, True])
+async def test_iterate_stream_denied_tools_produce_structured_denial_payload(
+    upload_free,
+):
     adapter = _make_adapter()
     mcp_proxy = _FakeMCPProxy()
+    mcp_proxy.tool_context_without_uploads = upload_free
     approval_manager = AsyncMock()
     messages = []
 
@@ -1744,7 +1759,7 @@ async def test_iterate_stream_denied_tools_produce_structured_denial_payload():
         "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
         mocked_acompletion,
     ):
-        await _collect(
+        chunks = await _collect(
             adapter,
             stream,
             require_tool_approval=True,
@@ -1758,6 +1773,14 @@ async def test_iterate_stream_denied_tools_produce_structured_denial_payload():
             pending_approval_ids=set(),
         )
 
+    completed = [
+        step
+        for chunk in chunks
+        for step in chunk.tool_calls_metadata or ()
+        if step.result is not None
+    ]
+    assert len(completed) == 1
+    assert completed[0].upload_free_reference_ids == (() if upload_free else None)
     denied_tool_messages = [m for m in messages if m.get("role") == "tool"]
     assert denied_tool_messages
     denied_payload = json.loads(denied_tool_messages[0]["content"])
@@ -1870,8 +1893,10 @@ async def test_non_streaming_round_cap_refuses_calls_and_forces_final_answer(
     assert refusals[0]["tool_call_id"] == f"call_{max_rounds}"
 
 
+@pytest.mark.parametrize("last_tool", ["server__tool", "unregistered"])
 async def test_iterate_stream_round_cap_refuses_calls_and_forces_final_answer(
     monkeypatch: pytest.MonkeyPatch,
+    last_tool: str,
 ):
     adapter = _make_adapter()
     mcp_proxy = _FakeMCPProxy()
@@ -1879,8 +1904,13 @@ async def test_iterate_stream_round_cap_refuses_calls_and_forces_final_answer(
     max_rounds = _cap_tool_rounds(monkeypatch, 3)
     follow_ups = [
         _AsyncChunkStream([_tool_call_chunk(tool_call_id=f"call_{i}")])
-        for i in range(1, max_rounds + 1)
+        for i in range(1, max_rounds)
     ]
+    follow_ups.append(
+        _AsyncChunkStream(
+            [_tool_call_chunk(tool_call_id=f"call_{max_rounds}", tool_name=last_tool)]
+        )
+    )
     follow_ups.append(
         _AsyncChunkStream([_text_chunk("partial answer", finish_reason="stop")])
     )
@@ -1936,7 +1966,10 @@ async def test_iterate_stream_round_cap_refuses_calls_and_forces_final_answer(
         for tm in (c.tool_calls_metadata or [])
         if tm.result_status == "failed" and tm.tool_call_id == f"call_{max_rounds}"
     ]
-    assert refused_events
+    assert len(refused_events) == 1
+    assert refused_events[0].mcp_tool_name == (
+        last_tool if last_tool == "server__tool" else "unknown_tool"
+    )
 
 
 async def test_forced_final_drops_ignored_tool_calls_without_pending_events(

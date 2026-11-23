@@ -97,7 +97,6 @@ async def test_preflight_router_returns_service_result():
         file_ids=[],
         session_id=None,
         assistant_id=request_body.assistant_id,
-        group_chat_id=None,
         tool_assistant_id=None,
         assistant_prompt=None,
         attachments=None,
@@ -131,18 +130,18 @@ async def test_preflight_router_propagates_session_id():
     call_kwargs = service.preflight_tokens.call_args.kwargs
     assert call_kwargs["session_id"] == session_id
     assert call_kwargs["assistant_id"] is None
-    assert call_kwargs["group_chat_id"] is None
+    assert "group_chat_id" not in call_kwargs
 
 
 @pytest.mark.asyncio
 async def test_preflight_router_forwards_tool_assistant_id():
-    """Mention targets are forwarded so group-chat preflight can use the same model."""
+    """Mention targets are forwarded to the service with the rest of the request."""
     container, service = _make_container(preflight_result=_sample_response())
 
     target_id = uuid4()
     request_body = PreflightRequest(
         question="hi",
-        group_chat_id=uuid4(),
+        assistant_id=uuid4(),
         tools=UseTools(assistants=[ToolAssistant(id=target_id, handle="target")]),
     )
 
@@ -163,6 +162,35 @@ async def test_preflight_router_forwards_tool_assistant_id():
         )
 
     assert service.preflight_tokens.call_args.kwargs["tool_assistant_id"] == target_id
+
+
+@pytest.mark.asyncio
+async def test_preflight_router_answers_410_for_a_retired_group_chat_target():
+    """The retired group_chat_id is refused before any scope or service work."""
+    container, service = _make_container(preflight_result=_sample_response())
+    request_body = PreflightRequest(question="hi", group_chat_id=uuid4())
+
+    with (
+        patch(
+            "eneo.conversations.conversations_router._validate_conversation_scope",
+            new=AsyncMock(),
+        ) as mock_validate,
+        patch(
+            "eneo.conversations.conversations_router.enforce_rate_limit",
+            new=AsyncMock(),
+        ),
+        pytest.raises(HTTPException) as excinfo,
+    ):
+        await preflight_tokens(
+            request=request_body,
+            http_request=_make_request(),
+            container=container,
+        )
+
+    assert excinfo.value.status_code == 410
+    assert excinfo.value.detail["code"] == "group_chats_retired"
+    mock_validate.assert_not_awaited()
+    service.preflight_tokens.assert_not_awaited()
 
 
 @pytest.mark.asyncio

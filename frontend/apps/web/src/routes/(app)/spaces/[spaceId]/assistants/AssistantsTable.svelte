@@ -5,12 +5,11 @@
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { IconAssistant } from "@eneo/icons/assistant";
   import PublishingStatusChip from "$lib/features/publishing/components/PublishingStatusChip.svelte";
-  import GroupChatActions from "./GroupChatActions.svelte";
-  import type { AssistantSparse, GroupChatSparse } from "@eneo/eneo-js";
+  import type { AssistantSparse } from "@eneo/eneo-js";
   import { getChatQueryParams } from "$lib/features/chat/getChatQueryParams";
   import { m } from "$lib/paraglide/messages";
 
-  export let items: (GroupChatSparse | AssistantSparse)[];
+  export let items: AssistantSparse[];
   const table = Table.createWithResource(items);
 
   const {
@@ -50,19 +49,9 @@
 
     table.columnActions({
       cell: (item) => {
-        if (item.value.type === "assistant") {
-          return Table.renderComponent(AssistantActions, {
-            assistant: item.value
-          });
-        }
-
-        if (item.value.type === "group-chat") {
-          return Table.renderComponent(GroupChatActions, {
-            groupChat: item.value
-          });
-        }
-
-        return Table.renderComponent(Table.FormattedCell, { value: m.unknown() });
+        return Table.renderComponent(AssistantActions, {
+          assistant: item.value
+        });
       }
     }),
 

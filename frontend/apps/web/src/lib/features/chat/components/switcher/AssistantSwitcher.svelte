@@ -1,6 +1,5 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
-  import { IconPeople } from "@eneo/icons/people";
   import ResourceSwitcher from "$lib/components/ResourceSwitcher.svelte";
   import { getEneo } from "$lib/core/Eneo";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
@@ -35,19 +34,6 @@
             alt=""
             class="h-full w-full object-cover"
           />
-        </div>
-        {#if partner.type === "group-chat"}
-          <div
-            class="bg-primary border-default text-secondary absolute -right-1.5 -bottom-1.5 flex h-5 w-5 items-center justify-center rounded-full border shadow-sm"
-          >
-            <IconPeople class="!h-3 !w-3" />
-          </div>
-        {/if}
-      {:else if partner.type === "group-chat"}
-        <div
-          class="bg-hover-default text-secondary flex h-10 w-10 items-center justify-center rounded-lg"
-        >
-          <IconPeople class="!h-5 !w-5" />
         </div>
       {:else}
         <SpaceChip space={{ ...partner, personal: false }} />

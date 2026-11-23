@@ -131,6 +131,8 @@ def loopback() -> Iterator[LoopbackResponsesProvider]:
 
 
 class _FakeMCPProxy:
+    tool_context_without_uploads = True
+
     def __init__(self) -> None:
         self.calls: list[Any] = []
 

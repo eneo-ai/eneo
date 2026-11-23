@@ -3,7 +3,6 @@ import { Button } from "@astryxdesign/core/Button";
 import { ChatMessageList, ChatSystemMessage } from "@astryxdesign/core/Chat";
 import { Collapsible } from "@/components/astryx/collapsible";
 import { useAnnounce, useMediaQuery } from "@astryxdesign/core/hooks";
-import { Selector } from "@astryxdesign/core/Selector";
 import { useQueryClient } from "@tanstack/react-query";
 import { CircleAlert } from "lucide-react";
 import { useLocale, useTranslations } from "use-intl";
@@ -67,6 +66,7 @@ import { ChatMessage, PendingAnswer, PendingQuestion, type ActivityRequest } fro
 import { Composer } from "./composer";
 import { ComposerDock, ConversationLayout } from "./conversation-layout";
 import {
+  approvalForPart,
   pendingTools,
   ToolApprovalsContext,
   ToolDecisionBar,
@@ -84,7 +84,6 @@ import { releasePreviews, useAttachments, type Attachment } from "./use-attachme
 import { useToolChoices } from "./use-tool-choices";
 import { chatDraftOwner, useChatDraft } from "./use-chat-draft";
 
-const NO_MENTION = "__none__";
 /** The current time as ISO 8601 (the timestamp of a question sent now). */
 function isoNow(): string {
   return new Date().toISOString();
@@ -93,7 +92,7 @@ function isoNow(): string {
 type SentFiles = NonNullable<NonNullable<EneoUIMessage["metadata"]>["files"]>;
 
 /** The request options of a question as they stood when it left the composer. */
-type SendRequest = Omit<ChatSendOptions, "files" | "session_id" | "assistant_id" | "group_chat_id">;
+type SendRequest = Omit<ChatSendOptions, "files" | "session_id" | "assistant_id">;
 
 /**
  * A question sent before its attachments were on the server. It waits in the
@@ -277,8 +276,8 @@ function ConversationView({
     findExisting: (file) => uploadsRef.current.find((uploaded) => matchesUpload(file, uploaded))
   });
   const panel = useSidePanel()!;
-  // The Felsök tab reads a saved turn's diagnostics; group chats have none.
-  const debugAvailable = can("assistant_debug") && partner.type !== "group-chat";
+  // The Felsök tab reads a saved turn's diagnostics.
+  const debugAvailable = can("assistant_debug");
   // Astryx's shared polite live region (mounted empty, cleared after a moment):
   // only "Svaret är klart", errors and tool approvals go there, never tokens.
   const announce = useAnnounce();
@@ -292,7 +291,6 @@ function ConversationView({
     chatDraftOwner(tenant.id, user.id),
     `${partner.type}:${partner.id}:${initialSessionId ?? "new"}`
   );
-  const [mentionId, setMentionId] = useState<string>(NO_MENTION);
   const fileInput = useRef<HTMLInputElement>(null);
   // Ref for event-time reads (send body, onFinish); state for render-time
   // consumers (preflight). Both are set together when data-session arrives.
@@ -415,12 +413,9 @@ function ConversationView({
           streamErrorRef.current = part.data;
           setStreamError(part.data);
         }
-        if (
-          part.type === "data-tool-approval" &&
-          part.data.status === "pending" &&
-          mounted.current
-        ) {
-          const names = part.data.tools.map((tool) => tool.title || tool.tool_name).join(", ");
+        const approval = approvalForPart(part);
+        if (approval?.status === "pending" && mounted.current) {
+          const names = approval.tools.map((tool) => tool.title || tool.tool_name).join(", ");
           announce(t("chat_announce_tool_approval", { tools: names }));
         }
         if (part.type === "data-token-usage") {
@@ -650,8 +645,7 @@ function ConversationView({
     revision: partner.preflightRevision ?? partner.completionModel?.id,
     fileIds: attachments.fileIds,
     sessionId,
-    assistantId: sessionId || partner.type === "group-chat" ? null : partner.id,
-    groupChatId: !sessionId && partner.type === "group-chat" ? partner.id : null
+    assistantId: sessionId ? null : partner.id
   });
 
   const usage = deriveContextUsage({
@@ -675,19 +669,16 @@ function ConversationView({
   const lastMessage = messages.at(-1);
   const waitingApproval =
     lastMessage?.role === "assistant"
-      ? lastMessage.parts.findLast(
-          (part) => part.type === "data-tool-approval" && part.data.status === "pending"
-        )
+      ? lastMessage.parts
+          .map(approvalForPart)
+          .findLast(
+            (approval) =>
+              approval?.status === "pending" &&
+              pendingTools(approval, approvals.decisions).length > 0
+          )
       : undefined;
-  const decisionBar =
-    phone === true &&
-    // A pending call only waits while its stream is open: a broken stream
-    // gives the composer back (and its retry).
-    busy &&
-    waitingApproval?.type === "data-tool-approval" &&
-    pendingTools(waitingApproval.data, approvals.decisions).length > 0
-      ? waitingApproval.data
-      : null;
+  // A broken stream gives the composer back with its retry action.
+  const decisionBar = phone === true && busy ? (waitingApproval ?? null) : null;
   // The decision is made: the composer is back where the bar was, and the
   // focus goes with it if it had none left.
   const barApprovalId = decisionBar?.approval_id ?? null;
@@ -729,19 +720,14 @@ function ConversationView({
 
   /** The request options as they stand now, for the question leaving the composer. */
   function requestOptions(): SendRequest {
-    const mention =
-      partner.type === "group-chat" && mentionId !== NO_MENTION
-        ? partner.mentionableAssistants?.find((assistant) => assistant.id === mentionId)
-        : undefined;
     const mcpOptions = mcpConversationOptions({
       servers: toolChoices.mcpServers,
+      hasSpecialists: toolChoices.hasSpecialists,
       capabilities: toolChoices.capabilities,
       disabledServerIds: toolChoices.disabledMcpServerIds,
-      autoAcceptTools: toolChoices.autoAcceptTools,
-      supportsToolApproval: partner.type !== "group-chat"
+      autoAcceptTools: toolChoices.autoAcceptTools
     });
     return {
-      tools: mention ? { assistants: [{ id: mention.id, handle: mention.handle }] } : null,
       disabled_capabilities: disabledCapabilitiesForRequest(toolChoices.disabledCapabilities),
       ...mcpOptions
     };
@@ -777,7 +763,6 @@ function ConversationView({
     const request = requestOptions();
     // A retry leaves the composer alone unless it holds the retried question.
     setInput((current) => (resendFiles && current.trim() !== question ? current : ""));
-    setMentionId(NO_MENTION);
 
     const batch = attachments.attachments;
     if (!resendFiles && batch.some((attachment) => attachment.uploading)) {
@@ -838,13 +823,12 @@ function ConversationView({
     };
     setLastQuestion({ text, files });
 
-    // The backend wants exactly ONE of session_id/assistant_id/group_chat_id:
-    // continuing a session identifies the partner through the session.
+    // The backend wants exactly ONE of session_id/assistant_id: continuing a
+    // session identifies the partner through the session.
     const continuing = sessionIdRef.current !== null;
     const body: ChatSendOptions = {
       session_id: sessionIdRef.current,
-      assistant_id: continuing || partner.type === "group-chat" ? null : partner.id,
-      group_chat_id: !continuing && partner.type === "group-chat" ? partner.id : null,
+      assistant_id: continuing ? null : partner.id,
       files: files.map((file) => ({ id: file.id })),
       ...request
     };
@@ -1029,25 +1013,6 @@ function ConversationView({
     () => ({ id: partner.id, name: partnerName, iconId: partner.iconId }),
     [partner.id, partnerName, partner.iconId]
   );
-  const mention =
-    partner.type === "group-chat" && (partner.mentionableAssistants?.length ?? 0) > 0 ? (
-      <Selector
-        label={t("mention")}
-        isLabelHidden
-        variant="ghost"
-        size="sm"
-        value={mentionId}
-        onChange={setMentionId}
-        options={[
-          { value: NO_MENTION, label: t("mentions") },
-          ...partner.mentionableAssistants!.map((assistant) => ({
-            value: assistant.id,
-            label: `@${assistant.handle}`
-          }))
-        ]}
-      />
-    ) : null;
-
   const toolsProps = {
     capabilities: toolChoices.capabilities,
     disabledCapabilities: toolChoices.disabledCapabilities,
@@ -1055,6 +1020,7 @@ function ConversationView({
     disabledServerIds: toolChoices.disabledMcpServerIds,
     autoAcceptTools: toolChoices.autoAcceptTools,
     modelSupportsTools: toolChoices.modelSupportsTools,
+    hasSpecialists: toolChoices.hasSpecialists,
     onDisabledCapabilitiesChange: toolChoices.setDisabledCapabilities,
     onDisabledServerIdsChange: toolChoices.setDisabledMcpServerIds,
     onAutoAcceptToolsChange: toolChoices.setAutoAcceptTools
@@ -1078,7 +1044,6 @@ function ConversationView({
     knowledge: partner.knowledge,
     knowledgeMode: partner.knowledgeMode,
     tools,
-    mention,
     modelSelector,
     quote: composerQuote,
     contextBar: (
@@ -1330,7 +1295,6 @@ function ConversationView({
                     message={message}
                     assistant={assistantIdentity}
                     isStreaming={streaming}
-                    showResponseLabel={partner.showResponseLabel ?? false}
                     // Only the answer being written shows who is answering.
                     liveAnswering={streaming ? liveAnswering : null}
                     knowledge={partner.knowledge}

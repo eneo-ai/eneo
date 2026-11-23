@@ -53,7 +53,7 @@ When no level has a time, nothing is removed.
 The nearest level decides **even when its time is longer** than a level outside
 it: the space's time is a default, not a maximum.
 
-- **Group chats:** each turn follows the assistant that answered it, so an
+- **Former group chats:** each historical turn follows the assistant that answered it, so an
   earlier turn can stay while a later one is removed. A turn whose assistant
   was deleted follows no time and is not removed.
 - **Deleting an assistant** deletes its chats. A question not asked to an
@@ -147,7 +147,7 @@ bytes still wait. See
 
 | Copy | How it follows |
 | --- | --- |
-| A conversation's name (its first question, a generated title or a name someone chose) and its feedback text | Once the time it was written is older than the conversation's period, the name is emptied (both apps show Untitled) and the feedback text removed, even while questions remain. The thumbs up or down stays. A group chat follows the shortest period among its assistants |
+| A conversation's name (its first question, a generated title or a name someone chose) and its feedback text | Once the time it was written is older than the conversation's period, the name is emptied (both apps show Untitled) and the feedback text removed, even while questions remain. The thumbs up or down stays. Conversations with specialists follow the orchestrating assistant's period. Former group chats keep the shortest effective period of their former members (now specialists); an explicit shorter period on the migrated assistant also applies |
 | A conversation copied from another one | Unreadable as soon as a question it was copied from is removed, and then removed itself. See [Copies of removed conversations](/docs/audit-logging#copies-of-removed-conversations) |
 | Temporary files of an upload, a transcription, a crawl or a SharePoint import | Removed when the process stops; after a crash, by the next process on the same volume. See [Temporary files](/guides/deployment#temporary-files) |
 | The record of a failed job | Keeps a failure code, never the error text. Jobs recorded before the upgrade keep their text |
@@ -170,7 +170,7 @@ was created. The next scheduled run removes it.
 
 | What | Time set on | Without a choice | Runs |
 | --- | --- | --- | --- |
-| Chats, group chats and help assistant chats | The assistant, otherwise its space | Kept | Nightly, 03:30 by default (`RETENTION_CRON_HOUR`, `RETENTION_CRON_MINUTE`) |
+| Chats and help assistant chats | The assistant, otherwise its space | Kept | Nightly, 03:30 by default (`RETENTION_CRON_HOUR`, `RETENTION_CRON_MINUTE`) |
 | App runs | The app, otherwise its space | Kept | Nightly, with chats |
 | Files of a turn or app run | They follow it; a file still used elsewhere stays | Kept | With the turn or run |
 | Names and feedback text | The conversation's period | Kept | Nightly, with chats |

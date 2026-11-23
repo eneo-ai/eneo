@@ -98,8 +98,8 @@ export function filterSessions<T extends SessionRow>(
 }
 
 /**
- * "Konversationer" (decision 29): one panel, scoped to this assistant or
- * group chat, or to all of them ("Den här assistenten | Alla"), with a title
+ * "Konversationer" (decision 29): one panel, scoped to this assistant or to
+ * all of them ("Den här assistenten | Alla"), with a title
  * search at the top and the rows grouped by date (Idag, Igår, …). This
  * assistant's list is complete: "Visa fler" appends the next page and moves
  * focus to the first row it added. "Alla" lists the latest conversations
@@ -147,7 +147,6 @@ function HistoryPanel({
     }
   });
 
-  const isGroupChat = partner.type === "group-chat";
   const history = useInfiniteQuery({
     ...cursorPagination,
     queryKey: historyQueryKey(partner),
@@ -156,8 +155,7 @@ function HistoryPanel({
         browserApi.GET("/api/v1/conversations/", {
           params: {
             query: {
-              assistant_id: isGroupChat ? undefined : partner.id,
-              group_chat_id: isGroupChat ? partner.id : undefined,
+              assistant_id: partner.id,
               limit: PAGE_SIZE,
               cursor: pageParam
             }
@@ -235,12 +233,7 @@ function HistoryPanel({
           onChange={(value) => setScope(value === "all" ? "all" : "partner")}
           size="sm"
         >
-          <SegmentedControlItem
-            value="partner"
-            label={
-              isGroupChat ? t("chat_history_scope_group_chat") : t("chat_history_scope_assistant")
-            }
-          />
+          <SegmentedControlItem value="partner" label={t("chat_history_scope_assistant")} />
           <SegmentedControlItem value="all" label={t("chat_history_scope_all")} />
         </SegmentedControl>
         {sessions.length > 0 && (

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from copy import deepcopy
+from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Optional, Union, cast
+from typing import TYPE_CHECKING, Any, Literal, Optional, Union, cast
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, computed_field, model_validator
@@ -54,6 +55,7 @@ class ResponseType(str, Enum):
     FIRST_CHUNK = "first_chunk"
     TOKEN_USAGE = "token_usage"
     ERROR = "error"
+    CONSULTATION = "consultation"
 
 
 @dataclass
@@ -135,6 +137,66 @@ class ToolCallMetadata:
     # the call is announced, so a client can show the view while the call's
     # arguments are still being written.
     app_view: Optional[dict[str, Any]] = None
+    generated_file_ids: list[UUID] | None = None
+    # Server-issued resource IDs for a step whose details may be shown
+    # without the files grant. An empty tuple means it produced no sources.
+    upload_free_reference_ids: tuple[UUID, ...] | None = None
+
+    @property
+    def unfinished(self) -> bool:
+        return self.result is None and self.result_status in (
+            None,
+            "pending",
+            "approved",
+            "awaiting_approval",
+        )
+
+    def record(self, steps: list[ToolCallMetadata], event: ResponseType | None) -> bool:
+        """Apply one provider event. Return True when it starts a new stored step."""
+        step = deepcopy(self)
+        if event == ResponseType.TOOL_APPROVAL_TIMEOUT:
+            step.approved = False
+            step.result_status = step.result_status or "timeout_denied"
+        for index in reversed(range(len(steps))):
+            previous = steps[index]
+            if not step.tool_call_id or previous.tool_call_id != step.tool_call_id:
+                continue
+            if (previous.server_name, previous.tool_name) != (
+                step.server_name,
+                step.tool_name,
+            ):
+                break
+            # A denial decision and its final JSON payload are separate events.
+            if not previous.unfinished:
+                if previous == step:
+                    return False
+                if (
+                    previous.result is None
+                    and previous.result_status in ("denied", "timeout_denied")
+                    and previous.result_status == step.result_status
+                ):
+                    if step.result is not None:
+                        previous.result = step.result
+                        previous.upload_free_reference_ids = (
+                            step.upload_free_reference_ids
+                        )
+                    return False
+                break
+            # Approval events may carry only status. Keep the pending request,
+            # never a completed result or an earlier step's visibility decision.
+            if event in (
+                ResponseType.TOOL_APPROVAL_REQUIRED,
+                ResponseType.TOOL_APPROVAL_TIMEOUT,
+            ):
+                previous.approved = step.approved
+                previous.result_status = step.result_status
+                if step.arguments is not None:
+                    previous.arguments = step.arguments
+            else:
+                steps[index] = step
+            return False
+        steps.append(step)
+        return True
 
 
 @dataclass
@@ -172,6 +234,45 @@ class GeneratedFile:
     tool_call_id: Optional[str] = None
     mcp_tool_name: Optional[str] = None
     filename: Optional[str] = None
+
+
+@dataclass
+class AssistantConsultation:
+    """One specialist consultation, including its own observed tool steps.
+
+    The containing question is the parent. Provider-local tool IDs are scoped
+    by this consultation ID, so a second consultation never overwrites the
+    first one's steps. System instructions and reasoning are not collected.
+    """
+
+    id: UUID
+    ordinal: int
+    assistant_id: UUID
+    assistant_name: str
+    question: str
+    status: Literal[
+        "running",
+        "awaiting_approval",
+        "complete",
+        "denied",
+        "timeout",
+        "cancelled",
+        "incomplete",
+        "failed",
+    ] = "running"
+    answer: str = ""
+    tool_calls: list[ToolCallMetadata] = field(default_factory=list[ToolCallMetadata])
+    references: list[McpToolReference] = field(default_factory=list[McpToolReference])
+    usage: TokenUsage | None = None
+    approval_id: str | None = None
+    # Provider IDs of the steps a pending approval decides. Internal tools in
+    # the same round never need approval and are not listed.
+    awaiting_tool_call_ids: list[str] = field(default_factory=list[str])
+    # Server-issued identities are separate from provider-local approval IDs.
+    step_ids: list[UUID] = field(default_factory=list[UUID])
+    completion_model_id: UUID | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
 
 
 @dataclass
@@ -217,6 +318,9 @@ class Completion:
     context_output_token_estimate: Optional[int] = None
     # LiteLLM-measured Skill-owned subset of the final provider prompt.
     skill_context_tokens: Optional[int] = None
+    consultations: list[AssistantConsultation] | None = None
+    consultation_id: UUID | None = None
+    execution_model_id: UUID | None = None
 
 
 class CompletionModelBase(BaseModel):

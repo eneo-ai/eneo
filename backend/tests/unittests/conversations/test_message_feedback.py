@@ -48,14 +48,13 @@ def _container(partner: OwnedChatPartner | None) -> MagicMock:
     )
     container.session_service.return_value = session_service
     container.assistant_service.return_value = AsyncMock()
-    container.group_chat_service.return_value = AsyncMock()
     return container
 
 
 class TestSetMessageFeedback:
     async def test_rates_after_authorizing_the_assistant(self):
         assistant_id = uuid4()
-        container = _container(OwnedChatPartner(assistant_id, None))
+        container = _container(OwnedChatPartner(assistant_id))
         session_id, message_id = uuid4(), uuid4()
 
         stored = await set_message_feedback(
@@ -75,24 +74,8 @@ class TestSetMessageFeedback:
             feedback=MessageFeedback(value=1),
         )
 
-    async def test_authorizes_a_group_chat_through_the_group_chat(self):
-        group_chat_id = uuid4()
-        container = _container(OwnedChatPartner(None, group_chat_id))
-
-        await set_message_feedback(
-            feedback=MessageFeedback(value=-1),
-            session_id=uuid4(),
-            message_id=uuid4(),
-            container=container,
-        )
-
-        container.group_chat_service.return_value.get_group_chat.assert_awaited_once_with(
-            group_chat_id=group_chat_id
-        )
-        container.assistant_service.return_value.get_assistant.assert_not_awaited()
-
     async def test_does_not_rate_when_access_to_the_assistant_was_revoked(self):
-        container = _container(OwnedChatPartner(uuid4(), None))
+        container = _container(OwnedChatPartner(uuid4()))
         container.assistant_service.return_value.get_assistant.side_effect = (
             UnauthorizedException("revoked")
         )
@@ -124,7 +107,7 @@ class TestSetMessageFeedback:
 
 class TestDeleteMessageFeedback:
     async def test_clears_after_authorizing_the_assistant(self):
-        container = _container(OwnedChatPartner(uuid4(), None))
+        container = _container(OwnedChatPartner(uuid4()))
         session_id, message_id = uuid4(), uuid4()
 
         await delete_message_feedback(
