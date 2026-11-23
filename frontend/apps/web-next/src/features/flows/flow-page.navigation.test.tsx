@@ -6,12 +6,14 @@ import {
   type RouterHistory
 } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SpaceProvider } from "@/features/spaces/use-space";
 import { makeSpace } from "@/features/spaces/testing/space-fixture";
 import { renderWithRouter } from "@/test/router";
 import { testAppContext, testQueryClient } from "@/test/render";
 import messages from "@/lib/i18n/messages/sv.json";
+import type { QueryClient } from "@tanstack/react-query";
+import { flowEditorKeys } from "./editor/editor-api";
 import { makeAssistant, makeKindOption, makeKindPlace } from "./editor/testing/fixtures";
 import { makeFlow, makeStep } from "./flow-fixtures";
 import { FlowPage } from "./flow-page";
@@ -19,6 +21,21 @@ import { flowKeys, type FlowPublic } from "./flows-api";
 import { parseFlowSearch } from "./flow-search";
 
 vi.unmock("@/lib/link");
+// The conversation is the chat feature's; the page only follows what it reports.
+vi.mock("@/features/chat/chat-view", () => ({
+  ChatView: ({
+    onToolCallFinished
+  }: {
+    onToolCallFinished: (call: { serverName: string; isInternal: boolean }) => void;
+  }) => (
+    <button
+      type="button"
+      onClick={() => onToolCallFinished({ serverName: "flows", isInternal: true })}
+    >
+      Verktyg klart
+    </button>
+  )
+}));
 
 const api = vi.hoisted(() => ({
   routes: {} as Record<string, (init: never) => { status?: number; body: unknown }>,
@@ -811,4 +828,183 @@ it("keeps an unsaved upload on Stay and releases it only when leaving the editor
       init: { params: { path: { id: "file-new" } } }
     })
   ]);
+});
+
+describe("the Leverans section's reader from a later prompt, while the prompts are read again", () => {
+  const ASSISTANT = "/api/v1/flows/{id}/assistants/{assistant_id}/";
+  const first = makeStep(1, { user_description: "Sammanfatta" });
+  const second = makeStep(2, { user_description: "Granska", input_source: "flow_input" });
+  const third = (order: number) =>
+    makeStep(order, {
+      id: "step-3",
+      assistant_id: "assistant-3",
+      user_description: "Skriv svar",
+      input_source: "flow_input"
+    });
+  const reader = "Läses av Steg 3: Skriv svar.";
+
+  beforeEach(() => {
+    flow = makeFlow({ steps: [first, second, third(3)] });
+    api.routes[`GET ${ASSISTANT}`] = (init: { params: { path: { assistant_id: string } } }) => {
+      const id = init.params.path.assistant_id;
+      const assistant = makeAssistant();
+      return {
+        body: makeAssistant({
+          id,
+          prompt: {
+            ...assistant.prompt!,
+            text: id === "assistant-3" ? "Jämför med {{Sammanfatta}}." : "Gör ditt jobb."
+          }
+        })
+      };
+    };
+  });
+
+  /** Holds the later step's prompt read until released; the other reads answer at once. */
+  function holdLaterPrompt() {
+    const get = api.stub.client.GET;
+    let release = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    api.stub.client.GET = ((
+      path: string,
+      init?: { params?: { path?: { assistant_id?: string } } }
+    ) =>
+      path === ASSISTANT && init?.params?.path?.assistant_id === "assistant-3"
+        ? held.then(() => get(path, init))
+        : get(path, init)) as typeof get;
+    return () => {
+      api.stub.client.GET = get;
+      release();
+    };
+  }
+  const delivery = () =>
+    screen.findByRole("region", { name: messages.flow_step_editor_delivery_title });
+  const rereading = (queryClient: QueryClient) =>
+    waitFor(() =>
+      expect(
+        queryClient.getQueryState(flowEditorKeys.assistant("flow-1", "assistant-3"))?.fetchStatus
+      ).toBe("fetching")
+    );
+  /** Neither a reader nor "no step reads it": the line waits for the read. */
+  async function waits(section: HTMLElement, line: string) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(within(section).queryByText(line)).toBeNull();
+    expect(within(section).queryByText(messages.flow_step_editor_delivery_unread_off)).toBeNull();
+  }
+  /** The editor's own save of a setting: the step list stays as it was. */
+  async function saveSetting(revision: number) {
+    api.routes["PATCH /api/v1/flows/{id}/editor/"] = () => ({
+      body: makeFlow({ draft_revision: revision, steps: [first, second, third(3)] })
+    });
+    fireEvent.click(
+      within(await delivery()).getByRole("switch", {
+        name: new RegExp(`^${messages.flow_step_editor_deliverable_switch}`)
+      })
+    );
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_step_editor_save }));
+    await screen.findByText(messages.flow_step_editor_saved);
+  }
+
+  it("waits after a move, and names no step until the prompt is read again", async () => {
+    const { queryClient } = await renderPage();
+    await screen.findByRole("button", { name: "Redigera Steg 1: Sammanfatta" });
+    const release = holdLaterPrompt();
+    try {
+      api.routes["PATCH /api/v1/flows/{id}/editor/"] = () => ({
+        body: makeFlow({
+          draft_revision: 5,
+          steps: [first, third(2), { ...second, step_order: 3 }]
+        })
+      });
+      await click("Flytta upp Steg 3: Skriv svar");
+      await screen.findByRole("button", { name: "Redigera Steg 2: Skriv svar" });
+      await openFirst();
+      const section = await delivery();
+      await rereading(queryClient);
+      await waits(section, "Går vidare till nästa steg: Steg 2: Skriv svar.");
+    } finally {
+      release();
+    }
+    expect(
+      await within(await delivery()).findByText("Går vidare till nästa steg: Steg 2: Skriv svar.")
+    ).toBeTruthy();
+  });
+
+  it("waits after a change from the chat with the same steps, also through an own save meanwhile", async () => {
+    api.routes["POST /api/v1/flows/{id}/authoring-chat/"] = () => ({
+      body: {
+        flow_id: "flow-1",
+        assistant_id: "assistant-chat",
+        session_id: "session-1",
+        editing: true
+      }
+    });
+    api.routes["GET /api/v1/assistants/{id}/"] = () => ({
+      body: { id: "assistant-chat", name: "Flödesassistent", mcp_servers: [] }
+    });
+    api.routes["GET /api/v1/conversations/{session_id}/"] = () => ({
+      body: { id: "session-1", name: "", messages: [] }
+    });
+    const { queryClient } = await renderPage("?step=step-1");
+    expect(await within(await delivery()).findByText(reader)).toBeTruthy();
+    // An own save first, settled: what it allowed does not outlast it.
+    await saveSetting(5);
+    expect(within(await delivery()).getByText(reader)).toBeTruthy();
+    const release = holdLaterPrompt();
+    try {
+      // The chat rewrote a prompt: a new revision, the same steps.
+      flow = makeFlow({ draft_revision: 6, steps: [first, second, third(3)] });
+      fireEvent.click(await screen.findByRole("button", { name: "Verktyg klart" }));
+      await rereading(queryClient);
+      await waits(await delivery(), reader);
+      // An own save while that read is under way does not bring the old prompt back.
+      await saveSetting(7);
+      await waits(await delivery(), reader);
+    } finally {
+      release();
+    }
+    expect(await within(await delivery()).findByText(reader)).toBeTruthy();
+  });
+
+  it("waits after a stale draft is read again", async () => {
+    const { queryClient } = await renderPage();
+    await screen.findByRole("button", { name: "Redigera Steg 1: Sammanfatta" });
+    const release = holdLaterPrompt();
+    try {
+      api.routes["PATCH /api/v1/flows/{id}/editor/"] = () => ({
+        status: 400,
+        body: { message: "Stale.", code: "stale_revision", eneo_error_code: 9000 }
+      });
+      flow = makeFlow({ draft_revision: 5, steps: [first, second, third(3)] });
+      await click("Flytta upp Steg 2: Granska");
+      await screen.findByText(messages.flows_notice_stale_title);
+      await waitFor(() =>
+        expect(queryClient.getQueryData<FlowPublic>(flowKeys.flow("flow-1"))?.draft_revision).toBe(
+          5
+        )
+      );
+      await openFirst();
+      const section = await delivery();
+      await rereading(queryClient);
+      await waits(section, reader);
+    } finally {
+      release();
+    }
+    expect(await within(await delivery()).findByText(reader)).toBeTruthy();
+  });
+
+  it("keeps the reader through the read that follows the editor's own save of a setting", async () => {
+    const { queryClient } = await renderPage("?step=step-1");
+    expect(await within(await delivery()).findByText(reader)).toBeTruthy();
+    const release = holdLaterPrompt();
+    try {
+      await saveSetting(5);
+      await rereading(queryClient);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(within(await delivery()).getByText(reader)).toBeTruthy();
+    } finally {
+      release();
+    }
+    expect(within(await delivery()).getByText(reader)).toBeTruthy();
+  });
 });

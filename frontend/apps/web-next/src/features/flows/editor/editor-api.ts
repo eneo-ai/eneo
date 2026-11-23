@@ -1,4 +1,10 @@
-import { queryOptions, useQueries, type QueryClient } from "@tanstack/react-query";
+import {
+  queryOptions,
+  skipToken,
+  useQueries,
+  useQuery,
+  type QueryClient
+} from "@tanstack/react-query";
 import { browserApi } from "@/lib/api/browser";
 import { apiErrorFromResponse, EneoApiError, unwrap } from "@/lib/api/errors";
 import type { components } from "@/lib/api/schema";
@@ -66,6 +72,11 @@ export const flowEditorKeys = {
   assistants: (flowId: string) => ["flows", flowId, "assistants"] as const,
   assistant: (flowId: string, assistantId: string) =>
     [...flowEditorKeys.assistants(flowId), assistantId] as const,
+  /**
+   * Whether the prompts held while the step assistants are read again still
+   * name what is saved: the flow page writes it each time it reads them again.
+   */
+  promptsHeld: (flowId: string) => ["flows", flowId, "prompts-held"] as const,
   toolOptions: (flowId: string) => ["flows", flowId, "tool-options"] as const,
   templateFiles: (flowId: string) => ["flows", flowId, "template-files"] as const,
   templateInspection: (flowId: string, assetId: string) =>
@@ -126,11 +137,13 @@ export function useStepPrompts(
 
 /**
  * The prompts that may name a reader, and whether every prompt is current:
- * read, and not invalidated or refused since. A prompt invalidated and left
- * unread, or whose read again failed, can name a step the saved one no longer
- * does, so it is left out. One being read again stays until the answer: the
- * page reads every assistant again on each save, and a correct line would
- * blink. `current` stays strict, since it allows saying no step reads it.
+ * read, and not invalidated or refused since. A prompt invalidated and not
+ * read again, or whose read again failed, can name a step the saved one no
+ * longer does, so it is left out. One being read again stays until the answer
+ * only while the page says the prompts held still name what is saved
+ * (`promptsHeld`): after the editor's own save that left the steps as they
+ * were, where a correct line would otherwise blink. After any other change it
+ * waits for the answer. `current` stays strict, since it allows saying no step reads it.
  */
 export function useStepPromptsState(
   flowId: string,
@@ -138,9 +151,13 @@ export function useStepPromptsState(
   enabled: boolean
 ): { prompts: StepPrompts; current: boolean } {
   const assistants = useStepAssistants(flowId, steps, enabled);
+  const held =
+    useQuery({ queryKey: flowEditorKeys.promptsHeld(flowId), queryFn: skipToken }).data === true;
   return {
     prompts: promptsOf(
-      assistants.filter((query) => query.isSuccess && (!query.isStale || query.isFetching))
+      assistants.filter(
+        (query) => query.isSuccess && (!query.isStale || (held && query.isFetching))
+      )
     ),
     current: assistants.every((query) => query.isSuccess && !query.isStale)
   };

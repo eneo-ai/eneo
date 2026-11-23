@@ -3406,26 +3406,31 @@ describe("FlowStepEditor Leverans", () => {
     const reader = "Läses av Steg 3: Skriv svar.";
     await within(delivery).findByText(reader);
     const key = flowEditorKeys.assistant(flow.id, "assistant-3");
-    // A save moves the draft and the page reads every assistant again: while
-    // that read is under way, the line from the prompt held stays.
+    // A new revision and the page reads every assistant again: while that read
+    // is under way the line waits, unless the page says the prompts held still
+    // name what is saved (after the editor's own save that left the steps alone).
     const get = api.stub.client.GET;
-    let release = () => {};
-    const held = new Promise<void>((resolve) => (release = resolve));
-    api.stub.client.GET = ((path: string, init?: object) =>
-      `GET ${path}` === ASSISTANT
-        ? held.then(() => get(path, init))
-        : get(path, init)) as typeof get;
-    try {
-      const reread = queryClient.invalidateQueries({ queryKey: key });
-      await waitFor(() => expect(queryClient.getQueryState(key)?.fetchStatus).toBe("fetching"));
-      await new Promise((resolve) => setTimeout(resolve, 50));
-      expect(within(delivery).getByText(reader)).toBeTruthy();
-      release();
-      await reread;
-    } finally {
-      api.stub.client.GET = get;
+    for (const promptsHeld of [false, true]) {
+      queryClient.setQueryData(flowEditorKeys.promptsHeld(flow.id), promptsHeld);
+      let release = () => {};
+      const held = new Promise<void>((resolve) => (release = resolve));
+      api.stub.client.GET = ((path: string, init?: object) =>
+        `GET ${path}` === ASSISTANT
+          ? held.then(() => get(path, init))
+          : get(path, init)) as typeof get;
+      try {
+        const reread = queryClient.invalidateQueries({ queryKey: key });
+        await waitFor(() => expect(queryClient.getQueryState(key)?.fetchStatus).toBe("fetching"));
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        expect(within(delivery).queryByText(reader) !== null).toBe(promptsHeld);
+        release();
+        await reread;
+      } finally {
+        api.stub.client.GET = get;
+      }
+      expect(await within(delivery).findByText(reader)).toBeTruthy();
     }
-    expect(within(delivery).getByText(reader)).toBeTruthy();
+    queryClient.setQueryData(flowEditorKeys.promptsHeld(flow.id), false);
     routeAssistants({}, ["assistant-3"]);
     // Invalidated: a newer draft may no longer name the step.
     await queryClient.invalidateQueries({ queryKey: key, refetchType: "none" });

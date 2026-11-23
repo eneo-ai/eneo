@@ -374,6 +374,19 @@ export function stepReadersByNameOrPlace(
     .sort((a, b) => a.step_order - b.step_order);
 }
 
+/**
+ * Whether two step lists resolve a read alike: the same steps, with the same
+ * assistants (whose prompts they read), at the same places under the same
+ * names. A read by alias, by place or by name is resolved against nothing
+ * else, and a change to any of them is one the core may rewrite prompts for.
+ */
+export function sameReadPlaces(before: readonly FlowStep[], after: readonly FlowStep[]): boolean {
+  const place = (step: FlowStep) =>
+    JSON.stringify([step.id, step.assistant_id, step.step_order, stepName(step)]);
+  const places = new Set(before.map(place));
+  return before.length === after.length && after.every((step) => places.has(place(step)));
+}
+
 const slotOf = (step: FlowStep): FlowStepSlot => ({ step_id: step.id ?? null });
 
 /**
