@@ -15,11 +15,8 @@ from eneo.flows.domain.flow_run_retention_policy import (
     FlowRunRetentionFlowTargetPage,
     FlowRunRetentionPolicy,
     FlowRunRetentionPolicySettings,
-    FlowRunRetentionReviewCursor,
-    FlowRunRetentionReviewPage,
     FlowRunRetentionScope,
     FlowRunRetentionSpaceTargetPage,
-    effective_flow_run_retention_policy,
 )
 from eneo.flows.infrastructure.flow_retention_repo import FlowRetentionRepository
 from eneo.flows.infrastructure.flow_run_retention_policy_repo import (
@@ -44,10 +41,6 @@ class FlowRunRetentionPolicyService:
         self.user = user
         self.repository = repository
         self.audit_service = audit_service
-
-    async def get_organization(self) -> FlowRunRetentionPolicySettings:
-        require_retention_view(self.user)
-        return await self.repository.get_organization(tenant_id=self.user.tenant_id)
 
     async def list_space_targets(
         self,
@@ -77,41 +70,6 @@ class FlowRunRetentionPolicyService:
             offset=offset,
         )
 
-    async def replace_organization(
-        self,
-        *,
-        policy: FlowRunRetentionPolicy | None,
-    ) -> FlowRunRetentionPolicySettings:
-        require_retention_manage(self.user)
-        change = await self.repository.replace_organization(
-            tenant_id=self.user.tenant_id,
-            policy=policy,
-        )
-        await self._audit_change(change)
-        return change.after
-
-    async def get_space(self, *, space_id: UUID) -> FlowRunRetentionPolicySettings:
-        require_retention_view(self.user)
-        return await self.repository.get_space(
-            tenant_id=self.user.tenant_id,
-            space_id=space_id,
-        )
-
-    async def replace_space(
-        self,
-        *,
-        space_id: UUID,
-        policy: FlowRunRetentionPolicy | None,
-    ) -> FlowRunRetentionPolicySettings:
-        require_retention_manage(self.user)
-        change = await self.repository.replace_space(
-            tenant_id=self.user.tenant_id,
-            space_id=space_id,
-            policy=policy,
-        )
-        await self._audit_change(change)
-        return change.after
-
     async def get_flow(self, *, flow_id: UUID) -> FlowRunRetentionPolicySettings:
         require_retention_view(self.user)
         return await self.repository.get_flow(
@@ -134,60 +92,6 @@ class FlowRunRetentionPolicyService:
         await self._audit_change(change)
         return change.after
 
-    async def list_organization_review_queue(
-        self,
-        *,
-        limit: int,
-        cursor: FlowRunRetentionReviewCursor | None,
-    ) -> FlowRunRetentionReviewPage:
-        require_retention_manage(self.user)
-        return await self.repository.list_review_queue(
-            tenant_id=self.user.tenant_id,
-            now=datetime.now(timezone.utc),
-            limit=limit,
-            cursor=cursor,
-        )
-
-    async def list_space_review_queue(
-        self,
-        *,
-        space_id: UUID,
-        limit: int,
-        cursor: FlowRunRetentionReviewCursor | None,
-    ) -> FlowRunRetentionReviewPage:
-        require_retention_manage(self.user)
-        await self.repository.get_space(
-            tenant_id=self.user.tenant_id,
-            space_id=space_id,
-        )
-        return await self.repository.list_review_queue(
-            tenant_id=self.user.tenant_id,
-            now=datetime.now(timezone.utc),
-            limit=limit,
-            cursor=cursor,
-            space_id=space_id,
-        )
-
-    async def list_flow_review_queue(
-        self,
-        *,
-        flow_id: UUID,
-        limit: int,
-        cursor: FlowRunRetentionReviewCursor | None,
-    ) -> FlowRunRetentionReviewPage:
-        require_retention_manage(self.user)
-        await self.repository.get_flow(
-            tenant_id=self.user.tenant_id,
-            flow_id=flow_id,
-        )
-        return await self.repository.list_review_queue(
-            tenant_id=self.user.tenant_id,
-            now=datetime.now(timezone.utc),
-            limit=limit,
-            cursor=cursor,
-            flow_id=flow_id,
-        )
-
     async def purge_due_history(
         self,
         *,
@@ -197,18 +101,25 @@ class FlowRunRetentionPolicyService:
         flow_id: UUID | None = None,
     ) -> FlowRunHistoryPurgePublic:
         require_retention_manage(self.user)
+        tenant_id = self.user.tenant_id
         if flow_id is not None:
-            settings = await self.repository.get_flow(
-                tenant_id=self.user.tenant_id, flow_id=flow_id
+            scope, scope_id = (
+                FlowRunRetentionScope.FLOW,
+                (
+                    await self.repository.get_flow(tenant_id=tenant_id, flow_id=flow_id)
+                ).scope_id,
             )
         elif space_id is not None:
-            settings = await self.repository.get_space(
-                tenant_id=self.user.tenant_id, space_id=space_id
+            scope, scope_id = (
+                FlowRunRetentionScope.SPACE,
+                (
+                    await self.repository.require_space(
+                        tenant_id=tenant_id, space_id=space_id
+                    )
+                ),
             )
         else:
-            settings = await self.repository.get_organization(
-                tenant_id=self.user.tenant_id
-            )
+            scope, scope_id = FlowRunRetentionScope.ORGANIZATION, tenant_id
         result = await FlowRetentionRepository(
             self.repository.session
         ).purge_due_flow_run_history_for_tenant(
@@ -221,7 +132,7 @@ class FlowRunRetentionPolicyService:
         )
         response = FlowRunHistoryPurgePublic(
             dry_run=dry_run,
-            scope=settings.scope,
+            scope=scope,
             candidate_count=result.candidate_count,
             purged_count=len(result.purged_run_ids),
             purged_run_ids=list(result.purged_run_ids),
@@ -230,7 +141,6 @@ class FlowRunRetentionPolicyService:
             blocked=FlowRunHistoryPurgeBlockedPublic(
                 undelivered_audit=result.blocked.skipped_undelivered_audit,
                 unresolved_webhook=result.blocked.skipped_unresolved_webhook,
-                review_required=result.blocked.skipped_review_required,
                 legal_hold=result.blocked.skipped_legal_hold,
                 counted_runs=result.blocked.counted_runs,
                 complete=result.blocked.complete,
@@ -241,12 +151,12 @@ class FlowRunRetentionPolicyService:
                 tenant_id=self.user.tenant_id,
                 user=self.user,
                 action=ActionType.FLOW_RUN_HISTORY_PURGED,
-                entity_type=self._entity_type(settings.scope),
-                entity_id=settings.scope_id,
+                entity_type=self._entity_type(scope),
+                entity_id=scope_id,
                 description="Purged due Flow run history and expired unbound live transcripts.",
                 metadata={
-                    "scope": settings.scope.value,
-                    "scope_id": str(settings.scope_id),
+                    "scope": scope.value,
+                    "scope_id": str(scope_id),
                     "tenant_id": str(self.user.tenant_id),
                     "space_id": str(space_id) if space_id is not None else None,
                     "flow_id": str(flow_id) if flow_id is not None else None,
@@ -265,7 +175,6 @@ class FlowRunRetentionPolicyService:
         if not change.changed:
             return
         after = change.after
-        effective_policy = effective_flow_run_retention_policy(after.effective)
         await self.audit_service.log(
             tenant_id=self.user.tenant_id,
             user=self.user,
@@ -278,7 +187,11 @@ class FlowRunRetentionPolicyService:
                 "scope_id": str(after.scope_id),
                 "previous_local_policy": self._audit_policy(change.before.local_policy),
                 "new_local_policy": self._audit_policy(after.local_policy),
-                "effective_policy": self._audit_policy(effective_policy),
+                "effective_policy": (
+                    {"days": after.effective.effective_days}
+                    if after.effective.effective_days is not None
+                    else None
+                ),
                 "effective_source": after.effective.source,
             },
             required=True,
@@ -320,10 +233,10 @@ class FlowRunRetentionPolicyService:
     @staticmethod
     def _audit_policy(
         policy: FlowRunRetentionPolicy | None,
-    ) -> dict[str, str | int] | None:
+    ) -> dict[str, int] | None:
         if policy is None:
             return None
-        return {"mode": policy.mode.value, "days": policy.days}
+        return {"days": policy.days}
 
     @staticmethod
     def _entity_type(scope: FlowRunRetentionScope) -> EntityType:

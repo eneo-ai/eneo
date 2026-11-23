@@ -190,23 +190,8 @@ FLOW_ROUTE_AUDIT_CONTRACTS: dict[str, FlowAuditContract] = {
             "get_flow_authoring_chat_policy": (
                 "flow_settings_router.get_flow_authoring_chat_policy"
             ),
-            "get_organization_flow_run_retention_policy": (
-                "flow_run_retention_policy_router.get_organization_policy"
-            ),
-            "get_space_flow_run_retention_policy": (
-                "flow_run_retention_policy_router.get_space_policy"
-            ),
             "get_flow_run_retention_policy": (
                 "flow_run_retention_policy_router.get_flow_policy"
-            ),
-            "list_organization_flow_run_retention_review_queue": (
-                "flow_run_retention_policy_router.list_organization_review_queue"
-            ),
-            "list_space_flow_run_retention_review_queue": (
-                "flow_run_retention_policy_router.list_space_review_queue"
-            ),
-            "list_flow_run_retention_review_queue": (
-                "flow_run_retention_policy_router.list_flow_review_queue"
             ),
             "list_flow_run_retention_space_targets": (
                 "flow_run_retention_policy_router.list_space_targets"
@@ -251,11 +236,7 @@ FLOW_ROUTE_AUDIT_CONTRACTS: dict[str, FlowAuditContract] = {
             ),
             idempotency="an unchanged replacement emits no event",
         )
-        for operation_id in (
-            "replace_organization_flow_run_retention_policy",
-            "replace_space_flow_run_retention_policy",
-            "replace_flow_run_retention_policy",
-        )
+        for operation_id in ("replace_flow_run_retention_policy",)
     },
     **{
         operation_id: _required_transaction(

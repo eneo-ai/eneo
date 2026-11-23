@@ -20,7 +20,9 @@ from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 from eneo.data_retention.infrastructure import gallring_lock
 from eneo.database.tables.audit_log_table import AuditLog
 from eneo.database.tables.flow_tables import (
+    FlowOutboxDeliveryStatus,
     FlowRetentionHolds,
+    FlowRunAuditOutbox,
     FlowRuns,
     Flows,
     FlowVersions,
@@ -30,10 +32,7 @@ from eneo.database.tables.spaces_table import Spaces, SpacesUsers
 from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.users_table import users_roles_table
 from eneo.flows.domain.flow_retention_hold import FlowRetentionHoldCreateRequest
-from eneo.flows.domain.flow_run_retention_policy import (
-    FlowRunRetentionMode,
-    FlowRunRetentionPolicy,
-)
+from eneo.flows.domain.flow_run_retention_policy import FlowRunRetentionPolicy
 from eneo.flows.infrastructure import flow_retention_repo
 from eneo.flows.infrastructure.flow_retention_repo import FlowRetentionRepository
 from eneo.flows.infrastructure.flow_run_history_purge_repo import (
@@ -100,7 +99,6 @@ async def history(db_container, admin_user):
                 name=f"Hold {label} {uuid4()}",
                 tenant_id=admin_user.tenant_id,
                 space_id=space.id,
-                flow_run_history_retention_mode="preserve",
                 flow_run_history_retention_days=1,
             )
             session.add(flow)
@@ -414,9 +412,7 @@ async def test_policy_replacement_waits_for_an_open_purge(
         async with db_container() as changing:
             return await changing.flow_run_retention_policy_service().replace_flow(
                 flow_id=flow_id,
-                policy=FlowRunRetentionPolicy(
-                    mode=FlowRunRetentionMode.REVIEW_REQUIRED, days=30
-                ),
+                policy=FlowRunRetentionPolicy(days=30),
             )
 
     async with db_container() as purging:
@@ -431,9 +427,7 @@ async def test_policy_replacement_waits_for_an_open_purge(
             replacing.cancel()
             raise
     changed = await replacing
-    assert changed.local_policy == FlowRunRetentionPolicy(
-        mode=FlowRunRetentionMode.REVIEW_REQUIRED, days=30
-    )
+    assert changed.local_policy == FlowRunRetentionPolicy(days=30)
 
 
 async def test_a_busy_retention_lock_is_refused_typed_and_writes_nothing(
@@ -953,9 +947,8 @@ async def test_rules_and_holds_need_their_own_retention_permission(
         for perms in (["retention_holds"], ["retention_manage"], ["admin"])
     ]
     rule_path = f"/api/v1/settings/flow-run-retention-policy/flows/{flow_id}"
-    rule = {"policy": {"mode": "preserve", "days": 30}}
+    rule = {"policy": {"days": 30}}
     limit_path = "/api/v1/settings/flow-run-retention-policy/hold-review-limit"
-    queue_path = "/api/v1/settings/flow-run-retention-policy/review-queue"
     hold_body = {
         "flow_id": str(flow_id),
         "reason": "Request",
@@ -983,7 +976,6 @@ async def test_rules_and_holds_need_their_own_retention_permission(
         await client.get(HOLDS, headers=bearer(plain_admin)),
         await client.put(rule_path, json=rule, headers=bearer(plain_admin)),
         await client.post(HOLDS, json=hold_body, headers=bearer(plain_admin)),
-        await client.get(queue_path, headers=bearer(holds_only)),
         await client.put(limit_path, json={"days": 30}, headers=bearer(holds_only)),
         await client.put(limit_path, json={"days": 30}, headers=bearer(plain_admin)),
     ):
@@ -992,7 +984,6 @@ async def test_rules_and_holds_need_their_own_retention_permission(
     changed = await client.put(rule_path, json=rule, headers=bearer(rules_only))
     assert changed.status_code == 200, changed.text
     assert (await client.get(HOLDS, headers=bearer(rules_only))).status_code == 200
-    assert (await client.get(queue_path, headers=bearer(rules_only))).status_code == 200
 
     limited = await client.put(
         limit_path, json={"days": 30}, headers=bearer(rules_only)
@@ -1052,7 +1043,7 @@ async def test_an_api_key_never_changes_or_stops_retention(
         ),
         await client.put(
             f"/api/v1/settings/flow-run-retention-policy/flows/{flow_id}",
-            json={"policy": {"mode": "preserve", "days": 30}},
+            json={"policy": {"days": 30}},
             headers=headers,
         ),
         await client.get(HOLDS, headers=headers),
@@ -1125,12 +1116,29 @@ async def test_purge_preview_counts_held_runs_apart_from_real_blockers(
     flow_id, sibling_id = history["flow_id"], history["sibling_id"]
     for _ in range(2):
         await _add_run(db_container, admin_user, flow_id)
-    await _add_run(db_container, admin_user, sibling_id)
+    sibling_run_id = await _add_run(db_container, admin_user, sibling_id)
     async with db_container() as container:
-        await container.session().execute(
-            sa.update(Flows)
-            .where(Flows.id == sibling_id)
-            .values(flow_run_history_retention_mode="review_required")
+        session = container.session()
+        sibling_run = await session.get(FlowRuns, sibling_run_id)
+        assert sibling_run is not None
+        session.add(
+            FlowRunAuditOutbox(
+                tenant_id=admin_user.tenant_id,
+                flow_id=sibling_id,
+                flow_run_id=sibling_run_id,
+                run_revision=sibling_run.revision,
+                description="flow_run_completed:executor_completed",
+                action="flow_run_completed",
+                entity_type="flow_run",
+                entity_id=sibling_run_id,
+                actor_id=admin_user.id,
+                actor_type="user",
+                source="executor_completed",
+                target_status="completed",
+                delivery_status=FlowOutboxDeliveryStatus.PENDING.value,
+                delivery_attempts=0,
+                next_delivery_at=datetime.now(timezone.utc),
+            )
         )
     await _place(client, admin_token, flow_id=flow_id)
     monkeypatch.setattr(
@@ -1145,9 +1153,8 @@ async def test_purge_preview_counts_held_runs_apart_from_real_blockers(
     assert response.status_code == 200, response.text
     assert response.json()["candidate_count"] == 0
     assert response.json()["blocked"] == {
-        "undelivered_audit": 0,
+        "undelivered_audit": 1,
         "unresolved_webhook": 0,
-        "review_required": 1,
         "legal_hold": 1,
         "counted_runs": 1,
         "complete": False,

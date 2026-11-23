@@ -208,14 +208,6 @@ async def flow_retention_service(
 async def flow_retention_space(
     async_session: AsyncSession, test_tenant, admin_user
 ) -> Spaces:
-    await async_session.execute(
-        update(Tenants)
-        .where(Tenants.id == test_tenant.id)
-        .values(
-            flow_run_history_retention_mode="preserve",
-            flow_run_history_retention_days=2555,
-        )
-    )
     space = Spaces(
         name=f"Flow retention space {admin_user.id}",
         description="Flow runtime retention tests",
@@ -286,9 +278,6 @@ async def _create_flow_runtime_fixture(
         owner_user_id=user.id,
         published_version=None,
         metadata_json={},
-        flow_run_history_retention_mode=(
-            "preserve" if flow_retention_days is not None else None
-        ),
         flow_run_history_retention_days=flow_retention_days,
         draft_revision=0,
         deleted_at=created_at if flow_deleted else None,
@@ -571,7 +560,6 @@ async def _create_flow_template_asset_fixture(
         owner_user_id=user.id,
         published_version=None,
         metadata_json={},
-        flow_run_history_retention_mode=None,
         flow_run_history_retention_days=None,
         draft_revision=0,
         created_at=now,
@@ -636,7 +624,6 @@ async def _create_unbound_runtime_upload_fixture(
         owner_user_id=user.id,
         published_version=None,
         metadata_json={},
-        flow_run_history_retention_mode=None,
         flow_run_history_retention_days=None,
     )
     async_session.add(flow)
@@ -1106,8 +1093,6 @@ async def test_scheduled_cleanup_preserves_all_flow_owned_data(
             update(Tenants)
             .where(Tenants.id == tenant.id)
             .values(
-                flow_run_history_retention_mode="preserve",
-                flow_run_history_retention_days=1,
                 flow_runtime_upload_abandonment_days=1,
                 flow_settings={
                     "retention_policy": {
@@ -2608,7 +2593,7 @@ async def test_flow_run_history_purge_removes_generated_file_with_derived_child(
 
 
 @pytest.mark.asyncio
-async def test_flow_run_history_purge_uses_flow_override_instead_of_space_policy(
+async def test_flow_run_history_purge_caps_a_longer_flow_time_by_the_space(
     async_session: AsyncSession,
     test_tenant,
     admin_user,
@@ -2616,8 +2601,7 @@ async def test_flow_run_history_purge_uses_flow_override_instead_of_space_policy
     flow_retention_assistant: Assistants,
     flow_retention_service: FlowRetentionRepository,
 ):
-    flow_retention_space.flow_run_history_retention_mode = "preserve"
-    flow_retention_space.flow_run_history_retention_days = 1
+    flow_retention_space.data_retention_days = 1
     larger_flow_value = await _create_flow_runtime_fixture(
         async_session,
         tenant=test_tenant,
@@ -2643,8 +2627,8 @@ async def test_flow_run_history_purge_uses_flow_override_instead_of_space_policy
     )
     await _flush_and_clear_identity_map(async_session)
 
-    assert result.counts.flow_runs_purged == 1
-    assert await async_session.get(FlowRuns, larger_flow_value.run.id) is not None
+    assert result.counts.flow_runs_purged == 2
+    assert await async_session.get(FlowRuns, larger_flow_value.run.id) is None
     assert await async_session.get(FlowRuns, matching_flow_value.run.id) is None
 
 
@@ -2657,8 +2641,7 @@ async def test_flow_run_history_purge_uses_space_policy_when_flow_inherits(
     flow_retention_assistant: Assistants,
     flow_retention_service: FlowRetentionRepository,
 ):
-    flow_retention_space.flow_run_history_retention_mode = "preserve"
-    flow_retention_space.flow_run_history_retention_days = 1
+    flow_retention_space.data_retention_days = 1
     fixture = await _create_flow_runtime_fixture(
         async_session,
         tenant=test_tenant,
@@ -2689,8 +2672,7 @@ async def test_flow_run_history_purge_uses_space_retention_one_day_boundary(
     flow_retention_service: FlowRetentionRepository,
 ):
     now = datetime(2026, 6, 10, 12, 0, tzinfo=timezone.utc)
-    flow_retention_space.flow_run_history_retention_mode = "preserve"
-    flow_retention_space.flow_run_history_retention_days = 1
+    flow_retention_space.data_retention_days = 1
     retained = await _create_flow_runtime_fixture(
         async_session,
         tenant=test_tenant,

@@ -30,7 +30,6 @@ from eneo.database.tables.flow_tables import (
 from eneo.database.tables.questions_table import Questions, QuestionsFiles
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import Spaces
-from eneo.database.tables.tenant_table import Tenants
 from eneo.flows.infrastructure.flow_retention_repo import FlowRetentionRepository
 from eneo.policy_levels import PolicyLevel
 from tests.integration.data_retention.retention_support import (
@@ -645,7 +644,7 @@ async def test_space_level_app_retention_fallback(
 
 
 @pytest.mark.asyncio
-async def test_space_conversation_and_app_retention_does_not_activate_flow_deletion(
+async def test_the_space_time_selects_flow_runs_only_for_an_explicit_purge(
     retention_session: AsyncSession,
     test_space: Spaces,
     test_app: Apps,
@@ -655,14 +654,6 @@ async def test_space_conversation_and_app_retention_does_not_activate_flow_delet
     anchor = datetime.now(timezone.utc)
     old = anchor - timedelta(days=60)
     test_space.data_retention_days = 30
-    await retention_session.execute(
-        update(Tenants)
-        .where(Tenants.id == test_tenant.id)
-        .values(
-            flow_run_history_retention_mode=None,
-            flow_run_history_retention_days=None,
-        )
-    )
     retention_session.add(test_space)
 
     assistant = Assistants(
@@ -703,7 +694,6 @@ async def test_space_conversation_and_app_retention_does_not_activate_flow_delet
         owner_user_id=admin_user.id,
         published_version=None,
         metadata_json=None,
-        flow_run_history_retention_mode=None,
         flow_run_history_retention_days=None,
         created_at=old,
         updated_at=old,
@@ -753,7 +743,9 @@ async def test_space_conversation_and_app_retention_does_not_activate_flow_delet
     )
     report = await run_registered_retention(retention_session)
 
-    assert flow_run.id not in flow_candidates
+    # The space's time makes the run due for an administrator's purge, and no
+    # scheduled pass removes it.
+    assert flow_run.id in flow_candidates
     assert report.counts.get("questions.questions_deleted", 0) == 1
     assert report.counts.get("app_runs.app_runs_deleted", 0) == 1
     assert await retention_session.get(FlowRuns, flow_run.id) is not None

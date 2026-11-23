@@ -26,7 +26,6 @@ from eneo.database.tables.flow_tables import (
 )
 from eneo.flows.application.flow_run_terminalization import FlowRunTerminalizer
 from eneo.flows.domain.flow import FlowRun, FlowRunStatus
-from eneo.flows.domain.flow_run_retention_policy import FlowRunRetentionMode
 from eneo.flows.enums import (
     TERMINAL_FLOW_RUN_STATUSES,
     FlowOutputType,
@@ -584,10 +583,7 @@ async def test_the_history_purge_selects_a_drained_run_once_it_is_due(
         await session.execute(
             sa.update(Flows)
             .where(Flows.id == flow_id)
-            .values(
-                flow_run_history_retention_mode=FlowRunRetentionMode.PRESERVE.value,
-                flow_run_history_retention_days=1,
-            )
+            .values(flow_run_history_retention_days=1)
         )
     await _retire(flow_id, admin_user.tenant_id)
 

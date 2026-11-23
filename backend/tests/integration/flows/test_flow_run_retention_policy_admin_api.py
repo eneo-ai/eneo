@@ -19,7 +19,6 @@ from eneo.database.tables.flow_tables import (
 )
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.tenant_table import Tenants
-from eneo.flows.infrastructure.flow_retention_repo import FlowRetentionRepository
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
@@ -132,10 +131,7 @@ async def test_admin_explicit_purge_defaults_to_preview_and_audits_deletion(
         await session.execute(
             sa.update(Flows)
             .where(Flows.id == flow_id)
-            .values(
-                flow_run_history_retention_mode="preserve",
-                flow_run_history_retention_days=1,
-            )
+            .values(flow_run_history_retention_days=1)
         )
         run = FlowRuns(
             flow_id=flow_id,
@@ -169,7 +165,6 @@ async def test_admin_explicit_purge_defaults_to_preview_and_audits_deletion(
         "blocked": {
             "undelivered_audit": 0,
             "unresolved_webhook": 0,
-            "review_required": 0,
             "legal_hold": 0,
             "counted_runs": 1,
             "complete": True,
@@ -264,8 +259,6 @@ async def published_flow_ids(db_container, admin_user) -> tuple[object, object]:
             tenant_space_id=organization_space_id,
             security_classification_id=None,
             data_retention_days=7,
-            flow_run_history_retention_mode=None,
-            flow_run_history_retention_days=None,
         )
         session.add(space)
         await session.flush()
@@ -278,7 +271,6 @@ async def published_flow_ids(db_container, admin_user) -> tuple[object, object]:
             owner_user_id=admin_user.id,
             published_version=None,
             metadata_json=None,
-            flow_run_history_retention_mode=None,
             flow_run_history_retention_days=None,
         )
         session.add(flow)
@@ -298,7 +290,7 @@ async def published_flow_ids(db_container, admin_user) -> tuple[object, object]:
         return space.id, flow.id
 
 
-async def test_admin_replaces_and_clears_complete_hierarchical_policies(
+async def test_admin_replaces_and_clears_the_flow_time_under_the_space_cap(
     client,
     admin_token,
     regular_token,
@@ -306,169 +298,44 @@ async def test_admin_replaces_and_clears_complete_hierarchical_policies(
     db_container,
     admin_user,
 ) -> None:
-    space_id, flow_id = published_flow_ids
+    _, flow_id = published_flow_ids
     admin_headers = {"Authorization": f"Bearer {admin_token}"}
     regular_headers = {"Authorization": f"Bearer {regular_token}"}
-    root_path = "/api/v1/settings/flow-run-retention-policy"
-    space_path = f"{root_path}/spaces/{space_id}"
-    flow_path = f"{root_path}/flows/{flow_id}"
-
-    organization_response = await client.put(
-        root_path,
-        json={"policy": {"mode": "preserve", "days": 30}},
-        headers=admin_headers,
-    )
-    assert organization_response.status_code == 200, organization_response.text
-    unchanged_organization_response = await client.put(
-        root_path,
-        json={"policy": {"mode": "preserve", "days": 30}},
-        headers=admin_headers,
-    )
-    assert unchanged_organization_response.status_code == 200
-
-    space_response = await client.put(
-        space_path,
-        json={"policy": {"mode": "review_required", "days": 60}},
-        headers=admin_headers,
-    )
-    assert space_response.status_code == 200, space_response.text
+    flow_path = f"/api/v1/settings/flow-run-retention-policy/flows/{flow_id}"
 
     flow_response = await client.put(
-        flow_path,
-        json={"policy": {"mode": "preserve", "days": 90}},
-        headers=admin_headers,
+        flow_path, json={"policy": {"days": 3}}, headers=admin_headers
     )
     assert flow_response.status_code == 200, flow_response.text
-    flow_settings = flow_response.json()
-    assert flow_settings["scope"] == "flow"
-    assert flow_settings["scope_id"] == str(flow_id)
-    assert flow_settings["local_policy"] == {"mode": "preserve", "days": 90}
-    assert flow_settings["inherited_policy"] == {
-        "mode": "review_required",
-        "days": 60,
-    }
-    assert flow_settings["effective"] == {
-        "state": "configured",
-        "mode": "preserve",
-        "effective_days": 90,
-        "source": "flow",
-        "contributors": {
-            "organization": {"mode": "preserve", "days": 30},
-            "space": {"mode": "review_required", "days": 60},
-            "flow": {"mode": "preserve", "days": 90},
+    assert flow_response.json() == {
+        "scope": "flow",
+        "scope_id": str(flow_id),
+        "local_policy": {"days": 3},
+        "inherited_policy": {"days": 7},
+        "effective": {
+            "state": "configured",
+            "effective_days": 3,
+            "source": "flow",
+            "contributors": {"space": {"days": 7}, "flow": {"days": 3}},
         },
     }
-
-    old = datetime.now(timezone.utc) - timedelta(days=100)
-    async with db_container() as container:
-        session = container.session()
-        inherited_flow = Flows(
-            name=f"Inherited retention Flow {uuid4()}",
-            description="Uses the Space review policy.",
-            tenant_id=admin_user.tenant_id,
-            space_id=space_id,
-            created_by_user_id=admin_user.id,
-            owner_user_id=admin_user.id,
-            published_version=None,
-            metadata_json=None,
-            flow_run_history_retention_mode=None,
-            flow_run_history_retention_days=None,
-        )
-        session.add(inherited_flow)
-        await session.flush()
-        session.add(
-            FlowVersions(
-                flow_id=inherited_flow.id,
-                version=1,
-                tenant_id=admin_user.tenant_id,
-                definition_checksum=f"retention-review-{uuid4()}",
-                definition_json={"schema_version": 1, "steps": []},
-            )
-        )
-        await session.flush()
-        inherited_flow.published_version = 1
-        review_run = FlowRuns(
-            flow_id=inherited_flow.id,
-            flow_version=1,
-            principal_type="user",
-            principal_user_id=admin_user.id,
-            tenant_id=admin_user.tenant_id,
-            trace_id=uuid4(),
-            status="completed",
-            started_at=old,
-            finished_at=old,
-            input_payload_json={"must_not": "appear in review queue"},
-            output_payload_json={"must_not": "appear in review queue"},
-            created_at=old,
-            updated_at=old,
-        )
-        preserved_run = FlowRuns(
-            flow_id=flow_id,
-            flow_version=1,
-            principal_type="user",
-            principal_user_id=admin_user.id,
-            tenant_id=admin_user.tenant_id,
-            trace_id=uuid4(),
-            status="completed",
-            started_at=old,
-            finished_at=old,
-            input_payload_json={"must_not": "appear in review queue"},
-            output_payload_json={"must_not": "appear in review queue"},
-            created_at=old,
-            updated_at=old,
-        )
-        session.add_all([review_run, preserved_run])
-        await session.flush()
-        review_run_id = review_run.id
-        preserved_run_id = preserved_run.id
-        inherited_flow_id = inherited_flow.id
-
-    queue_response = await client.get(
-        f"{space_path}/review-queue?limit=10",
-        headers=admin_headers,
+    unchanged = await client.put(
+        flow_path, json={"policy": {"days": 3}}, headers=admin_headers
     )
-    assert queue_response.status_code == 200, queue_response.text
-    queue = queue_response.json()
-    assert queue["count"] == 1
-    assert queue["has_more"] is False
-    assert len(queue["items"]) == 1
-    assert queue["items"][0]["run_id"] == str(review_run_id)
-    assert queue["items"][0]["flow_id"] == str(inherited_flow_id)
-    assert queue["items"][0]["effective_policy"] == {
-        "mode": "review_required",
-        "days": 60,
-    }
-    assert queue["items"][0]["policy_source"] == "space"
-    assert "input_payload_json" not in queue["items"][0]
-    assert "output_payload_json" not in queue["items"][0]
+    assert unchanged.status_code == 200, unchanged.text
 
     clear_response = await client.put(
-        flow_path,
-        json={"policy": None},
-        headers=admin_headers,
+        flow_path, json={"policy": None}, headers=admin_headers
     )
     assert clear_response.status_code == 200, clear_response.text
     cleared = clear_response.json()
     assert cleared["local_policy"] is None
-    assert cleared["effective"]["mode"] == "review_required"
-    assert cleared["effective"]["effective_days"] == 60
+    assert cleared["effective"]["effective_days"] == 7
     assert cleared["effective"]["source"] == "space"
-
-    inherited_queue_response = await client.get(
-        f"{flow_path}/review-queue?limit=10",
-        headers=admin_headers,
-    )
-    assert inherited_queue_response.status_code == 200, inherited_queue_response.text
-    inherited_queue = inherited_queue_response.json()
-    assert [item["run_id"] for item in inherited_queue["items"]] == [
-        str(preserved_run_id)
-    ]
 
     forbidden_get = await client.get(flow_path, headers=regular_headers)
     forbidden_put = await client.put(
-        flow_path,
-        json={"policy": {"mode": "preserve", "days": 10}},
-        headers=regular_headers,
+        flow_path, json={"policy": {"days": 3}}, headers=regular_headers
     )
     assert forbidden_get.status_code == 403, forbidden_get.text
     assert forbidden_put.status_code == 403, forbidden_put.text
@@ -489,7 +356,7 @@ async def test_admin_replaces_and_clears_complete_hierarchical_policies(
                 )
             ).all()
         )
-    assert len(audit_rows) == 4
+    assert len(audit_rows) == 2
     assert all(row.actor_id == admin_user.id for row in audit_rows)
     assert audit_rows[-1].entity_type == "flow"
     assert audit_rows[-1].entity_id == flow_id
@@ -502,9 +369,9 @@ async def test_admin_replaces_and_clears_complete_hierarchical_policies(
         },
         "scope": "flow",
         "scope_id": str(flow_id),
-        "previous_local_policy": {"mode": "preserve", "days": 90},
+        "previous_local_policy": {"days": 3},
         "new_local_policy": None,
-        "effective_policy": {"mode": "review_required", "days": 60},
+        "effective_policy": {"days": 7},
         "effective_source": "space",
     }
 
@@ -518,7 +385,7 @@ async def test_partial_or_automatic_policy_is_rejected_without_mutation(
     headers = {"Authorization": f"Bearer {admin_token}"}
     path = f"/api/v1/settings/flow-run-retention-policy/flows/{flow_id}"
 
-    for policy in ({"days": 30}, {"mode": "automatic", "days": 30}):
+    for policy in ({}, {"mode": "automatic", "days": 3}, {"days": 0}):
         response = await client.put(path, json={"policy": policy}, headers=headers)
         assert response.status_code == 422, response.text
 
@@ -650,21 +517,10 @@ async def test_deleted_flow_with_history_stays_under_retention_administration(
     assert current.status_code == 200, current.text
     assert current.json()["local_policy"] is None
     replaced = await client.put(
-        flow_path,
-        json={"policy": {"mode": "review_required", "days": 1}},
-        headers=headers,
+        flow_path, json={"policy": {"days": 1}}, headers=headers
     )
     assert replaced.status_code == 200, replaced.text
-    assert replaced.json()["local_policy"] == {"mode": "review_required", "days": 1}
-
-    queue = await client.get(f"{flow_path}/review-queue", headers=headers)
-    assert queue.status_code == 200, queue.text
-    assert [item["run_id"] for item in queue.json()["items"]] == [str(run_id)]
-
-    preserved = await client.put(
-        flow_path, json={"policy": {"mode": "preserve", "days": 1}}, headers=headers
-    )
-    assert preserved.status_code == 200, preserved.text
+    assert replaced.json()["local_policy"] == {"days": 1}
     preview = await client.post(f"{flow_path}/purge", json={}, headers=headers)
     assert preview.status_code == 200, preview.text
     assert preview.json()["candidate_count"] == 1
@@ -680,107 +536,6 @@ async def test_deleted_flow_with_history_stays_under_retention_administration(
     )
     assert emptied.status_code == 200, emptied.text
     assert emptied.json()["items"] == []
-
-
-async def test_review_required_run_is_listed_but_never_selected_for_purge(
-    client,
-    admin_token,
-    published_flow_ids,
-    db_container,
-    admin_user,
-) -> None:
-    _, flow_id = published_flow_ids
-    headers = {"Authorization": f"Bearer {admin_token}"}
-    root_path = "/api/v1/settings/flow-run-retention-policy"
-    flow_path = f"{root_path}/flows/{flow_id}"
-    policy_response = await client.put(
-        flow_path,
-        json={"policy": {"mode": "review_required", "days": 1}},
-        headers=headers,
-    )
-    assert policy_response.status_code == 200, policy_response.text
-
-    old = datetime.now(timezone.utc) - timedelta(days=3)
-    async with db_container() as container:
-        first_run = FlowRuns(
-            flow_id=flow_id,
-            flow_version=1,
-            principal_type="user",
-            principal_user_id=admin_user.id,
-            tenant_id=admin_user.tenant_id,
-            trace_id=uuid4(),
-            status="completed",
-            started_at=old,
-            finished_at=old,
-            input_payload_json={"sensitive": "input"},
-            output_payload_json={"sensitive": "output"},
-            created_at=old,
-            updated_at=old,
-        )
-        second_anchor = old + timedelta(hours=1)
-        second_run = FlowRuns(
-            flow_id=flow_id,
-            flow_version=1,
-            principal_type="user",
-            principal_user_id=admin_user.id,
-            tenant_id=admin_user.tenant_id,
-            trace_id=uuid4(),
-            status="completed",
-            started_at=second_anchor,
-            finished_at=second_anchor,
-            input_payload_json={"sensitive": "second input"},
-            output_payload_json={"sensitive": "second output"},
-            created_at=second_anchor,
-            updated_at=second_anchor,
-        )
-        container.session().add_all([first_run, second_run])
-        await container.session().flush()
-        first_run_id = first_run.id
-        second_run_id = second_run.id
-
-    first_page_response = await client.get(
-        f"{flow_path}/review-queue?limit=1",
-        headers=headers,
-    )
-    assert first_page_response.status_code == 200, first_page_response.text
-    first_page = first_page_response.json()
-    assert [item["run_id"] for item in first_page["items"]] == [str(first_run_id)]
-    assert first_page["has_more"] is True
-    assert first_page["next_cursor"]
-
-    second_page_response = await client.get(
-        f"{flow_path}/review-queue?limit=1&cursor={first_page['next_cursor']}",
-        headers=headers,
-    )
-    assert second_page_response.status_code == 200, second_page_response.text
-    second_page = second_page_response.json()
-    assert [item["run_id"] for item in second_page["items"]] == [str(second_run_id)]
-    assert second_page["has_more"] is False
-    assert second_page["next_cursor"] is None
-
-    invalid_cursor = await client.get(
-        f"{flow_path}/review-queue?cursor=invalid",
-        headers=headers,
-    )
-    assert invalid_cursor.status_code == 400, invalid_cursor.text
-    assert invalid_cursor.json()["code"] == "invalid_flow_retention_review_cursor"
-
-    oversized_cursor = await client.get(
-        f"{flow_path}/review-queue?cursor={'x' * 513}",
-        headers=headers,
-    )
-    assert oversized_cursor.status_code == 422, oversized_cursor.text
-
-    async with db_container() as container:
-        purge_result = await FlowRetentionRepository(
-            container.session()
-        ).purge_old_flow_run_history_batch(
-            now=datetime.now(timezone.utc),
-            limit=10,
-        )
-        assert purge_result.counts.flow_runs_considered == 0
-        assert await container.session().get(FlowRuns, first_run_id) is not None
-        assert await container.session().get(FlowRuns, second_run_id) is not None
 
 
 async def test_required_audit_failure_rolls_back_policy_change(
@@ -805,20 +560,15 @@ async def test_required_audit_failure_rolls_back_policy_change(
     with pytest.raises(RuntimeError, match="forced retention audit failure"):
         await client.put(
             path,
-            json={"policy": {"mode": "preserve", "days": 30}},
+            json={"policy": {"days": 3}},
             headers=headers,
         )
 
     async with db_container() as container:
-        stored = (
-            await container.session().execute(
-                sa.select(
-                    Flows.flow_run_history_retention_mode,
-                    Flows.flow_run_history_retention_days,
-                ).where(Flows.id == flow_id)
-            )
-        ).one()
-    assert stored == (None, None)
+        stored = await container.session().scalar(
+            sa.select(Flows.flow_run_history_retention_days).where(Flows.id == flow_id)
+        )
+    assert stored is None
 
 
 async def test_foreign_tenant_targets_are_not_visible_or_mutable(
@@ -844,8 +594,6 @@ async def test_foreign_tenant_targets_are_not_visible_or_mutable(
             tenant_space_id=None,
             security_classification_id=None,
             data_retention_days=None,
-            flow_run_history_retention_mode=None,
-            flow_run_history_retention_days=None,
         )
         session.add(foreign_space)
         await session.flush()
@@ -858,7 +606,6 @@ async def test_foreign_tenant_targets_are_not_visible_or_mutable(
             owner_user_id=None,
             published_version=None,
             metadata_json=None,
-            flow_run_history_retention_mode=None,
             flow_run_history_retention_days=None,
         )
         session.add(foreign_flow)
@@ -869,26 +616,19 @@ async def test_foreign_tenant_targets_are_not_visible_or_mutable(
     headers = {"Authorization": f"Bearer {admin_token}"}
     root_path = "/api/v1/settings/flow-run-retention-policy"
     paths = [
-        f"{root_path}/spaces/{foreign_space_id}",
-        f"{root_path}/spaces/{foreign_space_id}/review-queue",
         f"{root_path}/flows/{foreign_flow_id}",
-        f"{root_path}/flows/{foreign_flow_id}/review-queue",
         f"{root_path}/targets/spaces/{foreign_space_id}/flows",
     ]
     for path in paths:
         response = await client.get(path, headers=headers)
         assert response.status_code == 404, (path, response.text)
 
-    for path in (
-        f"{root_path}/spaces/{foreign_space_id}",
+    response = await client.put(
         f"{root_path}/flows/{foreign_flow_id}",
-    ):
-        response = await client.put(
-            path,
-            json={"policy": {"mode": "preserve", "days": 30}},
-            headers=headers,
-        )
-        assert response.status_code == 404, (path, response.text)
+        json={"policy": {"days": 3}},
+        headers=headers,
+    )
+    assert response.status_code == 404, response.text
 
     targets_response = await client.get(
         f"{root_path}/targets/spaces?limit=200&offset=0",
@@ -900,20 +640,17 @@ async def test_foreign_tenant_targets_are_not_visible_or_mutable(
     }
 
     async with db_container() as container:
-        foreign_policy = (
-            await container.session().execute(
-                sa.select(
-                    Flows.flow_run_history_retention_mode,
-                    Flows.flow_run_history_retention_days,
-                ).where(Flows.id == foreign_flow_id)
+        foreign_policy = await container.session().scalar(
+            sa.select(Flows.flow_run_history_retention_days).where(
+                Flows.id == foreign_flow_id
             )
-        ).one()
+        )
         new_audits = await container.session().scalar(
             sa.select(sa.func.count(AuditLog.id))
             .where(AuditLog.tenant_id == admin_user.tenant_id)
             .where(AuditLog.action == "flow_run_retention_policy_changed")
         )
-    assert foreign_policy == (None, None)
+    assert foreign_policy is None
     assert new_audits == 0
 
 
@@ -924,21 +661,14 @@ async def purge_history(db_container, admin_user, published_flow_ids, user_facto
     async with db_container() as container:
         session = container.session()
         await session.execute(
-            sa.update(Tenants)
-            .where(Tenants.id == admin_user.tenant_id)
-            .values(
-                flow_run_history_retention_mode="preserve",
-                flow_run_history_retention_days=1,
-            )
+            sa.update(Spaces).where(Spaces.id == space_id).values(data_retention_days=1)
         )
 
-        async def add_flow(tenant_id, target_space_id, mode=None):
+        async def add_flow(tenant_id, target_space_id):
             flow = Flows(
                 name=f"Purge scope {uuid4()}",
                 tenant_id=tenant_id,
                 space_id=target_space_id,
-                flow_run_history_retention_mode=mode,
-                flow_run_history_retention_days=1 if mode else None,
             )
             session.add(flow)
             await session.flush()
@@ -989,15 +719,12 @@ async def purge_history(db_container, admin_user, published_flow_ids, user_facto
             name="Other purge scope",
             tenant_id=admin_user.tenant_id,
             tenant_space_id=parent_space_id,
+            data_retention_days=1,
         )
         session.add(other_space)
         await session.flush()
         outside_flow_id = await add_flow(admin_user.tenant_id, other_space.id)
         outside = await add_run(outside_flow_id)
-        review_flow_id = await add_flow(
-            admin_user.tenant_id, space_id, "review_required"
-        )
-        review = await add_run(review_flow_id)
         running = await add_run(flow_id, status="running")
         audit_run = await add_run(flow_id)
         session.add(
@@ -1050,13 +777,15 @@ async def purge_history(db_container, admin_user, published_flow_ids, user_facto
             name=f"Purge isolation {uuid4()}",
             state="active",
             quota_limit=1_000_000,
-            flow_run_history_retention_mode="preserve",
-            flow_run_history_retention_days=1,
         )
         session.add(foreign_tenant)
         await session.flush()
         foreign_user = await user_factory(session, tenant_id=foreign_tenant.id)
-        foreign_space = Spaces(name="Foreign purge scope", tenant_id=foreign_tenant.id)
+        foreign_space = Spaces(
+            name="Foreign purge scope",
+            tenant_id=foreign_tenant.id,
+            data_retention_days=1,
+        )
         session.add(foreign_space)
         await session.flush()
         foreign_flow_id = await add_flow(foreign_tenant.id, foreign_space.id)
@@ -1076,7 +805,6 @@ async def purge_history(db_container, admin_user, published_flow_ids, user_facto
                 "flow": {first.id, second.id},
             },
             "retained": {
-                review.id,
                 running.id,
                 audit_run.id,
                 webhook_run.id,
@@ -1101,9 +829,8 @@ async def test_purge_is_scoped_bounded_and_reports_blocked_runs(
     blocked = {
         "undelivered_audit": 1,
         "unresolved_webhook": 1,
-        "review_required": 0 if scope == "flow" else 1,
         "legal_hold": 0,
-        "counted_runs": {"organization": 7, "space": 6, "flow": 4}[scope],
+        "counted_runs": {"organization": 6, "space": 5, "flow": 4}[scope],
         "complete": True,
     }
     assert preview.json()["candidate_count"] == 1
@@ -1260,9 +987,9 @@ async def test_concurrent_purges_audit_only_their_own_deleted_runs(
         )
 
 
-@pytest.mark.parametrize("extra_review_run", [False, True])
+@pytest.mark.parametrize("extra_run", [False, True])
 async def test_purge_diagnostics_count_only_the_window_and_report_completeness(
-    client, admin_token, admin_user, db_container, purge_history, extra_review_run
+    client, admin_token, admin_user, db_container, purge_history, extra_run
 ):
     old = datetime.now(timezone.utc) - timedelta(days=4)
     async with db_container() as container:
@@ -1282,20 +1009,14 @@ async def test_purge_diagnostics_count_only_the_window_and_report_completeness(
                     created_at=old,
                     updated_at=old,
                 )
-                for _ in range(493)
+                for _ in range(494)
             ]
         )
-        if extra_review_run:
-            review_flow_id = await session.scalar(
-                sa.select(Flows.id).where(
-                    Flows.tenant_id == admin_user.tenant_id,
-                    Flows.flow_run_history_retention_mode == "review_required",
-                )
-            )
+        if extra_run:
             newest = datetime.now(timezone.utc) - timedelta(days=2)
             session.add(
                 FlowRuns(
-                    flow_id=review_flow_id,
+                    flow_id=purge_history["flow_id"],
                     flow_version=1,
                     tenant_id=admin_user.tenant_id,
                     principal_type="user",
@@ -1319,8 +1040,7 @@ async def test_purge_diagnostics_count_only_the_window_and_report_completeness(
     assert response.json()["blocked"] == {
         "undelivered_audit": 1,
         "unresolved_webhook": 1,
-        "review_required": 1,
         "legal_hold": 0,
         "counted_runs": 500,
-        "complete": not extra_review_run,
+        "complete": not extra_run,
     }
