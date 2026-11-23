@@ -9500,7 +9500,7 @@
   "flow_transcript_live_reconnecting": "The connection dropped. Connecting again…",
   "flow_transcript_live_empty": "The text appears here when someone starts speaking.",
   "flow_transcript_live_latest": "Show latest",
-  "flow_transcript_live_draft": "Draft. The flow uses the live text if it covers the whole recording; otherwise the recording is transcribed afterwards.",
+  "flow_transcript_live_draft": "Draft. The flow uses the live text when it covers the whole recording and can be matched to the audio file. Otherwise the recording is transcribed afterwards.",
   "flow_transcript_live_interrupted_title": "The live text stopped",
   "flow_transcript_live_interrupted": "The recording goes on and is transcribed when the flow runs.",
   "flow_transcript_live_unavailable_title": "Live text could not start",

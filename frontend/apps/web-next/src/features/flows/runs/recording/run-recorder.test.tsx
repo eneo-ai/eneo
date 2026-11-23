@@ -495,6 +495,12 @@ describe("RunRecorder in the start dialog", () => {
     await within(dialog).findByText(/^Inspelning, del 1/);
     await waitFor(() => expect(FakeUpload.sent).toHaveLength(1));
     await waitFor(() => expect(socket.texts).toEqual([{ type: "stop", produced_samples: 1600 }]));
+    // The same condition as before recording: no promise the text is used.
+    expect(
+      within(dialog).getByText(
+        "Utkast. Flödet använder livetexten när den täcker hela inspelningen och kan kopplas till ljudfilen. Annars transkriberas inspelningen efteråt."
+      )
+    ).toBeTruthy();
 
     // The run waits for the final text, which names the stored transcript.
     fireEvent.click(button(dialog, messages.flow_runs_summary_next));

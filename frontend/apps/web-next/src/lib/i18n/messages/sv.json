@@ -9500,7 +9500,7 @@
   "flow_transcript_live_reconnecting": "Anslutningen bröts. Ansluter igen…",
   "flow_transcript_live_empty": "Texten visas här när någon börjar prata.",
   "flow_transcript_live_latest": "Visa senaste",
-  "flow_transcript_live_draft": "Utkast. Flödet använder livetexten om den täcker hela inspelningen, annars transkriberas inspelningen efteråt.",
+  "flow_transcript_live_draft": "Utkast. Flödet använder livetexten när den täcker hela inspelningen och kan kopplas till ljudfilen. Annars transkriberas inspelningen efteråt.",
   "flow_transcript_live_interrupted_title": "Livetexten avbröts",
   "flow_transcript_live_interrupted": "Inspelningen fortsätter och transkriberas när flödet körs.",
   "flow_transcript_live_unavailable_title": "Livetext kunde inte startas",

@@ -33,7 +33,7 @@ A flow stores the model it transcribes with, and Eneo never picks one on its own
 
 ## Set up live transcription
 
-An app that records audio for a flow can stream it and show the text while someone speaks. When the recording ends, the app uploads the recording to the flow run as usual and hands the run the streamed text, which the run uses instead of transcribing the recording again.
+An app that records audio for a flow can stream it and show the text while someone speaks. When the recording ends, the app uploads the recording to the flow run as usual and hands the run the streamed text. The run uses that text when it covers the whole recording and can be matched to the audio file. Otherwise the recording is transcribed afterwards.
 
 A flow can use two models for this:
 
