@@ -511,12 +511,32 @@ it("keeps a credential being replaced across the add, and starts over after the 
     }
   };
   flow = stored;
-  const added = withStepBeforeSend(stored, { user_description: "Sammanfatta" });
-  routeAddBeforeSend([added, { ...added, draft_revision: 6 }]);
+  // JSON steps send nothing, so "Lägg till steg före utskicket" stays after each add.
+  const added = withStepBeforeSend(stored, {
+    user_description: "Sammanfatta",
+    output_type: "json"
+  });
+  const [first, second, send] = added.steps;
+  const addedAgain = makeFlow({
+    draft_revision: 6,
+    steps: [
+      first!,
+      second!,
+      makeStep(3, {
+        id: "step-new-2",
+        assistant_id: "assistant-new-2",
+        user_description: "Sammanfatta 2",
+        output_type: "json"
+      }),
+      { ...send!, step_order: 4 }
+    ]
+  });
+  routeAddBeforeSend([added, addedAgain, { ...addedAgain, draft_revision: 7 }]);
   await renderPage("?step=step-send");
   await click("Ersätt: Token");
+  // Two adds in a row: the form stays through both, and the way back to the stored token with it.
   await addSummaryBeforeSend();
-  // The form stayed: the way back to the stored token is still there.
+  await addSummaryBeforeSend();
   expect(
     await screen.findByRole("button", { name: messages.flow_step_editor_secret_keep })
   ).toBeTruthy();
@@ -526,8 +546,8 @@ it("keeps a credential being replaced across the add, and starts over after the 
     target: { value: "ny-hemlighet" }
   });
   await click(messages.flow_step_editor_save);
-  await waitFor(() => expect(editorPatches()).toHaveLength(2));
-  expect(editorPatches()[1]).toMatchObject({ expected_revision: 5 });
+  await waitFor(() => expect(editorPatches()).toHaveLength(3));
+  expect(editorPatches()[2]).toMatchObject({ expected_revision: 6 });
   // After the save the form starts over on what is stored.
   expect(await screen.findByRole("button", { name: "Ersätt: Token" })).toBeTruthy();
   expect(screen.queryByRole("button", { name: messages.flow_step_editor_secret_keep })).toBeNull();
