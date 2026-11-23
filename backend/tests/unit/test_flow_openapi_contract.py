@@ -65,6 +65,13 @@ def test_a_live_transcript_that_cannot_be_bound_does_not_refuse_the_run(openapi_
     assert "not_received" in str(step["live_fallback_reason"])
 
 
+def test_a_space_edit_declares_the_busy_flow_retention_lock(openapi_spec):
+    """Changing a space's time waits for an open Flow history deletion and can
+    answer 409 `flow_retention_lock_busy`."""
+    operation = openapi_spec["paths"]["/api/v1/spaces/{id}/"]["patch"]
+    assert "409" in operation["responses"]
+
+
 def test_text_processing_contract_fields_are_typed(openapi_spec):
     schemas = openapi_spec["components"]["schemas"]
     config = schemas["FlowStepUpdateRequest"]["properties"]["input_config"]["anyOf"][0]
