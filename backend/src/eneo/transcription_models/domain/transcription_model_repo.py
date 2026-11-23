@@ -23,12 +23,13 @@ if TYPE_CHECKING:
 
 # Only the provider facts the read models need: the live text rule reads the
 # endpoint and whether outbound headers are configured. Neither the API key nor
-# any header value is loaded, so listing models decrypts nothing.
+# any header value is loaded, so listing models decrypts nothing. The endpoint
+# keeps its JSON type, so the rule sees the value the provider itself holds.
 _PROVIDER_FACTS = (
     ModelProviders.name,
     ModelProviders.provider_type,
-    ModelProviders.credentials["endpoint"].astext.label("credential_endpoint"),
-    ModelProviders.config["endpoint"].astext.label("config_endpoint"),
+    ModelProviders.credentials["endpoint"].label("credential_endpoint"),
+    ModelProviders.config["endpoint"].label("config_endpoint"),
     (
         sa.case(
             (
@@ -49,8 +50,9 @@ def _to_domain(row: "sa.Row[Any]", tenant: "TenantInDB") -> TranscriptionModel:
         tenant=tenant,
         provider_name=provider_name,
         provider_type=provider_type,
-        # A None value reads as an absent key, so an empty credential still
-        # shadows config exactly as it does for a request.
+        # A missing key and a JSON null both read as None, which the rule
+        # treats as absent, as a request does; an empty credential still
+        # shadows config.
         realtime_eligibility=realtime_eligibility(
             provider_type=provider_type,
             credentials={"endpoint": row.credential_endpoint},

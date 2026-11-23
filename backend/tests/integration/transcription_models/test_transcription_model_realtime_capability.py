@@ -10,13 +10,19 @@ when the provider changes later; ``streams_live`` says whether it applies now.
 from __future__ import annotations
 
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
 
 from eneo.database.tables.ai_models_table import TranscriptionModels
 from eneo.database.tables.model_providers_table import ModelProviders
+from eneo.model_providers.infrastructure.model_provider_repository import (
+    ModelProviderRepository,
+)
+from eneo.transcription_models.domain.transcription_model_repo import (
+    TranscriptionModelRepository,
+)
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
@@ -24,6 +30,11 @@ TENANT_TRANSCRIPTION_URL = "/api/v1/admin/tenant-models/transcription/"
 PROVIDERS_URL = "/api/v1/admin/model-providers/"
 GATEWAY = "https://gateway.example.se/v1"
 HEADERS = [{"id": str(uuid4()), "name": "X-Org-Unit", "value": "unit"}]
+ENDPOINT_REQUIRED = (
+    "Live text needs the endpoint of a server that serves vLLM's realtime "
+    "API. Enter the server's or gateway's address on the provider; OpenAI's "
+    "own service does not serve that API."
+)
 
 
 @pytest.fixture
@@ -260,14 +271,14 @@ async def test_a_gateway_registered_as_openai_carries_live_text(
 @pytest.mark.parametrize(
     ("provider", "message"),
     [
-        ({"config": {}}, "endpoint"),
-        ({"config": {"endpoint": "https://api.openai.com"}}, "endpoint"),
-        ({"config": {"endpoint": "https://api.openai.com/v1/"}}, "endpoint"),
-        ({"config": {"endpoint": "HTTPS://API.OPENAI.COM:443/v1"}}, "endpoint"),
-        ({"config": {"endpoint": "https://eu.api.openai.com/v1"}}, "endpoint"),
+        ({"config": {}}, ENDPOINT_REQUIRED),
+        ({"config": {"endpoint": "https://api.openai.com"}}, ENDPOINT_REQUIRED),
+        ({"config": {"endpoint": "https://api.openai.com/v1/"}}, ENDPOINT_REQUIRED),
+        ({"config": {"endpoint": "HTTPS://API.OPENAI.COM:443/v1"}}, ENDPOINT_REQUIRED),
+        ({"config": {"endpoint": "https://eu.api.openai.com/v1"}}, ENDPOINT_REQUIRED),
         (
             {"config": {"endpoint": GATEWAY}, "credentials": {"endpoint": ""}},
-            "endpoint",
+            ENDPOINT_REQUIRED,
         ),
         (
             {
@@ -395,3 +406,58 @@ async def test_the_provider_list_says_whether_each_provider_carries_live_text(
     assert eligibility[without_endpoint] == "endpoint_required"
     assert eligibility[with_headers] == "outbound_headers_configured"
     assert eligibility[azure] == "unsupported_provider"
+
+
+@pytest.mark.parametrize("provider_type", ["vllm", "openai"])
+@pytest.mark.parametrize(
+    ("credentials", "config"),
+    [
+        ({"endpoint": 8000}, {}),
+        ({"endpoint": True}, {}),
+        ({"endpoint": ""}, {}),
+        ({"endpoint": None}, {}),
+        ({}, {}),
+        ({}, {"endpoint": 8000}),
+        ({}, {"endpoint": True}),
+        ({}, {"endpoint": ""}),
+        ({}, {"endpoint": None}),
+        ({}, {"endpoint": GATEWAY}),
+        ({"endpoint": None}, {"endpoint": GATEWAY}),
+        # A falsy value that is not a string still answers first.
+        ({"endpoint": 0}, {"endpoint": GATEWAY}),
+        ({"endpoint": False}, {"endpoint": GATEWAY}),
+    ],
+)
+async def test_the_model_and_its_provider_read_the_same_stored_endpoint(
+    client,
+    admin_headers,
+    default_user,
+    db_container,
+    provider_type,
+    credentials,
+    config,
+):
+    # The model list reads the endpoint straight from the stored JSON; it must
+    # see the value the provider (and so the socket) sees, type and all.
+    provider_id = await _provider(
+        db_container,
+        default_user.tenant_id,
+        provider_type=provider_type,
+        credentials=credentials,
+        config=config,
+    )
+    created = await client.post(
+        TENANT_TRANSCRIPTION_URL, headers=admin_headers, json=_payload(provider_id)
+    )
+    assert created.status_code == 200, created.text
+
+    async with db_container() as container:
+        session = container.session()
+        provider = await ModelProviderRepository(
+            session=session, tenant_id=default_user.tenant_id
+        ).get_by_id(UUID(provider_id))
+        model = await TranscriptionModelRepository(
+            session=session, tenant=container.tenant()
+        ).one(UUID(created.json()["id"]))
+
+    assert model.realtime_eligibility == provider.realtime_eligibility
