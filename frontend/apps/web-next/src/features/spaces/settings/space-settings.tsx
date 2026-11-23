@@ -418,9 +418,9 @@ function SecuritySection() {
 }
 
 /**
- * The space's time, which is also the cap on its flows' run history. Changing it in a
- * shared space takes the right to edit the space and the permission to manage
- * retention (the backend refuses everyone else); the rest read the value.
+ * The space's time, which is also the cap on its flows' run history. Changing it
+ * takes the right to edit the space and the permission to manage retention (the
+ * backend refuses everyone else); the rest read the value.
  */
 function RetentionSection() {
   const t = useTranslations();
@@ -430,7 +430,7 @@ function RetentionSection() {
   const update = useUpdateSpace();
   const readOnlyHintId = useId();
   const editsSpace = can("edit", "space");
-  const canEditRetention = editsSpace && (space.personal || managesRetention);
+  const canEditRetention = editsSpace && managesRetention;
   const [daysVisited, setDaysVisited] = useState(false);
 
   const days = useAutosaveField({

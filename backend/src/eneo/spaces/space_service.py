@@ -412,8 +412,7 @@ class SpaceService:
                     raise UnauthorizedException(
                         "User does not have permission to edit space"
                     )
-                if not current.is_personal():
-                    require_retention_manage(self.user)
+                require_retention_manage(self.user)
                 await acquire_exclusive(self.repo.session, GallringSubject.FLOW_HISTORY)
                 changes_retention = True
         if changes_retention or is_provided(icon_id):

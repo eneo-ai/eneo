@@ -312,26 +312,6 @@ it("asks a space admin without retention_manage for the permission and keeps the
   await expectNoAxeViolations(container);
 });
 
-it("lets the owner of a personal space change its time without retention_manage", () => {
-  showSettings(
-    undefined,
-    [],
-    [],
-    "personal",
-    makeSpace({
-      overrides: {
-        personal: true,
-        data_retention_days: 30,
-        completion_models: [],
-        embedding_models: []
-      }
-    }),
-    []
-  );
-  const retention = screen.getByRole("textbox", { name: "Gallring av konversationshistorik" });
-  expect(retention.hasAttribute("disabled")).toBe(false);
-});
-
 it("shows the retention policy read-only to someone who may not edit the space", async () => {
   const { container } = showSettings(
     undefined,
