@@ -272,7 +272,9 @@ export function StepDeliverySection({
   // and the core rewrites it when a new name is saved.
   const self = flow.steps.find((step) => step.id === stepId);
   const order = self?.step_order ?? 0;
-  // A later AI step can read this one through its prompt, which lives on its assistant.
+  // A later AI step can read this one through its prompt, which lives on its
+  // assistant. Only a current prompt counts: one read before a change may name
+  // this step when the saved one no longer does.
   const later = flow.steps.filter((step) => step.step_order > order && !sendsRunResult(step));
   const { prompts, current } = useStepPromptsState(flow.id, later, true);
   const readers = self ? stepReadersByNameOrPlace(self, flow.steps, prompts) : [];

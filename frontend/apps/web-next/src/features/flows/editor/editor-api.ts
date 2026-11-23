@@ -121,32 +121,39 @@ export function useStepPrompts(
   steps: readonly FlowStep[],
   enabled: boolean
 ): StepPrompts {
-  return useStepPromptsState(flowId, steps, enabled).prompts;
+  return promptsOf(useStepAssistants(flowId, steps, enabled));
 }
 
 /**
- * `useStepPrompts`, and whether every prompt is current: read, and not
+ * The prompts that are current, and whether every prompt is: read, and not
  * invalidated or refused since. A prompt kept from an earlier read can name a
- * step the newer one no longer does, or miss one it does.
+ * step the newer one no longer does, or miss one it does, so it is left out.
+ * A read of current data again keeps it (`staleTime` is infinite).
  */
 export function useStepPromptsState(
   flowId: string,
   steps: readonly FlowStep[],
   enabled: boolean
 ): { prompts: StepPrompts; current: boolean } {
-  const assistants = useQueries({
+  const assistants = useStepAssistants(flowId, steps, enabled);
+  const current = assistants.filter((query) => query.isSuccess && !query.isStale);
+  return { prompts: promptsOf(current), current: current.length === assistants.length };
+}
+
+function useStepAssistants(flowId: string, steps: readonly FlowStep[], enabled: boolean) {
+  return useQueries({
     queries: steps
       .filter((step) => stepUsesModel(step))
       .map((step) => ({ ...flowAssistantQueryOptions(flowId, step.assistant_id), enabled }))
   });
-  return {
-    prompts: new Map(
-      assistants.flatMap((query) =>
-        query.data ? [[query.data.id, query.data.prompt?.text ?? ""] as [string, string]] : []
-      )
-    ),
-    current: assistants.every((query) => query.isSuccess && !query.isStale)
-  };
+}
+
+function promptsOf(assistants: readonly { data?: FlowAssistant }[]): StepPrompts {
+  return new Map(
+    assistants.flatMap((query) =>
+      query.data ? [[query.data.id, query.data.prompt?.text ?? ""] as [string, string]] : []
+    )
+  );
 }
 
 export function toolOptionsQueryOptions(flowId: string) {

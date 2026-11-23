@@ -3392,6 +3392,36 @@ describe("FlowStepEditor Leverans", () => {
     expect(within(delivery).queryByText(messages.flow_step_editor_delivery_unread_off)).toBeNull();
   }, 20_000);
 
+  it("stops naming a reader known only from its prompt once that prompt is invalidated, and while it cannot be read again", async () => {
+    routeAssistants({ "assistant-3": "Jämför med {{Sammanfatta}}." });
+    const flow = makeFlow({
+      steps: [
+        text(1, "Sammanfatta"),
+        text(2, "Granska", { input_source: "flow_input" }),
+        text(3, "Skriv svar", { input_source: "flow_input" })
+      ]
+    });
+    const { queryClient } = renderEditor(flow);
+    const delivery = await section();
+    const reader = "Läses av Steg 3: Skriv svar.";
+    await within(delivery).findByText(reader);
+    const key = flowEditorKeys.assistant(flow.id, "assistant-3");
+    // Reading current data again keeps the line while the read is under way.
+    const reread = queryClient.refetchQueries({ queryKey: key });
+    expect(within(delivery).getByText(reader)).toBeTruthy();
+    await reread;
+    expect(within(delivery).getByText(reader)).toBeTruthy();
+    routeAssistants({}, ["assistant-3"]);
+    // Invalidated: a newer draft may no longer name the step.
+    await queryClient.invalidateQueries({ queryKey: key, refetchType: "none" });
+    await waitFor(() => expect(within(delivery).queryByText(reader)).toBeNull());
+    // Read again and refused: the line stays away, and no "unread" claim takes its place.
+    await queryClient.refetchQueries({ queryKey: key });
+    await waitFor(() => expect(queryClient.getQueryState(key)?.status).toBe("error"));
+    expect(within(delivery).queryByText(reader)).toBeNull();
+    expect(within(delivery).queryByText(messages.flow_step_editor_delivery_unread_off)).toBeNull();
+  }, 20_000);
+
   it("keeps naming a known reader while another later prompt cannot be read", async () => {
     routeAssistants({ "assistant-3": "Jämför med {{Sammanfatta}}." }, ["assistant-2"]);
     renderEditor(
