@@ -3,6 +3,7 @@
   "releases": [
     {
       "version": "2.3.3",
+      "date": "2026-11-23",
       "entries": [
         {
           "id": "app-run-transcript-download",
