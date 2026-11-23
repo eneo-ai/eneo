@@ -825,7 +825,7 @@ it("agrees in Leverans, on the card that sends and in the removal dialog that a 
   expect(await within(delivery).findByText("Läses av Steg 3: Skicka.")).toBeTruthy();
   expect(
     within(delivery).getByText(
-      "Skickas till mottagare.example.org i en header i steget som skickar körningens resultat."
+      "Används i en header i steget som skickar körningens resultat till mottagare.example.org."
     )
   ).toBeTruthy();
 

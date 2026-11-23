@@ -3522,7 +3522,7 @@ describe("FlowStepEditor Leverans", () => {
   it("names the step that sends the run's result as a reader when one of its headers names the step", async () => {
     routeAssistants();
     const inHeader =
-      "Skickas till mottagare.example.org i en header i steget som skickar körningens resultat.";
+      "Används i en header i steget som skickar körningens resultat till mottagare.example.org.";
     const reading = (order: number, value = "{{Sammanfatta}}") =>
       makeStep({
         ...sender(order),
@@ -3553,7 +3553,7 @@ describe("FlowStepEditor Leverans", () => {
         "Ingår inte i körningens resultat som skickas till mottagare.example.org. Slå på Ta med i körningens resultat ovan om det ska följa med."
       )
     ).toBeTruthy();
-    // Its text still goes to the receiver, in the header: said right under the
+    // A header of the step that sends names it: said right under the
     // line about the result, before the button that opens the step that sends.
     const headerLine = within(delivery).getByText(inHeader);
     const follows = (a: Node, b: Node) =>

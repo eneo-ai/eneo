@@ -2230,7 +2230,7 @@
   "flow_step_editor_delivery_read_by": "Läses av {steps}.",
   "flow_step_editor_delivery_sent_to": "Skickas till {host} när körningen är klar.",
   "flow_step_editor_delivery_not_sent_to": "Ingår inte i körningens resultat som skickas till {host}. Slå på Ta med i körningens resultat ovan om det ska följa med.",
-  "flow_step_editor_delivery_sent_in_header": "Skickas till {host} i en header i steget som skickar körningens resultat.",
+  "flow_step_editor_delivery_sent_in_header": "Används i en header i steget som skickar körningens resultat till {host}.",
   "flow_step_editor_delivery_no_sender": "Flödet har inget steg som skickar körningens resultat.",
   "flow_step_editor_delivery_no_address": "Inget skickas förrän utskicket har en adress.",
   "flow_step_editor_delivery_open_sender": "Öppna utskickssteget",

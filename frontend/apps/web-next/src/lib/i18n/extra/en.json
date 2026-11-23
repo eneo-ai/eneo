@@ -2230,7 +2230,7 @@
   "flow_step_editor_delivery_read_by": "Read by {steps}.",
   "flow_step_editor_delivery_sent_to": "Sent to {host} when the run is complete.",
   "flow_step_editor_delivery_not_sent_to": "Not part of the run's result sent to {host}. Turn on Include in the run's result above if it should go with it.",
-  "flow_step_editor_delivery_sent_in_header": "Sent to {host} in a header of the step that sends the run's result.",
+  "flow_step_editor_delivery_sent_in_header": "Named in a header of the step that sends the run's result to {host}.",
   "flow_step_editor_delivery_no_sender": "The flow has no step that sends the run's result.",
   "flow_step_editor_delivery_no_address": "Nothing is sent until the step that sends has an address.",
   "flow_step_editor_delivery_open_sender": "Open the step that sends",

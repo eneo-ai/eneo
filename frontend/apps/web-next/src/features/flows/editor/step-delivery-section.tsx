@@ -328,8 +328,9 @@ export function StepDeliverySection({
         : included
           ? t("flow_step_editor_delivery_sent_to", { host })
           : t("flow_step_editor_delivery_not_sent_to", { host });
-  // Left out of the result, the step's text still goes to the receiver where a
-  // header of the step that sends names it: the core fills headers in as it sends.
+  // Left out of the result, the step can still be named in a header of the
+  // step that sends: the core fills headers in as it sends. With two headers
+  // of one name only the last is sent, so the line says the step is named there.
   const headerLine =
     sender &&
     host &&
