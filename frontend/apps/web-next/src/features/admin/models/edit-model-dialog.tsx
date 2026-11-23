@@ -206,9 +206,12 @@ function EditModelForm({
     ...modelProvidersQueryOptions(browserApi),
     enabled: kind === "transcription"
   });
-  const realtimeEligibility = providers.data?.find(
-    (provider) => provider.id === model.provider_id
-  )?.realtime_eligibility;
+  // A model without a provider cannot carry live text: the backend answers the
+  // same for it. Otherwise the provider's own answer, once the list is here.
+  const realtimeEligibility =
+    model.provider_id == null
+      ? "unsupported_provider"
+      : providers.data?.find((provider) => provider.id === model.provider_id)?.realtime_eligibility;
   const realtimeRefusal = realtimeRefusalKey(realtimeEligibility);
   // A saved mark can always be kept or turned off, even when the provider no
   // longer carries live text; only turning it on needs an eligible provider.
@@ -515,10 +518,15 @@ function EditModelForm({
             <div className="flex flex-col gap-1.5">
               <Label className="flex items-center justify-between gap-2 font-normal">
                 {t("live_transcription_support")}
+                {/* Locked rather than disabled: it stays in the tab order, so a
+                    keyboard or screen reader user reaches it and hears why. */}
                 <Switch
                   checked={realtime}
-                  onCheckedChange={setRealtime}
-                  disabled={realtimeLocked}
+                  onCheckedChange={(next) => {
+                    if (!realtimeLocked) setRealtime(next);
+                  }}
+                  aria-disabled={realtimeLocked || undefined}
+                  className="aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
                   aria-describedby={
                     realtimeRefusal ? `${realtimeHelpId} ${realtimeUnavailableId}` : realtimeHelpId
                   }

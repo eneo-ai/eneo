@@ -454,16 +454,42 @@ describe("live text on a transcription model", () => {
     );
   });
 
+  /** Locked but reachable: Tab stops on it and reads the reason; a press changes nothing. */
+  function expectLockedAndReachable(toggle: HTMLElement, reason: string) {
+    expect(toggle.getAttribute("aria-disabled")).toBe("true");
+    // Natively disabled controls leave the tab order.
+    expect((toggle as HTMLButtonElement).disabled).toBe(false);
+    toggle.focus();
+    expect(document.activeElement).toBe(toggle);
+    expect(descriptions(toggle)).toContain(reason);
+    // Space and Enter press a button by clicking it.
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+  }
+
   it.each(Object.entries(REASONS))(
     "is locked with what to do when the provider says %s",
     async (eligibility, reason) => {
       providersSay({ p1: eligibility });
       const toggle = await editLiveTranscription(transcriptionModel("p1"));
       await screen.findByText(reason);
-      expect((toggle as HTMLButtonElement).disabled).toBe(true);
-      expect(descriptions(toggle)).toContain(reason);
+      expectLockedAndReachable(toggle, reason);
+      fireEvent.click(screen.getByRole("button", { name: "Spara" }));
+      await waitFor(() =>
+        expect(api.PUT.mock.calls[0]?.[1]?.body).toMatchObject({ supports_realtime: false })
+      );
     }
   );
+
+  it("is locked with what to do for a model without a provider", async () => {
+    providersSay({ p1: "eligible" });
+    const toggle = await editLiveTranscription({
+      ...transcriptionModel("p1"),
+      provider_id: null
+    } as unknown as AdminModel);
+    await screen.findByText(REASONS.unsupported_provider);
+    expectLockedAndReachable(toggle, REASONS.unsupported_provider);
+  });
 
   it("can turn off a saved mark the provider no longer carries", async () => {
     providersSay({ p1: "endpoint_required" });

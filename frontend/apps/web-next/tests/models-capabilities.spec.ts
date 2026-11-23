@@ -110,7 +110,14 @@ test(
       {}
     );
     const form = await edit();
-    await expect(form.getByRole("switch", { name: "Livetext", exact: true })).toBeDisabled();
+    const live = form.getByRole("switch", { name: "Livetext", exact: true });
+    await expect(live).toHaveAttribute("aria-disabled", "true");
+    // Locked, yet reachable with Tab so the reason is read; Space changes nothing.
+    await form.getByLabel("Pris per minut (USD)").focus();
+    await page.keyboard.press("Tab");
+    await expect(live).toBeFocused();
+    await page.keyboard.press("Space");
+    await expect(live).toHaveAttribute("aria-checked", "false");
     await expect(
       form.getByText(
         "Ange adressen till servern eller gatewayen på leverantören. OpenAI:s egen tjänst har inte vLLM:s realtids-API.",
