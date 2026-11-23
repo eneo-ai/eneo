@@ -143,7 +143,7 @@ async def create_tenant_transcription_model(
         "off always works."
     ),
     response_model=TranscriptionModelPublic,
-    responses=responses.get_responses([403, 404, 409]),
+    responses=responses.get_responses([400, 403, 404, 409]),
 )
 @endpoint_access(
     authentication=Authentication.USER,
