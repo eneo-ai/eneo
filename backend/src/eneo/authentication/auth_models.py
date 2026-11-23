@@ -194,7 +194,15 @@ def audit_actor_for(user: "UserInDB") -> tuple[UUID | None, ActorType]:
     Service keys have no real user row, so the synthetic user.id must not be
     written to audit_log.actor_id. The audit log stores those actors through
     actor_api_key_id instead.
+
+    A widget visitor is synthetic too (``build_visitor_user``): its id is a
+    pseudonymous visitor id, not a users row, so it gets its own actor type
+    and no actor_id. The entry's metadata carries the visitor id. Decided on
+    the context object itself, so a user double with a truthy attribute of
+    that name is still audited as a user.
     """
+    if isinstance(getattr(user, "active_widget", None), WidgetVisitorContext):
+        return None, ActorType.WIDGET_VISITOR
     if is_service_api_key(user):
         return None, ActorType.API_KEY
     return user.id, ActorType.USER

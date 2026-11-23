@@ -1,6 +1,7 @@
 import pytest
 
 from eneo.allowed_origins.origin_matching import (
+    is_too_broad_wildcard,
     normalize_origin_pattern,
     origin_matches_pattern,
 )
@@ -203,3 +204,50 @@ def test_ipv6_hosts_compare_in_one_form_on_both_sides():
     assert origin_matches_pattern("http://[0:0:0:0:0:0:0:1]", "0:0:0:0:0:0:0:1")
     assert origin_matches_pattern("http://[::1]", "0:0:0:0:0:0:0:1")
     assert not origin_matches_pattern("http://[::2]", "0:0:0:0:0:0:0:1")
+
+
+# --- wildcard breadth (security audit L6) -------------------------------------
+
+
+@pytest.mark.parametrize(
+    "pattern", ["https://*.se", "https://*.se:443", "HTTP://*.LOCALHOST:*"]
+)
+def test_a_wildcard_needs_at_least_two_labels_after_it(pattern):
+    with pytest.raises(ValueError, match="two labels"):
+        normalize_origin_pattern(pattern)
+    # A pattern saved before the rule still reads, so it can be shown and fixed.
+    stored = normalize_origin_pattern(pattern, allow_too_broad=True)
+    assert stored == pattern.lower()
+    assert is_too_broad_wildcard(stored)
+
+
+@pytest.mark.parametrize(
+    "pattern",
+    [
+        "https://*.kommun.se",
+        "https://*.kommun.se:*",
+        "https://kommun.se",
+        "https://[::1]:8080",
+    ],
+)
+def test_two_labels_after_the_wildcard_are_enough(pattern):
+    assert normalize_origin_pattern(pattern) == pattern
+    assert not is_too_broad_wildcard(pattern)
+
+
+@pytest.mark.parametrize(
+    "pattern,expected",
+    [
+        ("https://*.se", None),
+        ("https://*.se:443", None),
+        ("https://*.kommun.se:*", "https://*.kommun.se:*"),
+        ("https://*.co.uk", "https://*.co.uk"),
+    ],
+)
+def test_wildcard_breadth_matches_the_editor(pattern, expected):
+    # The same rows as frontend/packages/eneo-js/src/widgets/origins.test.js.
+    if expected is None:
+        with pytest.raises(ValueError):
+            normalize_origin_pattern(pattern)
+    else:
+        assert normalize_origin_pattern(pattern) == expected

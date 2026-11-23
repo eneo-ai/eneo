@@ -53,6 +53,21 @@ class WidgetDetachTemplate(BaseModel):
     revision: int = Field(ge=0)
 
 
+class WidgetExternalToolPublic(BaseModel):
+    id: UUID
+    name: str
+
+
+class WidgetExternalToolServerPublic(BaseModel):
+    """An MCP server outside Eneo, configured in the widget's space, with the
+    tools the assistant has switched on there. Restrictions at run time can
+    narrow what a turn calls."""
+
+    id: UUID
+    name: str
+    tools: list[WidgetExternalToolPublic]
+
+
 class WidgetTemplateLinkPublic(BaseModel):
     """The template a widget follows and which parts it governs."""
 
@@ -112,6 +127,9 @@ class WidgetPublic(BaseModel):
     template: Optional[WidgetTemplateLinkPublic] = Field(
         default=None,
         description="Set when the widget follows a template.",
+    )
+    external_tools: list[WidgetExternalToolServerPublic] = Field(
+        description="The assistant’s enabled tools on external MCP servers."
     )
     created_by_user_id: Optional[UUID] = None
     activated_by_user_id: Optional[UUID] = None
@@ -233,6 +251,11 @@ class WidgetOverviewItem(BaseModel):
             " served within the policy."
         ),
     )
+    external_tools: list[str] = Field(
+        description=(
+            "Names of the assistant's MCP servers outside Eneo with a tool switched on."
+        ),
+    )
 
 
 class WidgetOverviewTotals(BaseModel):
@@ -287,6 +310,14 @@ class WidgetPolicyPublic(BaseModel):
     allow_bot_protection_none: bool
     min_retention_days: int
     max_retention_days: int
+    allow_external_tools: bool = Field(
+        description=(
+            "Whether widgets may publish assistants with tools switched on at MCP"
+            " servers outside Eneo. Default true; off, such widgets cannot be"
+            " activated, and live ones serve visitors without those tools and are"
+            " flagged in the overview."
+        )
+    )
 
 
 class WidgetPolicyUpdate(BaseModel):
@@ -298,3 +329,4 @@ class WidgetPolicyUpdate(BaseModel):
     allow_bot_protection_none: Optional[bool] = None
     min_retention_days: Optional[int] = Field(default=None, ge=0, le=3650)
     max_retention_days: Optional[int] = Field(default=None, ge=0, le=3650)
+    allow_external_tools: Optional[bool] = None

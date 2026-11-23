@@ -266,6 +266,10 @@ class ActionType(str, Enum):
     WIDGET_ARCHIVED = "widget_archived"
     WIDGET_POLICY_UPDATED = "widget_policy_updated"
     WIDGET_BUDGET_EXHAUSTED = "widget_budget_exhausted"
+    WIDGET_PREVIEW_TOKEN_MINTED = "widget_preview_token_minted"
+    # A visitor turn was approved to attempt an external tool. The proxy
+    # may refuse it locally. Recorded regardless of widget retention.
+    WIDGET_EXTERNAL_TOOL_CALLED = "widget_external_tool_called"
     WIDGET_TEMPLATE_CREATED = "widget_template_created"
     WIDGET_TEMPLATE_UPDATED = "widget_template_updated"
     WIDGET_TEMPLATE_DELETED = "widget_template_deleted"
@@ -275,7 +279,9 @@ class ActionType(str, Enum):
 # Logged whatever the tenant's audit configuration says: a tenant admin can
 # switch off categories, actions and the whole audit log, and none of those may
 # hide a change to how the organisation signs in, a session renewing itself,
-# which account a sign-in identity reaches, or an admin re-opening that.
+# which account a sign-in identity reaches, an admin re-opening that, the
+# operator taking a token to act as someone, or an anonymous widget visitor's
+# turn calling a tool outside Eneo.
 ALWAYS_AUDITED_ACTIONS: frozenset[ActionType] = frozenset(
     {
         ActionType.FEDERATION_UPDATED,
@@ -285,5 +291,6 @@ ALWAYS_AUDITED_ACTIONS: frozenset[ActionType] = frozenset(
         ActionType.IDENTITY_REBINDING_UPDATED,
         ActionType.IDENTITY_MIGRATION_WINDOW_UPDATED,
         ActionType.USER_ACCESS_TOKEN_ISSUED,
+        ActionType.WIDGET_EXTERNAL_TOOL_CALLED,
     }
 )
