@@ -9,8 +9,13 @@ import { makeFlow, makeStep } from "./flow-fixtures";
 import { FlowSettings, SettingsSummary } from "./flow-settings";
 
 const backend = vi.hoisted(() => ({ GET: vi.fn(), PUT: vi.fn() }));
+const toastError = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/api/browser", () => ({ browserApi: backend }));
 vi.mock("@/lib/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/toast", async (importOriginal) => {
+  const { toast } = await importOriginal<typeof import("@/lib/toast")>();
+  return { toast: { ...toast, error: toastError } };
+});
 
 const configured = {
   state: "configured",
@@ -37,6 +42,8 @@ const capRefusal = () =>
     context: { cap_days: 7, cap_origin: "space" }
   });
 const capText = "Ytan tillåter högst 7 dagar.";
+/** The cap's status text, not the live region that speaks it on its own timer. */
+const capStatus = () => screen.queryByText(capText, { ignore: "[aria-live], [aria-live] *" });
 
 /** A GET that answers only when released, as a slow read in flight. */
 function heldRead() {
@@ -56,6 +63,7 @@ afterEach(() => {
   cleanup();
   backend.GET.mockReset();
   backend.PUT.mockReset();
+  toastError.mockReset();
 });
 
 function renderSettings(permissions: Permission[]) {
@@ -250,6 +258,25 @@ describe("flow retention", () => {
     expect(
       screen.queryByText(/Ytan tillåter högst/, { ignore: "[aria-live], [aria-live] *" })
     ).toBeNull();
+  });
+
+  it("keeps the cap message when a resubmit fails for another reason", async () => {
+    backend.GET.mockResolvedValue(settings(null, { days: 60 }));
+    backend.PUT.mockRejectedValueOnce(capRefusal()).mockRejectedValueOnce(
+      new EneoApiError("Internal error", { status: 500 })
+    );
+    const days = (await openDialog()) as HTMLInputElement;
+    fireEvent.change(days, { target: { value: "10" } });
+    fireEvent.blur(days);
+    const saveButton = screen.getByRole("button", { name: "Spara inställningar" });
+    fireEvent.click(saveButton);
+    expect(await screen.findByText(capText)).toBeTruthy();
+    await waitFor(() => expect(days.readOnly).toBe(false));
+    fireEvent.click(saveButton);
+    await waitFor(() => expect(toastError).toHaveBeenCalledTimes(1));
+    await settle();
+    expect(capStatus()).toBeTruthy();
+    expect(days.getAttribute("aria-invalid")).toBe("true");
   });
 
   it("empties the flow's own time to use the space's again", async () => {
