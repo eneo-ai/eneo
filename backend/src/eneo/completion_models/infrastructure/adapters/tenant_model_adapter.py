@@ -8,6 +8,7 @@ import json
 import logging
 import re
 import uuid
+from collections import Counter
 from collections.abc import Callable, Sized
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
@@ -643,6 +644,21 @@ CONFIRMATION_UNAVAILABLE_RESULT: dict[str, Any] = {
 }
 
 
+# The tool result of a call that needs the person's decision but shares its
+# call id with another call of the same round. A decision names a call by its
+# id, so it could not tell the two apart. The call is not run.
+SHARED_CALL_ID_RESULT: dict[str, Any] = {
+    "denied": True,
+    "reason": "shared_call_id",
+    "message": (
+        "This action needs the person's decision, but it shared its call id "
+        "with another call in the same response, so it could not be decided "
+        "on its own and was not done. Call it again on its own if it is "
+        "still needed."
+    ),
+}
+
+
 # What the model is told when the person was asked to confirm a call and it
 # did not run: they declined it, or the confirmation timed out unanswered.
 CONFIRMATION_DECLINED_MESSAGE = (
@@ -676,15 +692,13 @@ def _denial_payload(
     return {"denied": True}
 
 
-def _approval_round(
+def _needs_decision(
     mcp_proxy: "MCPProxySession",
-    tool_metadata: list[ToolCallMetadata],
+    tool_metadata: ToolCallMetadata,
     *,
     require_tool_approval: bool,
-) -> tuple[set[str], set[str], list[ToolCallMetadata]]:
-    """Who decides each call of one tool round: the ids of the calls that run
-    without asking, the ids of the calls that need the person's
-    confirmation, and the calls to ask the person about.
+) -> bool:
+    """Whether a call waits for the person's decision.
 
     Tools of Eneo's own loopback servers (knowledge, files, built-in
     providers) are core capabilities and run unasked, unless the tool
@@ -694,21 +708,40 @@ def _approval_round(
     Internal is a property of the server entity, not of its name, so an
     external server named like an internal one still goes through approval.
     """
-    internal: set[str] = set()
-    confirmation: set[str] = set()
-    for tm in tool_metadata:
-        if tm.tool_call_id is None or tm.mcp_tool_name is None:
-            continue
-        if mcp_proxy.requires_confirmation(tm.mcp_tool_name):
-            confirmation.add(tm.tool_call_id)
-        elif mcp_proxy.is_internal_tool(tm.mcp_tool_name):
-            internal.add(tm.tool_call_id)
+    name = tool_metadata.mcp_tool_name
+    if name is not None and mcp_proxy.requires_confirmation(name):
+        return True
+    return require_tool_approval and (
+        name is None or not mcp_proxy.is_internal_tool(name)
+    )
+
+
+def _approval_round(
+    mcp_proxy: "MCPProxySession",
+    tool_metadata: list[ToolCallMetadata],
+    *,
+    require_tool_approval: bool,
+) -> tuple[set[str], set[str], list[ToolCallMetadata]]:
+    """Who decides each call of one tool round: the ids of the calls that run
+    without asking, the ids of the calls that need the person's
+    confirmation, and the calls to ask the person about (_needs_decision).
+
+    Each call is classified on its own, but the ids returned stand for
+    calls: where someone can be asked, a call that needs a decision has its
+    own id (_split_shared_id_calls).
+    """
     to_ask = [
         tm
         for tm in tool_metadata
-        if tm.tool_call_id in confirmation
-        or (require_tool_approval and tm.tool_call_id not in internal)
+        if _needs_decision(mcp_proxy, tm, require_tool_approval=require_tool_approval)
     ]
+    confirmation = {
+        tm.tool_call_id
+        for tm in to_ask
+        if tm.tool_call_id is not None
+        and tm.mcp_tool_name is not None
+        and mcp_proxy.requires_confirmation(tm.mcp_tool_name)
+    }
     asked = {tm.tool_call_id for tm in to_ask}
     unasked = {
         tm.tool_call_id
@@ -716,6 +749,33 @@ def _approval_round(
         if tm.tool_call_id is not None and tm.tool_call_id not in asked
     }
     return unasked, confirmation, to_ask
+
+
+def _split_shared_id_calls(
+    mcp_proxy: "MCPProxySession",
+    calls: list[_RoundCall],
+    *,
+    require_tool_approval: bool,
+) -> tuple[list[_RoundCall], list[_RoundCall]]:
+    """Set apart the calls that need the person's decision under a call id
+    another call of the round shares.
+
+    A decision names a call by its id, so it could not tell such calls apart
+    and might let one run that nobody was asked about. They are refused
+    without asking (SHARED_CALL_ID_RESULT); the calls that need no decision
+    still run.
+    """
+    uses = Counter(call["id"] for call, _ in calls)
+    decidable: list[_RoundCall] = []
+    shared: list[_RoundCall] = []
+    for call, tool_metadata in calls:
+        if uses[call["id"]] > 1 and _needs_decision(
+            mcp_proxy, tool_metadata, require_tool_approval=require_tool_approval
+        ):
+            shared.append((call, tool_metadata))
+        else:
+            decidable.append((call, tool_metadata))
+    return decidable, shared
 
 
 def _unasked_round(
@@ -780,6 +840,7 @@ def _answer_calls_not_run(
     *,
     messages: list[dict[str, Any]],
     denied: list[_RoundCall],
+    shared_id: list[_RoundCall],
     over_limit: list[_RoundCall],
     decisions: dict[str, tuple[bool, str | None]],
     unasked_call_ids: set[str],
@@ -789,7 +850,9 @@ def _answer_calls_not_run(
     """Answer the calls of a streamed round that did not run.
 
     A call the person denied, or that nobody could be asked about, gets its
-    denial as the tool result; a call beyond a limit gets the limit message.
+    denial as the tool result; a call that needed a decision under a shared
+    call id gets SHARED_CALL_ID_RESULT; a call beyond a limit gets the limit
+    message.
     The records returned show the reader what happened to each, built from
     the call's own parsed metadata.
     """
@@ -816,6 +879,19 @@ def _answer_calls_not_run(
                 approved=False,
                 result_status="timeout_denied" if timed_out else "denied",
                 result=json.dumps(denial_payload),
+            )
+        )
+    shared_id_payload = json.dumps(SHARED_CALL_ID_RESULT)
+    for tc, tool_metadata in shared_id:
+        messages.append(
+            {"role": "tool", "tool_call_id": tc["id"], "content": shared_id_payload}
+        )
+        denied_metadata.append(
+            replace(
+                tool_metadata,
+                approved=False,
+                result_status="denied",
+                result=shared_id_payload,
             )
         )
     denied_metadata.extend(_refuse_over_limit_calls(over_limit, messages=messages))
@@ -3551,6 +3627,17 @@ class TenantModelAdapter(CompletionModelAdapter):
                         if require_tool_approval or approval_context is not None
                         else None
                     )
+                    # A decision names calls by id, so where someone can be
+                    # asked, a call that needs one must have its own id. Where
+                    # nobody can, a confirmation call is refused by its id,
+                    # with every call that shares it (_unasked_round).
+                    shared_id_calls: list[_RoundCall] = []
+                    if round_approval_manager is not None:
+                        round_calls, shared_id_calls = _split_shared_id_calls(
+                            mcp_proxy,
+                            round_calls,
+                            require_tool_approval=require_tool_approval,
+                        )
                     window = (
                         call_budget.available
                         if round_approval_manager is not None
@@ -3799,6 +3886,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                     denied_metadata = _answer_calls_not_run(
                         messages=messages,
                         denied=denied_calls,
+                        shared_id=shared_id_calls,
                         over_limit=over_limit_calls,
                         decisions=decision_map,
                         unasked_call_ids=unasked_call_ids,

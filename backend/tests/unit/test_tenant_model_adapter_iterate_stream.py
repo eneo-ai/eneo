@@ -3778,6 +3778,47 @@ async def test_a_turn_that_cannot_ask_still_runs_an_external_call_beside_a_refus
     assert _statuses_of(completions, "call_ext") == ["approved", "succeeded"]
 
 
+async def test_a_call_that_needs_a_decision_and_shares_its_id_is_refused_unasked():
+    """A person's decision names a call by its id. When a call that needs one
+    shares its id with a call that runs unasked, a decision could not tell
+    them apart: the call that needs it is refused without asking, and the
+    other still runs."""
+    messages: list[dict] = []
+    manager = _decided()
+
+    proxy, completions = await _confirming_round(
+        [
+            _tool_call_delta_chunk(
+                index=0, tool_call_id="shared", tool_name="flows__read_flow"
+            ),
+            _tool_call_delta_chunk(index=0, arguments="{}"),
+            _tool_call_delta_chunk(
+                index=1, tool_call_id="shared", tool_name="server__tool"
+            ),
+            _tool_call_delta_chunk(index=1, arguments="{}", finish_reason="tool_calls"),
+        ],
+        messages,
+        require_tool_approval=True,
+        approval_manager=manager,
+        approval_context=_approval_context(),
+    )
+
+    assert proxy.calls == [[("flows__read_flow", {})]]
+    manager.request_approval.assert_not_awaited()
+    assert json.dumps(tenant_model_adapter.SHARED_CALL_ID_RESULT) in [
+        message["content"]
+        for message in messages
+        if message.get("role") == "tool" and message["tool_call_id"] == "shared"
+    ]
+    assert [
+        (metadata.approved, metadata.result_status)
+        for completion in _events(completions, ResponseType.TOOL_CALL)
+        for metadata in completion.tool_calls_metadata or []
+        if metadata.mcp_tool_name == "server__tool"
+        and metadata.result_status != "pending"
+    ] == [(False, "denied")]
+
+
 async def test_only_the_call_that_requires_confirmation_waits_for_the_person():
     """An internal tool without the hint and an external tool, in a request
     that does not require approval, run as before, whatever the person
