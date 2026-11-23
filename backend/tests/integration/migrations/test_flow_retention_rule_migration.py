@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from uuid import uuid4
 
 import psycopg2
 import pytest
+from sqlalchemy.dialects.postgresql.psycopg2 import (
+    PGDialect_psycopg2 as psycopg2_dialect,
+)
 
 from alembic import command
 from alembic.config import Config
+from eneo.flows.infrastructure.flow_retention_repo import FlowRetentionRepository
 from tests.integration.migrations.alembic_test_utils import reset_public_schema
 
 pytestmark = pytest.mark.migration_isolation
@@ -34,6 +39,10 @@ REMOVED_CHECKS = {
     "ck_flows_flow_run_history_retention_complete",
     "ck_flows_flow_run_history_retention_mode",
 }
+GUIDE = (
+    Path(__file__).parents[4]
+    / "frontend/apps/docs-site/src/content/guides/flows/retention-policy.mdx"
+)
 KEPT_CHECKS = {
     "ck_spaces_data_retention_days_range",
     "ck_flows_flow_run_history_retention_days_range",
@@ -308,3 +317,166 @@ def test_the_downgrade_restores_valid_policies_and_upgrades_again(
 
     command.upgrade(cfg, "head")
     assert _columns(conn) == {("flows", "flow_run_history_retention_days")}
+
+
+def _guide_listing() -> str:
+    """The listing query exactly as the guide prints it for operators."""
+    blocks = re.findall(r"```sql\n(.*?)```", GUIDE.read_text(), flags=re.DOTALL)
+    [query] = [block for block in blocks if "before upgrading" in block]
+    return query
+
+
+def _listing_seed(conn) -> dict[str, object]:
+    """Four runs, all 40 days old, far from every deadline: one the upgrade
+    makes purgeable, the same held, one it makes no longer purgeable, and one
+    it leaves due."""
+    ids = {
+        name: uuid4()
+        for name in ("tenant", "user", "capped", "uncapped", "review", "held_flow")
+        + ("tenant_time", "unchanged")
+    }
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO tenants (
+                id, name, display_name, quota_limit, provisioning, security_enabled,
+                state, flow_run_history_retention_mode, flow_run_history_retention_days
+            ) VALUES (%s, %s, %s, 100000, false, false, 'active', 'preserve', 30)
+            """,
+            (ids["tenant"], f"listing-{ids['tenant']}", "Listing"),
+        )
+        cur.execute(
+            "INSERT INTO users (id, tenant_id, username, email, used_tokens, state) "
+            "VALUES (%s, %s, %s, %s, 0, 'active')",
+            (
+                ids["user"],
+                ids["tenant"],
+                f"listing-{ids['user'].hex[:8]}",
+                f"listing-{ids['user'].hex[:12]}@example.test",
+            ),
+        )
+        organization = uuid4()
+        cur.execute(
+            "INSERT INTO spaces (id, name, tenant_id) VALUES (%s, %s, %s)",
+            (organization, f"Listing {organization}", ids["tenant"]),
+        )
+        for space, days in (("capped", 7), ("uncapped", None)):
+            cur.execute(
+                "INSERT INTO spaces (id, name, tenant_id, tenant_space_id, "
+                "data_retention_days) VALUES (%s, %s, %s, %s, %s)",
+                (
+                    ids[space],
+                    f"Listing {space} {ids[space]}",
+                    ids["tenant"],
+                    organization,
+                    days,
+                ),
+            )
+        flows = {
+            # A review mode kept these runs out of every purge.
+            "review": ("capped", "review_required", 10),
+            "held_flow": ("capped", "review_required", 10),
+            # The organisation's preserve time made it due; its space has none.
+            "tenant_time": ("uncapped", None, None),
+            # Due before through the organisation's 30 days, after through 7.
+            "unchanged": ("capped", None, None),
+        }
+        runs = {}
+        for flow, (space, mode, days) in flows.items():
+            cur.execute(
+                """
+                INSERT INTO flows (
+                    id, name, tenant_id, space_id,
+                    flow_run_history_retention_mode, flow_run_history_retention_days
+                ) VALUES (%s, %s, %s, %s, %s, %s)
+                """,
+                (ids[flow], f"Listing {flow}", ids["tenant"], ids[space], mode, days),
+            )
+            cur.execute(
+                """
+                INSERT INTO flow_versions (
+                    flow_id, version, tenant_id, definition_checksum, definition_json
+                ) VALUES (%s, 1, %s, %s, '{"schema_version": 1, "steps": []}')
+                """,
+                (ids[flow], ids["tenant"], f"listing-{ids[flow]}"),
+            )
+            cur.execute(
+                """
+                INSERT INTO flow_runs (
+                    tenant_id, flow_id, flow_version, principal_user_id, status,
+                    created_at, finished_at
+                ) VALUES (
+                    %s, %s, 1, %s, 'completed',
+                    now() - interval '40 days', now() - interval '40 days'
+                ) RETURNING id
+                """,
+                (ids["tenant"], ids[flow], ids["user"]),
+            )
+            runs[flow] = cur.fetchone()[0]
+        cur.execute(
+            """
+            INSERT INTO flow_retention_holds (
+                tenant_id, flow_id, flow_run_id, reason, review_by, created_by_actor
+            ) VALUES (%s, %s, %s, 'Request', now() + interval '30 days', '{}')
+            """,
+            (ids["tenant"], ids["held_flow"], runs["held_flow"]),
+        )
+    return {"tenant": ids["tenant"], "runs": runs}
+
+
+def test_the_guide_lists_the_runs_whose_eligibility_the_upgrade_changes(
+    migration_db,
+) -> None:
+    """The guide's query, run before the upgrade, agrees with the selector after
+    it at the same moment. Mutants: the query misses a review run, a held run or
+    a run that only the organisation's time made due; it lists an unchanged run;
+    the guide's text drifts from what this test runs."""
+    conn, cfg = migration_db
+    seeded = _listing_seed(conn)
+    runs = {run: name for name, run in seeded["runs"].items()}
+    listing = _guide_listing()
+    with conn.cursor() as cur:
+        # now() is fixed for a transaction: the listing and its moment agree.
+        cur.execute("BEGIN READ ONLY")
+        try:
+            cur.execute("SELECT now()")
+            moment = cur.fetchone()[0]
+            cur.execute(listing)
+            columns = [column.name for column in cur.description]
+            rows = [dict(zip(columns, values)) for values in cur.fetchall()]
+        finally:
+            cur.execute("ROLLBACK")
+    listed = {
+        runs[row["run_id"]]: (row["change"], row["held"])
+        for row in rows
+        if row["run_id"] in runs
+    }
+    assert listed == {
+        "review": ("becomes purgeable", False),
+        "held_flow": ("becomes purgeable", True),
+        "tenant_time": ("no longer purgeable", False),
+    }
+
+    command.upgrade(cfg, RULE_REVISION)
+
+    repository = FlowRetentionRepository(session=None)  # type: ignore[arg-type]
+
+    def selected(query) -> set[str]:
+        compiled = query.compile(
+            dialect=psycopg2_dialect(), compile_kwargs={"render_postcompile": True}
+        )
+        with conn.cursor() as cur:
+            cur.execute(str(compiled), compiled.params)
+            return {runs[run_id] for (run_id,) in cur.fetchall()}
+
+    tenant = seeded["tenant"]
+    due = selected(
+        repository._build_due_flow_run_history_purge_query(now=moment, tenant_id=tenant)
+    )
+    purgeable = selected(
+        repository._build_flow_run_history_purge_batch_query(
+            now=moment, limit=100, tenant_id=tenant
+        )
+    )
+    assert due == {"review", "held_flow", "unchanged"}
+    assert purgeable == due - {"held_flow"}

@@ -98,7 +98,11 @@ an upgrade changes:
   from its Flows. Nothing is removed automatically. Runs that
   `review_required` kept out of a purge are no longer kept: an explicit
   purge removes them once they pass the space's time, so run it with
-  `dry_run` (the default) first.
+  `dry_run` (the default) first. Before upgrading, run the listing query in
+  the guide ("Before upgrading: list the runs whose eligibility changes" in
+  `guides/flows/retention-policy.mdx`) on the old version: it lists every run
+  the upgrade makes purgeable or no longer purgeable, since the old times and
+  modes are gone afterwards.
 - A Flow time longer than its space's is refused with 400 and code 9086
   (`retention_exceeds_space`), naming the cap.
 - Changing a shared space's time needs `retention_manage` as well as the

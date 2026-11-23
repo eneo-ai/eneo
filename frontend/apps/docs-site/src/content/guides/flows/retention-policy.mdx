@@ -24,6 +24,55 @@ There is no automatic Flow run-history deletion. History is deleted only by the 
 
 On upgrade to this version, every Flow's own time is cleared without an audit row and the space's time applies to its Flows, so an administrator should check the spaces' times before the next purge.
 
+### Before upgrading: list the runs whose eligibility changes
+
+The upgrade clears every Flow's and every organisation's run-history time and every retention mode; from then on the space's `data_retention_days` alone decides. Nothing in the database records the old values afterwards. Run this read-only query on the old version, before upgrading, and keep its output. It lists every finished run that the upgrade makes purgeable (for example one a review mode kept out of the purge) or no longer purgeable (for example one that only the organisation's time made due), with `held` showing a legal hold, which protects the run before and after. It judges at the moment it runs (`now()`), and it pastes into `psql` as it stands. Nothing is deleted until an administrator runs the explicit purge.
+
+```sql
+-- Run on the old version, before upgrading. Read-only: lists the runs whose
+-- purge eligibility the upgrade changes, judged at now().
+WITH runs AS (
+  SELECT r.id AS run_id, r.tenant_id, f.space_id, r.flow_id,
+         coalesce(r.finished_at, r.created_at) AS anchor,
+         coalesce(f.flow_run_history_retention_mode,
+                  s.flow_run_history_retention_mode,
+                  t.flow_run_history_retention_mode) AS old_mode,
+         coalesce(f.flow_run_history_retention_days,
+                  s.flow_run_history_retention_days,
+                  t.flow_run_history_retention_days) AS old_days,
+         s.data_retention_days AS new_days,
+         EXISTS (
+           SELECT 1 FROM flow_retention_holds h
+           WHERE h.released_at IS NULL
+             AND (h.ends_at IS NULL OR h.ends_at > now())
+             AND ((h.flow_run_id IS NULL AND h.flow_id = r.flow_id)
+                  OR h.flow_run_id = r.id)
+         ) AS held
+  FROM flow_runs r
+  JOIN flows f ON f.id = r.flow_id AND f.tenant_id = r.tenant_id
+  JOIN spaces s ON s.id = f.space_id AND s.tenant_id = f.tenant_id
+  JOIN tenants t ON t.id = r.tenant_id
+  WHERE r.status IN ('completed', 'failed', 'cancelled')
+), judged AS (
+  SELECT *,
+         coalesce(old_mode = 'preserve'
+                  AND anchor <= now() - make_interval(days => old_days),
+                  false) AS due_before,
+         coalesce(anchor + make_interval(days => new_days) <= now(),
+                  false) AS due_after
+  FROM runs
+)
+SELECT run_id, tenant_id, space_id, flow_id, anchor, old_mode, old_days,
+       new_days, held,
+       CASE WHEN due_after THEN 'becomes purgeable'
+            ELSE 'no longer purgeable' END AS change
+FROM judged
+WHERE due_before <> due_after
+ORDER BY tenant_id, space_id, flow_id, anchor;
+```
+
+A run's delivery blockers (an undelivered audit row or an unresolved webhook) keep it out of the purge before and after, so the query does not repeat them. After the upgrade, a purge with `dry_run` (the default) counts what the new rule selects.
+
 ```mermaid
 flowchart TD
   A[Resolve a Flow's run-history time] --> B{Flow time?}
