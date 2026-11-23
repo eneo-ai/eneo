@@ -185,12 +185,13 @@ export function startAuthoringConversation(
 
 /**
  * Puts a flow the server returned into the cache and marks the space's list
- * stale. A late answer never replaces a newer draft already there: the draft
- * revision only goes up, so a lower one is older.
+ * stale. A late answer never touches a newer draft already there: the draft
+ * revision only goes up, so a lower one is older. Returning `undefined` skips
+ * the write, so the newer entry keeps its state (an invalidation included).
  */
 export function storeFlow(queryClient: QueryClient, flow: FlowPublic): void {
   queryClient.setQueryData<FlowPublic>(flowKeys.flow(flow.id), (cached) =>
-    cached && cached.draft_revision > flow.draft_revision ? cached : flow
+    cached && cached.draft_revision > flow.draft_revision ? undefined : flow
   );
   void queryClient.invalidateQueries({ queryKey: flowKeys.list(flow.space_id) });
 }

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { Permission } from "@/lib/auth/permissions";
-import { flowsAvailable } from "./flows-api";
+import { testQueryClient } from "@/test/render";
+import { makeFlow } from "./flow-fixtures";
+import { flowKeys, flowsAvailable, storeFlow } from "./flows-api";
 
 const userWith = (permissions: Permission[]) => ({
   roles: [{ permissions }],
@@ -32,4 +34,23 @@ describe("flowsAvailable", () => {
       expect(flowsAvailable({ flows_enabled: true }, userWith([permission]))).toBe(true);
     }
   );
+});
+
+describe("storeFlow", () => {
+  it("leaves a newer cached draft as it was, still invalidated, when an older answer arrives", async () => {
+    const queryClient = testQueryClient();
+    const key = flowKeys.flow("flow-1");
+    queryClient.setQueryData(key, makeFlow({ draft_revision: 6 }), { updatedAt: 1000 });
+    await queryClient.invalidateQueries({ queryKey: key, refetchType: "none" });
+    queryClient.setQueryData(flowKeys.list("space-1"), []);
+
+    storeFlow(queryClient, makeFlow({ draft_revision: 5 }));
+
+    const after = queryClient.getQueryState(key)!;
+    expect(queryClient.getQueryData<{ draft_revision: number }>(key)?.draft_revision).toBe(6);
+    expect(after.isInvalidated).toBe(true);
+    expect(after.dataUpdatedAt).toBe(1000);
+    // The space's list is still marked stale.
+    expect(queryClient.getQueryState(flowKeys.list("space-1"))?.isInvalidated).toBe(true);
+  });
 });
