@@ -142,12 +142,11 @@ class FlowRunRetentionPolicyRepository:
         )
 
     async def require_space(self, *, tenant_id: UUID, space_id: UUID) -> UUID:
-        """A managed Space of this organisation, or 404."""
+        """A Space of this organisation, personal ones included, or 404."""
         found = await self.session.scalar(
             sa.select(Spaces.id)
             .where(Spaces.id == space_id)
             .where(Spaces.tenant_id == tenant_id)
-            .where(Spaces.user_id.is_(None))
         )
         if found is None:
             raise NotFoundException("Space not found.")

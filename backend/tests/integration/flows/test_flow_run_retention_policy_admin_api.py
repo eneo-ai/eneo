@@ -460,6 +460,33 @@ async def test_admin_discovers_non_member_spaces_and_flows_for_retention(
     assert personal_flow_targets.status_code == 404, personal_flow_targets.text
 
 
+async def test_the_space_purge_accepts_a_personal_space(
+    client, admin_token, admin_user, db_container
+) -> None:
+    """The purge has always taken any space of the organisation. Mutant: the
+    lookup keeps only shared spaces, so a personal space answers 404."""
+    async with db_container() as container:
+        personal_space = Spaces(
+            name=f"Personal purge target {uuid4()}",
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+        )
+        container.session().add(personal_space)
+        await container.session().flush()
+        personal_space_id = personal_space.id
+
+    preview = await client.post(
+        "/api/v1/settings/flow-run-retention-policy/spaces/"
+        f"{personal_space_id}/purge",
+        json={},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["dry_run"] is True
+    assert preview.json()["scope"] == "space"
+    assert preview.json()["candidate_count"] == 0
+
+
 async def test_deleted_flow_with_history_stays_under_retention_administration(
     client,
     admin_token,
