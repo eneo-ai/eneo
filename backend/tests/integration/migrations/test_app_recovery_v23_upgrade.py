@@ -13,6 +13,7 @@ seed_default_models = expand.seed_default_models
 
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
+_SHARED_PARENT = "202610261200"
 _RELEASE = "202611201300"
 _DEVELOP_INDEXES = "202611190900"
 _DEVELOP = "202611201210"
@@ -62,5 +63,12 @@ def test_upgrade_preserves_indexes_and_applies_missing_revisions(start, index_re
             command.downgrade(config, index_revision)
             command.downgrade(config, f"{index_revision}@-1")
             assert _index_ids(cursor) == indexes
+
+            command.downgrade(config, _SHARED_PARENT)
+            cursor.execute(
+                "SELECT to_regclass('ix_jobs_active_task_updated_id'), "
+                "to_regclass('ix_app_runs_job_id')"
+            )
+            assert cursor.fetchone() == (None, None)
             command.upgrade(config, _MERGE)
-            assert _index_ids(cursor) == indexes
+            assert len(_index_ids(cursor)) == 2
