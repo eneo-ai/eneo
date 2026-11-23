@@ -45,6 +45,9 @@ _FILE_METADATA_COLUMNS = (
     Files.tenant_id,
     Files.parent_file_id,
     Files.revises_file_id,
+    Files.origin_space_id,
+    Files.origin_flow_id,
+    Files.origin_flow_run_id,
 )
 
 

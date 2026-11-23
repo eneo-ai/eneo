@@ -22,6 +22,7 @@ from eneo.files.file_models import (
     FileInUseError,
     FileMetadata,
     FileMetadataCreate,
+    FileOrigin,
     FileOriginalNotFoundError,
     FileOwner,
     FilePublic,
@@ -153,17 +154,34 @@ class FileService:
         object_content: ObjectContentService,
         upload_admission: UploadAdmissionSnapshot | None = None,
         owner: FileOwner | None = None,
+        origin: FileOrigin | None = None,
     ):
         if user is not None and owner is not None:
             raise ValueError("FileService accepts either a user or an explicit owner")
         self.user = user
         self._explicit_owner = owner
+        self._origin = origin
         self.repo = repo
         self.protocol = protocol
         self._object_content = object_content
         self._upload_admission = upload_admission
         self._content_loader = FileContentLoader(repo, object_content)
         self._usage = FileUsageRepository(repo.session)
+
+    def with_origin(self, origin: FileOrigin) -> "FileService":
+        """The same service, recording ``origin`` on every File it creates.
+
+        A separate instance, so the service it came from, and anything else
+        holding it, keeps recording no origin."""
+        return FileService(
+            self.user,
+            self.repo,
+            self.protocol,
+            self._object_content,
+            self._upload_admission,
+            owner=self._explicit_owner,
+            origin=origin,
+        )
 
     @asynccontextmanager
     async def _write_transaction(self) -> AsyncGenerator[None]:
@@ -458,6 +476,7 @@ class FileService:
         revises_file_id: UUID | None = None,
     ) -> FileMetadata:
         owner = self._owner()
+        origin = self._origin
         prepared = captured_file.prepared
         return await self.repo.add_metadata(
             FileMetadataCreate(
@@ -470,6 +489,9 @@ class FileService:
                 tenant_id=owner.tenant_id,
                 parent_file_id=parent_file_id,
                 revises_file_id=revises_file_id,
+                origin_space_id=origin.space_id if origin else None,
+                origin_flow_id=origin.flow_id if origin else None,
+                origin_flow_run_id=origin.flow_run_id if origin else None,
             )
         )
 

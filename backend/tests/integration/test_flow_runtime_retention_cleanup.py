@@ -41,6 +41,7 @@ from eneo.database.tables.object_content_table import (
     ObjectContents,
 )
 from eneo.database.tables.questions_table import Questions
+from eneo.database.tables.service_principals_table import ServicePrincipals
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.tenant_table import Tenants
@@ -162,14 +163,15 @@ async def _create_durable_file(
     variant: FileContentVariant,
     created_at: datetime,
     parent_file_id: UUID | None = None,
+    owner_service_id: UUID | None = None,
 ) -> Files:
     file = Files(
         name=name,
         mimetype=mimetype,
         file_type=file_type.value,
-        owner_type="user",
-        owner_user_id=user_id,
-        owner_service_id=None,
+        owner_type="user" if owner_service_id is None else "service_key",
+        owner_user_id=user_id if owner_service_id is None else None,
+        owner_service_id=owner_service_id,
         tenant_id=tenant_id,
         parent_file_id=parent_file_id,
         created_at=created_at,
@@ -2187,6 +2189,131 @@ async def test_flow_run_history_purge_keeps_runtime_source_with_another_owner(
         flow_id=fixture.flow.id,
         tenant_id=test_tenant.id,
     )
+
+
+@pytest.mark.asyncio
+async def test_flow_run_history_purge_keeps_the_origin_of_files_used_elsewhere(
+    async_session: AsyncSession,
+    test_tenant,
+    admin_user,
+    flow_retention_space: Spaces,
+    flow_retention_assistant: Assistants,
+    flow_retention_service: FlowRetentionRepository,
+):
+    # The origin names the run and flow but holds no reference to them: purging
+    # the run's history leaves a file that is still used elsewhere with its
+    # recorded origin, and deletes a file with no other use.
+    fixture = await _create_flow_runtime_fixture(
+        async_session,
+        tenant=test_tenant,
+        user=admin_user,
+        space=flow_retention_space,
+        assistant=flow_retention_assistant,
+        days_old=3,
+        flow_retention_days=1,
+    )
+    run_origin = (flow_retention_space.id, fixture.flow.id, fixture.run.id)
+    upload_origin = (flow_retention_space.id, fixture.flow.id, None)
+    service_id = uuid4()
+    async_session.add(
+        ServicePrincipals(
+            id=service_id,
+            tenant_id=test_tenant.id,
+            display_name="Flow retention service",
+            scope_type="tenant",
+            state="active",
+        )
+    )
+    await async_session.flush()
+
+    async def run_output(name: str, ordinal: int, **owner) -> Files:
+        file = await _create_durable_file(
+            async_session,
+            tenant_id=test_tenant.id,
+            user_id=admin_user.id,
+            name=name,
+            mimetype="text/plain",
+            file_type=FileType.TEXT,
+            payload=name.encode(),
+            variant=FileContentVariant.GENERATED_ARTIFACT,
+            created_at=datetime.now(timezone.utc),
+            **owner,
+        )
+        async_session.add(
+            FlowRunStepResultFiles(
+                flow_run_id=fixture.run.id,
+                flow_id=fixture.flow.id,
+                tenant_id=test_tenant.id,
+                step_result_id=fixture.step_result.id,
+                step_id=fixture.step_id,
+                step_order=1,
+                attempt_no=1,
+                file_id=file.id,
+                ordinal=ordinal,
+                source="declared_artifact",
+            )
+        )
+        return file
+
+    child = await _create_durable_file(
+        async_session,
+        tenant_id=test_tenant.id,
+        user_id=admin_user.id,
+        name="page-1.png",
+        mimetype="image/png",
+        file_type=FileType.IMAGE,
+        payload=b"p" * 13,
+        variant=FileContentVariant.ORIGINAL,
+        created_at=datetime.now(timezone.utc),
+        parent_file_id=fixture.runtime_input_file.id,
+    )
+    service_output = await run_output(
+        "service-output.txt", 1, owner_service_id=service_id
+    )
+    unused_output = await run_output("unused-output.txt", 2)
+    origins = [
+        (fixture.runtime_input_file, upload_origin),
+        (child, upload_origin),
+        (fixture.generated_file, run_origin),
+        (service_output, run_origin),
+        (unused_output, run_origin),
+    ]
+    for file, (space_id, flow_id, run_id) in origins:
+        file.origin_space_id = space_id
+        file.origin_flow_id = flow_id
+        file.origin_flow_run_id = run_id
+    kept = {
+        fixture.runtime_input_file.id: upload_origin,
+        child.id: upload_origin,
+        fixture.generated_file.id: run_origin,
+        service_output.id: run_origin,
+    }
+    for file_id in (
+        fixture.runtime_input_file.id,
+        fixture.generated_file.id,
+        service_output.id,
+    ):
+        async_session.add(
+            AssistantsFiles(assistant_id=flow_retention_assistant.id, file_id=file_id)
+        )
+    unused_output_id = unused_output.id
+    await async_session.flush()
+
+    result = await flow_retention_service.purge_old_flow_run_history_batch(
+        now=datetime.now(timezone.utc),
+        limit=10,
+    )
+    await _flush_and_clear_identity_map(async_session)
+
+    assert result.counts.flow_runs_purged == 1
+    assert await async_session.get(FlowRuns, fixture.run.id) is None
+    stored = {
+        file.id: (file.origin_space_id, file.origin_flow_id, file.origin_flow_run_id)
+        for file in await async_session.scalars(
+            select(Files).where(Files.id.in_([*kept, unused_output_id]))
+        )
+    }
+    assert stored == kept
 
 
 @pytest.mark.asyncio

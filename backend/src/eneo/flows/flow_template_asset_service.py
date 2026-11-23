@@ -9,7 +9,7 @@ from uuid import UUID
 from fastapi import UploadFile
 
 from eneo.files.file_content_loader import FileContentLoader
-from eneo.files.file_models import File, FileContentVariant
+from eneo.files.file_models import File, FileContentVariant, FileOrigin
 from eneo.files.file_repo import FileRepository
 from eneo.files.file_service import FileService
 from eneo.flows.domain.flow import FlowTemplateAsset
@@ -110,7 +110,8 @@ class FlowTemplateAssetService:
             )
             # The prepared original streams once and inspection just read it;
             # persist the bytes that were inspected, not the drained stream.
-            saved_file = await self.file_service.save_prepared_file(
+            origin = FileOrigin(space_id=flow.space_id, flow_id=persisted_flow_id)
+            saved_file = await self.file_service.with_origin(origin).save_prepared_file(
                 replace(
                     prepared,
                     contents=(replace(original, chunks=_single_chunk(document_bytes)),),

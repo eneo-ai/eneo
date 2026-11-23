@@ -39,6 +39,7 @@ def _service_with_explicit_transactions() -> tuple[FileService, dict[str, bool]]
     service = FileService.__new__(FileService)
     service.user = SimpleNamespace(id=uuid4())
     service.repo = SimpleNamespace(session=session)
+    service._origin = None
     return service, state
 
 

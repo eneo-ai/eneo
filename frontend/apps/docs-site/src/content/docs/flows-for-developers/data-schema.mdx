@@ -19,16 +19,16 @@ than editing an applied one.
 
 ## Core aggregates
 
-| Aggregate                   | Tables                                                                                                             | Ownership                                                                                                        |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
-| Draft and publication       | `flows`, `flow_steps`, `flow_versions`, `flow_template_assets`, `flow_resource_bindings`                           | Mutable authoring is separated from immutable published snapshots.                                               |
-| Execution and evidence      | `flow_runs`, `flow_step_results`, `flow_step_attempts`, `flow_step_attempt_resolved_inputs`, `flow_provider_calls` | A run executes one published version. Attempts and provider calls preserve evidence across retries and recovery. |
-| Runtime files               | `flow_runtime_uploaded_files`, `flow_run_step_input_files`, `flow_run_step_result_files`                           | File identity remains in the platform `files` table; Flow rows record tenant-scoped use and provenance.          |
-| Review                      | `flow_run_review_checkpoints`                                                                                      | Revisioned review state, actor attribution, edited payloads, and resume idempotency.                             |
-| Delivery                    | `flow_run_audit_outbox`, `flow_run_webhook_deliveries`                                                             | Transactional intents are written with lifecycle state and delivered asynchronously.                             |
-| Portability                 | `flow_package_imports`                                                                                             | Import state for validated `.eneopkg` archives. Imported definitions remain drafts.                              |
-| Suggestions                 | `flow_suggestion_dismissals`                                                                                       | Which of a flow's suggestions its editors hid, by fingerprint; deleted with the flow.                            |
-| Shared platform integration | `service_principals`, `provider_token_usages`                                                                      | Principal and token-usage records shared with non-Flow consumers.                                                |
+| Aggregate                   | Tables                                                                                                             | Ownership                                                                                                                                                                                            |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Draft and publication       | `flows`, `flow_steps`, `flow_versions`, `flow_template_assets`, `flow_resource_bindings`                           | Mutable authoring is separated from immutable published snapshots.                                                                                                                                   |
+| Execution and evidence      | `flow_runs`, `flow_step_results`, `flow_step_attempts`, `flow_step_attempt_resolved_inputs`, `flow_provider_calls` | A run executes one published version. Attempts and provider calls preserve evidence across retries and recovery.                                                                                     |
+| Runtime files               | `flow_runtime_uploaded_files`, `flow_run_step_input_files`, `flow_run_step_result_files`                           | File identity and origin stay on the file's own row in the platform `files` table; the origin grants no access (see [File origin](#file-origin)). Flow rows record tenant-scoped use and provenance. |
+| Review                      | `flow_run_review_checkpoints`                                                                                      | Revisioned review state, actor attribution, edited payloads, and resume idempotency.                                                                                                                 |
+| Delivery                    | `flow_run_audit_outbox`, `flow_run_webhook_deliveries`                                                             | Transactional intents are written with lifecycle state and delivered asynchronously.                                                                                                                 |
+| Portability                 | `flow_package_imports`                                                                                             | Import state for validated `.eneopkg` archives. Imported definitions remain drafts.                                                                                                                  |
+| Suggestions                 | `flow_suggestion_dismissals`                                                                                       | Which of a flow's suggestions its editors hid, by fingerprint; deleted with the flow.                                                                                                                |
+| Shared platform integration | `service_principals`, `provider_token_usages`                                                                      | Principal and token-usage records shared with non-Flow consumers.                                                                                                                                    |
 
 There are no partial-rerun operation or invalidation tables, no
 classification-retention policy tables, and no Flow retention tombstones in the
@@ -48,6 +48,27 @@ terminalization.
 
 These are database constraints as well as service-layer checks. Do not replace a
 composite ownership constraint with an application-only assertion.
+
+## File origin
+
+A file created for a flow records where it came from on its own `files` row:
+`origin_space_id`, `origin_flow_id` and, for a file a run created,
+`origin_flow_run_id`. An upload to a published step and a Word template, whether
+uploaded to a draft or brought in by a package import, record the space and the
+flow. A run's rendered documents, filled templates, and text or transcripts
+stored as files because they exceed the inline limit also record the run. A
+derived file, such as a page image, records the origin of the file it came from.
+A template made from a file that is already attached reuses that file's row and
+records nothing new.
+
+The values are written when the file is created and never change. They have no
+foreign keys, so a file keeps its origin after its run, flow or space is gone.
+NULL means that no origin was recorded, for example for a file uploaded outside
+Flows or created before revision `202611181900`. It does not mean the file is
+unrelated to a flow.
+
+The origin is a fact for tracing a file, not an ownership record. It grants no
+access, and no read, change or deletion checks it.
 
 ## Lifecycle integrity
 

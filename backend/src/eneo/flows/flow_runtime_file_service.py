@@ -21,7 +21,7 @@ from eneo.files.audio import (
     AudioMeasurementBusy,
     AudioUnreadableError,
 )
-from eneo.files.file_models import FileInfo, FileInUseError, FileUsageKind
+from eneo.files.file_models import FileInfo, FileInUseError, FileOrigin, FileUsageKind
 from eneo.files.file_service import FileService
 from eneo.files.mime_support import canonicalize_mime
 from eneo.files.text import PdfExtractionLimitExceeded, PdfExtractionLimits
@@ -261,6 +261,7 @@ class FlowRuntimeFileService:
                 limits=runtime_inputs.limits,
             )
         return await self._upload_with_policy(
+            space_id=runtime_inputs.published.flow.space_id,
             flow_id=runtime_inputs.published.flow_id,
             step_id=step_id,
             upload_file=upload_file,
@@ -314,6 +315,7 @@ class FlowRuntimeFileService:
     async def _upload_with_policy(
         self,
         *,
+        space_id: UUID,
         flow_id: UUID,
         step_id: UUID,
         upload_file: UploadFile,
@@ -363,7 +365,8 @@ class FlowRuntimeFileService:
 
         try:
             settings = get_settings()
-            return await self.file_service.save_file(
+            origin = FileOrigin(space_id=space_id, flow_id=flow_id)
+            return await self.file_service.with_origin(origin).save_file(
                 upload_file,
                 max_size=max_size,
                 before_commit=bind_and_audit,
