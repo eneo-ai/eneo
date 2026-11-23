@@ -116,6 +116,10 @@ test(
     await form.getByLabel("Pris per minut (USD)").focus();
     await page.keyboard.press("Tab");
     await expect(live).toBeFocused();
+    // The switch draws its own focus ring, so the lock dims only the thumb and the
+    // track colour: the ring keeps its full contrast (WCAG 1.4.11).
+    await expect(live).toHaveCSS("opacity", "1");
+    await expect(live.locator("[data-slot=switch-thumb]")).toHaveCSS("opacity", "0.5");
     await page.keyboard.press("Space");
     await expect(live).toHaveAttribute("aria-checked", "false");
     await expect(

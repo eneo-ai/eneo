@@ -519,14 +519,16 @@ function EditModelForm({
               <Label className="flex items-center justify-between gap-2 font-normal">
                 {t("live_transcription_support")}
                 {/* Locked rather than disabled: it stays in the tab order, so a
-                    keyboard or screen reader user reaches it and hears why. */}
+                    keyboard or screen reader user reaches it and hears why. The
+                    lock dims the thumb and the track colour, not the switch: the
+                    switch draws the focus ring, which keeps its full contrast. */}
                 <Switch
                   checked={realtime}
                   onCheckedChange={(next) => {
                     if (!realtimeLocked) setRealtime(next);
                   }}
                   aria-disabled={realtimeLocked || undefined}
-                  className="aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
+                  className="aria-disabled:cursor-not-allowed aria-disabled:data-[state=unchecked]:bg-input/50 aria-disabled:*:opacity-50"
                   aria-describedby={
                     realtimeRefusal ? `${realtimeHelpId} ${realtimeUnavailableId}` : realtimeHelpId
                   }
