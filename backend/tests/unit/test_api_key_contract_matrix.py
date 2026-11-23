@@ -876,6 +876,7 @@ class TestModelProvidersBearerRoleContract:
             "provider_type": "openai",
             "config": {},
             "is_active": True,
+            "realtime_eligibility": "endpoint_required",
             "created_at": datetime.now(timezone.utc),
             "updated_at": datetime.now(timezone.utc),
         }

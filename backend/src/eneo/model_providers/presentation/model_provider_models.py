@@ -8,6 +8,7 @@ from eneo.model_providers.domain.connection_check import (
     ConnectionCheckError,
     ConnectionCheckStatus,
 )
+from eneo.transcription_models.domain.realtime import RealtimeEligibility
 
 _KEY_EXPIRES_ON_DESCRIPTION = (
     "Date the API key stops working, entered by an admin so the key can be "
@@ -237,6 +238,16 @@ class ModelProviderPublic(BaseModel):
             "Whether POST /{provider_id}/connection-check/ can check this "
             "provider: Eneo knows a cheap authenticated call for its type, or "
             "it has an OpenAI-compatible endpoint."
+        ),
+    )
+    realtime_eligibility: RealtimeEligibility = Field(
+        description=(
+            "Whether the provider can carry live text (a transcription model's "
+            "supports_realtime), and if not, what the administrator does: "
+            "endpoint_required (enter the endpoint of a server that serves vLLM's "
+            "realtime API; OpenAI's own service does not), unsupported_provider "
+            "(only vLLM, or OpenAI with such an endpoint, qualify) or "
+            "outbound_headers_configured (live text cannot send outbound headers)."
         ),
     )
     outbound_headers: list[OutboundHeaderPublic] = []

@@ -12,6 +12,11 @@ from eneo.model_providers.domain.provider_api import (
     connection_check_supported,
 )
 
+from eneo.transcription_models.domain.realtime import (
+    RealtimeEligibility,
+    realtime_eligibility,
+)
+
 if TYPE_CHECKING:
     from eneo.database.tables.model_providers_table import ModelProviders
 
@@ -91,6 +96,16 @@ class ModelProvider:
             self.provider_type.lower(), configured_endpoint(self.config)
         )
 
+    @property
+    def realtime_eligibility(self) -> RealtimeEligibility:
+        # Reads the endpoint and the header list only; nothing is decrypted.
+        return realtime_eligibility(
+            provider_type=self.provider_type,
+            credentials=self.credentials,
+            config=self.config,
+            has_outbound_headers=bool(self.outbound_headers),
+        )
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary (for API responses)."""
         check = self.connection_check
@@ -112,6 +127,7 @@ class ModelProvider:
                 else None
             ),
             "connection_check_supported": self.connection_check_supported,
+            "realtime_eligibility": self.realtime_eligibility,
             "outbound_headers": [
                 _public_header(header) for header in self.outbound_headers
             ],

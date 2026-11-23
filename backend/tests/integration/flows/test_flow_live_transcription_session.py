@@ -30,7 +30,9 @@ from websockets.typing import Origin, Subprotocol
 
 from eneo.audit.domain.action_types import ActionType
 from eneo.authentication.browser_session import session_cookie_name
+from eneo.database.tables.ai_models_table import TranscriptionModels
 from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
+from eneo.database.tables.model_providers_table import ModelProviders
 from eneo.database.tables.spaces_table import SpacesTranscriptionModels
 from eneo.flows.api import flow_live_transcription_socket_router
 from eneo.flows.runtime.live_transcription import tickets
@@ -106,13 +108,14 @@ async def _create_transcription_model(
     *,
     endpoint: str,
     supports_realtime: bool,
+    provider_type: str = "vllm",
 ) -> dict[str, str]:
     provider = await client.post(
         "/api/v1/admin/model-providers/",
         headers=headers,
         json={
-            "name": f"vadsa-{uuid4().hex[:8]}",
-            "provider_type": "vllm",
+            "name": f"{provider_type}-{uuid4().hex[:8]}",
+            "provider_type": provider_type,
             "credentials": {"api_key": PROVIDER_API_KEY},
             "config": {"endpoint": endpoint},
         },
@@ -142,6 +145,36 @@ async def _add_to_space(db_container, space_id: str, model_id: str) -> None:
         )
 
 
+async def _change_provider_of(db_container, model_id: str, **values: Any) -> None:
+    """Change the provider behind a model directly, as an admin edit would."""
+    async with db_container() as container:
+        await container.session().execute(
+            sa.update(ModelProviders)
+            .where(
+                ModelProviders.id
+                == sa.select(TranscriptionModels.provider_id)
+                .where(TranscriptionModels.id == UUID(model_id))
+                .scalar_subquery()
+            )
+            .values(**values)
+        )
+
+
+# Each leaves the saved mark in place and makes the provider unable to carry
+# live text: the rule must be read again when the socket opens.
+PROVIDER_STOPS_QUALIFYING = {
+    "headers added": {
+        "outbound_headers": [{"id": str(uuid4()), "name": "X-Unit", "value": "u"}]
+    },
+    "endpoint removed": {"config": {}},
+    "endpoint shadowed": {
+        "credentials": sa.literal_column(
+            "model_providers.credentials || '{\"endpoint\": \"\"}'::jsonb"
+        )
+    },
+}
+
+
 async def _remove_from_space(db_container, space_id: str, model_id: str) -> None:
     async with db_container() as container:
         await container.session().execute(
@@ -159,6 +192,7 @@ async def _draft_flow(
     *,
     endpoint: str = UNREACHABLE_ENDPOINT,
     supports_realtime: bool = True,
+    provider_type: str = "vllm",
     audio: bool = True,
     input_required: bool = True,
     wizard: Mapping[str, object] | None = None,
@@ -170,7 +204,11 @@ async def _draft_flow(
     if space_id is None:
         space_id = await _create_space(client, headers)
     model = await _create_transcription_model(
-        client, headers, endpoint=endpoint, supports_realtime=supports_realtime
+        client,
+        headers,
+        endpoint=endpoint,
+        supports_realtime=supports_realtime,
+        provider_type=provider_type,
     )
     await _add_to_space(db_container, space_id, model["id"])
 
@@ -711,6 +749,82 @@ async def test_realtime_switched_off_after_admission_ends_the_session(
 
     assert [event["code"] for event in events] == ["model_unavailable"]
     assert live_stack.model_server.received == []
+
+
+@pytest.mark.parametrize(
+    "change", PROVIDER_STOPS_QUALIFYING.values(), ids=PROVIDER_STOPS_QUALIFYING.keys()
+)
+async def test_a_provider_that_stops_qualifying_after_admission_opens_nothing(
+    live_stack: LiveStack, db_container, change
+):
+    session = await live_stack.open_session()
+    await _change_provider_of(db_container, live_stack.flow.model_id, **change)
+
+    async with connect(
+        live_stack.socket_url(session), subprotocols=_subprotocols(session["ticket"])
+    ) as socket:
+        events = [json.loads(message) async for message in socket]
+
+    assert [event["code"] for event in events] == ["model_unavailable"]
+    assert live_stack.model_server.authorization is None
+    assert live_stack.model_server.received == []
+
+    refused = await live_stack.client.post(
+        live_stack.flow.sessions_path, headers=live_stack.headers
+    )
+    assert refused.status_code == 409, refused.text
+    assert refused.json()["context"] == {"reason": "model_not_realtime"}
+
+
+async def test_a_provider_switched_off_after_admission_opens_nothing(
+    live_stack: LiveStack, db_container
+):
+    session = await live_stack.open_session()
+    await _change_provider_of(db_container, live_stack.flow.model_id, is_active=False)
+
+    async with connect(
+        live_stack.socket_url(session), subprotocols=_subprotocols(session["ticket"])
+    ) as socket:
+        events = [json.loads(message) async for message in socket]
+
+    assert [event["code"] for event in events] == ["model_unavailable"]
+    assert live_stack.model_server.authorization is None
+
+
+async def test_a_gateway_registered_as_openai_streams_live_text(
+    client, app, flow_process_auth_headers, db_container
+):
+    headers = dict(flow_process_auth_headers)
+    async with (
+        fake_realtime_server() as model_server,
+        _served(app) as (base_url, _server),
+    ):
+        flow = await _published_flow(
+            client,
+            headers,
+            db_container,
+            provider_type="openai",
+            endpoint=_provider_endpoint(model_server),
+        )
+        stack = LiveStack(client, headers, flow, model_server, base_url, _server)
+        session = await stack.open_session()
+
+        async with connect(
+            stack.socket_url(session), subprotocols=_subprotocols(session["ticket"])
+        ) as socket:
+            assert json.loads(await socket.recv())["type"] == "ready"
+            await socket.send(TENTH_OF_A_SECOND)
+            await socket.send(TENTH_OF_A_SECOND)
+            await socket.send(json.dumps({"type": "stop"}))
+            events = [json.loads(message) async for message in socket]
+
+    assert events[-1] == {"type": "transcript.done", "text": "Hej världen"}
+    assert model_server.path == "/v1/realtime"
+    assert model_server.authorization == f"Bearer {PROVIDER_API_KEY}"
+    assert model_server.received[0] == {
+        "type": "session.update",
+        "model": flow.model_name,
+    }
 
 
 async def test_flows_switched_off_after_admission_ends_the_session(

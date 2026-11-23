@@ -18,7 +18,6 @@ from eneo.flows.application.flow_authoring_reads import (
 )
 from eneo.flows.infrastructure.flow_repo import StoredAssistantPrompt
 from eneo.flows.step_lineage import StepRead
-from eneo.transcription_models.domain.realtime import REALTIME_PROVIDER_TYPE
 
 
 def _step(order: int, name: str, **config):
@@ -169,7 +168,7 @@ def _model(name: str, *, realtime: bool = False, can_access: bool = True):
         name=name.lower(),
         can_access=can_access,
         supports_realtime=realtime,
-        provider_type=REALTIME_PROVIDER_TYPE,
+        realtime_eligibility="eligible",
     )
 
 

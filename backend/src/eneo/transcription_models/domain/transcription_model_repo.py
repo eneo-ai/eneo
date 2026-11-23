@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 import sqlalchemy as sa
 from sqlalchemy.orm import selectinload
@@ -9,6 +9,7 @@ from eneo.database.tables.security_classifications_table import (
     SecurityClassification as SecurityClassificationDBModel,
 )
 from eneo.main.exceptions import NotFoundException
+from eneo.transcription_models.domain.realtime import realtime_eligibility
 from eneo.transcription_models.domain.transcription_model import (
     TranscriptionModel,
 )
@@ -20,6 +21,45 @@ if TYPE_CHECKING:
     from eneo.tenants.tenant import TenantInDB
 
 
+# Only the provider facts the read models need: the live text rule reads the
+# endpoint and whether outbound headers are configured. Neither the API key nor
+# any header value is loaded, so listing models decrypts nothing.
+_PROVIDER_FACTS = (
+    ModelProviders.name,
+    ModelProviders.provider_type,
+    ModelProviders.credentials["endpoint"].astext.label("credential_endpoint"),
+    ModelProviders.config["endpoint"].astext.label("config_endpoint"),
+    (
+        sa.case(
+            (
+                sa.func.jsonb_typeof(ModelProviders.outbound_headers) == "array",
+                sa.func.jsonb_array_length(ModelProviders.outbound_headers),
+            ),
+            else_=0,
+        )
+        > 0
+    ).label("has_outbound_headers"),
+)
+
+
+def _to_domain(row: "sa.Row[Any]", tenant: "TenantInDB") -> TranscriptionModel:
+    transcription_model, provider_name, provider_type, *_ = row
+    return TranscriptionModel.create_from_db(
+        transcription_model_db=transcription_model,
+        tenant=tenant,
+        provider_name=provider_name,
+        provider_type=provider_type,
+        # A None value reads as an absent key, so an empty credential still
+        # shadows config exactly as it does for a request.
+        realtime_eligibility=realtime_eligibility(
+            provider_type=provider_type,
+            credentials={"endpoint": row.credential_endpoint},
+            config={"endpoint": row.config_endpoint},
+            has_outbound_headers=bool(row.has_outbound_headers),
+        ),
+    )
+
+
 class TranscriptionModelRepository:
     def __init__(self, *, session: "AsyncSession", tenant: "TenantInDB") -> None:
         super().__init__()
@@ -28,9 +68,7 @@ class TranscriptionModelRepository:
 
     async def all(self, with_deprecated: bool = False):
         stmt = (
-            sa.select(
-                TranscriptionModels, ModelProviders.name, ModelProviders.provider_type
-            )
+            sa.select(TranscriptionModels, *_PROVIDER_FACTS)
             .outerjoin(
                 ModelProviders, TranscriptionModels.provider_id == ModelProviders.id
             )
@@ -66,22 +104,12 @@ class TranscriptionModelRepository:
         result = await self.session.execute(stmt)
         rows = result.all()
 
-        return [
-            TranscriptionModel.create_from_db(
-                transcription_model_db=transcription_model,
-                tenant=self.tenant,
-                provider_name=provider_name,
-                provider_type=provider_type,
-            )
-            for transcription_model, provider_name, provider_type in rows
-        ]
+        return [_to_domain(row, self.tenant) for row in rows]
 
     async def one_or_none(self, model_id: "UUID") -> Optional["TranscriptionModel"]:
         # When fetching by ID, return ANY model (global or tenant) that the user can access
         stmt = (
-            sa.select(
-                TranscriptionModels, ModelProviders.name, ModelProviders.provider_type
-            )
+            sa.select(TranscriptionModels, *_PROVIDER_FACTS)
             .outerjoin(
                 ModelProviders, TranscriptionModels.provider_id == ModelProviders.id
             )
@@ -110,13 +138,7 @@ class TranscriptionModelRepository:
         if row is None:
             return None
 
-        transcription_model, provider_name, provider_type = row
-        return TranscriptionModel.create_from_db(
-            transcription_model_db=transcription_model,
-            tenant=self.tenant,
-            provider_name=provider_name,
-            provider_type=provider_type,
-        )
+        return _to_domain(row, self.tenant)
 
     async def one(self, model_id: "UUID") -> "TranscriptionModel":
         transcription_model = await self.one_or_none(model_id=model_id)

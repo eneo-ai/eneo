@@ -37,6 +37,7 @@ class FakeRealtimeServer:
     url: str = ""
     received: list[dict[str, object]] = field(default_factory=list)
     authorization: str | None = None
+    path: str | None = None
     closed: asyncio.Event = field(default_factory=asyncio.Event)
     done_sent: asyncio.Event = field(default_factory=asyncio.Event)
     final_received: asyncio.Event = field(default_factory=asyncio.Event)
@@ -68,6 +69,7 @@ async def fake_realtime_server(
 
     async def handler(connection: ServerConnection) -> None:
         state.authorization = connection.request.headers.get("Authorization")
+        state.path = connection.request.path
         pending = list(deltas)
         sent: list[str] = []
         received_samples = 0

@@ -14,6 +14,7 @@ if TYPE_CHECKING:
         TranscriptionModels as TranscriptionModelsDB,
     )
     from eneo.tenants.tenant import TenantInDB
+    from eneo.transcription_models.domain.realtime import RealtimeEligibility
 
 
 class TranscriptionModel(AIModel):
@@ -45,6 +46,7 @@ class TranscriptionModel(AIModel):
         provider_type: Optional[str] = None,
         migrated_to_model_id: Optional["UUID"] = None,
         supports_realtime: bool = False,
+        realtime_eligibility: "RealtimeEligibility" = "unsupported_provider",
     ):
         super().__init__(
             tenant=tenant,
@@ -73,7 +75,12 @@ class TranscriptionModel(AIModel):
         self.provider_name = provider_name
         self.provider_type = provider_type
         self.migrated_to_model_id = migrated_to_model_id
+        # The administrator's saved choice; whether the model streams now also
+        # depends on its provider (realtime.streams_live).
         self.supports_realtime = supports_realtime
+        # Computed from the provider by the repository. The default fails
+        # closed: a model built without provider facts never streams.
+        self.realtime_eligibility: "RealtimeEligibility" = realtime_eligibility
 
     @property
     def model_name(self) -> str:
@@ -91,6 +98,7 @@ class TranscriptionModel(AIModel):
         tenant: "TenantInDB",
         provider_name: Optional[str] = None,
         provider_type: Optional[str] = None,
+        realtime_eligibility: "RealtimeEligibility" = "unsupported_provider",
     ):
         # Settings are now directly on the model table
         return cls(
@@ -125,4 +133,5 @@ class TranscriptionModel(AIModel):
             provider_type=provider_type,
             migrated_to_model_id=transcription_model_db.migrated_to_model_id,
             supports_realtime=transcription_model_db.supports_realtime,
+            realtime_eligibility=realtime_eligibility,
         )

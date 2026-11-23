@@ -53,6 +53,7 @@ const existing: ModelProvider = {
   key_expires_on: null,
   connection_check: null,
   connection_check_supported: true,
+  realtime_eligibility: "endpoint_required",
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z"
 };
