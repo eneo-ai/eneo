@@ -51,6 +51,8 @@ def rule_period(
     a NULL, and is NULL only when nothing is chosen). On a tie the nearest
     level is the source, and among equal caps the outermost.
     """
+    if not rule.levels:
+        raise ValueError("The rule has no levels to resolve a period from.")
     if set(chosen) != set(rule.levels):
         raise ValueError(f"The rule needs a column for each of {rule.levels}.")
     levels = [(level, chosen[level]) for level in rule.levels]

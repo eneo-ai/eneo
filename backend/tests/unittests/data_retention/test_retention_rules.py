@@ -34,6 +34,13 @@ def test_the_sql_refuses_a_rule_it_cannot_resolve_like_the_kernel():
         rule_period(RuleTask("extra", (OWN,)), columns)
 
 
+def test_the_sql_refuses_a_rule_without_levels():
+    """Mutant: a rule without levels builds an empty COALESCE, which the
+    database refuses only when the query runs."""
+    with pytest.raises(ValueError, match="no levels"):
+        rule_period(RuleExemption("exempt"), {})
+
+
 def test_an_exempt_rule_has_no_period_to_resolve():
     """Mutant: an exempt rule resolves as if a task removed it."""
     with pytest.raises(ValueError):
