@@ -459,6 +459,25 @@ it("adds nothing after a reload in which the step that sends is gone, and says s
   expect(editorPatches()).toHaveLength(1);
 });
 
+it("adds nothing after a reload in which the step that sends became a plain call, and says so", async () => {
+  flow = senderFlow();
+  await renderPage("?step=step-send");
+  await nameField();
+  // Another author made the same step a call with its own body: it no longer sends the result.
+  const [first, sender] = flow.steps;
+  const config = sender!.output_config as Record<string, unknown>;
+  const reread = makeFlow({
+    draft_revision: 5,
+    steps: [first!, { ...sender!, output_config: { ...config, body: { mode: "auto" } } }]
+  });
+  const dialog = await addBeforeSendAfterReload(reread, null);
+  expect(
+    await within(dialog).findByText(messages.flow_step_editor_add_before_sender_gone)
+  ).toBeTruthy();
+  expect(within(dialog).queryByRole("radio")).toBeNull();
+  expect(editorPatches()).toHaveLength(1);
+});
+
 it("keeps a newer version the page holds when the answer to its own add comes late", async () => {
   flow = senderFlow();
   const { queryClient } = await renderPage("?step=step-send");

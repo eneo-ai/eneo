@@ -25,7 +25,7 @@ import {
 } from "./editor-api";
 import { problemStatus } from "./editor-fields";
 import { describeSaveError, isStaleRevision } from "./field-problems";
-import { httpUrlProblemKey } from "./step-configs";
+import { httpUrlProblemKey, sendsRunResult } from "./step-configs";
 import {
   kindOption,
   kindRefusalText,
@@ -704,11 +704,12 @@ function AddStepPicker({
 }
 
 /**
- * Adds a step at `position`: a place (1-based), or before a step named by its
- * id, placed on the flow the add is fenced on (a draft read again after a
- * stale refusal included). The author picks what the step does,
- * a task or a kind of step, and the step is named after it (renamed in the
- * editor). The kinds the place allows, why the others are refused and the
+ * Adds a step at `position`: a place (1-based), or before the step that sends
+ * the run's result, named by its id and placed on the flow the add is fenced
+ * on (a draft read again after a stale refusal included). When that step is
+ * gone there, or no longer sends the run's result, there is no place. The
+ * author picks what the step does, a task or a kind of step, and the step is
+ * named after it (renamed in the editor). The kinds the place allows, why the others are refused and the
  * configuration each starts with are the core's answer for the place; the
  * step is saved as one editor change (`new_steps` + `step_order`).
  */
@@ -734,7 +735,8 @@ export function AddStepDialog({
   const position =
     typeof requestedPosition === "number"
       ? Math.min(Math.max(1, Math.round(requestedPosition)), flow.steps.length + 1)
-      : (flow.steps.find((step) => step.id === requestedPosition.before)?.step_order ?? null);
+      : (flow.steps.find((step) => step.id === requestedPosition.before && sendsRunResult(step))
+          ?.step_order ?? null);
   const kinds = useQuery({
     ...insertionKindsQueryOptions(flow.id, flow.draft_revision, position ?? 0),
     enabled: open && position !== null
