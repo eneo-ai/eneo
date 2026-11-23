@@ -943,6 +943,12 @@
   }
   .astryx-tab {
     scroll-snap-align: start;
+    isolation: isolate;
+  }
+  /* Astryx paints hover and press on the first child. Keep that layer above the tab's
+     background and below its label so the label retains its foreground contrast. */
+  .astryx-tab > span[aria-hidden="true"]:first-child {
+    z-index: -1;
   }
 }
 
