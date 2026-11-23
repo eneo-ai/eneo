@@ -436,9 +436,7 @@ it("shows nothing of the other steps in what is sent while the form holds edits 
   expect(within(pinned).queryByText("Sammanfatta")).toBeNull();
   expect(within(pinned).queryByRole("button", openSum)).toBeNull();
   expect(within(pinned).queryByRole("button", openNotes)).toBeNull();
-  expect(
-    within(pinned).getByText(messages.flow_step_editor_run_result_older_version)
-  ).toBeTruthy();
+  expect(within(pinned).getByText(messages.flow_step_editor_run_result_older_version)).toBeTruthy();
   expect((await address()).value).toBe("https://mottagare.example.org/ny");
 
   await click(messages.flow_step_editor_reload);
@@ -449,6 +447,53 @@ it("shows nothing of the other steps in what is sent while the form holds edits 
     within(current).queryByText(messages.flow_step_editor_run_result_older_version)
   ).toBeNull();
   expect((await address()).value).toBe("https://mottagare.example.org/ny");
+});
+
+describe("focus when a newer version hides what the sending step showed", () => {
+  const address = () =>
+    screen.findByRole("textbox", {
+      name: new RegExp(`^${messages.flow_step_editor_http_url_run_result}`)
+    }) as Promise<HTMLInputElement>;
+  /** Text, then the step that sends: one result, with its button. */
+  async function openSender() {
+    const [, start] = senderFlow().steps;
+    flow = makeFlow({
+      steps: [makeStep(1, { id: "step-sum", user_description: "Sammanfatta" }), start!]
+    });
+    const view = await renderPage("?step=step-send");
+    fireEvent.change(await address(), { target: { value: "https://mottagare.example.org/ny" } });
+    return view;
+  }
+  /** A newer version arrives with nothing clicked: the chat or another tab saved. */
+  const newerArrives = async (queryClient: QueryClient) => {
+    flow = { ...flow, draft_revision: 5 };
+    act(() => queryClient.setQueryData(flowKeys.flow(flow.id), flow));
+    await screen.findByText(messages.flow_step_editor_newer_title);
+  };
+
+  it("hands focus from a step's button that goes to the heading", async () => {
+    const { queryClient } = await openSender();
+    const open = await within(await sendsRegion()).findByRole("button", {
+      name: "Öppna steg 1 – Sammanfatta"
+    });
+    act(() => open.focus());
+    await newerArrives(queryClient);
+    const heading = await sendsHeading();
+    await waitFor(() => expect(document.activeElement).toBe(heading));
+  });
+
+  it("leaves focus and the caret in the receiver's address, which stays", async () => {
+    const { queryClient } = await openSender();
+    const field = await address();
+    act(() => {
+      field.focus();
+      field.setSelectionRange(8, 8);
+    });
+    await newerArrives(queryClient);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(document.activeElement).toBe(await address());
+    expect((await address()).selectionStart).toBe(8);
+  });
 });
 
 /**
@@ -1090,6 +1135,46 @@ describe("the open step while the flow changes", () => {
     expect(gone).toBe(false);
     expect(within(await delivery()).getByText(reader)).toBeTruthy();
   });
+
+  /**
+   * Step 1 right before the step that sends, with an unsaved name; `focus`
+   * puts focus on a control of its place, then a newer version arrives with
+   * nothing clicked: focus goes to the switch that takes the place's controls.
+   */
+  async function focusMovesToSwitch(focus: (section: HTMLElement) => Promise<void>) {
+    flow = makeFlow({ steps: [first, senderFlow().steps[1]!] });
+    const { queryClient } = await renderPage("?step=step-1");
+    await changeName();
+    await focus(await delivery());
+    flow = { ...flow, draft_revision: 5 };
+    act(() => queryClient.setQueryData(flowKeys.flow(flow.id), flow));
+    await screen.findByText(messages.flow_step_editor_newer_title);
+    const toggle = await within(await delivery()).findByRole("switch", {
+      name: new RegExp(`^${messages.flow_step_editor_deliverable_switch}`)
+    });
+    await waitFor(() => expect(document.activeElement).toBe(toggle));
+  }
+
+  it("hands focus from Behåll to the switch when a newer version hides the step's place", () =>
+    focusMovesToSwitch(async (section) => {
+      const keep = within(section).getByRole("button", {
+        name: messages.flow_step_editor_deliverable_keep
+      });
+      act(() => keep.focus());
+    }));
+
+  it("hands focus from a name field opened but not typed in to the switch", () =>
+    focusMovesToSwitch(async (section) => {
+      fireEvent.click(
+        within(section).getByRole("button", {
+          name: messages.flow_step_editor_deliverable_customise_text
+        })
+      );
+      const label = await within(section).findByRole("textbox", {
+        name: new RegExp(`^${messages.flow_step_editor_deliverable_label}`)
+      });
+      expect(document.activeElement).toBe(label);
+    }));
 
   it("shows nothing of the step that sends while the form holds edits on an older version, and that none is left after a reload", async () => {
     withChat();

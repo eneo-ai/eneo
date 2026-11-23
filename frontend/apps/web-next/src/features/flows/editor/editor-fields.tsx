@@ -2,7 +2,7 @@ import { DropdownMenu, type DropdownMenuOption } from "@astryxdesign/core/Dropdo
 import { Heading, Text } from "@astryxdesign/core/Text";
 import { Braces } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { createContext, useContext } from "react";
+import { createContext, useContext, useLayoutEffect, useRef, type FocusEvent } from "react";
 import type { FieldAnchor } from "./field-problems";
 import { variableEntryLabel, variableGroupTitle } from "./step-labels";
 import type { FlowPublic } from "./step-types";
@@ -19,6 +19,33 @@ export const TemplateScope = createContext<{
   flow: Pick<FlowPublic, "steps" | "metadata_json">;
   stepOrder: number;
 } | null>(null);
+
+/**
+ * Hands focus to `target` when the controls these handlers are on go away
+ * (`gone` turns true) while one of them has focus: a newer version of the
+ * flow can take them away with nothing clicked, and focus would be left on
+ * the page. Focus that has moved on, or a control that stays, is left alone.
+ */
+export function useFocusHandoff(gone: boolean, target: () => HTMLElement | null | undefined) {
+  // Whether focus was last inside: a control taken away sends no blur that names where focus went.
+  const inside = useRef(false);
+  useLayoutEffect(() => {
+    if (!gone || !inside.current) return;
+    inside.current = false;
+    const active = document.activeElement;
+    if (!active || active === document.body || !active.isConnected) target()?.focus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only the change of `gone` counts; `target` is read then
+  }, [gone]);
+  return {
+    onFocus: () => {
+      inside.current = true;
+    },
+    onBlur: (event: FocusEvent<HTMLElement>) => {
+      const next = event.relatedTarget;
+      if (next && !event.currentTarget.contains(next)) inside.current = false;
+    }
+  };
+}
 
 /** The status an Astryx field takes for a problem, or none. */
 export function problemStatus(message: string | null | undefined) {

@@ -5,14 +5,21 @@ import { Text } from "@astryxdesign/core/Text";
 import { VStack } from "@astryxdesign/core/VStack";
 import { ArrowRight, Send } from "lucide-react";
 import { useFormatter, useTranslations } from "use-intl";
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { TextInput } from "@/components/astryx/text-input";
 import { StatusLabel } from "@/components/composites/status-label";
 import { flowDeliverables, type DeliverablePlace } from "../flow-deliverables";
 import { formFieldsOf as formFieldDrafts } from "../flow-form-fields";
 import { senderReads, stepReadersByNameOrPlace } from "../flow-steps";
-import { Anchor, EditorSection, focusAnchor, problemStatus, VariablePicker } from "./editor-fields";
+import {
+  Anchor,
+  EditorSection,
+  focusAnchor,
+  problemStatus,
+  useFocusHandoff,
+  VariablePicker
+} from "./editor-fields";
 import type { FieldProblems } from "./field-problems";
 import {
   oneLineStart,
@@ -75,6 +82,12 @@ function DeliverableFields({
   const [customising, setCustomising] = useState(false);
   const keepId = useId();
   const resetId = useId();
+  // A newer version that takes the place away takes its controls with it:
+  // focus on one of them goes to the switch that stands in their stead.
+  const root = useRef<HTMLElement>(null);
+  const handoff = useFocusHandoff(place === null, () =>
+    root.current?.querySelector<HTMLElement>('[role="switch"]')
+  );
   const deliverable = readDeliverable(draft.output_config);
   const isDocument = stepDeliversArtifact(draft);
   // What the step is named in the result until the author names it.
@@ -143,7 +156,7 @@ function DeliverableFields({
 
   if (!place) {
     return (
-      <VStack gap={4}>
+      <VStack gap={4} ref={root} {...handoff}>
         <Switch
           label={t("flow_step_editor_deliverable_switch")}
           description={t("flow_step_editor_deliverable_switch_description")}
@@ -158,7 +171,7 @@ function DeliverableFields({
   // A marked step whose own names differ from the step's: taking the mark away resets them.
   const named = deliverable !== null && (deliverable.label !== stepName || !!deliverable.file_name);
   return (
-    <VStack gap={4}>
+    <VStack gap={4} ref={root} {...handoff}>
       <VStack gap={1}>
         <StatusLabel status="success" label={t("flow_step_editor_deliverable_included")} />
         <Text type="supporting" size="sm" as="p" display="block" className="m-0 max-w-prose">

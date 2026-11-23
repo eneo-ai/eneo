@@ -7,7 +7,7 @@ import { useTranslations } from "use-intl";
 import { EmptyState } from "@/components/composites/empty-state";
 import { flowDeliverables } from "../flow-deliverables";
 import type { FlowStep } from "../flows-api";
-import { Anchor, EditorSection, TemplateScope } from "./editor-fields";
+import { Anchor, EditorSection, TemplateScope, useFocusHandoff } from "./editor-fields";
 import type { FieldProblems } from "./field-problems";
 import { readDeliverable, readHttpConfig } from "./step-configs";
 import { HttpFields } from "./step-http-fields";
@@ -62,6 +62,10 @@ export function StepRunResultSections({
   olderVersion: boolean;
 }) {
   const t = useTranslations();
+  // A step's button that a newer version hides hands focus to the heading.
+  const handoff = useFocusHandoff(olderVersion, () =>
+    document.getElementById(sendsHeadingId(formId))
+  );
   const run = flowDeliverables(
     flow.steps.map((step) => (step.id === stepId ? { ...step, ...draft } : step))
   );
@@ -105,7 +109,7 @@ export function StepRunResultSections({
             {t("flow_step_editor_run_result_older_version")}
           </Text>
         ) : run.deliverables.length > 0 ? (
-          <VStack gap={4}>
+          <VStack gap={4} {...handoff}>
             <List hasDividers density="compact" edge="flush">
               {run.deliverables.map((step) => (
                 <ListItem
@@ -148,7 +152,7 @@ export function StepRunResultSections({
           </VStack>
         ) : (
           // Nothing is a warning yet: a step just added has nothing before it to send.
-          <VStack gap={3}>
+          <VStack gap={3} {...handoff}>
             <EmptyState
               title={t("flow_step_editor_run_result_empty_title")}
               description={t(
