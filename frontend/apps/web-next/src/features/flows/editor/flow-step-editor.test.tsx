@@ -3258,7 +3258,7 @@ describe("FlowStepEditor deliverables", () => {
 });
 
 describe("FlowStepEditor Leverans", () => {
-  const RECEIVER = "https://startsidan.example.org/in";
+  const RECEIVER = "https://mottagare.example.org/in";
 
   /** Each step's assistant answered by its id, with the prompt given for it (else a plain one). */
   function routeAssistants(prompts: Record<string, string> = {}) {
@@ -3375,7 +3375,7 @@ describe("FlowStepEditor Leverans", () => {
     expect(toggle.checked).toBe(false);
     expect(
       await within(delivery).findByText(
-        "Ingår inte i körningens resultat som skickas till startsidan.example.org. Slå på Ta med i körningens resultat ovan om det ska följa med."
+        "Ingår inte i körningens resultat som skickas till mottagare.example.org. Slå på Ta med i körningens resultat ovan om det ska följa med."
       )
     ).toBeTruthy();
     // How to send it is said once, on the line about the receiver.
@@ -3384,7 +3384,7 @@ describe("FlowStepEditor Leverans", () => {
     fireEvent.click(toggle);
     expect(toggle.checked).toBe(true);
     expect(
-      within(delivery).getByText("Skickas till startsidan.example.org när körningen är klar.")
+      within(delivery).getByText("Skickas till mottagare.example.org när körningen är klar.")
     ).toBeTruthy();
     noReaderLine();
   }, 20_000);
@@ -3392,7 +3392,7 @@ describe("FlowStepEditor Leverans", () => {
   it("names the step that sends the run's result as a reader when one of its headers names the step", async () => {
     routeAssistants();
     const inHeader =
-      "Skickas till startsidan.example.org i en header i steget som skickar körningens resultat.";
+      "Skickas till mottagare.example.org i en header i steget som skickar körningens resultat.";
     const reading = (order: number, value = "{{Sammanfatta}}") =>
       makeStep({
         ...sender(order),
@@ -3420,7 +3420,7 @@ describe("FlowStepEditor Leverans", () => {
     // What it sends is said apart from what it reads.
     expect(
       within(delivery).getByText(
-        "Ingår inte i körningens resultat som skickas till startsidan.example.org. Slå på Ta med i körningens resultat ovan om det ska följa med."
+        "Ingår inte i körningens resultat som skickas till mottagare.example.org. Slå på Ta med i körningens resultat ovan om det ska följa med."
       )
     ).toBeTruthy();
     // Its text still goes to the receiver, in the header: said right under the
@@ -3457,7 +3457,7 @@ describe("FlowStepEditor Leverans", () => {
     delivery = await section();
     expect(
       await within(delivery).findByText(
-        "Ingår inte i körningens resultat som skickas till startsidan.example.org. Slå på Ta med i körningens resultat ovan om det ska följa med."
+        "Ingår inte i körningens resultat som skickas till mottagare.example.org. Slå på Ta med i körningens resultat ovan om det ska följa med."
       )
     ).toBeTruthy();
     expect(within(delivery).queryByText(inHeader)).toBeNull();
@@ -3470,7 +3470,7 @@ describe("FlowStepEditor Leverans", () => {
       await within(delivery).findByText("Går vidare till nästa steg: Steg 2: Skicka.")
     ).toBeTruthy();
     expect(
-      within(delivery).getByText("Skickas till startsidan.example.org när körningen är klar.")
+      within(delivery).getByText("Skickas till mottagare.example.org när körningen är klar.")
     ).toBeTruthy();
     // Part of the result, it is said once: no header line beside it.
     expect(within(delivery).queryByText(inHeader)).toBeNull();
@@ -3499,9 +3499,7 @@ describe("FlowStepEditor Leverans", () => {
     const delivery = await section();
     // Only the step that sends comes after it, and that step reads no result.
     expect(
-      await within(delivery).findByText(
-        "Skickas till startsidan.example.org när körningen är klar."
-      )
+      await within(delivery).findByText("Skickas till mottagare.example.org när körningen är klar.")
     ).toBeTruthy();
     expect(within(delivery).queryByText(/^Läses /)).toBeNull();
   }, 20_000);
@@ -3529,7 +3527,7 @@ describe("FlowStepEditor Leverans", () => {
     const delivery = await section();
     expect(
       await within(delivery).findByText(
-        "Ingår inte i körningens resultat som skickas till startsidan.example.org. Slå på Ta med i körningens resultat ovan om det ska följa med."
+        "Ingår inte i körningens resultat som skickas till mottagare.example.org. Slå på Ta med i körningens resultat ovan om det ska följa med."
       )
     ).toBeTruthy();
     const saveFirst = "Spara först för att se ändringen i utskicket.";
@@ -3540,7 +3538,7 @@ describe("FlowStepEditor Leverans", () => {
       })
     );
     expect(
-      within(delivery).getByText("Skickas till startsidan.example.org när körningen är klar.")
+      within(delivery).getByText("Skickas till mottagare.example.org när körningen är klar.")
     ).toBeTruthy();
     // The step that sends shows the saved flow: an unsaved change is not there yet.
     expect(within(delivery).getByText(saveFirst)).toBeTruthy();

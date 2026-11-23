@@ -211,7 +211,7 @@ describe("stepReadersByNameOrPlace", () => {
     makeStep(order, {
       output_mode: "http_post",
       output_config: {
-        url: "https://startsidan.example.org/in",
+        url: "https://mottagare.example.org/in",
         auth: { mode: "none" },
         body: { mode: "run_result" }
       }

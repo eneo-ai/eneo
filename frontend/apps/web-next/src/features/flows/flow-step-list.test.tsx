@@ -376,7 +376,7 @@ describe("FlowStepList", () => {
         user_description: "Skicka",
         output_mode: "http_post",
         output_config: {
-          url: "https://startsidan.example.org/in",
+          url: "https://mottagare.example.org/in",
           auth: { mode: "none" },
           body: { mode: body }
         }
@@ -421,7 +421,7 @@ describe("FlowStepList", () => {
       marked,
       middle,
       word,
-      sender("https://startsidan.example.org/in")
+      sender("https://mottagare.example.org/in")
     ]);
     const card = (name: string) => screen.getByRole("article", { name });
     expect(within(card("Steg 1 Mötesanteckningar")).getByText("Leverans")).toBeTruthy();
@@ -432,7 +432,7 @@ describe("FlowStepList", () => {
     expect(
       within(sending).getByText("Mötesanteckningar (Text), Protokoll (Word-dokument)")
     ).toBeTruthy();
-    expect(within(sending).getByText("startsidan.example.org")).toBeTruthy();
+    expect(within(sending).getByText("mottagare.example.org")).toBeTruthy();
     for (const row of [
       messages.flows_step_reads,
       messages.flows_step_takes,
@@ -460,7 +460,7 @@ describe("FlowStepList", () => {
       makeStep(2, {
         user_description: "Skicka",
         output_mode: "http_post",
-        output_config: { url: "https://startsidan.example.org/in", auth: { mode: "none" } }
+        output_config: { url: "https://mottagare.example.org/in", auth: { mode: "none" } }
       })
     ]);
     const plain = screen.getByRole("article", { name: "Steg 2 Skicka" });
@@ -497,7 +497,7 @@ describe("FlowStepList", () => {
         user_description: "Skicka",
         output_mode: "http_post",
         output_config: {
-          url: "https://startsidan.example.org/in",
+          url: "https://mottagare.example.org/in",
           auth: { mode: "none" },
           body: { mode: "run_result" },
           custom_headers: [{ name: "X-Fall", value: "{{Sammanfatta}}", secret: false }]

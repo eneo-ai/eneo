@@ -247,7 +247,7 @@ function senderFlow() {
         user_description: "Skicka till Startsidan",
         output_mode: "http_post",
         output_config: {
-          url: "https://startsidan.example.org/in",
+          url: "https://mottagare.example.org/in",
           auth: { mode: "none" },
           timeout_seconds: 30,
           body: { mode: "run_result" },
@@ -619,7 +619,7 @@ it("agrees on the cards and in what the step that sends lists after the first of
     user_description: "Skicka",
     output_mode: "http_post",
     output_config: {
-      url: "https://startsidan.example.org/in",
+      url: "https://mottagare.example.org/in",
       auth: { mode: "none" },
       body: { mode: "run_result" }
     }
@@ -650,7 +650,7 @@ it("agrees on the cards and in what the step that sends lists after the first of
   expect(
     await within(
       await screen.findByRole("region", { name: messages.flow_step_editor_delivery_title })
-    ).findByText("Skickas till startsidan.example.org när körningen är klar.")
+    ).findByText("Skickas till mottagare.example.org när körningen är klar.")
   ).toBeTruthy();
 
   await click("Alla steg");
@@ -675,7 +675,7 @@ it("agrees in Leverans, on the card that sends and in the removal dialog that a 
         user_description: "Skicka",
         output_mode: "http_post",
         output_config: {
-          url: "https://startsidan.example.org/in",
+          url: "https://mottagare.example.org/in",
           auth: { mode: "api_key", header_name: "X-{{Sammanfatta}}", key: "hemlig" },
           body: { mode: "run_result" }
         }
@@ -689,7 +689,7 @@ it("agrees in Leverans, on the card that sends and in the removal dialog that a 
   expect(await within(delivery).findByText("Läses av Steg 3: Skicka.")).toBeTruthy();
   expect(
     within(delivery).getByText(
-      "Skickas till startsidan.example.org i en header i steget som skickar körningens resultat."
+      "Skickas till mottagare.example.org i en header i steget som skickar körningens resultat."
     )
   ).toBeTruthy();
 

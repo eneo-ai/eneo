@@ -157,13 +157,9 @@ describe("HTTP", () => {
   it("names the host the run's result goes to, only for an address it can be sent to", () => {
     const sender = (url: string) => ({ output_config: { url, body: { mode: "run_result" } } });
     expect(runResultHost(sender(" https://Startsidan.example.org/in?x=1 "))).toBe(
-      "startsidan.example.org"
+      "mottagare.example.org"
     );
-    for (const url of [
-      "",
-      "http://startsidan.example.org/in",
-      "https://{{ flow_input.host }}/in"
-    ]) {
+    for (const url of ["", "http://mottagare.example.org/in", "https://{{ flow_input.host }}/in"]) {
       expect(runResultHost(sender(url))).toBeNull();
     }
   });
