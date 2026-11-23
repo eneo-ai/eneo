@@ -3469,7 +3469,10 @@ describe("FlowStepEditor Leverans", () => {
           text(2, "Granska", { input_source: "flow_input" }),
           reading(3)
         ]
-      })
+      }),
+      {
+        navigation: { position: 1, count: 3, previous: null, next: null, steps: [], onGo: vi.fn() }
+      }
     );
     let delivery = await section();
     expect(await within(delivery).findByText("Läses av Steg 3: Skicka.")).toBeTruthy();
@@ -3479,8 +3482,25 @@ describe("FlowStepEditor Leverans", () => {
         "Ingår inte i körningens resultat som skickas till startsidan.example.org. Slå på Ta med i körningens resultat ovan om det ska följa med."
       )
     ).toBeTruthy();
-    // Its text still goes to the receiver, in the header.
-    expect(within(delivery).getByText(inHeader)).toBeTruthy();
+    // Its text still goes to the receiver, in the header: said right under the
+    // line about the result, before the button that opens the step that sends.
+    const headerLine = within(delivery).getByText(inHeader);
+    const follows = (a: Node, b: Node) =>
+      (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+    expect(
+      follows(
+        within(delivery).getByText(/^Ingår inte i körningens resultat som skickas till/),
+        headerLine
+      )
+    ).toBe(true);
+    expect(
+      follows(
+        headerLine,
+        within(delivery).getByRole("button", {
+          name: messages.flow_step_editor_delivery_open_sender
+        })
+      )
+    ).toBe(true);
     view.unmount();
 
     // A header that names another step sends nothing of this one.

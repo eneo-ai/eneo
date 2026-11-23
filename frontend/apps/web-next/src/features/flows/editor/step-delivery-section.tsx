@@ -230,6 +230,9 @@ function DeliverableFields({
   );
 }
 
+/** A line's icon, on the first line of its text however the text wraps. */
+const ICON = "text-ax-text-secondary mt-0.5 size-4 shrink-0";
+
 /**
  * Where a text or document step's result goes: which later steps read it,
  * whether it is one of the run's results (and under which names), and
@@ -324,8 +327,8 @@ export function StepDeliverySection({
       description={t("flow_step_editor_delivery_description")}
     >
       {readLine && (
-        <HStack gap={2} align="center">
-          <ArrowRight className="text-ax-text-secondary size-4 shrink-0" aria-hidden="true" />
+        <HStack gap={2} align="start">
+          <ArrowRight className={ICON} aria-hidden="true" />
           <Text type="supporting" size="sm" as="p" display="block" className="m-0 max-w-prose">
             {readLine}
           </Text>
@@ -341,26 +344,30 @@ export function StepDeliverySection({
         onChange={onChange}
         problems={problems}
       />
-      <HStack gap={3} align="center" justify="between" wrap="wrap">
-        <HStack gap={2} align="center">
-          <Send className="text-ax-text-secondary size-4 shrink-0" aria-hidden="true" />
+      {/* Whether it leaves for the receiver, and how: the header line belongs
+          to the line about the result, and the button to both. */}
+      <HStack gap={2} align="start">
+        <Send className={ICON} aria-hidden="true" />
+        <VStack gap={1}>
           <Text type="supporting" size="sm" as="p" display="block" className="m-0 max-w-prose">
             {sendLine}
           </Text>
-        </HStack>
-        {senderId && onGoStep && (
+          {headerLine && (
+            <Text type="supporting" size="sm" as="p" display="block" className="m-0 max-w-prose">
+              {headerLine}
+            </Text>
+          )}
+        </VStack>
+      </HStack>
+      {senderId && onGoStep && (
+        <HStack>
           <Button
             label={t("flow_step_editor_delivery_open_sender")}
             size="sm"
             variant="secondary"
             onClick={() => onGoStep(senderId)}
           />
-        )}
-      </HStack>
-      {headerLine && (
-        <Text type="supporting" size="sm" as="p" display="block" className="m-0 max-w-prose">
-          {headerLine}
-        </Text>
+        </HStack>
       )}
       {senderId && onGoStep && dirty && (
         // It opens the saved flow; leaving asks first, as every other way out does.
