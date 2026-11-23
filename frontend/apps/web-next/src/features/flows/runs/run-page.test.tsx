@@ -1609,6 +1609,80 @@ describe("FlowRunPage", () => {
     expect(stepList.queryAllByText(messages.flow_runs_step_status_running)).toHaveLength(0);
   });
 
+  // The other way round: a status read just before the commit and a graph read just after it show
+  // a running run with every step done, and the detail read for that pair already holds the result.
+  // The result follows the header: it shows once a status read says the run finished.
+  it("shows the result only once the header shows the run finished, though its detail holds it earlier", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const running = makeRunSummary({ status: "running", finished_at: null, revision: 2 });
+    const completed = makeRunSummary();
+    answerRun(
+      running,
+      makeRunDetail({
+        ...completed,
+        result_files: [makeResultFile({ file_id: "file-7", name: "underlag.docx" })]
+      })
+    );
+    renderRun();
+    await screen.findAllByText(messages.flow_runs_status_running);
+    const section = await resultSection();
+    expect(section.queryByText("Beslutet är fattat.")).toBeNull();
+    expect(section.getByText(messages.flow_runs_result_pending)).toBeTruthy();
+    expect(section.queryByRole("button", { name: messages.flow_run_more_copy_output })).toBeNull();
+    // The run's other files are listed while it runs, as they always were.
+    const earlier = section.getByRole("list", { name: messages.flow_run_more_other_files });
+    expect(within(earlier).getByText("underlag.docx")).toBeTruthy();
+
+    // The next status read says the run completed: the result shows with it, from the detail
+    // already read, while the detail is read again for the run as it ended.
+    state.routes[STATUS] = () => ({ body: completed });
+    const release = holdAnswers(DETAIL);
+    await act(() => vi.advanceTimersByTimeAsync(2_100));
+    expect(calls(DETAIL)).toHaveLength(2);
+    expect(screen.getAllByText(messages.flow_runs_status_completed).length).toBeGreaterThan(0);
+    expect(screen.queryAllByText(messages.flow_runs_status_running)).toHaveLength(0);
+    expect(section.getByText("Beslutet är fattat.")).toBeTruthy();
+    expect(section.getByRole("button", { name: messages.flow_run_more_copy_output })).toBeTruthy();
+    const files = section.getByRole("list", { name: messages.flow_run_more_other_files });
+    expect(within(files).getByText("underlag.docx")).toBeTruthy();
+    release();
+    await act(() => vi.advanceTimersByTimeAsync(100));
+  });
+
+  // The same race for a run that ends failed: the detail already says why while the header says
+  // it runs. Why it failed follows the header too.
+  it("says why the run failed only once the header shows it failed, though its detail says so earlier", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const running = makeRunSummary({ status: "running", finished_at: null, revision: 2 });
+    const failed = makeRunSummary({ status: "failed" });
+    answerRun(
+      running,
+      makeRunDetail({
+        ...failed,
+        result: null,
+        error: { code: "flow_step_timeout", message: "timed out", details: null, retryable: true }
+      } as Partial<RunDetail>)
+    );
+    state.routes[GRAPH] = () => ({
+      body: makeRunGraph([
+        { order: 1, label: "Sammanfatta", status: "completed" },
+        { order: 2, label: "Skriv svar", status: "failed" }
+      ])
+    });
+    renderRun();
+    await screen.findAllByText(messages.flow_runs_status_running);
+    await resultSection();
+    expect(screen.queryByText(messages.flow_runs_failed_title)).toBeNull();
+    expect(screen.queryByText(messages.flow_error_flow_step_timeout)).toBeNull();
+
+    state.routes[STATUS] = () => ({ body: failed });
+    await act(() => vi.advanceTimersByTimeAsync(2_100));
+    expect(await screen.findByText(messages.flow_runs_failed_title)).toBeTruthy();
+    expect(screen.getByText(messages.flow_error_flow_step_timeout)).toBeTruthy();
+    expect(screen.getAllByText(messages.flow_runs_status_failed).length).toBeGreaterThan(0);
+    expect(screen.queryAllByText(messages.flow_runs_status_running)).toHaveLength(0);
+  });
+
   // One move of the run changes its status and graph together. Whichever of the two answers last,
   // the audited detail and steps are read again once, for the run as it now is: never once for the
   // new status with the old graph and again for both.
@@ -1893,7 +1967,8 @@ describe("FlowRunPage", () => {
       makeRunDetail({ ...running, result: { kind: "inline_text", text: "Ett första utkast." } })
     );
     renderRun();
-    expect(await screen.findByText("Ett första utkast.")).toBeTruthy();
+    // Its result shows once its status says it finished, below.
+    expect(await screen.findByText(messages.flow_runs_result_pending)).toBeTruthy();
     expect(screen.getByRole("article", { name: "Steg 1: Sammanfatta" })).toBeTruthy();
 
     // The run moved on; its detail and steps cannot be read again.

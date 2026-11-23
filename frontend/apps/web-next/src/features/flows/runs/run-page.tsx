@@ -570,7 +570,9 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
   });
 
   const run = detail.data;
-  const resultCopy = copyableResult(run?.result);
+  // The result follows the header: a detail read for a status from before the run's last commit
+  // and a graph from after it already holds the result while the status still says it runs.
+  const resultCopy = settled ? copyableResult(run?.result) : null;
   const startedAt = summary ? (summary.started_at ?? summary.created_at) : null;
   const time = useClientTimeText(startedAt, "date_time");
   const title =
@@ -873,7 +875,8 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
             <RefreshError
               queries={[progress, detail, steps, ...(awaitingReview ? [review] : [])]}
             />
-            {run ? (
+            {/* Why it failed or was cancelled waits for the header to say so, as the result does. */}
+            {run && (settled || run.status === "queued") ? (
               <RunProblem
                 run={run}
                 flow={flow}
@@ -931,12 +934,19 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
                 />
               ) : run ? (
                 <>
-                  <RunResult
-                    flowId={flowId}
-                    run={run}
-                    steps={stepViews}
-                    delivery={latestDelivery}
-                  />
+                  {settled ? (
+                    <RunResult
+                      flowId={flowId}
+                      run={run}
+                      steps={stepViews}
+                      delivery={latestDelivery}
+                    />
+                  ) : (
+                    <p className="text-ax-text-secondary text-sm">
+                      {t("flow_runs_result_pending")}
+                    </p>
+                  )}
+                  {/* Leaves out the result's own files, so none shows here before the result. */}
                   <RunOtherFiles flowId={flowId} run={run} />
                 </>
               ) : (
