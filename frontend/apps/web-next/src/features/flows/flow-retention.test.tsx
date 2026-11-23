@@ -81,6 +81,14 @@ function renderSettings(permissions: Permission[]) {
   );
 }
 
+/** The page reads the flow from its detail entry, as the summary does here. */
+function CachedFlowSettings() {
+  const flow = useQuery(flowQueryOptions(browserApi, "flow-1")).data;
+  return flow ? (
+    <FlowSettings flow={flow} canEdit transcription={resources} onSave={vi.fn()} />
+  ) : null;
+}
+
 async function openDialog() {
   renderSettings(["retention_manage"]);
   fireEvent.click(screen.getByRole("button", { name: "Ändra gallring" }));
@@ -249,13 +257,6 @@ describe("flow retention", () => {
         effective: byFlow(3)
       })
     );
-    // The page reads the flow from its detail entry, as the summary does here.
-    function CachedFlowSettings() {
-      const flow = useQuery(flowQueryOptions(browserApi, "flow-1")).data;
-      return flow ? (
-        <FlowSettings flow={flow} canEdit transcription={resources} onSave={vi.fn()} />
-      ) : null;
-    }
     renderInApp(<CachedFlowSettings />, {
       queryClient,
       appContext: testAppContext({ permissions: ["retention_manage"] })
@@ -282,6 +283,62 @@ describe("flow retention", () => {
       name: /Egen tid för det här flödet/
     })) as HTMLInputElement;
     expect(reopened.value).toBe("3");
+  });
+
+  it("reads the Flow again after a refusal, so the summary shows the space's shorter time", async () => {
+    const retention = (source: "flow" | "space", days: number, space: number) =>
+      ({
+        state: "configured",
+        source,
+        effective_days: days,
+        contributors: { space: { days: space }, flow: { days: 30 } }
+      }) as const;
+    const queryClient = testQueryClient();
+    queryClient.setQueryData(
+      flowKeys.flow("flow-1"),
+      makeFlow({ run_history_retention: retention("flow", 30, 60) })
+    );
+    // Each Flow read answers only when released: one from before the save, one after it.
+    const flowReads: ((value: unknown) => void)[] = [];
+    backend.GET.mockImplementation((path: string) =>
+      path === "/api/v1/flows/{id}/"
+        ? new Promise((resolve) => flowReads.push(resolve))
+        : Promise.resolve(settings({ days: 30 }, { days: 60 }))
+    );
+    backend.PUT.mockRejectedValue(capRefusal());
+    renderInApp(<CachedFlowSettings />, {
+      queryClient,
+      appContext: testAppContext({ permissions: ["retention_manage"] })
+    });
+    expect(screen.getByText(/30 dagar, satt på flödet/)).toBeTruthy();
+    void queryClient.refetchQueries({ queryKey: flowKeys.flow("flow-1"), exact: true });
+    await waitFor(() => expect(flowReads).toHaveLength(1));
+
+    fireEvent.click(screen.getByRole("button", { name: "Ändra gallring" }));
+    const days = (await screen.findByRole("spinbutton", {
+      name: /Egen tid för det här flödet/
+    })) as HTMLInputElement;
+    fireEvent.change(days, { target: { value: "10" } });
+    fireEvent.blur(days);
+    fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
+    // The cap shows without waiting for the Flow, which is read again behind it.
+    expect(await screen.findByText(capText)).toBeTruthy();
+    await waitFor(() => expect(flowReads).toHaveLength(2));
+
+    // The new read lands while the dialog is open: the error, the value and the focus stay.
+    flowReads[1]!(answered(makeFlow({ run_history_retention: retention("space", 7, 7) })));
+    await settle();
+    expect(capStatus()).toBeTruthy();
+    expect(days.value).toBe("10");
+    expect(document.activeElement).toBe(days);
+
+    // The read from before the refusal lands last and does not bring the Flow's 30 back.
+    flowReads[0]!(answered(makeFlow({ run_history_retention: retention("flow", 30, 60) })));
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Avbryt" }));
+    await waitFor(() => expect(screen.queryByRole("spinbutton")).toBeNull());
+    expect(screen.getByText(/7 dagar, ärvt från ytan/)).toBeTruthy();
+    expect(screen.queryByText(/30 dagar, satt på flödet/)).toBeNull();
   });
 
   it("keeps a saved time when an older read lands after the save", async () => {
