@@ -178,9 +178,10 @@ function Question({
       className="w-full"
     >
       {(text || quote) && (
-        <ChatMessageBubble className="bg-ax-muted rounded-ax-page flex max-w-[min(100%,32.5rem)] flex-col gap-2 px-[15px] py-2.5 text-[14.5px] leading-normal whitespace-pre-wrap">
+        <ChatMessageBubble className="bg-ax-muted rounded-ax-page flex max-w-[min(100%,32.5rem)] flex-col gap-2 px-[15px] py-2.5 text-[14.5px] leading-normal">
           {quote && <QuestionQuote quote={quote} conversationFiles={conversationFiles} />}
-          {text}
+          {/* Pasted text arrives as Markdown; a line break typed in a paragraph stays one. */}
+          {text && <MessageResponse className="[&_p]:whitespace-pre-wrap">{text}</MessageResponse>}
         </ChatMessageBubble>
       )}
       {children}
