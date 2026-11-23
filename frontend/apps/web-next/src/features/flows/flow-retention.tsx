@@ -3,7 +3,7 @@ import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
 import { NumberInput } from "@astryxdesign/core/NumberInput";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
 import { LoadingState } from "@/components/composites/loading-state";
 import { ListError } from "@/components/composites/query-state";
@@ -134,12 +134,15 @@ function RetentionForm({
   const t = useTranslations();
   const formId = useId();
   const queryClient = useQueryClient();
-  const spaceDays = settings.inherited_policy?.days ?? null;
   const savedDays = settings.local_policy?.days ?? null;
   const [days, setDays] = useState(savedDays);
   const [refused, setRefused] = useState(false);
-  // The cap a refusal named; it may be newer than the one this form read.
-  const [cap, setCap] = useState<number | null>(null);
+  // The space's time as the server last gave it: a refusal may name a newer one than
+  // this form read, and that one then applies to an empty field too.
+  const [spaceDays, setSpaceDays] = useState(settings.inherited_policy?.days ?? null);
+  // The field's value is over the space's time; a new value clears it.
+  const [overCap, setOverCap] = useState(false);
+  const field = useRef<HTMLInputElement>(null);
 
   const save = useMutation({
     mutationFn: (sent: number | null) =>
@@ -159,16 +162,21 @@ function RetentionForm({
     },
     onError: (error) => {
       const refusedAt = refusedCap(error);
-      if (refusedAt === null) toastApiError(error, t);
-      setCap(refusedAt);
+      if (refusedAt === null) {
+        toastApiError(error, t);
+        return;
+      }
+      setSpaceDays(refusedAt);
+      setOverCap(true);
+      field.current?.focus();
     }
   });
 
   const problem =
     refused && days !== null && !retentionDaysValid(days)
       ? t("flows_retention_days_range", { min: MIN_DAYS, max: MAX_DAYS })
-      : cap !== null
-        ? t("flows_retention_cap_space", { days: cap })
+      : overCap && spaceDays !== null
+        ? t("flows_retention_cap_space", { days: spaceDays })
         : undefined;
   const applies =
     days !== null
@@ -204,16 +212,19 @@ function RetentionForm({
             }}
           >
             <NumberInput
+              ref={field}
               label={t("flows_retention_days_label")}
               description={applies}
               value={days}
               onChange={(next) => {
                 setDays(next);
-                setCap(null);
+                setOverCap(false);
               }}
               min={MIN_DAYS}
               max={MAX_DAYS}
               hasClear
+              // Read-only, not disabled: it keeps focus, and a refusal marks the value sent.
+              isReadOnly={save.isPending}
               status={problem ? { type: "error", message: problem } : undefined}
             />
           </form>

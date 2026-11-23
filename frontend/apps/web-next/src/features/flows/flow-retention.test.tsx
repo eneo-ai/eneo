@@ -112,7 +112,23 @@ describe("flow retention", () => {
 
   it("names the space's cap next to the field when the backend refuses a longer time", async () => {
     backend.GET.mockResolvedValue(settings(null, { days: 60 }));
-    backend.PUT.mockRejectedValue(
+    let refuse: (error: unknown) => void = () => {};
+    backend.PUT.mockReturnValue(
+      new Promise((_, reject) => {
+        refuse = reject;
+      })
+    );
+    const days = (await openDialog()) as HTMLInputElement;
+    fireEvent.change(days, { target: { value: "10" } });
+    fireEvent.blur(days);
+    const saveButton = screen.getByRole("button", { name: "Spara inställningar" });
+    saveButton.focus();
+    fireEvent.click(saveButton);
+    await waitFor(() => expect(backend.PUT).toHaveBeenCalledTimes(1));
+    // An edit while the save is pending does not take, so a late refusal marks the value sent.
+    fireEvent.change(days, { target: { value: "5" } });
+    fireEvent.blur(days);
+    refuse(
       new EneoApiError("The retention period is longer than the limit that applies here.", {
         status: 400,
         code: 9086,
@@ -120,16 +136,21 @@ describe("flow retention", () => {
         context: { cap_days: 7, cap_origin: "space" }
       })
     );
-    const days = await openDialog();
-    fireEvent.change(days, { target: { value: "90" } });
-    fireEvent.blur(days);
-    fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
     expect(await screen.findByText("Ytan tillåter högst 7 dagar.")).toBeTruthy();
+    expect(days.value).toBe("10");
     expect(days.getAttribute("aria-invalid")).toBe("true");
-    // A new value clears the refusal.
+    expect(document.activeElement).toBe(days);
+    await waitFor(() => expect(days.readOnly).toBe(false));
+    // A new value clears the refusal. The live region may still speak it, on its own timer.
     fireEvent.change(days, { target: { value: "5" } });
     fireEvent.blur(days);
-    expect(screen.queryByText("Ytan tillåter högst 7 dagar.")).toBeNull();
+    expect(
+      screen.queryByText("Ytan tillåter högst 7 dagar.", { ignore: "[aria-live], [aria-live] *" })
+    ).toBeNull();
+    // Emptied, the field inherits the time the space last named, not the one read at open.
+    fireEvent.change(days, { target: { value: "" } });
+    fireEvent.blur(days);
+    expect(screen.getByText(/Från ytan: 7 dagar/)).toBeTruthy();
   });
 
   it("empties the flow's own time to use the space's again", async () => {
