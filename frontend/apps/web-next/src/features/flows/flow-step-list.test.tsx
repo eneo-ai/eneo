@@ -542,6 +542,42 @@ describe("FlowStepList", () => {
     expect(within(previous).queryByText(messages.flows_step_reads)).toBeNull();
   });
 
+  it("says on the sending card that its headers read run input, once however many do", () => {
+    const sending = (headers: string[]) =>
+      makeStep(2, {
+        user_description: "Skicka",
+        output_mode: "http_post",
+        output_config: {
+          url: "https://mottagare.example.org/in",
+          auth: { mode: "none" },
+          body: { mode: "run_result" },
+          custom_headers: headers.map((value, index) => ({
+            name: `X-Fall-${index}`,
+            value,
+            secret: false
+          }))
+        }
+      });
+    const first = makeStep(1, { user_description: "Sammanfatta", output_type: "text" });
+    const card = () => screen.getByRole("article", { name: "Steg 2 Skicka" });
+
+    for (const headers of [
+      ["{{ flow_input.case_id }}"],
+      ["{{ flow_input.case_id }}", "{{flow_input.team}}"]
+    ]) {
+      renderList(true, null, {}, true, [first, sending(headers)]);
+      expect(within(card()).getByText(messages.flows_step_reads)).toBeTruthy();
+      expect(within(card()).getAllByText(messages.flows_read_flow_input)).toHaveLength(1);
+      // What it sends stays its own row.
+      expect(within(card()).getByText(messages.flows_step_sends)).toBeTruthy();
+      cleanup();
+    }
+
+    // The result it sends on its own is no read.
+    renderList(true, null, {}, true, [first, sending([])]);
+    expect(within(card()).queryByText(messages.flows_step_reads)).toBeNull();
+  });
+
   it("folds each step's suggestions into one quiet row with their count", async () => {
     prompts.suggestions = [
       suggestionAbout("step-2", "a".repeat(64), "patch"),

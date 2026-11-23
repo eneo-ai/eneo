@@ -218,25 +218,32 @@ function webhookTarget(
 }
 
 /**
- * The earlier steps the step that sends the run's result reads in its own
- * right, in run order: those what it sends in headers names (`headerTokens`),
- * read as the core fills them in (`webhookTarget`). The result it sends is
- * not a read.
+ * What the step that sends the run's result reads in its own right: the
+ * earlier steps what it sends in headers names (`headerTokens`), in run
+ * order, then the run's input once when a header reads it, each read as the
+ * core fills them in (`webhookTarget`). The result it sends is not a read,
+ * and its address takes no reference (`runResultUrlFixed`).
  */
 export function senderReads(sender: FlowStep, steps: readonly FlowStep[]): StepRead[] {
   const config = isRecord(sender.output_config) ? sender.output_config : {};
   const reads = new Map<number, FlowStep | null>();
+  let readsFlowInput = false;
   for (const token of headerTokens(config)) {
     const target = webhookTarget(token, sender, steps);
     if (target?.kind === "step") {
       reads.set(target.order, steps.find((step) => step.step_order === target.order) ?? null);
     } else if (target?.kind === "deleted" && !reads.has(target.order)) {
       reads.set(target.order, null);
+    } else if (target?.kind === "flow_input") {
+      readsFlowInput = true;
     }
   }
-  return [...reads]
-    .sort(([a], [b]) => a - b)
-    .map(([order, step]) => ({ kind: "step" as const, order, step }));
+  return [
+    ...[...reads]
+      .sort(([a], [b]) => a - b)
+      .map(([order, step]) => ({ kind: "step" as const, order, step })),
+    ...(readsFlowInput ? [{ kind: "flow_input" as const }] : [])
+  ];
 }
 
 type ReadFacts = {
