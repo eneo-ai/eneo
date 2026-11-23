@@ -183,6 +183,27 @@ describe("stepReaders", () => {
     ];
     expect(stepReadersByNameOrPlace(steps[0]!, steps)).toEqual([steps[1]]);
   });
+  it("reads the names a call's credentials go under, and its body only as a template", () => {
+    const post = (overrides: Record<string, unknown>) => [
+      makeStep(1),
+      makeStep(2, {
+        input_source: "flow_input",
+        output_mode: "http_post",
+        output_config: { url: "https://hooks.example.se", auth: { mode: "none" }, ...overrides }
+      })
+    ];
+    const readers = (steps: ReturnType<typeof post>) =>
+      stepReaders(steps[0]!, steps).map((step) => step.step_order);
+
+    expect(
+      readers(post({ auth: { mode: "api_key", header_name: "X-{{step_1}}", key: "hemlig" } }))
+    ).toEqual([2]);
+    expect(
+      readers(post({ auth: { mode: "basic_auth", username: "{{step_1}}", password: "hemlig" } }))
+    ).toEqual([2]);
+    // A template left from another body mode is not sent.
+    expect(readers(post({ body: { mode: "auto", template: "{{step_1}}" } }))).toEqual([]);
+  });
 });
 
 describe("stepReadersByNameOrPlace", () => {

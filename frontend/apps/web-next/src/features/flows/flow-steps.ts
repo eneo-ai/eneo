@@ -162,16 +162,21 @@ function templateFieldTokens(step: FlowStep): string[] {
 }
 
 /**
- * What an HTTP call reads: the texts publish checks in it (its address, its
- * body and the values of its headers that are not secret).
+ * What an HTTP call reads: the texts the core fills in (`interpolated_template_sites`):
+ * its address, the header name or user name its credential goes under, its
+ * body when that is a template, and the values of its headers that are not secret.
  */
 function callTokens(call: unknown): string[] {
   if (!isRecord(call)) return [];
+  const auth = isRecord(call.auth) ? call.auth : {};
   const body = isRecord(call.body) ? call.body : {};
   return [
-    ...[call.url, body.template].flatMap((text) =>
-      typeof text === "string" ? tokensOf(text) : []
-    ),
+    ...[
+      call.url,
+      auth.mode === "api_key" ? auth.header_name : null,
+      auth.mode === "basic_auth" ? auth.username : null,
+      body.mode === "json_template" || body.mode === "text_template" ? body.template : null
+    ].flatMap((text) => (typeof text === "string" ? tokensOf(text) : [])),
     ...headerTokens(call)
   ];
 }
