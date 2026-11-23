@@ -125,6 +125,7 @@ describe("flow retention", () => {
     fireEvent.blur(days);
     fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
     expect(await screen.findByText("Ytan tillåter högst 7 dagar.")).toBeTruthy();
+    expect(days.getAttribute("aria-invalid")).toBe("true");
     // A new value clears the refusal.
     fireEvent.change(days, { target: { value: "5" } });
     fireEvent.blur(days);
