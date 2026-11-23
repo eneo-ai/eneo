@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Optional, Union, cast
+from typing import TYPE_CHECKING, Any, Literal, Optional, Union, cast
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, computed_field, model_validator
@@ -55,6 +55,7 @@ class ResponseType(str, Enum):
     FIRST_CHUNK = "first_chunk"
     TOKEN_USAGE = "token_usage"
     ERROR = "error"
+    CONSULTATION = "consultation"
 
 
 @dataclass
@@ -136,6 +137,7 @@ class ToolCallMetadata:
     # the call is announced, so a client can show the view while the call's
     # arguments are still being written.
     app_view: Optional[dict[str, Any]] = None
+    generated_file_ids: list[UUID] | None = None
     # Server-issued resource IDs for a step whose details may be shown
     # without the files grant. An empty tuple means it produced no sources.
     upload_free_reference_ids: tuple[UUID, ...] | None = None
@@ -235,6 +237,45 @@ class GeneratedFile:
 
 
 @dataclass
+class AssistantConsultation:
+    """One specialist consultation, including its own observed tool steps.
+
+    The containing question is the parent. Provider-local tool IDs are scoped
+    by this consultation ID, so a second consultation never overwrites the
+    first one's steps. System instructions and reasoning are not collected.
+    """
+
+    id: UUID
+    ordinal: int
+    assistant_id: UUID
+    assistant_name: str
+    question: str
+    status: Literal[
+        "running",
+        "awaiting_approval",
+        "complete",
+        "denied",
+        "timeout",
+        "cancelled",
+        "incomplete",
+        "failed",
+    ] = "running"
+    answer: str = ""
+    tool_calls: list[ToolCallMetadata] = field(default_factory=list[ToolCallMetadata])
+    references: list[McpToolReference] = field(default_factory=list[McpToolReference])
+    usage: TokenUsage | None = None
+    approval_id: str | None = None
+    # Provider IDs of the steps a pending approval decides. Internal tools in
+    # the same round never need approval and are not listed.
+    awaiting_tool_call_ids: list[str] = field(default_factory=list[str])
+    # Server-issued identities are separate from provider-local approval IDs.
+    step_ids: list[UUID] = field(default_factory=list[UUID])
+    completion_model_id: UUID | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+
+
+@dataclass
 class Completion:
     reasoning_token_count: Optional[int] = 0
     text: Optional[str] = None
@@ -277,6 +318,9 @@ class Completion:
     context_output_token_estimate: Optional[int] = None
     # LiteLLM-measured Skill-owned subset of the final provider prompt.
     skill_context_tokens: Optional[int] = None
+    consultations: list[AssistantConsultation] | None = None
+    consultation_id: UUID | None = None
+    execution_model_id: UUID | None = None
 
 
 class CompletionModelBase(BaseModel):

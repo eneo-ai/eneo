@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from contextlib import nullcontext
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from typing import TYPE_CHECKING, Any
@@ -157,26 +158,27 @@ async def load_active_litellm_provider(
         ModelProviders.id == provider_id,
         ModelProviders.tenant_id == tenant_id,
     )
-    result = await session.execute(stmt)
-    provider_db = result.scalar_one_or_none()
+    async with nullcontext() if session.in_transaction() else session.begin():
+        result = await session.execute(stmt)
+        provider_db = result.scalar_one_or_none()
 
-    if provider_db is None:
-        raise ProviderNotFoundException(
-            f"Model provider '{provider_id}' not found or is not accessible."
+        if provider_db is None:
+            raise ProviderNotFoundException(
+                f"Model provider '{provider_id}' not found or is not accessible."
+            )
+
+        if not provider_db.is_active:
+            raise ProviderInactiveException(
+                f"The model provider '{provider_db.name}' is currently inactive. "
+                "Please contact your administrator to enable the provider."
+            )
+
+        return ResolvedLiteLLMProvider(
+            id=provider_db.id,
+            tenant_id=provider_db.tenant_id,
+            name=provider_db.name,
+            provider_type=provider_db.provider_type,
+            credentials=provider_db.credentials,
+            config=provider_db.config,
+            outbound_headers=provider_db.outbound_headers,
         )
-
-    if not provider_db.is_active:
-        raise ProviderInactiveException(
-            f"The model provider '{provider_db.name}' is currently inactive. "
-            "Please contact your administrator to enable the provider."
-        )
-
-    return ResolvedLiteLLMProvider(
-        id=provider_db.id,
-        tenant_id=provider_db.tenant_id,
-        name=provider_db.name,
-        provider_type=provider_db.provider_type,
-        credentials=provider_db.credentials,
-        config=provider_db.config,
-        outbound_headers=provider_db.outbound_headers,
-    )
