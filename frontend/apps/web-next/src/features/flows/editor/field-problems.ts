@@ -1,6 +1,6 @@
 import { EneoApiError, getErrorMessage } from "@/lib/api/errors";
 import { FlowEditorError } from "./editor-api";
-import { HTTP_CONFIG_KEYS, sendsRunResult } from "./step-configs";
+import { HTTP_CONFIG_KEYS } from "./step-configs";
 import { EDITABLE_STEP_FIELDS, isJsonObject, type StepConfig } from "./step-types";
 
 /**
@@ -312,18 +312,13 @@ function validationPaths(error: EneoApiError): string[] {
   });
 }
 
-/**
- * Where and how the editor shows a failed save of this step. With the step's
- * `output_config`, a step that sends the run's result gets its own text for
- * an address the core alone refuses.
- */
+/** Where and how the editor shows a failed save of this step. */
 export function describeSaveError(
   error: unknown,
   step: {
     stepId: string;
     stepOrder: number;
-    config: Pick<StepConfig, "input_source" | "output_mode"> &
-      Partial<Pick<StepConfig, "output_config">>;
+    config: Pick<StepConfig, "input_source" | "output_mode">;
   },
   t: Translator
 ): EditorProblem {
@@ -338,13 +333,7 @@ export function describeSaveError(
   const context = error instanceof FlowEditorError ? error.context : {};
   const code = error.reason ?? null;
   const issueCode = contextString(context, "issue_code");
-  const httpError = contextString(context, "http_error") ?? "";
-  // The core checks some of an address only itself (the host) and names it
-  // HTTP_INVALID_URL; the step that sends the run's result has one rule for its address.
-  const httpErrorKey =
-    httpError === "HTTP_INVALID_URL" && sendsRunResult(step.config)
-      ? HTTP_ERROR_KEYS.HTTP_RUN_RESULT_REQUIRES_FIXED_HTTPS_URL
-      : HTTP_ERROR_KEYS[httpError];
+  const httpErrorKey = HTTP_ERROR_KEYS[contextString(context, "http_error") ?? ""];
   const message =
     (httpErrorKey ? t(httpErrorKey) : null) ??
     refusalMessage(issueCode, t) ??

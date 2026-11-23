@@ -553,16 +553,11 @@ describe("AddStepDialog", () => {
   });
 
   it.each([
-    [
-      "send_run_result",
-      "Skicka körningens resultat",
-      "run_result",
-      "flow_step_editor_http_run_result_url_fixed"
-    ],
-    ["send_http", "Anropa webbtjänst", "auto", "flow_step_editor_http_url_invalid"]
+    ["send_run_result", "Skicka körningens resultat", "run_result"],
+    ["send_http", "Anropa webbtjänst", "auto"]
   ] as const)(
-    "puts the core's refusal of an address it alone checks at the field of %s, in its own words",
-    async (kind, name, mode, message) => {
+    "puts the core's refusal of a host at the address of %s, without the https rule",
+    async (kind, name, mode) => {
       api.routes[KINDS] = () => ({
         body: {
           flow_id: "flow-1",
@@ -580,13 +575,14 @@ describe("AddStepDialog", () => {
           steps: []
         }
       });
-      // An address the dialog lets through, which the core still refuses (its host, say).
+      // What the core answers an address whose host it refuses (`draft_step_refusals`).
       api.routes[EDITOR] = () => ({
         status: 400,
         body: {
-          message: "Step 2: output_config validation failed",
+          message:
+            "Step 2: output_config.url is not an absolute http or https URL without userinfo (HTTP_INVALID_URL).",
           code: "typed_io_http_invalid_config",
-          context: { field: "output_config.url", http_error: "HTTP_INVALID_URL" },
+          context: { field: "output_config.url", issue_code: "flow_step_invalid", step_order: 2 },
           eneo_error_code: 9000
         }
       });
@@ -595,10 +591,16 @@ describe("AddStepDialog", () => {
       const address = within(dialog).getByRole("textbox", {
         name: /^(Mottagarens adress|Adress att skicka till)/
       }) as HTMLInputElement;
+      // A phone shows the keyboard for addresses; the form checks the address itself.
       expect(address.type).toBe("url");
-      fireEvent.change(address, { target: { value: "https://intranet.example/in" } });
+      fireEvent.change(address, { target: { value: "https://a..b.example/in" } });
       fireEvent.click(within(dialog).getByRole("button", { name: `Lägg till ${name}` }));
-      expect(await within(dialog).findByText(messages[message])).toBeTruthy();
+      expect(
+        await within(dialog).findByText(messages.flow_validation_msg_flow_step_invalid)
+      ).toBeTruthy();
+      expect(
+        within(dialog).queryByText(messages.flow_step_editor_http_run_result_url_fixed)
+      ).toBeNull();
       expect(document.activeElement).toBe(address);
     }
   );

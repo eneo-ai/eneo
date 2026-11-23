@@ -192,26 +192,28 @@ describe("describeSaveError", () => {
     expect(template.message).toBe(messages.flow_step_editor_http_run_result_no_template);
   });
 
-  it("gives an address only the core refuses the sender's own text, and a plain request the general one", () => {
-    const http = (mode: string) => ({ url: "https://intranet.example/in", body: { mode } });
-    const at = (config: Parameters<typeof describeSaveError>[1]["config"]) =>
+  it("keeps the https rule of the step that sends the run's result to the core's code for it", () => {
+    // The step as the editor passes it: its whole draft, output included.
+    const sending = {
+      input_source: "previous_step",
+      output_mode: "http_post",
+      output_config: { url: "https://a..b.example/in", body: { mode: "run_result" } }
+    } as const;
+    const at = (context: Record<string, unknown>) =>
       describeSaveError(
-        refusal("typed_io_http_invalid_config", {
-          field: "output_config.url",
-          http_error: "HTTP_INVALID_URL"
-        }),
-        { stepId: "", stepOrder: 2, config },
+        refusal("typed_io_http_invalid_config", context),
+        { stepId: "", stepOrder: 2, config: sending },
         t
-      ).message;
-    const post = { input_source: "previous_step", output_mode: "http_post" } as const;
-    expect(at({ ...post, output_config: http("run_result") })).toBe(
-      messages.flow_step_editor_http_run_result_url_fixed
-    );
-    expect(at({ ...post, output_config: http("auto") })).toBe(
+      );
+    // What the core answers a save of the step that sends the run's result whose
+    // host it refuses (`https://a..b.example/in`, `draft_step_refusals`): no `http_error`.
+    const host = at({ field: "output_config.url", issue_code: "flow_step_invalid", step_order: 2 });
+    expect(host.anchor).toBe("output_config.http");
+    expect(host.message).toBe(messages.flow_validation_msg_flow_step_invalid);
+    // Another address code keeps the text it has for any step.
+    expect(at({ field: "output_config", http_error: "HTTP_INVALID_URL" }).message).toBe(
       messages.flow_step_editor_http_url_invalid
     );
-    // A caller that does not pass the step's output gets the general text, as before.
-    expect(at(post)).toBe(messages.flow_step_editor_http_url_invalid);
   });
 
   it("names the field of a code without a field in its context", () => {

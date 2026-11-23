@@ -293,9 +293,7 @@ function AddStepPicker({
           stepOrder: position,
           config: {
             input_source: option.configuration.input_source,
-            output_mode: option.configuration.output_mode,
-            // Tells the step that sends the run's result from a plain request.
-            output_config: option.configuration.output_config
+            output_mode: option.configuration.output_mode
           }
         },
         t

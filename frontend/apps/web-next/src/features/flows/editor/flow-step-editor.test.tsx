@@ -3104,17 +3104,38 @@ describe("FlowStepEditor deliverables", () => {
     expect(patchBodies()).toHaveLength(0);
   }, 20_000);
 
-  it.each([
-    {
-      // An address the editor lets through and only the core refuses (its host, say).
-      field: "output_config.url",
-      httpError: "HTTP_INVALID_URL",
-      message: messages.flow_step_editor_http_run_result_url_fixed,
-      focused: () =>
+  it("puts the core's refusal of a host at the address, without the https rule", async () => {
+    // What the core answers a save of the step that sends the run's result whose
+    // host it refuses (`https://a..b.example/in`, `draft_step_refusals`): no `http_error`.
+    api.routes[EDITOR] = () => ({
+      status: 400,
+      body: {
+        message:
+          "Step 2: output_config.url is not an absolute http or https URL without userinfo (HTTP_INVALID_URL).",
+        code: "typed_io_http_invalid_config",
+        context: { field: "output_config.url", issue_code: "flow_step_invalid", step_order: 2 },
+        eneo_error_code: 9000
+      }
+    });
+    renderEditor(resultFlow({ url: "https://a..b.example/in", body: { mode: "run_result" } }), {
+      stepId: "step-2"
+    });
+    fireEvent.change(await nameField(), { target: { value: "Skicka resultatet" } });
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_step_editor_save }));
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
         screen.getByRole("textbox", {
           name: new RegExp(`^${messages.flow_step_editor_http_url_run_result}`)
         })
-    },
+      )
+    );
+    expect(
+      screen.getAllByText(messages.flow_validation_msg_flow_step_invalid).length
+    ).toBeGreaterThan(0);
+    expect(screen.queryByText(messages.flow_step_editor_http_run_result_url_fixed)).toBeNull();
+  }, 20_000);
+
+  it.each([
     {
       field: "output_config.url",
       httpError: "HTTP_RUN_RESULT_REQUIRES_FIXED_HTTPS_URL",
