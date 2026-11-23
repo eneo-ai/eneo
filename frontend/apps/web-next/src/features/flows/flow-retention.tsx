@@ -181,8 +181,11 @@ function RetentionForm({
       await writeAnswer<PolicySettings>(policyKey(flow.id), (current) =>
         current ? { ...current, inherited_policy: { days: refusedAt } } : current
       );
-      // The summary shows the server's projection, which the newer space time changes.
-      // Not awaited: the cap error does not wait for the read.
+      // The refusal is the server's as of the save, and the write cancelled any read in
+      // flight: a read started now sees a later change, such as a longer space time, and the
+      // summary's projection, which the space time changes. Not awaited: the cap error does
+      // not wait for the reads.
+      void queryClient.invalidateQueries({ queryKey: policyKey(flow.id), exact: true });
       void queryClient.invalidateQueries({ queryKey: flowKeys.flow(flow.id), exact: true });
       setOverCap(true);
       field.current?.focus();

@@ -44,6 +44,11 @@ const capRefusal = () =>
     reason: "retention_exceeds_space",
     context: { cap_days: 7, cap_origin: "space" }
   });
+/** A PUT the server refuses at a space time of 7, which its later reads then name. */
+const refusedAt7 = () => {
+  backend.GET.mockResolvedValue(settings(null, { days: 7 }));
+  return Promise.reject(capRefusal());
+};
 const capText = "Ytan tillåter högst 7 dagar.";
 /** The cap's status text, not the live region that speaks it on its own timer. */
 const capStatus = () => screen.queryByText(capText, { ignore: "[aria-live], [aria-live] *" });
@@ -180,6 +185,8 @@ describe("flow retention", () => {
     // An edit while the save is pending does not take, so a late refusal marks the value sent.
     fireEvent.change(days, { target: { value: "5" } });
     fireEvent.blur(days);
+    // The server is at 7 when it refuses, and the dialog reads its times again.
+    backend.GET.mockResolvedValue(settings(null, { days: 7 }));
     refuse(
       new EneoApiError("The retention period is longer than the limit that applies here.", {
         status: 400,
@@ -207,7 +214,7 @@ describe("flow retention", () => {
 
   it("keeps the space's time a refusal named when an older read lands after it", async () => {
     backend.GET.mockResolvedValue(settings(null, { days: 60 }));
-    backend.PUT.mockRejectedValue(capRefusal());
+    backend.PUT.mockImplementation(refusedAt7);
     const { queryClient } = renderSettings(["retention_manage"]);
     fireEvent.click(screen.getByRole("button", { name: "Ändra gallring" }));
     const days = (await screen.findByRole("spinbutton", {
@@ -225,6 +232,51 @@ describe("flow retention", () => {
     fireEvent.change(days, { target: { value: "" } });
     fireEvent.blur(days);
     expect(screen.getByText(/Från ytan: 7 dagar/)).toBeTruthy();
+  });
+
+  it("reads the times again after a refusal, so a space time raised meanwhile clears the error", async () => {
+    // What the server holds; each read after the opening one answers only when released.
+    let space = 60;
+    const held: (() => void)[] = [];
+    backend.GET.mockImplementation(() => {
+      const answer = settings(null, { days: space });
+      if (backend.GET.mock.calls.length === 1) return Promise.resolve(answer);
+      return new Promise((resolve) => held.push(() => resolve(answer)));
+    });
+    let refuse: (error: unknown) => void = () => {};
+    backend.PUT.mockReturnValue(
+      new Promise((_, reject) => {
+        refuse = reject;
+      })
+    );
+    const { queryClient } = renderSettings(["retention_manage"]);
+    fireEvent.click(screen.getByRole("button", { name: "Ändra gallring" }));
+    const days = (await screen.findByRole("spinbutton", {
+      name: /Egen tid för det här flödet/
+    })) as HTMLInputElement;
+    fireEvent.change(days, { target: { value: "10" } });
+    fireEvent.blur(days);
+    fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
+    await waitFor(() => expect(backend.PUT).toHaveBeenCalledTimes(1));
+
+    // The server refuses at 7; another admin then raises the space's time to 14, and a read
+    // in flight sees it before the refusal arrives.
+    space = 14;
+    void queryClient.refetchQueries({ queryKey: policyKey, exact: true });
+    await waitFor(() => expect(held).toHaveLength(1));
+    refuse(capRefusal());
+    expect(await screen.findByText(capText)).toBeTruthy();
+    await settle();
+    expect(capStatus()).toBeTruthy();
+
+    // Every read still held answers 14: the error goes, the value and the focus stay.
+    held.forEach((release) => release());
+    await settle();
+    expect(capStatus()).toBeNull();
+    expect(days.value).toBe("10");
+    expect(days.getAttribute("aria-invalid")).toBeNull();
+    expect(document.activeElement).toBe(days);
+    expect(backend.PUT).toHaveBeenCalledTimes(1);
   });
 
   it("keeps the summary's saved time when an older Flow read lands after the save", async () => {
@@ -309,14 +361,19 @@ describe("flow retention", () => {
       flowKeys.flow("flow-1"),
       makeFlow({ run_history_retention: retention("flow", 30, 60) })
     );
+    // The server is at 7 when it refuses, and the dialog reads its times again.
+    let space = 60;
     // Each Flow read answers only when released: one from before the save, one after it.
     const flowReads: ((value: unknown) => void)[] = [];
     backend.GET.mockImplementation((path: string) =>
       path === "/api/v1/flows/{id}/"
         ? new Promise((resolve) => flowReads.push(resolve))
-        : Promise.resolve(settings({ days: 30 }, { days: 60 }))
+        : Promise.resolve(settings({ days: 30 }, { days: space }))
     );
-    backend.PUT.mockRejectedValue(capRefusal());
+    backend.PUT.mockImplementation(() => {
+      space = 7;
+      return Promise.reject(capRefusal());
+    });
     renderInApp(<CachedFlowSettings />, {
       queryClient,
       appContext: testAppContext({ permissions: ["retention_manage"] })
@@ -453,7 +510,7 @@ describe("flow retention", () => {
 
   it("drops the cap error when a later read raises the space's time above the value", async () => {
     backend.GET.mockResolvedValue(settings(null, { days: 60 }));
-    backend.PUT.mockRejectedValue(capRefusal());
+    backend.PUT.mockImplementation(refusedAt7);
     const { queryClient } = renderSettings(["retention_manage"]);
     fireEvent.click(screen.getByRole("button", { name: "Ändra gallring" }));
     const days = (await screen.findByRole("spinbutton", {
@@ -475,7 +532,7 @@ describe("flow retention", () => {
 
   it("keeps the cap message when a resubmit fails for another reason", async () => {
     backend.GET.mockResolvedValue(settings(null, { days: 60 }));
-    backend.PUT.mockRejectedValueOnce(capRefusal()).mockRejectedValueOnce(
+    backend.PUT.mockImplementationOnce(refusedAt7).mockRejectedValueOnce(
       new EneoApiError("Internal error", { status: 500 })
     );
     const days = (await openDialog()) as HTMLInputElement;
