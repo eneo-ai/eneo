@@ -162,24 +162,18 @@ function templateFieldTokens(step: FlowStep): string[] {
 }
 
 /**
- * What an HTTP call and a webhook read: the texts publish checks in them (its
- * address, its body and the values of its headers that are not secret).
+ * What an HTTP call reads: the texts publish checks in it (its address, its
+ * body and the values of its headers that are not secret).
  */
-function httpTokens(step: FlowStep): string[] {
-  const calls = [
-    step.input_source === "http_get" ? step.input_config : null,
-    step.output_mode === "http_post" ? step.output_config : null
+function callTokens(call: unknown): string[] {
+  if (!isRecord(call)) return [];
+  const body = isRecord(call.body) ? call.body : {};
+  return [
+    ...[call.url, body.template].flatMap((text) =>
+      typeof text === "string" ? tokensOf(text) : []
+    ),
+    ...headerTokens(call)
   ];
-  return calls.flatMap((call) => {
-    if (!isRecord(call)) return [];
-    const body = isRecord(call.body) ? call.body : {};
-    return [
-      ...[call.url, body.template].flatMap((text) =>
-        typeof text === "string" ? tokensOf(text) : []
-      ),
-      ...headerTokens(call)
-    ];
-  });
 }
 
 /**
@@ -200,20 +194,34 @@ function headerTokens(call: Record<string, unknown>): string[] {
 }
 
 /**
+ * What one reference in a step's webhook reads. The core fills the webhook in
+ * once the step has answered, as for the step after it (`config_channel`):
+ * the step before is then the step's own answer, which is no read of an
+ * earlier step (null), and so are its alias and its name.
+ */
+function webhookTarget(
+  token: string,
+  step: FlowStep,
+  steps: readonly FlowStep[]
+): ReadTarget | null {
+  const target = readTarget(token, { step_order: step.step_order + 1 }, steps);
+  return target.kind === "step" && target.order === step.step_order ? null : target;
+}
+
+/**
  * The earlier steps the step that sends the run's result reads in its own
  * right, in run order: those the values of its headers that are not secret
- * name by alias or by name. The result it sends is not a read, and neither is
- * the previous step: the core builds its headers once it has answered, so
- * there the previous step is its own result.
+ * name, read as the core fills them in (`webhookTarget`). The result it
+ * sends is not a read.
  */
 export function senderReads(sender: FlowStep, steps: readonly FlowStep[]): StepRead[] {
   const config = isRecord(sender.output_config) ? sender.output_config : {};
   const reads = new Map<number, FlowStep | null>();
   for (const token of headerTokens(config)) {
-    const target = readTarget(token, sender, steps);
-    if (target.kind === "step" && target.via !== "previous") {
+    const target = webhookTarget(token, sender, steps);
+    if (target?.kind === "step") {
       reads.set(target.order, steps.find((step) => step.step_order === target.order) ?? null);
-    } else if (target.kind === "deleted" && !reads.has(target.order)) {
+    } else if (target?.kind === "deleted" && !reads.has(target.order)) {
       reads.set(target.order, null);
     }
   }
@@ -253,9 +261,8 @@ function readFacts(step: FlowStep, steps: readonly FlowStep[], prompt = ""): Rea
     else facts.readsFlowInput = true;
   };
 
-  const readToken = (token: string) => {
-    const target = readTarget(token, step, steps);
-    switch (target.kind) {
+  const read = (target: ReadTarget | null) => {
+    switch (target?.kind) {
       case "deleted":
         facts.deleted.add(target.order);
         break;
@@ -270,11 +277,15 @@ function readFacts(step: FlowStep, steps: readonly FlowStep[], prompt = ""): Rea
         break;
     }
   };
+  const readToken = (token: string) => read(readTarget(token, step, steps));
 
   // The prompt, a Word step's fields and an HTTP call's texts are read whatever the step's material is.
   tokensOf(prompt).forEach(readToken);
   templateFieldTokens(step).forEach(readToken);
-  httpTokens(step).forEach(readToken);
+  if (step.input_source === "http_get") callTokens(step.input_config).forEach(readToken);
+  if (step.output_mode === "http_post") {
+    callTokens(step.output_config).forEach((token) => read(webhookTarget(token, step, steps)));
+  }
   const { question, refs } = bindingsOf(step);
   if (question.trim() || refs.length > 0) {
     tokensOf(question).forEach(readToken);

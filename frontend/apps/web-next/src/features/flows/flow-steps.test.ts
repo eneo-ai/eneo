@@ -153,6 +153,36 @@ describe("stepReaders", () => {
       )
     ).toEqual([]);
   });
+
+  it("reads a webhook as the core fills it in, once its step has answered", () => {
+    const post = (body: string, overrides: Parameters<typeof makeStep>[1] = {}) =>
+      makeStep(2, {
+        user_description: "Skicka",
+        input_source: "flow_input",
+        output_mode: "http_post",
+        output_config: {
+          url: "https://hooks.example.se",
+          auth: { mode: "none" },
+          body: { mode: "text_template", template: body }
+        },
+        ...overrides
+      });
+    // There the step before is the step's own answer, and so are its alias and its name.
+    for (const body of ["{{föregående_steg}}", "{{step_2.output.text}}", "{{Skicka}}"]) {
+      const steps = [makeStep(1), post(body)];
+      expect(stepReadersByNameOrPlace(steps[0]!, steps)).toEqual([]);
+      expect(stepReads(steps[1]!, steps)).toEqual([{ kind: "flow_input" }]);
+    }
+    // An address the step fetches is read before it answers: the step before is step 1.
+    const steps = [
+      makeStep(1),
+      post("{{föregående_steg}}", {
+        input_source: "http_get",
+        input_config: { url: "https://api.example.se/{{föregående_steg}}", auth: { mode: "none" } }
+      })
+    ];
+    expect(stepReadersByNameOrPlace(steps[0]!, steps)).toEqual([steps[1]]);
+  });
 });
 
 describe("stepReadersByNameOrPlace", () => {
