@@ -1,3 +1,4 @@
+import copy
 import hashlib
 import json
 from datetime import datetime, timezone
@@ -245,6 +246,112 @@ async def test_a_request_without_a_stream_refuses_a_call_that_requires_confirmat
     )
     assert call.arguments == {"q": "hello"}
     assert completion.text == "final answer"
+
+
+class _ConfirmingAndExternalMCPProxy(_FakeMCPProxy):
+    """One of Eneo's own servers whose run_flow requires confirmation, beside
+    an external server's tool."""
+
+    def __init__(self):
+        super().__init__()
+        self.calls: list[list[tuple[str, dict]]] = []
+
+    def get_allowed_tool_names(self):
+        return {"flows__run_flow", "server__tool"}
+
+    def get_tool_info(self, prefixed_tool_name: str):
+        server, tool = prefixed_tool_name.split("__", 1)
+        return (server, tool, None)
+
+    def is_internal_tool(self, prefixed_tool_name: str) -> bool:
+        return prefixed_tool_name.startswith("flows__")
+
+    def requires_confirmation(self, prefixed_tool_name: str) -> bool:
+        return prefixed_tool_name == "flows__run_flow"
+
+    async def call_tools_parallel(self, proxy_calls):
+        self.calls.append(proxy_calls)
+        return [
+            {"content": [{"type": "text", "text": "ok"}], "is_error": False}
+            for _ in proxy_calls
+        ]
+
+
+def _named_call(call_id: str, name: str):
+    return SimpleNamespace(
+        id=call_id, function=SimpleNamespace(name=name, arguments="{}")
+    )
+
+
+async def _without_a_stream(*calls):
+    """One round of ``calls`` without a stream; the proxy, the follow-up
+    request's messages as sent, and the completion."""
+    proxy = _ConfirmingAndExternalMCPProxy()
+    responses = [
+        _response(
+            response_id="resp-initial",
+            tool_calls=list(calls),
+            finish_reason="tool_calls",
+        ),
+        _response(response_id="resp-final", content="final answer"),
+    ]
+    sent: list[list[dict]] = []
+
+    def complete(**kwargs):
+        sent.append(copy.deepcopy(kwargs["messages"]))
+        return responses.pop(0)
+
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(side_effect=complete),
+    ):
+        completion = await _make_adapter().get_response(
+            context=SimpleNamespace(), model_kwargs={}, mcp_proxy=proxy
+        )
+    return proxy, sent[1], completion
+
+
+def _tool_replies(messages) -> list[tuple[str, str]]:
+    """The tool replies among ``messages``, in order, as (call id, content)."""
+    return [
+        (message["tool_call_id"], message["content"])
+        for message in messages
+        if message.get("role") == "tool"
+    ]
+
+
+async def test_a_request_without_a_stream_refuses_every_call_under_a_confirmation_id():
+    """A request without a stream cannot ask: a call that needs confirmation
+    is refused with every call that shares its id, so the id has one outcome.
+    The call that needs confirmation is told so; the other, that it was
+    withheld for the shared id."""
+    from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import (
+        CONFIRMATION_UNAVAILABLE_RESULT,
+        SHARED_CALL_ID_RESULT,
+    )
+
+    proxy, follow_up, completion = await _without_a_stream(
+        _named_call("shared", "server__tool"),
+        _named_call("shared", "flows__run_flow"),
+    )
+
+    assert proxy.calls == []
+    assert _tool_replies(follow_up) == [
+        ("shared", json.dumps(SHARED_CALL_ID_RESULT)),
+        ("shared", json.dumps(CONFIRMATION_UNAVAILABLE_RESULT)),
+    ]
+    assert sorted(
+        (call.mcp_tool_name, call.approved, call.result_status, call.result)
+        for call in completion.tool_calls_metadata or []
+    ) == [
+        (
+            "flows__run_flow",
+            False,
+            "denied",
+            json.dumps(CONFIRMATION_UNAVAILABLE_RESULT),
+        ),
+        ("server__tool", False, "denied", json.dumps(SHARED_CALL_ID_RESULT)),
+    ]
 
 
 @pytest.mark.asyncio

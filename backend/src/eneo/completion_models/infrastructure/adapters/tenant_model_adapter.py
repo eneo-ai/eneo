@@ -9,7 +9,7 @@ import logging
 import re
 import uuid
 from collections import Counter
-from collections.abc import Callable, Sized
+from collections.abc import Callable, Sequence, Sized
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from typing import (
@@ -556,6 +556,8 @@ class _AccumulatedToolCall(TypedDict):
 # call's metadata up by its id.
 _RoundCall: TypeAlias = tuple[_AccumulatedToolCall, ToolCallMetadata]
 
+_Call = TypeVar("_Call")
+
 
 @dataclass
 class PreparedModelStream:
@@ -644,17 +646,17 @@ CONFIRMATION_UNAVAILABLE_RESULT: dict[str, Any] = {
 }
 
 
-# The tool result of a call that needs the person's decision but shares its
-# call id with another call of the same round. A decision names a call by its
-# id, so it could not tell the two apart. The call is not run.
+# The tool result of a call withheld because the provider gave its call id to
+# several calls of one round and a call under that id needs the person's
+# decision (_split_shared_id_calls). The call is not run.
 SHARED_CALL_ID_RESULT: dict[str, Any] = {
     "denied": True,
     "reason": "shared_call_id",
     "message": (
-        "This action needs the person's decision, but it shared its call id "
-        "with another call in the same response, so it could not be decided "
-        "on its own and was not done. Call it again on its own if it is "
-        "still needed."
+        "This call shared its call id with other calls in the same response, "
+        "and a call under that id needs the person's decision, which names a "
+        "call only by its id. So none of the calls under that id were done. "
+        "Request them again as separate calls if they are still needed."
     ),
 }
 
@@ -727,8 +729,8 @@ def _approval_round(
     confirmation, and the calls to ask the person about (_needs_decision).
 
     Each call is classified on its own, but the ids returned stand for
-    calls: where someone can be asked, a call that needs a decision has its
-    own id (_split_shared_id_calls).
+    calls: after _split_shared_id_calls, a call that needs a decision has its
+    own id.
     """
     to_ask = [
         tm
@@ -752,30 +754,44 @@ def _approval_round(
 
 
 def _split_shared_id_calls(
-    mcp_proxy: "MCPProxySession",
-    calls: list[_RoundCall],
+    calls: Sequence[_Call],
     *,
-    require_tool_approval: bool,
-) -> tuple[list[_RoundCall], list[_RoundCall]]:
-    """Set apart the calls that need the person's decision under a call id
-    another call of the round shares.
+    call_id: Callable[[_Call], str | None],
+    needs_decision: Callable[[_Call], bool],
+) -> tuple[list[_Call], list[_Call]]:
+    """Withhold the MCP calls of a round under a call id the provider reused,
+    when any call under that id needs the person's decision in this turn:
+    approval, or confirmation where nobody can be asked.
 
-    A decision names a call by its id, so it could not tell such calls apart
-    and might let one run that nobody was asked about. They are refused
-    without asking (SHARED_CALL_ID_RESULT); the calls that need no decision
-    still run.
+    A decision names a call only by its id, so it could not tell such calls
+    apart and might let one run that nobody was asked about; and a call that
+    runs would answer under the same id as one that did not. So every call
+    under that id is withheld before the window and never runs
+    (_withheld_result). Calls that share an id only with calls that need no
+    decision stay, and the budget applies to each of them on its own.
+
+    Returns the calls that stay and the withheld calls, each in round order.
     """
-    uses = Counter(call["id"] for call, _ in calls)
-    decidable: list[_RoundCall] = []
-    shared: list[_RoundCall] = []
-    for call, tool_metadata in calls:
-        if uses[call["id"]] > 1 and _needs_decision(
-            mcp_proxy, tool_metadata, require_tool_approval=require_tool_approval
-        ):
-            shared.append((call, tool_metadata))
-        else:
-            decidable.append((call, tool_metadata))
-    return decidable, shared
+    uses = Counter(call_id(call) for call in calls)
+    withheld_ids = {
+        call_id(call)
+        for call in calls
+        if uses[call_id(call)] > 1 and needs_decision(call)
+    }
+    stay = [call for call in calls if call_id(call) not in withheld_ids]
+    withheld = [call for call in calls if call_id(call) in withheld_ids]
+    return stay, withheld
+
+
+def _withheld_result(
+    mcp_proxy: "MCPProxySession", name: str, *, can_ask: bool
+) -> dict[str, Any]:
+    """The tool result of a call refused without asking: one that needs
+    confirmation nobody can give says so, and any other was withheld under a
+    reused id (_split_shared_id_calls)."""
+    if not can_ask and mcp_proxy.requires_confirmation(name):
+        return dict(CONFIRMATION_UNAVAILABLE_RESULT)
+    return dict(SHARED_CALL_ID_RESULT)
 
 
 def _unasked_round(
@@ -817,8 +833,10 @@ def _unasked_call_metadata(
     mcp_proxy: "MCPProxySession",
     call: ProviderToolCall,
     arguments: dict[str, Any] | None,
+    result: dict[str, Any] = CONFIRMATION_UNAVAILABLE_RESULT,
 ) -> ToolCallMetadata:
-    """The record of a call refused with CONFIRMATION_UNAVAILABLE_RESULT."""
+    """The record of a call refused without asking, with ``result`` as its
+    tool result."""
     server_name, tool_name, title = _tool_names(mcp_proxy, call.name)
     return ToolCallMetadata(
         server_name=server_name,
@@ -828,7 +846,7 @@ def _unasked_call_metadata(
         tool_call_id=call.call_id,
         approved=False,
         result_status="denied",
-        result=json.dumps(CONFIRMATION_UNAVAILABLE_RESULT),
+        result=json.dumps(result),
         mcp_tool_name=call.name,
         purpose=mcp_proxy.get_tool_purpose(call.name),
         is_internal=mcp_proxy.is_internal_tool(call.name),
@@ -840,7 +858,7 @@ def _answer_calls_not_run(
     *,
     messages: list[dict[str, Any]],
     denied: list[_RoundCall],
-    shared_id: list[_RoundCall],
+    withheld: list[tuple[_RoundCall, dict[str, Any]]],
     over_limit: list[_RoundCall],
     decisions: dict[str, tuple[bool, str | None]],
     unasked_call_ids: set[str],
@@ -850,9 +868,9 @@ def _answer_calls_not_run(
     """Answer the calls of a streamed round that did not run.
 
     A call the person denied, or that nobody could be asked about, gets its
-    denial as the tool result; a call that needed a decision under a shared
-    call id gets SHARED_CALL_ID_RESULT; a call beyond a limit gets the limit
-    message.
+    denial as the tool result; a call withheld under a reused id gets the
+    result it is paired with (_withheld_result); a call beyond a limit gets
+    the limit message.
     The records returned show the reader what happened to each, built from
     the call's own parsed metadata.
     """
@@ -881,17 +899,15 @@ def _answer_calls_not_run(
                 result=json.dumps(denial_payload),
             )
         )
-    shared_id_payload = json.dumps(SHARED_CALL_ID_RESULT)
-    for tc, tool_metadata in shared_id:
-        messages.append(
-            {"role": "tool", "tool_call_id": tc["id"], "content": shared_id_payload}
-        )
+    for (tc, tool_metadata), result in withheld:
+        payload = json.dumps(result)
+        messages.append({"role": "tool", "tool_call_id": tc["id"], "content": payload})
         denied_metadata.append(
             replace(
                 tool_metadata,
                 approved=False,
                 result_status="denied",
-                result=shared_id_payload,
+                result=payload,
             )
         )
     denied_metadata.extend(_refuse_over_limit_calls(over_limit, messages=messages))
@@ -989,9 +1005,6 @@ TOOL_CALL_LIMIT_MESSAGE = (
     "results you have, and request it again in a later step only if it is "
     "still needed."
 )
-
-
-_Call = TypeVar("_Call")
 
 
 class _ToolCallBudget:
@@ -2584,20 +2597,30 @@ class TenantModelAdapter(CompletionModelAdapter):
                     results: list[dict[str, Any]] = []
                     proxy_calls: list[tuple[str, dict[str, Any]]] = []
                     # A request without a stream cannot ask the person, so a
-                    # call that needs their confirmation is refused, never run.
+                    # call that needs their confirmation is refused, never run,
+                    # with every call under its id (_split_shared_id_calls).
                     run_calls: list[ProviderToolCall] = []
                     unasked_calls: list[ProviderToolCall] = []
                     over_limit_calls: list[ProviderToolCall] = []
                     if external_calls:
                         assert mcp_proxy is not None
-                        allowed_tools = mcp_proxy.get_allowed_tool_names()
+                        proxy = mcp_proxy
+                        allowed_tools = proxy.get_allowed_tool_names()
                         for call in external_calls:
                             if call.name not in allowed_tools:
                                 raise OpenAIException(
                                     "The model requested an unauthorized tool.",
                                     code="unauthorized_tool",
                                 )
-                            if mcp_proxy.requires_confirmation(call.name):
+                        kept_calls, unasked_calls = _split_shared_id_calls(
+                            external_calls,
+                            call_id=lambda call: call.call_id,
+                            needs_decision=lambda call: proxy.requires_confirmation(
+                                call.name
+                            ),
+                        )
+                        for call in kept_calls:
+                            if proxy.requires_confirmation(call.name):
                                 unasked_calls.append(call)
                             else:
                                 run_calls.append(call)
@@ -2692,15 +2715,20 @@ class TenantModelAdapter(CompletionModelAdapter):
                             unasked_args = self._parse_tool_arguments(call.arguments)
                         except OpenAIException:
                             unasked_args = None
+                        unasked_result = _withheld_result(
+                            mcp_proxy, call.name, can_ask=False
+                        )
                         messages.append(
                             {
                                 "role": "tool",
                                 "tool_call_id": call.call_id,
-                                "content": json.dumps(CONFIRMATION_UNAVAILABLE_RESULT),
+                                "content": json.dumps(unasked_result),
                             }
                         )
                         collected_tool_metadata.append(
-                            _unasked_call_metadata(mcp_proxy, call, unasked_args)
+                            _unasked_call_metadata(
+                                mcp_proxy, call, unasked_args, unasked_result
+                            )
                         )
                     for call in over_limit_calls:
                         assert mcp_proxy is not None
@@ -3617,7 +3645,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                         )
                     # A provider can reuse a call ID within a round. Keep the
                     # parsed metadata beside the call all the way to its result.
-                    round_calls = list(zip(tool_calls, tool_metadata, strict=True))
+                    round_calls: list[_RoundCall] = list(
+                        zip(tool_calls, tool_metadata, strict=True)
+                    )
 
                     # Offer only calls that could all run if the person approves.
                     # Unattended turns remove calls requiring confirmation before
@@ -3627,22 +3657,29 @@ class TenantModelAdapter(CompletionModelAdapter):
                         if require_tool_approval or approval_context is not None
                         else None
                     )
-                    # A decision names calls by id, so where someone can be
-                    # asked, a call that needs one must have its own id. Where
-                    # nobody can, a confirmation call is refused by its id,
-                    # with every call that shares it (_unasked_round).
-                    shared_id_calls: list[_RoundCall] = []
-                    if round_approval_manager is not None:
-                        round_calls, shared_id_calls = _split_shared_id_calls(
-                            mcp_proxy,
-                            round_calls,
-                            require_tool_approval=require_tool_approval,
-                        )
-                    window = (
-                        call_budget.available
-                        if round_approval_manager is not None
-                        else len(tool_calls)
+                    can_ask = round_approval_manager is not None
+                    # Where nobody can be asked, only a confirmation is a
+                    # decision this turn; the person's approval is not sought.
+                    asks_approval = require_tool_approval and can_ask
+                    # A reused id under which a call needs a decision is
+                    # withheld whole, before the window, so it takes no place.
+                    round_calls, withheld_calls = _split_shared_id_calls(
+                        round_calls,
+                        call_id=lambda call: call[0]["id"],
+                        needs_decision=lambda call: _needs_decision(
+                            mcp_proxy, call[1], require_tool_approval=asks_approval
+                        ),
                     )
+                    withheld = [
+                        (
+                            (tc, metadata),
+                            _withheld_result(
+                                mcp_proxy, tc["function"]["name"], can_ask=can_ask
+                            ),
+                        )
+                        for tc, metadata in withheld_calls
+                    ]
+                    window = call_budget.available if can_ask else len(tool_calls)
                     # The calls cut here are never decided: each ends as an
                     # over-limit record.
                     decision_calls = round_calls[:window]
@@ -3748,12 +3785,14 @@ class TenantModelAdapter(CompletionModelAdapter):
                         # Nobody can be asked in this turn: a call that needs
                         # the person's decision is refused and never runs.
                         unasked_call_ids = confirmation_call_ids
-                        yield Completion(
-                            response_type=ResponseType.TOOL_CALL,
-                            tool_calls_metadata=_unasked_round(
-                                decision_metadata, unasked_call_ids
-                            ),
-                        )
+                        # Nothing to show when the whole round was withheld.
+                        if decision_metadata:
+                            yield Completion(
+                                response_type=ResponseType.TOOL_CALL,
+                                tool_calls_metadata=_unasked_round(
+                                    decision_metadata, unasked_call_ids
+                                ),
+                            )
                         approved_ids = {
                             tc["id"]
                             for tc, _ in decision_calls
@@ -3886,7 +3925,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                     denied_metadata = _answer_calls_not_run(
                         messages=messages,
                         denied=denied_calls,
-                        shared_id=shared_id_calls,
+                        withheld=withheld,
                         over_limit=over_limit_calls,
                         decisions=decision_map,
                         unasked_call_ids=unasked_call_ids,

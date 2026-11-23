@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import copy
 import hashlib
 import json
 import logging
@@ -3589,13 +3590,24 @@ def _decided(*decisions: ToolApprovalDecision, timed_out: bool = False):
     return manager
 
 
-async def _confirming_round(chunks, messages, *, next_round=None, **approval):
-    """Run the tool requests over ``_ConfirmingMCPProxy``, then return a final answer."""
+async def _confirming_round(
+    chunks, messages, *, next_round=None, sent=None, **approval
+):
+    """Run the tool requests over ``_ConfirmingMCPProxy``, then return a final answer.
+
+    ``sent`` collects a copy of the messages of each follow-up request.
+    """
     proxy = _ConfirmingMCPProxy()
     follow_ups = []
     if next_round is not None:
         follow_ups.append(_AsyncChunkStream(next_round))
     follow_ups.append(_AsyncChunkStream([_text_chunk("done", finish_reason="stop")]))
+
+    def follow_up(**kwargs):
+        if sent is not None:
+            sent.append(copy.deepcopy(kwargs["messages"]))
+        return follow_ups.pop(0)
+
     stream = _AsyncChunkStream(
         chunks,
         eneo_context={
@@ -3607,7 +3619,7 @@ async def _confirming_round(chunks, messages, *, next_round=None, **approval):
     )
     with patch(
         "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
-        AsyncMock(side_effect=follow_ups),
+        AsyncMock(side_effect=follow_up),
     ):
         completions = await _collect(
             _make_adapter(), stream, pending_approval_ids=set(), **approval
@@ -3778,11 +3790,33 @@ async def test_a_turn_that_cannot_ask_still_runs_an_external_call_beside_a_refus
     assert _statuses_of(completions, "call_ext") == ["approved", "succeeded"]
 
 
-async def test_a_call_that_needs_a_decision_and_shares_its_id_is_refused_unasked():
-    """A person's decision names a call by its id. When a call that needs one
-    shares its id with a call that runs unasked, a decision could not tell
-    them apart: the call that needs it is refused without asking, and the
-    other still runs."""
+def _tool_replies(messages) -> list[tuple[str, str]]:
+    """The tool replies among ``messages``, in order, as (call id, content)."""
+    return [
+        (message["tool_call_id"], message["content"])
+        for message in messages
+        if message.get("role") == "tool"
+    ]
+
+
+def _decided_calls(completions) -> list[tuple[str | None, str | None, str | None]]:
+    """Each call's id, tool and status in the TOOL_CALL events once decided."""
+    return [
+        (metadata.tool_call_id, metadata.mcp_tool_name, metadata.result_status)
+        for completion in _events(completions, ResponseType.TOOL_CALL)
+        for metadata in completion.tool_calls_metadata or []
+        if metadata.result_status != "pending"
+    ]
+
+
+_WITHHELD = json.dumps(tenant_model_adapter.SHARED_CALL_ID_RESULT)
+
+
+async def test_every_call_under_a_reused_id_that_needs_a_decision_is_refused_unasked():
+    """A person's decision names a call by its id. When any call under a
+    reused id needs one, a decision could not tell the calls apart: every call
+    carrying that id is refused without asking, the one that would run unasked
+    too, and each is told why."""
     messages: list[dict] = []
     manager = _decided()
 
@@ -3803,20 +3837,134 @@ async def test_a_call_that_needs_a_decision_and_shares_its_id_is_refused_unasked
         approval_context=_approval_context(),
     )
 
-    assert proxy.calls == [[("flows__read_flow", {})]]
+    assert proxy.calls == []
     manager.request_approval.assert_not_awaited()
-    assert json.dumps(tenant_model_adapter.SHARED_CALL_ID_RESULT) in [
-        message["content"]
-        for message in messages
-        if message.get("role") == "tool" and message["tool_call_id"] == "shared"
+    assert _tool_replies(messages) == [("shared", _WITHHELD), ("shared", _WITHHELD)]
+    assert _decided_calls(completions) == [
+        ("shared", "flows__read_flow", "denied"),
+        ("shared", "server__tool", "denied"),
     ]
-    assert [
-        (metadata.approved, metadata.result_status)
+
+
+async def test_a_turn_that_cannot_ask_refuses_every_call_under_a_confirmation_id():
+    """Where nobody can be asked, a call that needs confirmation is refused
+    with every call that shares its id, also one that could run, so the id
+    has one outcome. The call that needs confirmation is told so; the other,
+    that it was withheld for the shared id."""
+    messages: list[dict] = []
+
+    proxy, completions = await _confirming_round(
+        [
+            _tool_call_delta_chunk(
+                index=0,
+                tool_call_id="shared",
+                tool_name="flows__run_flow",
+                arguments="{}",
+            ),
+            _tool_call_delta_chunk(
+                index=1,
+                tool_call_id="shared",
+                tool_name="server__tool",
+                arguments="{}",
+                finish_reason="tool_calls",
+            ),
+        ],
+        messages,
+        require_tool_approval=False,
+        approval_manager=None,
+        approval_context=None,
+    )
+
+    assert proxy.calls == []
+    assert _tool_replies(messages) == [
+        ("shared", json.dumps(tenant_model_adapter.CONFIRMATION_UNAVAILABLE_RESULT)),
+        ("shared", _WITHHELD),
+    ]
+    assert _decided_calls(completions) == [
+        ("shared", "flows__run_flow", "denied"),
+        ("shared", "server__tool", "denied"),
+    ]
+    # The record kept for the chat says what the model was told.
+    (sibling,) = [
+        metadata
         for completion in _events(completions, ResponseType.TOOL_CALL)
         for metadata in completion.tool_calls_metadata or []
         if metadata.mcp_tool_name == "server__tool"
-        and metadata.result_status != "pending"
-    ] == [(False, "denied")]
+        and metadata.result_status == "denied"
+    ]
+    assert sibling.result == _WITHHELD
+
+
+async def test_without_anyone_to_ask_only_a_confirmation_withholds_a_reused_id():
+    """Where nobody can be asked, a required approval is not a decision this
+    turn: external calls under one id run as they would under their own."""
+    proxy, _ = await _confirming_round(
+        [
+            _tool_call_delta_chunk(
+                index=0,
+                tool_call_id="shared",
+                tool_name="server__tool",
+                arguments='{"q":"a"}',
+            ),
+            _tool_call_delta_chunk(
+                index=1,
+                tool_call_id="shared",
+                tool_name="server__tool",
+                arguments='{"q":"b"}',
+                finish_reason="tool_calls",
+            ),
+        ],
+        [],
+        require_tool_approval=True,
+        approval_manager=None,
+        approval_context=None,
+    )
+
+    assert proxy.calls == [[("server__tool", {"q": "a"}), ("server__tool", {"q": "b"})]]
+
+
+async def test_a_withheld_reused_id_takes_no_place_in_the_window(monkeypatch):
+    """Calls refused before any decision leave the window to the calls that
+    can be offered one: with room for one call, a withheld group comes first
+    and the call after it, under its own id, runs."""
+    _cap_tool_calls(monkeypatch, per_round=1, per_turn=3)
+    messages: list[dict] = []
+    manager = _decided()
+
+    proxy, completions = await _confirming_round(
+        [
+            _tool_call_delta_chunk(
+                index=0,
+                tool_call_id="x",
+                tool_name="flows__read_flow",
+                arguments='{"q":"x"}',
+            ),
+            _tool_call_delta_chunk(
+                index=1, tool_call_id="x", tool_name="flows__run_flow", arguments="{}"
+            ),
+            _tool_call_delta_chunk(
+                index=2,
+                tool_call_id="y",
+                tool_name="flows__read_flow",
+                arguments='{"q":"y"}',
+                finish_reason="tool_calls",
+            ),
+        ],
+        messages,
+        require_tool_approval=False,
+        approval_manager=manager,
+        approval_context=_approval_context(),
+    )
+
+    manager.request_approval.assert_not_awaited()
+    assert proxy.calls == [[("flows__read_flow", {"q": "y"})]]
+    # The decisions event lists only the call that ran; the group is refused.
+    assert _decided_calls(completions) == [
+        ("y", "flows__read_flow", "approved"),
+        ("y", "flows__read_flow", "succeeded"),
+        ("x", "flows__read_flow", "denied"),
+        ("x", "flows__run_flow", "denied"),
+    ]
 
 
 async def test_only_the_call_that_requires_confirmation_waits_for_the_person():
