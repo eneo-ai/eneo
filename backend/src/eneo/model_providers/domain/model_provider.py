@@ -11,7 +11,6 @@ from eneo.model_providers.domain.provider_api import (
     configured_endpoint,
     connection_check_supported,
 )
-
 from eneo.transcription_models.domain.realtime import (
     RealtimeEligibility,
     realtime_eligibility,

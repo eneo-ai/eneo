@@ -174,7 +174,7 @@ PROVIDER_STOPS_QUALIFYING = {
     "endpoint removed": {"config": {}},
     "endpoint shadowed": {
         "credentials": sa.literal_column(
-            "model_providers.credentials || '{\"endpoint\": \"\"}'::jsonb"
+            'model_providers.credentials || \'{"endpoint": ""}\'::jsonb'
         )
     },
 }

@@ -239,7 +239,9 @@ async def test_a_gateway_registered_as_openai_carries_live_text(
     assert created.json()["streams_live"] is True
 
     existing = await client.post(
-        TENANT_TRANSCRIPTION_URL, headers=admin_headers, json=_payload(gateway_provider_id)
+        TENANT_TRANSCRIPTION_URL,
+        headers=admin_headers,
+        json=_payload(gateway_provider_id),
     )
     model_id = existing.json()["id"]
     assert existing.json()["streams_live"] is False
