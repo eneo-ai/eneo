@@ -686,7 +686,7 @@ describe("ModelsPage", () => {
 
     await waitFor(() => expect(toast.warning).toHaveBeenCalledTimes(1));
     expect(toast.warning.mock.calls[0]?.[0]).toContain(
-      "1 modell visas nu som Markerad, används inte."
+      "1 modell visas nu som ”Markerad, används inte”."
     );
     // The page refetches providers and models; no reload.
     expect(await within(card).findByText("Markerad, används inte")).toBeTruthy();

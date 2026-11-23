@@ -206,8 +206,8 @@ describe("ProviderEditDialog", () => {
 
   it.each([
     // Headers added to a vLLM provider whose models stream live text.
-    ["outbound_headers_configured", 2, "2 modeller visas nu som Markerad, används inte."],
-    ["endpoint_required", 1, "1 modell visas nu som Markerad, används inte."]
+    ["outbound_headers_configured", 2, "2 modeller visas nu som ”Markerad, används inte”."],
+    ["endpoint_required", 1, "1 modell visas nu som ”Markerad, används inte”."]
   ] as const)(
     "says marked models stop using live text when the saved provider cannot carry it: %s",
     async (eligibility, marked, count) => {

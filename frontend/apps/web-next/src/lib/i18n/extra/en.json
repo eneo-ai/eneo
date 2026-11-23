@@ -2405,7 +2405,7 @@
   "flow_editor_tools_live_model_lost": "The chosen model can no longer show live text in the space, so the recording is transcribed afterwards. Choose another.",
   "live_text_for_selected_models": "Live text for selected models",
   "live_text_saved_but_unused": "Marked, not in use",
-  "live_text_provider_saved_unused": "The provider was saved, but it cannot carry live text. {count, plural, one {# model now shows} other {# models now show}} as Marked, not in use. {reason} The marks stay and work again once this is fixed.",
+  "live_text_provider_saved_unused": "The provider was saved, but it cannot carry live text. {count, plural, one {# model now shows} other {# models now show}} as “Marked, not in use”. {reason} The marks stay and work again once this is fixed.",
   "live_text_reason_endpoint_required": "Enter the address of the server or gateway on the provider. OpenAI's own service does not have vLLM's realtime API.",
   "live_text_reason_unsupported_provider": "Choose a supported provider: vLLM, or OpenAI with the address of a server that has vLLM's realtime API.",
   "live_text_reason_outbound_headers_configured": "Use a provider without outbound headers. Live text cannot send them.",
