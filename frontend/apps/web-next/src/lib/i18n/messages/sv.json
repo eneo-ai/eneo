@@ -8312,6 +8312,7 @@
   "flow_step_editor_run_result_empty_candidates": "Öppna ett text- eller dokumentsteg och slå på Ta med i körningens resultat.",
   "flow_step_editor_run_result_empty_none": "Lägg till ett steg som skapar text eller dokument före utskicket.",
   "flow_step_editor_run_result_add_before": "Lägg till steg före utskicket",
+  "flow_step_editor_run_result_older_version": "Ladda om för att se vad den nyaste versionen skickar.",
   "flow_step_editor_run_result_receiver_title": "Mottagare",
   "flow_step_editor_http_url_run_result": "Mottagarens adress",
   "flow_step_editor_http_url_run_result_description": "Använd den fasta https-adress som intranätet eller tjänsten har för att ta emot resultat.",

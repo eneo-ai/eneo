@@ -30,6 +30,10 @@ export function sendsHeadingId(formId: string): string {
  * What the step that sends the run's result sends, in step order, and to
  * whom. It sends nothing of its own: the steps the run delivers are chosen
  * on them (`flowDeliverables`), so this view lists them and opens them.
+ * While the form holds edits on an older version than the newest
+ * (`olderVersion`), the list, its buttons and the add are not shown: they
+ * come from the other steps, which the newest may have moved or removed.
+ * The receiver is the step's own and stays.
  */
 export function StepRunResultSections({
   formId,
@@ -40,7 +44,8 @@ export function StepRunResultSections({
   onChange,
   problems,
   onGoStep,
-  onAddStepBefore
+  onAddStepBefore,
+  olderVersion
 }: {
   formId: string;
   flow: FlowPublic;
@@ -53,6 +58,8 @@ export function StepRunResultSections({
   onGoStep?: (stepId: string) => void;
   /** Adds a step right before the step that sends; absent, it is not offered. */
   onAddStepBefore?: () => void;
+  /** The form holds unsaved edits on an older version of the flow than the newest. */
+  olderVersion: boolean;
 }) {
   const t = useTranslations();
   const run = flowDeliverables(
@@ -93,7 +100,11 @@ export function StepRunResultSections({
         title={t("flow_step_editor_run_result_sends_title")}
         isFocusTarget
       >
-        {run.deliverables.length > 0 ? (
+        {olderVersion ? (
+          <Text type="supporting" size="sm" as="p" display="block" className="m-0 max-w-prose">
+            {t("flow_step_editor_run_result_older_version")}
+          </Text>
+        ) : run.deliverables.length > 0 ? (
           <VStack gap={4}>
             <List hasDividers density="compact" edge="flush">
               {run.deliverables.map((step) => (

@@ -1120,6 +1120,7 @@ function StepEditorSession({
                   problems={shownProblems}
                   onGoStep={onGoStep}
                   onAddStepBefore={onStepAdded ? () => setAdding(true) : undefined}
+                  olderVersion={newerElsewhere}
                 />
               ) : (
                 <>

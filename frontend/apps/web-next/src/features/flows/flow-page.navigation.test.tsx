@@ -360,17 +360,19 @@ it("keeps the banner when the add went through on a newer revision than the edit
   flow = senderFlow();
   const { queryClient } = await renderPage("?step=step-send");
   fireEvent.change(await nameField(), { target: { value: "Skicka till intranätet" } });
+  routeAddBeforeSend([]);
+  // The dialog is open when the newer version comes in: under the banner the
+  // view no longer offers the add, but the dialog asked for stays.
+  await click(messages.flow_step_editor_run_result_add_before);
+  const dialog = await screen.findByRole("dialog", { name: "Lägg till steg" });
   const newer = { ...flow, draft_revision: 5 };
   flow = newer;
   act(() => queryClient.setQueryData(flowKeys.flow(newer.id), newer));
   expect(await screen.findByText(messages.flow_step_editor_newer_title)).toBeTruthy();
-  routeAddBeforeSend([]);
   const answers = [STALE, { body: withStepBeforeSend(newer, { user_description: "Sammanfatta" }) }];
   api.routes["PATCH /api/v1/flows/{id}/editor/"] = () => answers.shift()!;
 
   // The add is fenced on the edits' revision, refused, read again and added on the newer one.
-  await click(messages.flow_step_editor_run_result_add_before);
-  const dialog = await screen.findByRole("dialog", { name: "Lägg till steg" });
   fireEvent.click(await within(dialog).findByRole("radio", { name: "Sammanfatta" }));
   fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till Sammanfatta" }));
   fireEvent.click(
@@ -397,6 +399,56 @@ it("keeps the banner when the add went through on a newer revision than the edit
   expect(((await nameField()) as HTMLInputElement).value).toBe("Skicka till intranätet");
   const heading = await sendsHeading();
   await waitFor(() => expect(document.activeElement).toBe(heading));
+  // The form's older version is not offered as the place to add a step.
+  expect(
+    screen.queryByRole("button", { name: messages.flow_step_editor_run_result_add_before })
+  ).toBeNull();
+});
+
+it("shows nothing of the other steps in what is sent while the form holds edits on an older version, and the current list after a reload", async () => {
+  const address = () =>
+    screen.findByRole("textbox", {
+      name: new RegExp(`^${messages.flow_step_editor_http_url_run_result}`)
+    }) as Promise<HTMLInputElement>;
+  const [, start] = senderFlow().steps;
+  const send = { ...start!, step_order: 3 };
+  const notes = makeStep(1, { id: "step-notes", user_description: "Anteckningar" });
+  flow = makeFlow({
+    steps: [notes, makeStep(2, { id: "step-sum", user_description: "Sammanfatta" }), send]
+  });
+  const { queryClient } = await renderPage("?step=step-send");
+  const sends = await sendsRegion();
+  expect(await within(sends).findByText("Sammanfatta")).toBeTruthy();
+  const openSum = { name: "Öppna steg 2 – Sammanfatta" };
+  const openNotes = { name: "Öppna steg 1 – Anteckningar" };
+  expect(within(sends).getByRole("button", openSum)).toBeTruthy();
+  expect(within(sends).getByRole("button", openNotes)).toBeTruthy();
+  fireEvent.change(await address(), { target: { value: "https://mottagare.example.org/ny" } });
+
+  // Changed elsewhere: the step the run delivered is replaced by another.
+  flow = makeFlow({
+    draft_revision: 5,
+    steps: [notes, makeStep(2, { id: "step-doc", user_description: "Protokoll" }), send]
+  });
+  act(() => queryClient.setQueryData(flowKeys.flow(flow.id), flow));
+  expect(await screen.findByText(messages.flow_step_editor_newer_title)).toBeTruthy();
+  const pinned = await sendsRegion();
+  expect(within(pinned).queryByText("Sammanfatta")).toBeNull();
+  expect(within(pinned).queryByRole("button", openSum)).toBeNull();
+  expect(within(pinned).queryByRole("button", openNotes)).toBeNull();
+  expect(
+    within(pinned).getByText(messages.flow_step_editor_run_result_older_version)
+  ).toBeTruthy();
+  expect((await address()).value).toBe("https://mottagare.example.org/ny");
+
+  await click(messages.flow_step_editor_reload);
+  const current = await sendsRegion();
+  expect(await within(current).findByText("Protokoll")).toBeTruthy();
+  expect(within(current).getByRole("button", { name: "Öppna steg 2 – Protokoll" })).toBeTruthy();
+  expect(
+    within(current).queryByText(messages.flow_step_editor_run_result_older_version)
+  ).toBeNull();
+  expect((await address()).value).toBe("https://mottagare.example.org/ny");
 });
 
 /**
