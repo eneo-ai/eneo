@@ -31,7 +31,7 @@ import {
   stepLabel
 } from "./flow-labels";
 import { useFlowReadLabel } from "./flow-read-layout";
-import { stepName, stepReaders, stepReads, type StepPrompts } from "./flow-steps";
+import { senderReads, stepName, stepReaders, stepReads, type StepPrompts } from "./flow-steps";
 import {
   useSuggestionDismissal,
   useSuggestionFix,
@@ -133,13 +133,31 @@ function StepCard({
   const titleId = useId();
   const id = step.id ?? "";
   const label = stepLabel(step, t);
-  const reads = stepReads(step, steps, prompts);
+  const sends = run.sender === step;
+  // The step that sends reads only what its headers name: what it sends is its own row.
+  const reads = sends ? senderReads(step, steps) : stepReads(step, steps, prompts);
   const review = step.review_policy?.mode;
   // Files the run asks for, which "Tar emot" says beside the type (they may be required).
   // A file type already names them, so there it adds only whether they are required.
   const uploads = readRuntimeInput(step.input_config);
   const delivered = run.deliverables.includes(step);
-  const host = run.sender === step ? runResultHost(step) : null;
+  const host = sends ? runResultHost(step) : null;
+  // Plain text like the rows below it; a read of a step that is gone says so
+  // in words, and in the error colour.
+  const readsRow = (
+    <MetadataListItem label={t("flows_step_reads")}>
+      {reads.map((read, position) => (
+        <Fragment key={read.kind === "step" ? `step-${read.order}` : read.kind}>
+          {position > 0 ? ", " : null}
+          <span
+            className={read.kind === "step" && read.step === null ? "text-ax-error" : undefined}
+          >
+            {readLabel(read, t)}
+          </span>
+        </Fragment>
+      ))}
+    </MetadataListItem>
+  );
 
   return (
     <article
@@ -253,9 +271,11 @@ function StepCard({
           ) : null}
         </div>
       </div>
-      {run.sender === step ? (
-        // It sends the run's deliverables, not what it reads: what and where are its rows.
+      {sends ? (
+        // What it sends and to whom are its own rows; what its headers read
+        // comes first when there is any.
         <MetadataList label={labelColumn}>
+          {reads.length > 0 ? readsRow : null}
           <MetadataListItem label={t("flows_step_sends")}>
             {run.deliverables.length > 0 ? (
               run.deliverables
@@ -279,22 +299,7 @@ function StepCard({
         </MetadataList>
       ) : (
         <MetadataList label={labelColumn}>
-          {/* Plain text like the rows below it; a read of a step that is gone
-            says so in words, and in the error colour. */}
-          <MetadataListItem label={t("flows_step_reads")}>
-            {reads.map((read, position) => (
-              <Fragment key={read.kind === "step" ? `step-${read.order}` : read.kind}>
-                {position > 0 ? ", " : null}
-                <span
-                  className={
-                    read.kind === "step" && read.step === null ? "text-ax-error" : undefined
-                  }
-                >
-                  {readLabel(read, t)}
-                </span>
-              </Fragment>
-            ))}
-          </MetadataListItem>
+          {readsRow}
           <MetadataListItem label={t("flows_step_takes")}>
             {!uploads.enabled
               ? inputTypeLabel(step.input_type, t)

@@ -173,13 +173,44 @@ function httpTokens(step: FlowStep): string[] {
   return calls.flatMap((call) => {
     if (!isRecord(call)) return [];
     const body = isRecord(call.body) ? call.body : {};
-    const headers = Array.isArray(call.custom_headers) ? call.custom_headers : [];
     return [
-      call.url,
-      body.template,
-      ...headers.map((header) => (isRecord(header) && header.secret !== true ? header.value : null))
-    ].flatMap((text) => (typeof text === "string" ? tokensOf(text) : []));
+      ...[call.url, body.template].flatMap((text) =>
+        typeof text === "string" ? tokensOf(text) : []
+      ),
+      ...headerTokens(call)
+    ];
   });
+}
+
+/** What the values of a call's headers that are not secret read. */
+function headerTokens(call: Record<string, unknown>): string[] {
+  const headers = Array.isArray(call.custom_headers) ? call.custom_headers : [];
+  return headers.flatMap((header) =>
+    isRecord(header) && header.secret !== true && typeof header.value === "string"
+      ? tokensOf(header.value)
+      : []
+  );
+}
+
+/**
+ * The earlier steps the step that sends the run's result reads in its own
+ * right, in run order: those the values of its headers that are not secret
+ * name. The result it sends is not a read.
+ */
+export function senderReads(sender: FlowStep, steps: readonly FlowStep[]): StepRead[] {
+  const config = isRecord(sender.output_config) ? sender.output_config : {};
+  const reads = new Map<number, FlowStep | null>();
+  for (const token of headerTokens(config)) {
+    const target = readTarget(token, sender, steps);
+    if (target.kind === "step") {
+      reads.set(target.order, steps.find((step) => step.step_order === target.order) ?? null);
+    } else if (target.kind === "deleted" && !reads.has(target.order)) {
+      reads.set(target.order, null);
+    }
+  }
+  return [...reads]
+    .sort(([a], [b]) => a - b)
+    .map(([order, step]) => ({ kind: "step" as const, order, step }));
 }
 
 type ReadFacts = {
@@ -312,8 +343,8 @@ export function stepReaders(
 /**
  * The later steps that read a step, by name or by place (the previous step,
  * all earlier ones), in run order: where its result goes next in the flow.
- * The step that sends the run's result is left out; it sends the run's
- * results, not what it reads.
+ * The step that sends the run's result counts only where its headers name
+ * the step (`senderReads`): the result it sends is not a read.
  */
 export function stepReadersByNameOrPlace(
   step: FlowStep,
@@ -321,8 +352,13 @@ export function stepReadersByNameOrPlace(
   prompts: StepPrompts = new Map()
 ): FlowStep[] {
   return steps
-    .filter((later) => later.step_order > step.step_order && !sendsRunResult(later))
+    .filter((later) => later.step_order > step.step_order)
     .filter((later) => {
+      if (sendsRunResult(later)) {
+        return senderReads(later, steps).some(
+          (read) => read.kind === "step" && read.step !== null && read.order === step.step_order
+        );
+      }
       const facts = readFacts(later, steps, prompts.get(later.assistant_id));
       return facts.named.has(step.step_order) || facts.implicit.has(step.step_order);
     })

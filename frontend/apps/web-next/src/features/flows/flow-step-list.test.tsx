@@ -488,6 +488,41 @@ describe("FlowStepList", () => {
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
   });
 
+  it("says on the sending card which step its headers read, apart from what it sends, as the removal check does", async () => {
+    const list = [
+      makeStep(1, { user_description: "Sammanfatta", output_type: "text" }),
+      makeStep(2, { user_description: "Granska", input_source: "flow_input" }),
+      makeStep(3, {
+        user_description: "Skicka",
+        output_mode: "http_post",
+        output_config: {
+          url: "https://startsidan.example.org/in",
+          auth: { mode: "none" },
+          body: { mode: "run_result" },
+          custom_headers: [{ name: "X-Fall", value: "{{Sammanfatta}}", secret: false }]
+        }
+      })
+    ];
+    renderList(true, null, {}, true, list);
+    const sending = screen.getByRole("article", { name: "Steg 3 Skicka" });
+    expect(within(sending).getByText(messages.flows_step_reads)).toBeTruthy();
+    expect(within(sending).getByText("Steg 1: Sammanfatta")).toBeTruthy();
+    // What it sends is its own row: the last working step, not the step it reads.
+    expect(within(sending).getByText(messages.flows_step_sends)).toBeTruthy();
+    expect(within(sending).getByText("Granska (Text)")).toBeTruthy();
+
+    const trigger = screen.getByRole("button", { name: "Fler åtgärder för Steg 1: Sammanfatta" });
+    fireEvent.click(trigger);
+    const menu = document.getElementById(trigger.getAttribute("aria-controls") ?? "")!;
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Ta bort steg" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "Ta bort steget?" });
+    expect(
+      within(dialog).getByText(
+        "Steg 3: Skicka läser Steg 1: Sammanfatta. Ändra först vad som läses där, sedan går steget att ta bort."
+      )
+    ).toBeTruthy();
+  });
+
   it("folds each step's suggestions into one quiet row with their count", async () => {
     prompts.suggestions = [
       suggestionAbout("step-2", "a".repeat(64), "patch"),

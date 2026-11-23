@@ -204,6 +204,29 @@ describe("stepReadersByNameOrPlace", () => {
     expect(orders([makeStep(1), post], 0)).toEqual([2]);
   });
 
+  it("counts the step that sends the run's result when one of its headers names the step", () => {
+    const config = sender(3).output_config as Record<string, unknown>;
+    const withHeader = (value: string, secret = false) =>
+      makeStep(3, {
+        output_mode: "http_post",
+        output_config: { ...config, custom_headers: [{ name: "X-Fall", value, secret }] }
+      });
+    const steps = (last: ReturnType<typeof makeStep>) => [
+      makeStep(1, { user_description: "Sammanfatta" }),
+      makeStep(2, { input_source: "flow_input" }),
+      last
+    ];
+    expect(orders(steps(withHeader("{{Sammanfatta}}")), 0)).toEqual([3]);
+    expect(orders(steps(withHeader("{{step_1.output.text}}")), 0)).toEqual([3]);
+    // The result it sends is not a read: the step before it is not counted.
+    expect(orders(steps(withHeader("{{Sammanfatta}}")), 1)).toEqual([]);
+    // A secret header's value is never read.
+    expect(orders(steps(withHeader("{{Sammanfatta}}", true)), 0)).toEqual([]);
+    // The removal check finds the same reader.
+    const named = steps(withHeader("{{Sammanfatta}}"));
+    expect(stepReaders(named[0]!, named).map((step) => step.step_order)).toEqual([3]);
+  });
+
   it("leaves the removal check to named reads", () => {
     const steps = [makeStep(1), makeStep(2)];
     expect(orders(steps, 0)).toEqual([2]);

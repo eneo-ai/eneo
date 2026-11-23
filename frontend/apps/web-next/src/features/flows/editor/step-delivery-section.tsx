@@ -279,15 +279,16 @@ export function StepDeliverySection({
   const { prompts, current } = useStepPromptsState(flow.id, later, true);
   const readers = self ? stepReadersByNameOrPlace(self, flow.steps, prompts) : [];
   const name = (step: FlowStep) => stepLabel(step.step_order, step.user_description, t);
-  // The last working step has no later step to name. "Read by no step" waits
-  // for every prompt to be current: one not read, or read before a change, may name this step.
+  // The step that sends reads it only where its headers name it. The last
+  // working step has no other later step to name. "Read by no step" waits for
+  // every prompt to be current: one not read, or read before a change, may name this step.
   const readLine =
-    later.length === 0
-      ? null
-      : readers.length === 1 && readers[0]!.step_order === order + 1
-        ? t("flow_step_editor_delivery_read_next", { step: name(readers[0]!) })
-        : readers.length > 0
-          ? t("flow_step_editor_delivery_read_by", { steps: format.list(readers.map(name)) })
+    readers.length === 1 && readers[0]!.step_order === order + 1
+      ? t("flow_step_editor_delivery_read_next", { step: name(readers[0]!) })
+      : readers.length > 0
+        ? t("flow_step_editor_delivery_read_by", { steps: format.list(readers.map(name)) })
+        : later.length === 0
+          ? null
           : current
             ? t(
                 included

@@ -3422,6 +3422,48 @@ describe("FlowStepEditor Leverans", () => {
     expect(within(delivery).queryByText(messages.flow_step_editor_delivery_unread_off)).toBeNull();
   }, 20_000);
 
+  it("names the step that sends the run's result as a reader when one of its headers names the step", async () => {
+    routeAssistants();
+    const reading = (order: number) =>
+      makeStep({
+        ...sender(order),
+        output_config: {
+          url: RECEIVER,
+          auth: { mode: "none" },
+          body: { mode: "run_result" },
+          custom_headers: [{ name: "X-Fall", value: "{{Sammanfatta}}", secret: false }]
+        }
+      });
+    const view = renderEditor(
+      makeFlow({
+        steps: [
+          text(1, "Sammanfatta"),
+          text(2, "Granska", { input_source: "flow_input" }),
+          reading(3)
+        ]
+      })
+    );
+    let delivery = await section();
+    expect(await within(delivery).findByText("Läses av Steg 3: Skicka.")).toBeTruthy();
+    // What it sends is said apart from what it reads.
+    expect(
+      within(delivery).getByText(
+        "Skickas inte till startsidan.example.org. Slå på Ta med i körningens resultat ovan om det ska följa med."
+      )
+    ).toBeTruthy();
+    view.unmount();
+
+    // The last working step: the step that sends is its only later step, and reads it.
+    renderEditor(makeFlow({ steps: [text(1, "Sammanfatta"), reading(2)] }));
+    delivery = await section();
+    expect(
+      await within(delivery).findByText("Går vidare till nästa steg: Steg 2: Skicka.")
+    ).toBeTruthy();
+    expect(
+      within(delivery).getByText("Skickas till startsidan.example.org när körningen är klar.")
+    ).toBeTruthy();
+  }, 20_000);
+
   it("keeps naming a known reader while another later prompt cannot be read", async () => {
     routeAssistants({ "assistant-3": "Jämför med {{Sammanfatta}}." }, ["assistant-2"]);
     renderEditor(
