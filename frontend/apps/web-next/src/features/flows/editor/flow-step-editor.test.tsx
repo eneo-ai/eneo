@@ -3438,6 +3438,33 @@ describe("FlowStepEditor Leverans", () => {
     }
   }, 20_000);
 
+  it("names a Word step only as a reader of the steps its fields name", async () => {
+    routeAssistants();
+    const flow = makeFlow({
+      steps: [
+        text(1, "Sammanfatta"),
+        text(2, "Granska"),
+        text(3, "Mall", {
+          output_mode: "template_fill",
+          output_type: "docx",
+          output_config: {
+            placeholders: ["sammanfattning"],
+            bindings: { sammanfattning: "{{step_1.output.text}}" }
+          }
+        })
+      ]
+    });
+    renderEditor(flow);
+    expect(await within(await section()).findByText(/Steg 3: Mall/)).toBeTruthy();
+    cleanup();
+
+    // The core never reads a Word step's input: the step before it is not read.
+    renderEditor(flow, { stepId: "step-2" });
+    const delivery = await section();
+    expect(within(delivery).queryByText(/^Läses av /)).toBeNull();
+    expect(within(delivery).queryByText(/^Går vidare till nästa steg/)).toBeNull();
+  }, 20_000);
+
   it("names a tool step with bindings that sends the result to its tool in an argument", async () => {
     routeAssistants();
     renderEditor(

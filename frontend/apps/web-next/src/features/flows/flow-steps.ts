@@ -299,6 +299,9 @@ function readFacts(step: FlowStep, steps: readonly FlowStep[], prompt = ""): Rea
   // arguments are read whatever the step's material is: the core fills them all in.
   tokensOf(prompt).forEach(readToken);
   templateFieldTokens(step).forEach(readToken);
+  // The core fills a Word step from its fields alone and never resolves its
+  // input source or bindings (`OUTPUT_MODES_WITHOUT_STEP_INPUT`).
+  if (step.output_mode === "template_fill") return facts;
   if (step.input_source === "tool") toolArgumentTokens(step).forEach(readToken);
   if (step.input_source === "http_get") callTokens(step.input_config).forEach(readToken);
   if (step.output_mode === "http_post") {
@@ -334,7 +337,8 @@ function readFacts(step: FlowStep, steps: readonly FlowStep[], prompt = ""): Rea
 /**
  * What a step reads, each source once: earlier steps in run order first,
  * then the run's input, the web or a tool. Bindings, when the step has
- * any, decide its material alone; otherwise its input source does. What
+ * any, decide its material alone; otherwise its input source does. A Word
+ * step reads only what its fields name: the core resolves neither. What
  * its prompt (`prompts`, by assistant id), its Word fields, its HTTP calls
  * and its tool's arguments read comes on top.
  */

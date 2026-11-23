@@ -81,7 +81,7 @@ describe("stepReaders", () => {
     expect(stepReaders(steps[1]!, steps)).toEqual([]);
   });
 
-  it("counts a Word step whose field reads the step", () => {
+  it("counts a Word step whose field reads the step, and nothing else of it", () => {
     const steps = [
       makeStep(1),
       makeStep(2),
@@ -95,9 +95,17 @@ describe("stepReaders", () => {
       })
     ];
     expect(stepReaders(steps[0]!, steps).map((step) => step.step_order)).toEqual([3]);
+    // The core fills a Word step from its fields alone: its input source and
+    // bindings are never resolved, so the step before it is not read.
     expect(stepReads(steps[2]!, steps).map((read) => read.kind === "step" && read.order)).toEqual([
-      1, 2
+      1
     ]);
+    expect(stepReadersByNameOrPlace(steps[1]!, steps)).toEqual([]);
+    expect(stepReadersByNameOrPlace(steps[0]!, steps).map((step) => step.step_order)).toEqual([
+      2, 3
+    ]);
+    const bound = { ...steps[2]!, input_bindings: { question: "{{step_2.output.text}}" } };
+    expect(stepReadersByNameOrPlace(steps[1]!, [steps[0]!, steps[1]!, bound])).toEqual([]);
   });
 
   it("counts an HTTP call or webhook whose address, body or header value reads the step", () => {
