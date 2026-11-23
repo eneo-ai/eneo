@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- Same visual system as the MFA and file-home diagrams (canvas 860 wide, Inter 15-17, one meaning per colour:
      neutral = ordinary step, blue = the box the diagram turns on, green = allowed, red = refused, dashed grey = absent). -->
-<svg xmlns="http://www.w3.org/2000/svg" width="860" height="348" viewBox="0 0 860 348" role="img" aria-labelledby="t d" style="font-family: Inter, 'Segoe UI', Helvetica, Arial, sans-serif; color-scheme: light dark;">
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="400" viewBox="0 0 860 400" role="img" aria-labelledby="t d" style="font-family: Inter, 'Segoe UI', Helvetica, Arial, sans-serif; color-scheme: light dark;">
   <title id="t">What a Skill can reach</title>
-  <desc id="d">Left: while the Skill creator is on, it reads only the person's personal space and the current conversation, and web search, MCP tools, image generation and calculation are paused, so nothing it read leaves in a tool call meanwhile. Right: when a Skill runs in a shared space at classification level 3, its reference to web search attaches nothing by itself; the chat attaches only tools whose classification meets the space's, so a level 3 tool is attached and a level 2 web search is not.</desc>
+  <desc id="d">Left: while the Skill creator is on, its tools read only the person's own Skills and the current conversation, and web search, external MCP tools, image generation and calculation are paused, so nothing it read leaves in a tool call meanwhile. Right: in a shared space at classification level 3, a Skill's link to web search attaches nothing by itself. The chat turn attaches only tools whose classification meets the space's: an otherwise enabled level 3 tool is attached and a level 2 web search is not, and the Skill settings and the chat say why.</desc>
   <defs>
     <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
   </defs>
@@ -47,16 +47,18 @@
       .dot,.ah{fill:#8b949e}
     }
   </style>
-  <rect class="bg" x="0.5" y="0.5" width="859" height="347" rx="12"/>
-  <rect class="lane" x="24" y="24" width="394" height="300" rx="8"/><text class="h" x="221" y="52" text-anchor="middle">While a Skill is written</text>
-  <rect class="lane" x="442" y="24" width="394" height="300" rx="8"/><text class="h" x="639" y="52" text-anchor="middle">A Skill runs in a level 3 shared space</text>
-  <rect class="key" x="48" y="72" width="346" height="84" rx="8"/><text class="h" x="221" y="100" text-anchor="middle">Skill creator in the chat</text><text class="s" x="221" y="124" text-anchor="middle">reads only your personal space</text><text class="s" x="221" y="143" text-anchor="middle">and this conversation</text>
-  <rect class="gone" x="48" y="188" width="160" height="84" rx="8"/><text class="h" x="128" y="216" text-anchor="middle">Web search</text><text class="s" x="128" y="240" text-anchor="middle">paused</text>
-  <rect class="gone" x="234" y="188" width="160" height="84" rx="8"/><text class="h" x="314" y="216" text-anchor="middle">Other tools</text><text class="s" x="314" y="240" text-anchor="middle">MCP, images,</text><text class="s" x="314" y="259" text-anchor="middle">calculation: paused</text>
-  <text class="m" x="221" y="300" text-anchor="middle">Nothing leaves in a tool call meanwhile</text>
-  <rect class="box" x="466" y="72" width="346" height="84" rx="8"/><text class="h" x="639" y="100" text-anchor="middle">The Skill's text</text><text class="s" x="639" y="124" text-anchor="middle">refers to web search;</text><text class="s" x="639" y="143" text-anchor="middle">a reference attaches nothing</text>
-  <path class="line" d="M639,156 V172"/><path class="edge" d="M639,172 H546 V186"/><path class="edge" d="M639,172 H732 V186"/>
-  <rect class="ok" x="466" y="188" width="160" height="84" rx="8"/><text class="h" x="546" y="216" text-anchor="middle">A level 3 tool</text><text class="s" x="546" y="240" text-anchor="middle">attached</text>
-  <rect class="no" x="652" y="188" width="160" height="84" rx="8"/><text class="h" x="732" y="216" text-anchor="middle">Web search</text><text class="s" x="732" y="240" text-anchor="middle">level 2:</text><text class="s" x="732" y="259" text-anchor="middle">not attached</text>
-  <text class="m" x="639" y="300" text-anchor="middle">Tools must meet the space's level</text>
+  <rect class="bg" x="0.5" y="0.5" width="859" height="399" rx="12"/>
+  <rect class="lane" x="24" y="24" width="394" height="352" rx="8"/><text class="h" x="221" y="52" text-anchor="middle">While a Skill is written</text>
+  <rect class="lane" x="442" y="24" width="394" height="352" rx="8"/><text class="h" x="639" y="52" text-anchor="middle">A Skill runs in a level 3 shared space</text>
+  <rect class="key" x="48" y="72" width="346" height="84" rx="8"/><text class="h" x="221" y="100" text-anchor="middle">Skill creator in the chat</text><text class="s" x="221" y="124" text-anchor="middle">its tools read only your own Skills</text><text class="s" x="221" y="143" text-anchor="middle">and this conversation</text>
+  <rect class="gone" x="48" y="208" width="160" height="104" rx="8"/><text class="h" x="128" y="246" text-anchor="middle">Web search</text><text class="s" x="128" y="270" text-anchor="middle">paused</text>
+  <rect class="gone" x="234" y="208" width="160" height="104" rx="8"/><text class="h" x="314" y="236" text-anchor="middle">Other tools</text><text class="s" x="314" y="260" text-anchor="middle">external MCP,</text><text class="s" x="314" y="279" text-anchor="middle">images, calculation:</text><text class="s" x="314" y="298" text-anchor="middle">paused</text>
+  <text class="m" x="221" y="352" text-anchor="middle">Nothing leaves in a tool call meanwhile</text>
+  <rect class="box" x="466" y="72" width="346" height="60" rx="8"/><text class="h" x="639" y="97" text-anchor="middle">The Skill's text</text><text class="s" x="639" y="119" text-anchor="middle">a link to web search attaches nothing</text>
+  <path class="edge" d="M639,132 V150"/>
+  <rect class="key" x="466" y="152" width="346" height="60" rx="8"/><text class="h" x="639" y="177" text-anchor="middle">The chat turn</text><text class="s" x="639" y="199" text-anchor="middle">attaches tools that meet level 3</text>
+  <path class="line" d="M639,212 V224"/><path class="edge" d="M639,224 H546 V240"/><path class="edge" d="M639,224 H732 V240"/>
+  <rect class="ok" x="466" y="242" width="160" height="84" rx="8"/><text class="h" x="546" y="270" text-anchor="middle">A level 3 tool</text><text class="s" x="546" y="294" text-anchor="middle">otherwise enabled:</text><text class="s" x="546" y="313" text-anchor="middle">attached</text>
+  <rect class="no" x="652" y="242" width="160" height="84" rx="8"/><text class="h" x="732" y="270" text-anchor="middle">Web search</text><text class="s" x="732" y="294" text-anchor="middle">level 2:</text><text class="s" x="732" y="313" text-anchor="middle">not attached</text>
+  <text class="m" x="639" y="352" text-anchor="middle">The Skill settings and the chat say why</text>
 </svg>
