@@ -351,13 +351,9 @@
     chat.requestPreflight(composeQuotedQuestion(quote, $question), fileIds, tools);
   });
 
-  const shouldShowMentionButton = $derived.by(() => {
-    const hasTools = chat.partner.tools.assistants.length > 0;
-    const isEnabled =
-      chat.partner.type === "default-assistant" ||
-      ("allow_mentions" in chat.partner && chat.partner.allow_mentions);
-    return hasTools && isEnabled;
-  });
+  const shouldShowMentionButton = $derived(
+    chat.partner.type === "default-assistant" && chat.partner.tools.assistants.length > 0
+  );
 
   // MCP servers available to the current partner (drives the toolbar popover).
   // For the personal/default assistant the policy GRANTS servers that are not

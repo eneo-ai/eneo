@@ -33,6 +33,7 @@ import { deriveActivity, modelName, type ActivitySource } from "./activity";
 import type { ActivityTab } from "./activity-panel";
 import type { DocumentDraft } from "./side-panel/document-draft";
 import { ActivityPill } from "./activity-pill";
+import { ConsultationTrace } from "./consultation-trace";
 import { sourceMeta } from "./activity-sources";
 import type { TurnDurations } from "./activity-timings";
 import {
@@ -577,7 +578,6 @@ function AssistantMessage({
   message,
   assistant,
   isStreaming,
-  showResponseLabel,
   liveAnswering,
   knowledge,
   durations,
@@ -592,7 +592,6 @@ function AssistantMessage({
   message: EneoUIMessage;
   assistant: AssistantIdentity;
   isStreaming: boolean;
-  showResponseLabel: boolean;
   liveAnswering: { id: string; handle: string } | null;
   knowledge: KnowledgeOrigin[];
   durations: TurnDurations | null;
@@ -668,7 +667,7 @@ function AssistantMessage({
         <AssistantName
           assistant={assistant}
           model={modelName(message)}
-          handle={showResponseLabel && answering ? answering.handle : null}
+          handle={answering && answering.id !== assistant.id ? answering.handle : null}
         />
       }
       className="w-full"
@@ -711,6 +710,7 @@ function AssistantMessage({
               </CitationSourcesProvider>
             );
           }
+          if (part.type === "data-consultation" && !isStreaming) return null;
           const approval = approvalForPart(part);
           if (approval) {
             return <ToolApprovalCard key={approval.approval_id} data={approval} />;
@@ -718,6 +718,11 @@ function AssistantMessage({
           return null;
         })}
         <McpImageStrip references={mcpReferences} />
+        <ConsultationTrace
+          parts={message.parts}
+          streaming={isStreaming}
+          sessionId={sessionId ?? null}
+        />
         <McpAppFrames message={message} live={isStreaming} sessionId={sessionId} />
         {draft && <DraftLine draft={draft} />}
         <GeneratedFiles message={message} documents={documents} />
@@ -755,7 +760,6 @@ export function ChatMessage({
   message,
   assistant,
   isStreaming = false,
-  showResponseLabel = false,
   liveAnswering = null,
   knowledge = NO_KNOWLEDGE,
   durations = null,
@@ -771,7 +775,6 @@ export function ChatMessage({
   message: EneoUIMessage;
   assistant: AssistantIdentity;
   isStreaming?: boolean;
-  showResponseLabel?: boolean;
   liveAnswering?: { id: string; handle: string } | null;
   knowledge?: KnowledgeOrigin[];
   durations?: TurnDurations | null;
@@ -798,7 +801,6 @@ export function ChatMessage({
       message={message}
       assistant={assistant}
       isStreaming={isStreaming}
-      showResponseLabel={showResponseLabel}
       liveAnswering={liveAnswering}
       knowledge={knowledge}
       durations={durations}

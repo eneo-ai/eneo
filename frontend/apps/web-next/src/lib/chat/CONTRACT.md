@@ -284,7 +284,10 @@ part per batch, no id).
 The part carries a public `ConsultationInfo` snapshot. Its ID is the consultation
 ID. Updates replace the same part as the specialist works. A specialist's
 pending approval carries the approval ID and the tool call IDs awaiting a decision.
-The parent's final answer continues on the ordinary text stream.
+The parent's final answer continues on the ordinary text stream. View steps renders
+the specialist's question, answer, sources and tool calls from this part. History
+maps persisted consultations back to the same parts. An interrupted consultation
+reopens as incomplete, with no actionable approval.
 
 ### `data-tool-approval` (eneo) — see [Tool approval](#tool-approval)
 

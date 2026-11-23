@@ -67,7 +67,7 @@ export type SessionData = {
   files: Schema<"FilePublic">[];
   web_search_references: { id: string; title: string; url: string }[];
   mcp_tool_references?: Schema<"McpToolReferencePublic">[];
-  /** Group chats: which member assistant answered (null = none / clarification). */
+  /** The assistant that authored the answer, including directed and historical replies. */
   answering_assistant?: { id: string; handle: string } | null;
 };
 
