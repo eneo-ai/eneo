@@ -3406,10 +3406,25 @@ describe("FlowStepEditor Leverans", () => {
     const reader = "Läses av Steg 3: Skriv svar.";
     await within(delivery).findByText(reader);
     const key = flowEditorKeys.assistant(flow.id, "assistant-3");
-    // Reading current data again keeps the line while the read is under way.
-    const reread = queryClient.refetchQueries({ queryKey: key });
-    expect(within(delivery).getByText(reader)).toBeTruthy();
-    await reread;
+    // A save moves the draft and the page reads every assistant again: while
+    // that read is under way, the line from the prompt held stays.
+    const get = api.stub.client.GET;
+    let release = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    api.stub.client.GET = ((path: string, init?: object) =>
+      `GET ${path}` === ASSISTANT
+        ? held.then(() => get(path, init))
+        : get(path, init)) as typeof get;
+    try {
+      const reread = queryClient.invalidateQueries({ queryKey: key });
+      await waitFor(() => expect(queryClient.getQueryState(key)?.fetchStatus).toBe("fetching"));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(within(delivery).getByText(reader)).toBeTruthy();
+      release();
+      await reread;
+    } finally {
+      api.stub.client.GET = get;
+    }
     expect(within(delivery).getByText(reader)).toBeTruthy();
     routeAssistants({}, ["assistant-3"]);
     // Invalidated: a newer draft may no longer name the step.

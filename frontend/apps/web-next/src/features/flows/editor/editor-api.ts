@@ -125,10 +125,12 @@ export function useStepPrompts(
 }
 
 /**
- * The prompts that are current, and whether every prompt is: read, and not
- * invalidated or refused since. A prompt kept from an earlier read can name a
- * step the newer one no longer does, or miss one it does, so it is left out.
- * A read of current data again keeps it (`staleTime` is infinite).
+ * The prompts that may name a reader, and whether every prompt is current:
+ * read, and not invalidated or refused since. A prompt invalidated and left
+ * unread, or whose read again failed, can name a step the saved one no longer
+ * does, so it is left out. One being read again stays until the answer: the
+ * page reads every assistant again on each save, and a correct line would
+ * blink. `current` stays strict, since it allows saying no step reads it.
  */
 export function useStepPromptsState(
   flowId: string,
@@ -136,8 +138,12 @@ export function useStepPromptsState(
   enabled: boolean
 ): { prompts: StepPrompts; current: boolean } {
   const assistants = useStepAssistants(flowId, steps, enabled);
-  const current = assistants.filter((query) => query.isSuccess && !query.isStale);
-  return { prompts: promptsOf(current), current: current.length === assistants.length };
+  return {
+    prompts: promptsOf(
+      assistants.filter((query) => query.isSuccess && (!query.isStale || query.isFetching))
+    ),
+    current: assistants.every((query) => query.isSuccess && !query.isStale)
+  };
 }
 
 function useStepAssistants(flowId: string, steps: readonly FlowStep[], enabled: boolean) {
