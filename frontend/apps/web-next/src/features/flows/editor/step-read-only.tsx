@@ -187,6 +187,12 @@ export function StepReadOnly({
     </MetadataListItem>
   );
 
+  const timeout = step.timeout_seconds !== null && (
+    <MetadataListItem label={t("flow_step_editor_timeout")}>
+      {t("flow_step_editor_seconds", { count: step.timeout_seconds })}
+    </MetadataListItem>
+  );
+
   // The step that sends the run's result reads as its editor does: what it sends, and to whom.
   if (sendsRunResult(step)) {
     // Empty only on a draft: publishing refuses a step with nothing to send.
@@ -230,6 +236,7 @@ export function StepReadOnly({
         {/* No review: the step only sends. */}
         <MetadataList title={t("flows_classification_heading")} label={label}>
           {classification}
+          {timeout}
         </MetadataList>
       </div>
     );
@@ -402,11 +409,7 @@ export function StepReadOnly({
           {reviewChoiceLabel(review, t)}
         </MetadataListItem>
         {classification}
-        {step.timeout_seconds !== null && (
-          <MetadataListItem label={t("flow_step_editor_timeout")}>
-            {t("flow_step_editor_seconds", { count: step.timeout_seconds })}
-          </MetadataListItem>
-        )}
+        {timeout}
       </MetadataList>
     </div>
   );

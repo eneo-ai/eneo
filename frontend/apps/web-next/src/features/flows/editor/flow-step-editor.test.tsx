@@ -1775,6 +1775,109 @@ describe("FlowStepEditor", () => {
     expect(screen.queryByText(messages.flow_step_editor_control_title)).toBeNull();
   }, 20_000);
 
+  it("shows the step that sends its timeout in the read view", async () => {
+    renderEditor(
+      makeFlow({
+        steps: [
+          makeStep({ output_mode: "compose_text" }),
+          makeStep({
+            id: "step-2",
+            step_order: 2,
+            output_mode: "http_post",
+            timeout_seconds: 120,
+            output_config: {
+              url: "https://hook.example.org/",
+              auth: { mode: "none" },
+              timeout_seconds: 30,
+              body: { mode: "run_result" },
+              custom_headers: [],
+              response_format: null
+            }
+          })
+        ]
+      }),
+      { readOnly: true, stepId: "step-2" }
+    );
+    expect((await rowValue(messages.flow_step_editor_timeout)).textContent).toBe("120 sekunder");
+  }, 20_000);
+
+  it("reads what is published, not the form's unsaved edits, once a published version arrives", async () => {
+    const sender = makeStep({
+      id: "step-send",
+      step_order: 2,
+      user_description: "Skicka körningens resultat",
+      output_mode: "http_post",
+      output_config: {
+        url: "https://hook.example.org/",
+        auth: { mode: "none" },
+        timeout_seconds: 30,
+        body: { mode: "run_result" },
+        custom_headers: [],
+        response_format: null
+      }
+    });
+    const start = makeFlow({
+      steps: [
+        makeStep({ id: "step-a", user_description: "Rapport A", output_mode: "compose_text" }),
+        sender
+      ]
+    });
+    const editor = (flow: FlowPublic) => (
+      <FlowStepEditor
+        flow={flow}
+        stepId="step-send"
+        readOnly={false}
+        onSaved={() => {}}
+        onCancel={() => {}}
+      />
+    );
+    const { rerender } = renderEditor(start, { stepId: "step-send" });
+    fireEvent.change(await screen.findByLabelText(/^Mottagarens adress/), {
+      target: { value: "https://osparad.example.org/" }
+    });
+    rerender(
+      editor(
+        makeFlow({
+          draft_revision: start.draft_revision + 1,
+          published_version: 1,
+          steps: [
+            makeStep({ id: "step-b", user_description: "Rapport B", output_mode: "compose_text" }),
+            sender
+          ]
+        })
+      )
+    );
+    await screen.findByText(messages.flow_step_editor_published);
+    expect(await screen.findByText("Rapport B")).toBeTruthy();
+    expect(screen.getByText("https://hook.example.org/")).toBeTruthy();
+    expect(screen.queryByText("Rapport A")).toBeNull();
+    expect(screen.queryByText("https://osparad.example.org/")).toBeNull();
+  }, 20_000);
+
+  it("heads the read view with the saved name, and gives the unsaved one back when unpublished", async () => {
+    const start = makeFlow();
+    const editor = (flow: FlowPublic) => (
+      <FlowStepEditor
+        flow={flow}
+        stepId="step-1"
+        readOnly={false}
+        onSaved={() => {}}
+        onCancel={() => {}}
+      />
+    );
+    const { rerender } = renderEditor(start);
+    fireEvent.change(await nameField(), { target: { value: "Osparat namn" } });
+    rerender(editor({ ...start, draft_revision: start.draft_revision + 1, published_version: 1 }));
+    await screen.findByText(messages.flow_step_editor_published);
+    expect(screen.getByRole("heading", { level: 2, name: "Sammanfatta" })).toBeTruthy();
+    expect(screen.queryByText("Osparat namn")).toBeNull();
+
+    rerender(
+      editor({ ...start, draft_revision: start.draft_revision + 2, published_version: null })
+    );
+    expect((await nameField()).value).toBe("Osparat namn");
+  }, 20_000);
+
   it("says in the read view of a draft step that sends the run's result that it has nothing to send yet", async () => {
     const { container } = renderEditor(
       makeFlow({

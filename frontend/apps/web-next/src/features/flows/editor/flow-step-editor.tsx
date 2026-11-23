@@ -607,7 +607,8 @@ function StepEditorSession({
 
   // --- Loading and missing states -------------------------------------------------
 
-  if (!session) {
+  // A published step is read from the newest flow, which may no longer hold it.
+  if (!session || (effectiveReadOnly && !latestStep)) {
     return (
       <div className="flex flex-col gap-4 px-6 py-5">
         <Banner
@@ -928,43 +929,58 @@ function StepEditorSession({
   const changeCount =
     (stepPatch ? Object.keys(stepPatch).length : 0) +
     (assistantUpdate ? Object.keys(assistantUpdate).length : 0);
-  const name = draft.user_description?.trim() || t("flow_step_editor_unnamed");
+  // The read view and the form head the step the same way, each from its own source.
+  function headerOf(view: {
+    flow: FlowPublic;
+    stepOrder: number;
+    step: StepConfig;
+    assistant: AssistantConfig;
+  }) {
+    return (
+      <header className="flex flex-col gap-3">
+        {/* The bar above says "Steg 2 av 5", and Källa and Vad steget gör are rows below. */}
+        <Heading level={2} id={headingId}>
+          {view.step.user_description?.trim() || t("flow_step_editor_unnamed")}
+        </Heading>
+        {sendsRunResult(view.step) ? (
+          <Text type="supporting" size="sm" as="p" display="block" className="m-0 max-w-prose">
+            {t("flow_step_editor_run_result_description")}
+          </Text>
+        ) : (
+          <StepRequestPreviewButton
+            flow={view.flow}
+            stepOrder={view.stepOrder}
+            draft={view.step}
+            assistant={view.assistant}
+          />
+        )}
+      </header>
+    );
+  }
 
-  const header = (
-    <header className="flex flex-col gap-3">
-      {/* The bar above says "Steg 2 av 5", and Källa and Vad steget gör are rows below. */}
-      <Heading level={2} id={headingId}>
-        {name}
-      </Heading>
-      {sendsResult ? (
-        <Text type="supporting" size="sm" as="p" display="block" className="m-0 max-w-prose">
-          {t("flow_step_editor_run_result_description")}
-        </Text>
-      ) : (
-        <StepRequestPreviewButton
-          flow={flow}
-          stepOrder={stepOrder}
-          draft={draft}
-          assistant={assistantDraft}
-        />
-      )}
-    </header>
-  );
-
-  if (effectiveReadOnly) {
+  if (effectiveReadOnly && latestStep && assistantSaved) {
+    // What is published, never the form's edits: they stay pinned and come
+    // back if the flow is unpublished again.
+    const saved = {
+      flow: latest,
+      stepOrder: latestStep.step_order,
+      step: stepConfigOf(latestStep)
+    };
     return (
       <section aria-labelledby={headingId} className="flex flex-col gap-6 px-6 py-5">
-        {header}
+        {headerOf({ ...saved, assistant: assistantSaved })}
         {latest.published_version != null && !readOnly && (
           <Banner status="info" title={t("flow_step_editor_published")} collapsible={false} />
         )}
-        <StepReadOnly flow={flow} step={draft} stepOrder={stepOrder} assistant={assistantDraft} />
+        <StepReadOnly {...saved} assistant={assistantSaved} />
         <div>
           <Button label={t("close")} onClick={onCancel} />
         </div>
       </section>
     );
   }
+
+  const header = headerOf({ flow, stepOrder, step: draft, assistant: assistantDraft });
 
   return (
     <section aria-labelledby={headingId} className="flex min-h-0 flex-1 flex-col">
