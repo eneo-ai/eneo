@@ -8298,7 +8298,7 @@
   "flow_step_editor_delivery_unread_included": "Läses inte av senare steg, men ingår i körningens resultat.",
   "flow_step_editor_delivery_sent_to": "Skickas till {host} när körningen är klar.",
   "flow_step_editor_delivery_not_sent_to": "Ingår inte i körningens resultat som skickas till {host}. Slå på Ta med i körningens resultat ovan om det ska följa med.",
-  "flow_step_editor_delivery_sent_in_header": "Skickas till {host} i en rubrik i steget som skickar körningens resultat.",
+  "flow_step_editor_delivery_sent_in_header": "Skickas till {host} i en header i steget som skickar körningens resultat.",
   "flow_step_editor_delivery_no_sender": "Flödet har inget steg som skickar körningens resultat.",
   "flow_step_editor_delivery_no_address": "Inget skickas förrän utskicket har en adress.",
   "flow_step_editor_delivery_open_sender": "Öppna utskickssteget",

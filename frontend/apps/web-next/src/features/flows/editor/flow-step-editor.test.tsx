@@ -3445,7 +3445,7 @@ describe("FlowStepEditor Leverans", () => {
   it("names the step that sends the run's result as a reader when one of its headers names the step", async () => {
     routeAssistants();
     const inHeader =
-      "Skickas till startsidan.example.org i en rubrik i steget som skickar körningens resultat.";
+      "Skickas till startsidan.example.org i en header i steget som skickar körningens resultat.";
     const reading = (order: number, value = "{{Sammanfatta}}") =>
       makeStep({
         ...sender(order),
