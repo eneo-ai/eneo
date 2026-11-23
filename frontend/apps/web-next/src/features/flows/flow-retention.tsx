@@ -20,6 +20,7 @@ const MIN_DAYS = 1;
 const MAX_DAYS = 2555;
 
 const policyKey = (flowId: string) => ["flows", "retention", flowId] as const;
+type PolicySettings = Schema<"FlowRunRetentionPolicySettings">;
 
 export function retentionDaysValid(days: number | null): days is number {
   return days !== null && Number.isInteger(days) && days >= MIN_DAYS && days <= MAX_DAYS;
@@ -128,7 +129,7 @@ function RetentionForm({
   onClose
 }: {
   flow: FlowPublic;
-  settings: Schema<"FlowRunRetentionPolicySettings">;
+  settings: PolicySettings;
   onClose: () => void;
 }) {
   const t = useTranslations();
@@ -143,6 +144,12 @@ function RetentionForm({
   const [overCap, setOverCap] = useState(false);
   const field = useRef<HTMLInputElement>(null);
 
+  /** Writes what the server just said; an older read still in flight must not replace it. */
+  const writePolicy = async (update: (current?: PolicySettings) => PolicySettings | undefined) => {
+    await queryClient.cancelQueries({ queryKey: policyKey(flow.id), exact: true });
+    queryClient.setQueryData<PolicySettings>(policyKey(flow.id), update);
+  };
+
   const save = useMutation({
     mutationFn: (sent: number | null) =>
       unwrap(
@@ -151,24 +158,23 @@ function RetentionForm({
           body: { policy: sent === null ? null : { days: sent } }
         })
       ),
-    onSuccess: (saved) => {
-      queryClient.setQueryData(policyKey(flow.id), saved);
+    onSuccess: async (saved) => {
+      await writePolicy(() => saved);
       queryClient.setQueryData<FlowPublic>(flowKeys.flow(flow.id), (current) =>
         current ? { ...current, run_history_retention: saved.effective } : current
       );
       toast.success(t("flows_retention_saved"));
       onClose();
     },
-    onError: (error) => {
+    onError: async (error) => {
       const refusedAt = refusedCap(error);
       if (refusedAt === null) {
         toastApiError(error, t);
         return;
       }
       // The refusal names a newer space time than the one read; an empty field inherits it.
-      queryClient.setQueryData<Schema<"FlowRunRetentionPolicySettings">>(
-        policyKey(flow.id),
-        (current) => (current ? { ...current, inherited_policy: { days: refusedAt } } : current)
+      await writePolicy((current) =>
+        current ? { ...current, inherited_policy: { days: refusedAt } } : current
       );
       setOverCap(true);
       field.current?.focus();

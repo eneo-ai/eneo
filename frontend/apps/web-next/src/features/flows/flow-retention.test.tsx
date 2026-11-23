@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { EneoApiError } from "@/lib/api/errors";
 import type { Permission } from "@/lib/auth/permissions";
@@ -28,6 +28,29 @@ const settings = (local: unknown, inherited: unknown) =>
     effective: configured
   });
 const resources = { models: [], services: [] };
+const policyKey = ["flows", "retention", "flow-1"];
+const capRefusal = () =>
+  new EneoApiError("The retention period is longer than the limit that applies here.", {
+    status: 400,
+    code: 9086,
+    reason: "retention_exceeds_space",
+    context: { cap_days: 7, cap_origin: "space" }
+  });
+const capText = "Ytan tillåter högst 7 dagar.";
+
+/** A GET that answers only when released, as a slow read in flight. */
+function heldRead() {
+  let release: (value: unknown) => void = () => {};
+  backend.GET.mockReturnValueOnce(
+    new Promise((resolve) => {
+      release = resolve;
+    })
+  );
+  return (value: unknown) => release(value);
+}
+
+/** Lets a released response, and the renders it causes, land. */
+const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 20)));
 
 afterEach(() => {
   cleanup();
@@ -161,6 +184,50 @@ describe("flow retention", () => {
     fireEvent.change(days, { target: { value: "" } });
     fireEvent.blur(days);
     expect(screen.getByText(/Från ytan: 7 dagar/)).toBeTruthy();
+  });
+
+  it("keeps the space's time a refusal named when an older read lands after it", async () => {
+    backend.GET.mockResolvedValue(settings(null, { days: 60 }));
+    backend.PUT.mockRejectedValue(capRefusal());
+    const { queryClient } = renderSettings(["retention_manage"]);
+    fireEvent.click(screen.getByRole("button", { name: "Ändra gallring" }));
+    const days = (await screen.findByRole("spinbutton", {
+      name: /Egen tid för det här flödet/
+    })) as HTMLInputElement;
+    const release = heldRead();
+    void queryClient.refetchQueries({ queryKey: policyKey, exact: true });
+    await waitFor(() => expect(backend.GET).toHaveBeenCalledTimes(2));
+    fireEvent.change(days, { target: { value: "10" } });
+    fireEvent.blur(days);
+    fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
+    expect(await screen.findByText(capText)).toBeTruthy();
+    release(settings(null, { days: 60 }));
+    await settle();
+    fireEvent.change(days, { target: { value: "" } });
+    fireEvent.blur(days);
+    expect(screen.getByText(/Från ytan: 7 dagar/)).toBeTruthy();
+  });
+
+  it("keeps a saved time when an older read lands after the save", async () => {
+    backend.GET.mockResolvedValue(settings(null, { days: 60 }));
+    backend.PUT.mockResolvedValue(settings({ days: 30 }, { days: 60 }));
+    const { queryClient } = renderSettings(["retention_manage"]);
+    fireEvent.click(screen.getByRole("button", { name: "Ändra gallring" }));
+    const days = await screen.findByRole("spinbutton", { name: /Egen tid för det här flödet/ });
+    const release = heldRead();
+    void queryClient.refetchQueries({ queryKey: policyKey, exact: true });
+    await waitFor(() => expect(backend.GET).toHaveBeenCalledTimes(2));
+    fireEvent.change(days, { target: { value: "30" } });
+    fireEvent.blur(days);
+    fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
+    await waitFor(() => expect(screen.queryByRole("spinbutton")).toBeNull());
+    release(settings(null, { days: 60 }));
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Ändra gallring" }));
+    const reopened = (await screen.findByRole("spinbutton", {
+      name: /Egen tid för det här flödet/
+    })) as HTMLInputElement;
+    expect(reopened.value).toBe("30");
   });
 
   it("empties the flow's own time to use the space's again", async () => {
