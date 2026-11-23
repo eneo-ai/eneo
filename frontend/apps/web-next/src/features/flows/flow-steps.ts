@@ -374,14 +374,11 @@ export function stepReaders(
 /**
  * The later steps that read a step, by name or by place (the previous step,
  * all earlier ones), in run order: where its result goes next in the flow.
- * The step that sends the run's result counts only where its headers name
- * the step (`senderReads`): the result it sends is not a read.
+ * Only the steps' saved fields count, not their prompts, which are read apart
+ * from the flow. The step that sends the run's result counts only where its
+ * headers name the step (`senderReads`): the result it sends is not a read.
  */
-export function stepReadersByNameOrPlace(
-  step: FlowStep,
-  steps: readonly FlowStep[],
-  prompts: StepPrompts = new Map()
-): FlowStep[] {
+export function stepReadersByNameOrPlace(step: FlowStep, steps: readonly FlowStep[]): FlowStep[] {
   return steps
     .filter((later) => later.step_order > step.step_order)
     .filter((later) => {
@@ -390,23 +387,10 @@ export function stepReadersByNameOrPlace(
           (read) => read.kind === "step" && read.step !== null && read.order === step.step_order
         );
       }
-      const facts = readFacts(later, steps, prompts.get(later.assistant_id));
+      const facts = readFacts(later, steps);
       return facts.named.has(step.step_order) || facts.implicit.has(step.step_order);
     })
     .sort((a, b) => a.step_order - b.step_order);
-}
-
-/**
- * Whether two step lists resolve a read alike: the same steps, with the same
- * assistants (whose prompts they read), at the same places under the same
- * names. A read by alias, by place or by name is resolved against nothing
- * else, and a change to any of them is one the core may rewrite prompts for.
- */
-export function sameReadPlaces(before: readonly FlowStep[], after: readonly FlowStep[]): boolean {
-  const place = (step: FlowStep) =>
-    JSON.stringify([step.id, step.assistant_id, step.step_order, stepName(step)]);
-  const places = new Set(before.map(place));
-  return before.length === after.length && after.every((step) => places.has(place(step)));
 }
 
 const slotOf = (step: FlowStep): FlowStepSlot => ({ step_id: step.id ?? null });

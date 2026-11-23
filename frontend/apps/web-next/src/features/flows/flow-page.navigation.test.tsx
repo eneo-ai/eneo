@@ -870,7 +870,7 @@ it("keeps an unsaved upload on Stay and releases it only when leaving the editor
   ]);
 });
 
-describe("the Leverans section's reader from a later prompt, while the prompts are read again", () => {
+describe("the open step while the flow changes", () => {
   const ASSISTANT = "/api/v1/flows/{id}/assistants/{assistant_id}/";
   const first = makeStep(1, { user_description: "Sammanfatta" });
   const second = makeStep(2, { user_description: "Granska", input_source: "flow_input" });
@@ -881,9 +881,8 @@ describe("the Leverans section's reader from a later prompt, while the prompts a
       user_description: "Skriv svar",
       input_source: "flow_input"
     });
-  const reader = "Läses av Steg 3: Skriv svar.";
 
-  /** The later step's prompt is `text()` when read; the others name no step. */
+  /** Step 3's prompt is `text()` when read; the others are plain. */
   function laterPrompt(text: () => string) {
     api.routes[`GET ${ASSISTANT}`] = (init: { params: { path: { assistant_id: string } } }) => {
       const id = init.params.path.assistant_id;
@@ -898,7 +897,6 @@ describe("the Leverans section's reader from a later prompt, while the prompts a
   }
   beforeEach(() => {
     flow = makeFlow({ steps: [first, second, third(3)] });
-    laterPrompt(() => "Jämför med {{Sammanfatta}}.");
   });
   /** The chat panel, whose tools finishing make the page read the flow again. */
   function withChat() {
@@ -918,26 +916,9 @@ describe("the Leverans section's reader from a later prompt, while the prompts a
     });
   }
 
-  /** Holds the later step's prompt read until released; the other reads answer at once. */
-  function holdLaterPrompt() {
-    const get = api.stub.client.GET;
-    let release = () => {};
-    const held = new Promise<void>((resolve) => (release = resolve));
-    api.stub.client.GET = ((
-      path: string,
-      init?: { params?: { path?: { assistant_id?: string } } }
-    ) =>
-      path === ASSISTANT && init?.params?.path?.assistant_id === "assistant-3"
-        ? held.then(() => get(path, init))
-        : get(path, init)) as typeof get;
-    return () => {
-      api.stub.client.GET = get;
-      release();
-    };
-  }
   /**
-   * Holds each read of the later step's prompt until it is let go, answered
-   * with the prompt as it was when the read was made.
+   * Holds each read of step 3's prompt until it is let go, answered with the
+   * prompt as it was when the read was made.
    */
   function holdLaterReads() {
     const get = api.stub.client.GET;
@@ -960,173 +941,19 @@ describe("the Leverans section's reader from a later prompt, while the prompts a
       }
     };
   }
-  const delivery = () =>
-    screen.findByRole("region", { name: messages.flow_step_editor_delivery_title });
-  /** The later prompt's first read has landed, so what is held next is a read again. */
-  const read = (queryClient: QueryClient) =>
-    waitFor(() =>
-      expect(
-        queryClient.getQueryState(flowEditorKeys.assistant("flow-1", "assistant-3"))?.status
-      ).toBe("success")
-    );
-  const rereading = (queryClient: QueryClient) =>
-    waitFor(() =>
-      expect(
-        queryClient.getQueryState(flowEditorKeys.assistant("flow-1", "assistant-3"))?.fetchStatus
-      ).toBe("fetching")
-    );
-  /** Neither a reader nor "no step reads it": the line waits for the read. */
-  async function waits(section: HTMLElement, line: string) {
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(within(section).queryByText(line)).toBeNull();
-    expect(within(section).queryByText(messages.flow_step_editor_delivery_unread_off)).toBeNull();
-  }
-  /** The editor's own save of a setting: the step list stays as it was. */
-  async function saveSetting(revision: number) {
+
+  it("hands the version a reload reads to the page", async () => {
+    const { queryClient } = await renderPage("?step=step-1");
+    await changeName();
     api.routes["PATCH /api/v1/flows/{id}/editor/"] = () => ({
-      body: makeFlow({ draft_revision: revision, steps: [first, second, third(3)] })
+      status: 400,
+      body: { message: "Stale.", code: "stale_revision", eneo_error_code: 9000 }
     });
-    fireEvent.click(
-      within(await delivery()).getByRole("switch", {
-        name: new RegExp(`^${messages.flow_step_editor_deliverable_switch}`)
-      })
-    );
     fireEvent.click(screen.getByRole("button", { name: messages.flow_step_editor_save }));
-    await screen.findByText(messages.flow_step_editor_saved);
-  }
-
-  it("waits after a move, and names no step until the prompt is read again", async () => {
-    const { queryClient } = await renderPage();
-    await screen.findByRole("button", { name: "Redigera Steg 1: Sammanfatta" });
-    await read(queryClient);
-    const release = holdLaterPrompt();
-    try {
-      api.routes["PATCH /api/v1/flows/{id}/editor/"] = () => ({
-        body: makeFlow({
-          draft_revision: 5,
-          steps: [first, third(2), { ...second, step_order: 3 }]
-        })
-      });
-      await click("Flytta upp Steg 3: Skriv svar");
-      await screen.findByRole("button", { name: "Redigera Steg 2: Skriv svar" });
-      await openFirst();
-      const section = await delivery();
-      await rereading(queryClient);
-      await waits(section, "Går vidare till nästa steg: Steg 2: Skriv svar.");
-    } finally {
-      release();
-    }
-    expect(
-      await within(await delivery()).findByText("Går vidare till nästa steg: Steg 2: Skriv svar.")
-    ).toBeTruthy();
-  });
-
-  it("waits after a change from the chat with the same steps, also through an own save meanwhile", async () => {
-    withChat();
-    const { queryClient } = await renderPage("?step=step-1");
-    expect(await within(await delivery()).findByText(reader)).toBeTruthy();
-    // An own save first, settled: what it allowed does not outlast it.
-    await saveSetting(5);
-    expect(within(await delivery()).getByText(reader)).toBeTruthy();
-    const release = holdLaterPrompt();
-    try {
-      // The chat rewrote a prompt: a new revision, the same steps.
-      flow = makeFlow({ draft_revision: 6, steps: [first, second, third(3)] });
-      fireEvent.click(await screen.findByRole("button", { name: "Verktyg klart" }));
-      await rereading(queryClient);
-      await waits(await delivery(), reader);
-      // An own save while that read is under way does not bring the old prompt back.
-      await saveSetting(7);
-      await waits(await delivery(), reader);
-    } finally {
-      release();
-    }
-    expect(await within(await delivery()).findByText(reader)).toBeTruthy();
-  });
-
-  it("waits after a stale draft is read again", async () => {
-    const { queryClient } = await renderPage();
-    await screen.findByRole("button", { name: "Redigera Steg 1: Sammanfatta" });
-    await read(queryClient);
-    const release = holdLaterPrompt();
-    try {
-      api.routes["PATCH /api/v1/flows/{id}/editor/"] = () => ({
-        status: 400,
-        body: { message: "Stale.", code: "stale_revision", eneo_error_code: 9000 }
-      });
-      flow = makeFlow({ draft_revision: 5, steps: [first, second, third(3)] });
-      await click("Flytta upp Steg 2: Granska");
-      await screen.findByText(messages.flows_notice_stale_title);
-      await waitFor(() =>
-        expect(queryClient.getQueryData<FlowPublic>(flowKeys.flow("flow-1"))?.draft_revision).toBe(
-          5
-        )
-      );
-      await openFirst();
-      const section = await delivery();
-      await rereading(queryClient);
-      await waits(section, reader);
-    } finally {
-      release();
-    }
-    expect(await within(await delivery()).findByText(reader)).toBeTruthy();
-  });
-
-  it("keeps the reader through the read that follows the editor's own save of a setting", async () => {
-    const { queryClient } = await renderPage("?step=step-1");
-    expect(await within(await delivery()).findByText(reader)).toBeTruthy();
-    const release = holdLaterPrompt();
-    try {
-      await saveSetting(5);
-      await rereading(queryClient);
-      await new Promise((resolve) => setTimeout(resolve, 50));
-      expect(within(await delivery()).getByText(reader)).toBeTruthy();
-    } finally {
-      release();
-    }
-    expect(within(await delivery()).getByText(reader)).toBeTruthy();
-  });
-  it("waits after a save that answers more than one revision past the one on screen", async () => {
-    const { queryClient } = await renderPage("?step=step-1");
-    expect(await within(await delivery()).findByText(reader)).toBeTruthy();
-    const release = holdLaterPrompt();
-    try {
-      // From 4 to 6: a change made elsewhere came in between, which may have rewritten a prompt.
-      await saveSetting(6);
-      await rereading(queryClient);
-      await waits(await delivery(), reader);
-    } finally {
-      release();
-    }
-    expect(await within(await delivery()).findByText(reader)).toBeTruthy();
-  });
-
-  it("waits after a rename from the step editor, also for a prompt that reads the step by place", async () => {
-    laterPrompt(() => "Jämför med {{step_1}}.");
-    const { queryClient } = await renderPage("?step=step-1");
-    expect(await within(await delivery()).findByText(reader)).toBeTruthy();
-    const release = holdLaterPrompt();
-    try {
-      api.routes["PATCH /api/v1/flows/{id}/editor/"] = () => ({
-        body: makeFlow({
-          draft_revision: 5,
-          steps: [{ ...first, user_description: "Eget utkast" }, second, third(3)]
-        })
-      });
-      await changeName();
-      fireEvent.click(screen.getByRole("button", { name: messages.flow_step_editor_save }));
-      await screen.findByText(messages.flow_step_editor_saved);
-      await rereading(queryClient);
-      await waits(await delivery(), reader);
-    } finally {
-      release();
-    }
-    expect(await within(await delivery()).findByText(reader)).toBeTruthy();
-  });
-
-  /** The flow with a step put first, the later prompt rewritten to name this step at its new place. */
-  const inserted = () =>
-    makeFlow({
+    await screen.findByText(messages.flow_step_editor_stale_title);
+    // Changed elsewhere: a step put first. With no chat event and no focus, the
+    // page holds the version the reload read, as it does after a save.
+    flow = makeFlow({
       draft_revision: 5,
       steps: [
         makeStep(1, { id: "step-0", assistant_id: "assistant-0", user_description: "Hämta" }),
@@ -1135,116 +962,20 @@ describe("the Leverans section's reader from a later prompt, while the prompts a
         third(4)
       ]
     });
-  /** The later prompt has been read again as `text`, and no read is under way. */
-  const readAs = (queryClient: QueryClient, text: string) =>
-    waitFor(() => {
-      const state = queryClient.getQueryState<ReturnType<typeof makeAssistant>>(
-        flowEditorKeys.assistant("flow-1", "assistant-3")
-      );
-      expect(state?.data?.prompt?.text).toBe(text);
-      expect(state?.fetchStatus).toBe("idle");
-    });
-  /** No reader line: neither a reader nor "no later step reads it". */
-  async function noReaderLine() {
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    const section = await delivery();
-    expect(within(section).queryByText(/^Läses av /)).toBeNull();
-    expect(within(section).queryByText(/^Går vidare till nästa steg/)).toBeNull();
-    expect(within(section).queryByText(messages.flow_step_editor_delivery_unread_off)).toBeNull();
-    expect(
-      within(section).queryByText(messages.flow_step_editor_delivery_unread_included)
-    ).toBeNull();
-  }
-
-  it("names no reader while the form holds edits on an older version, and the right one on the newer", async () => {
-    withChat();
-    let prompt = "Jämför med {{step_1}}.";
-    laterPrompt(() => prompt);
-    const { queryClient } = await renderPage("?step=step-1");
-    expect(await within(await delivery()).findByText(reader)).toBeTruthy();
-    await changeName();
-    prompt = "Jämför med {{step_2}}.";
-    flow = inserted();
-    fireEvent.click(await screen.findByRole("button", { name: "Verktyg klart" }));
-    await screen.findByText(messages.flow_step_editor_newer_title);
-    // The prompts are read for the page's version; the form's steps are the older ones.
-    await readAs(queryClient, prompt);
-    await noReaderLine();
     await click(messages.flow_step_editor_reload);
-    expect(await within(await delivery()).findByText("Läses av Steg 4: Skriv svar.")).toBeTruthy();
-  });
-
-  it("names the reader right after a reload, which hands the version it read to the page", async () => {
-    let prompt = "Jämför med {{step_1}}.";
-    laterPrompt(() => prompt);
-    const { queryClient } = await renderPage("?step=step-1");
-    expect(await within(await delivery()).findByText(reader)).toBeTruthy();
-    await changeName();
-    api.routes["PATCH /api/v1/flows/{id}/editor/"] = () => ({
-      status: 400,
-      body: { message: "Stale.", code: "stale_revision", eneo_error_code: 9000 }
-    });
-    fireEvent.click(screen.getByRole("button", { name: messages.flow_step_editor_save }));
-    await screen.findByText(messages.flow_step_editor_stale_title);
-    // Changed elsewhere: the reload reads it, and the page takes it from there.
-    prompt = "Jämför med {{step_2}}.";
-    flow = inserted();
-    await click(messages.flow_step_editor_reload);
-    expect(await within(await delivery()).findByText("Läses av Steg 4: Skriv svar.")).toBeTruthy();
+    await waitFor(() =>
+      expect(screen.queryByText(messages.flow_step_editor_stale_title)).toBeNull()
+    );
     expect(queryClient.getQueryData<FlowPublic>(flowKeys.flow("flow-1"))?.draft_revision).toBe(5);
-    await readAs(queryClient, prompt);
   });
 
-  it("keeps the reader on screen through the editor's own save", async () => {
-    await renderPage("?step=step-1");
-    expect(await within(await delivery()).findByText(reader)).toBeTruthy();
-    // The save's answer reaches the form a moment before the page: the line is
-    // there each time the page has changed, from the save to its settling.
-    let gone = false;
-    const observer = new MutationObserver(() => {
-      if (!document.body.textContent?.includes(reader)) gone = true;
-    });
-    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
-    try {
-      await saveSetting(5);
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    } finally {
-      observer.disconnect();
-    }
-    expect(gone).toBe(false);
-    expect(within(await delivery()).getByText(reader)).toBeTruthy();
-  });
-
-  /** The page has taken a new revision and marked the later prompt to be read again. */
+  /** The page has taken a new revision and marked step 3's prompt to be read again. */
   const laterInvalidated = (queryClient: QueryClient) =>
     waitFor(() =>
       expect(
         queryClient.getQueryState(flowEditorKeys.assistant("flow-1", "assistant-3"))?.isInvalidated
       ).toBe(true)
     );
-
-  it("reads a later prompt again when the flow changes during its first read, and takes no answer from before the change", async () => {
-    withChat();
-    let prompt = "Jämför med {{step_1}}.";
-    laterPrompt(() => prompt);
-    const reads = holdLaterReads();
-    try {
-      const { queryClient } = await renderPage("?step=step-1");
-      await waitFor(() => expect(reads.held).toHaveLength(1));
-      // The chat put a step first: this one is at place 2 now, and the prompt names it there.
-      prompt = "Jämför med {{step_2}}.";
-      flow = inserted();
-      fireEvent.click(await screen.findByRole("button", { name: "Verktyg klart" }));
-      await laterInvalidated(queryClient);
-      // The read from before the change answers, with the prompt from before it.
-      reads.held[0]!();
-      await waits(await delivery(), "Läses av Steg 4: Skriv svar.");
-      expect(reads.held).toHaveLength(2);
-    } finally {
-      reads.restore();
-    }
-    expect(await within(await delivery()).findByText("Läses av Steg 4: Skriv svar.")).toBeTruthy();
-  });
 
   it("shows the open step's own prompt as saved when the flow changes during its first read", async () => {
     withChat();

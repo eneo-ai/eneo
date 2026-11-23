@@ -593,8 +593,7 @@ function StepEditorSession({
       return fresh;
     },
     onSuccess: (fresh) => {
-      // The page takes it as it takes a save, so the form and the page are on
-      // one version again and read the later prompts for it.
+      // The page takes it as it takes a save, so the form and the page are on one version again.
       storeFlow(queryClient, fresh);
       setReceived(fresh);
       setPinned(fresh);
@@ -1171,7 +1170,6 @@ function StepEditorSession({
                       onChange={changeStep}
                       problems={shownProblems}
                       dirty={dirty}
-                      readersHeld={flow.draft_revision !== propFlow.draft_revision}
                       onGoStep={onGoStep}
                     />
                   )}

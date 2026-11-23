@@ -12,14 +12,12 @@ import { StatusLabel } from "@/components/composites/status-label";
 import { flowDeliverables, type RunDeliverables } from "../flow-deliverables";
 import { formFieldsOf as formFieldDrafts } from "../flow-form-fields";
 import { senderReads, stepReadersByNameOrPlace } from "../flow-steps";
-import { useStepPromptsState } from "./editor-api";
 import { Anchor, EditorSection, focusAnchor, problemStatus, VariablePicker } from "./editor-fields";
 import type { FieldProblems } from "./field-problems";
 import {
   oneLineStart,
   readDeliverable,
   runResultHost,
-  sendsRunResult,
   stepDeliversArtifact,
   withDeliverable,
   withTidyDeliverable
@@ -237,9 +235,8 @@ const ICON = "text-ax-text-secondary mt-0.5 size-4 shrink-0";
  * Where a text or document step's result goes: which later steps read it,
  * whether it is one of the run's results (and under which names), and
  * whether the step that sends the run's result sends it. Readers come from
- * the saved flow; whether it is included is read with the step's draft in
- * place. While the form shows another version than the one the later prompts
- * are read for (`readersHeld`), no reader line is shown.
+ * the saved flow the form shows; whether it is included is read with the
+ * step's draft in place.
  */
 export function StepDeliverySection({
   formId,
@@ -251,7 +248,6 @@ export function StepDeliverySection({
   onChange,
   problems,
   dirty,
-  readersHeld,
   onGoStep
 }: {
   formId: string;
@@ -264,11 +260,6 @@ export function StepDeliverySection({
   problems: FieldProblems;
   /** The step has unsaved changes, which the step that sends does not show yet. */
   dirty: boolean;
-  /**
-   * The form shows another version of the flow than the page, for which the
-   * later prompts are read: they may name steps that stand elsewhere in it.
-   */
-  readersHeld: boolean;
   /** Opens another step of the flow; absent, the step that sends is not offered. */
   onGoStep?: (stepId: string) => void;
 }) {
@@ -278,35 +269,22 @@ export function StepDeliverySection({
     flow.steps.map((step) => (step.id === stepId ? { ...step, ...draft } : step))
   );
   const included = run.deliverables.some((step) => step.id === stepId);
-  // Readers come from the saved flow: a later prompt names this step as saved,
-  // and the core rewrites it when a new name is saved.
+  // Readers come from the flow's saved fields, as the form shows it: a later
+  // step names this step as saved, and the core rewrites it when a new name is
+  // saved. A later prompt is not read here: it lives on the step's assistant,
+  // read apart from the flow, and can be from another version of it. With no
+  // reader in a saved field, no reader line is shown, so none can be wrong.
   const self = flow.steps.find((step) => step.id === stepId);
   const order = self?.step_order ?? 0;
-  // A later AI step can read this one through its prompt, which lives on its
-  // assistant. Only a current prompt counts: one read before a change may name
-  // this step when the saved one no longer does.
-  const later = flow.steps.filter((step) => step.step_order > order && !sendsRunResult(step));
-  const { prompts, current } = useStepPromptsState(flow.id, later, true);
-  const readers = self ? stepReadersByNameOrPlace(self, flow.steps, prompts) : [];
+  const readers = self ? stepReadersByNameOrPlace(self, flow.steps) : [];
   const name = (step: FlowStep) => stepLabel(step.step_order, step.user_description, t);
-  // The step that sends reads it only where its headers name it. The last
-  // working step has no other later step to name. "Read by no step" waits for
-  // every prompt to be current: one not read, or read before a change, may name this step.
-  const readLine = readersHeld
-    ? null
-    : readers.length === 1 && readers[0]!.step_order === order + 1
+  // The step that sends reads it only where its headers name it.
+  const readLine =
+    readers.length === 1 && readers[0]!.step_order === order + 1
       ? t("flow_step_editor_delivery_read_next", { step: name(readers[0]!) })
       : readers.length > 0
         ? t("flow_step_editor_delivery_read_by", { steps: format.list(readers.map(name)) })
-        : later.length === 0
-          ? null
-          : current
-            ? t(
-                included
-                  ? "flow_step_editor_delivery_unread_included"
-                  : "flow_step_editor_delivery_unread_off"
-              )
-            : null;
+        : null;
 
   const sender = run.sender;
   const host = sender ? runResultHost(sender) : null;

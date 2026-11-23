@@ -88,7 +88,7 @@ import { FlowSettings } from "./flow-settings";
 import { FlowStatusBadge } from "./flow-status";
 import type { FieldAnchor } from "./editor/field-problems";
 import { FlowStepList, showStepCard, stepControlId } from "./flow-step-list";
-import { orderWithMove, orderWithout, sameReadPlaces, stepName, stepsInOrder } from "./flow-steps";
+import { orderWithMove, orderWithout, stepName, stepsInOrder } from "./flow-steps";
 import { speakerStepCandidate, speakerStepOption, speakerStepUpdate } from "./speaker-step-offer";
 import { FlowPhonePage } from "./flow-phone-page";
 import { FlowRunStarter } from "./flow-run-starter";
@@ -550,27 +550,11 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
 
   // A new draft revision can carry rewritten prompts (a chat tool's edit, a
   // move whose reads the core followed, a reload of a stale draft): the step
-  // assistants are read again then, and only then. The prompts held meanwhile
-  // still name what is saved only after the step editor's own save, fenced on
-  // the revision on screen and leaving the steps as they were (`ownSave`, its
-  // revision), and only if they were current or held before it: a read still
-  // waiting from an earlier change keeps waiting.
+  // assistants are read again then, and only then.
   const assistantsRevision = useRef(flow.draft_revision);
-  const ownSave = useRef<number | null>(null);
   useEffect(() => {
     if (assistantsRevision.current === flow.draft_revision) return;
     assistantsRevision.current = flow.draft_revision;
-    const heldKey = flowEditorKeys.promptsHeld(flowId);
-    const current = queryClient
-      .getQueryCache()
-      .findAll({ queryKey: flowEditorKeys.assistants(flowId) })
-      .every((query) => !query.state.isInvalidated);
-    queryClient.setQueryData(
-      heldKey,
-      ownSave.current === flow.draft_revision &&
-        (current || queryClient.getQueryData<boolean>(heldKey) === true)
-    );
-    ownSave.current = null;
     // Invalidation would otherwise reuse a first read under way, and its answer land as current.
     void queryClient.cancelQueries({
       queryKey: flowEditorKeys.assistants(flowId),
@@ -1124,13 +1108,6 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
                     suggestionDismissal={suggestionDismissal}
                     suggestionRuns={suggestionRuns}
                     onSaved={(updated) => {
-                      // The core advances the draft by one per save: one past the revision on
-                      // screen is a save on it, with nothing else in between.
-                      ownSave.current =
-                        updated.draft_revision === flow.draft_revision + 1 &&
-                        sameReadPlaces(flow.steps, updated.steps)
-                          ? updated.draft_revision
-                          : null;
                       saved(updated);
                       announce(t("flows_step_saved", { step: stepLabel(openedStep, t) }));
                     }}

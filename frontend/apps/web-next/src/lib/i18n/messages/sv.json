@@ -8294,8 +8294,6 @@
   "flow_step_editor_delivery_description": "Visar om steget ingår i körningens resultat, som syns på körningssidan och följer med vid utskick.",
   "flow_step_editor_delivery_read_next": "Går vidare till nästa steg: {step}.",
   "flow_step_editor_delivery_read_by": "Läses av {steps}.",
-  "flow_step_editor_delivery_unread_off": "Läses inte av senare steg och ingår inte i körningens resultat.",
-  "flow_step_editor_delivery_unread_included": "Läses inte av senare steg, men ingår i körningens resultat.",
   "flow_step_editor_delivery_sent_to": "Skickas till {host} när körningen är klar.",
   "flow_step_editor_delivery_not_sent_to": "Ingår inte i körningens resultat som skickas till {host}. Slå på Ta med i körningens resultat ovan om det ska följa med.",
   "flow_step_editor_delivery_sent_in_header": "Skickas till {host} i en header i steget som skickar körningens resultat.",
