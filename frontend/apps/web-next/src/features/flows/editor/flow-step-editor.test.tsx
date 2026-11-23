@@ -3439,14 +3439,16 @@ describe("FlowStepEditor Leverans", () => {
 
   it("names the step that sends the run's result as a reader when one of its headers names the step", async () => {
     routeAssistants();
-    const reading = (order: number) =>
+    const inHeader =
+      "Skickas till startsidan.example.org i en rubrik i steget som skickar körningens resultat.";
+    const reading = (order: number, value = "{{Sammanfatta}}") =>
       makeStep({
         ...sender(order),
         output_config: {
           url: RECEIVER,
           auth: { mode: "none" },
           body: { mode: "run_result" },
-          custom_headers: [{ name: "X-Fall", value: "{{Sammanfatta}}", secret: false }]
+          custom_headers: [{ name: "X-Fall", value, secret: false }]
         }
       });
     const view = renderEditor(
@@ -3463,10 +3465,31 @@ describe("FlowStepEditor Leverans", () => {
     // What it sends is said apart from what it reads.
     expect(
       within(delivery).getByText(
-        "Skickas inte till startsidan.example.org. Slå på Ta med i körningens resultat ovan om det ska följa med."
+        "Ingår inte i körningens resultat som skickas till startsidan.example.org. Slå på Ta med i körningens resultat ovan om det ska följa med."
       )
     ).toBeTruthy();
+    // Its text still goes to the receiver, in the header.
+    expect(within(delivery).getByText(inHeader)).toBeTruthy();
     view.unmount();
+
+    // A header that names another step sends nothing of this one.
+    const other = renderEditor(
+      makeFlow({
+        steps: [
+          text(1, "Sammanfatta"),
+          text(2, "Granska", { input_source: "flow_input" }),
+          reading(3, "{{Granska}}")
+        ]
+      })
+    );
+    delivery = await section();
+    expect(
+      await within(delivery).findByText(
+        "Ingår inte i körningens resultat som skickas till startsidan.example.org. Slå på Ta med i körningens resultat ovan om det ska följa med."
+      )
+    ).toBeTruthy();
+    expect(within(delivery).queryByText(inHeader)).toBeNull();
+    other.unmount();
 
     // The last working step: the step that sends is its only later step, and reads it.
     renderEditor(makeFlow({ steps: [text(1, "Sammanfatta"), reading(2)] }));
@@ -3557,7 +3580,7 @@ describe("FlowStepEditor Leverans", () => {
     const delivery = await section();
     expect(
       await within(delivery).findByText(
-        "Skickas inte till startsidan.example.org. Slå på Ta med i körningens resultat ovan om det ska följa med."
+        "Ingår inte i körningens resultat som skickas till startsidan.example.org. Slå på Ta med i körningens resultat ovan om det ska följa med."
       )
     ).toBeTruthy();
     const saveFirst = "Spara först för att se ändringen i utskicket.";

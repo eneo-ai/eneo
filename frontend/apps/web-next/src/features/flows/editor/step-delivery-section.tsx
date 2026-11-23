@@ -11,7 +11,7 @@ import { TextInput } from "@/components/astryx/text-input";
 import { StatusLabel } from "@/components/composites/status-label";
 import { flowDeliverables, type RunDeliverables } from "../flow-deliverables";
 import { formFieldsOf as formFieldDrafts } from "../flow-form-fields";
-import { stepReadersByNameOrPlace } from "../flow-steps";
+import { senderReads, stepReadersByNameOrPlace } from "../flow-steps";
 import { useStepPromptsState } from "./editor-api";
 import { Anchor, EditorSection, focusAnchor, problemStatus, VariablePicker } from "./editor-fields";
 import type { FieldProblems } from "./field-problems";
@@ -306,6 +306,15 @@ export function StepDeliverySection({
       : included
         ? t("flow_step_editor_delivery_sent_to", { host })
         : t("flow_step_editor_delivery_not_sent_to", { host });
+  // Left out of the result, the step's text still goes to the receiver where a
+  // header of the step that sends names it: the core fills headers in as it sends.
+  const headerLine =
+    sender &&
+    host &&
+    !included &&
+    senderReads(sender, flow.steps).some((read) => read.kind === "step" && read.step?.id === stepId)
+      ? t("flow_step_editor_delivery_sent_in_header", { host })
+      : null;
   const senderId = sender?.id;
 
   return (
@@ -348,6 +357,11 @@ export function StepDeliverySection({
           />
         )}
       </HStack>
+      {headerLine && (
+        <Text type="supporting" size="sm" as="p" display="block" className="m-0 max-w-prose">
+          {headerLine}
+        </Text>
+      )}
       {senderId && onGoStep && dirty && (
         // It opens the saved flow; leaving asks first, as every other way out does.
         <Text type="supporting" size="sm" as="p" display="block" className="m-0 max-w-prose">
