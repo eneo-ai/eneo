@@ -1,6 +1,5 @@
 <script lang="ts">
   import { formatDateTime } from "$lib/core/formatting/dateTime";
-  import { IconDownload } from "@eneo/icons/download";
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
   import { Markdown } from "$lib/components/markdown/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -9,8 +8,7 @@
   import { createAppRunResult } from "$lib/features/apps/createAppRunResult.svelte";
   import UploadedFileIcon from "$lib/features/attachments/components/UploadedFileIcon.svelte";
   import { getAttachmentUrlService } from "$lib/features/attachments/AttachmentUrlService.svelte.js";
-  import { getEneo } from "$lib/core/Eneo.js";
-  import { browser } from "$app/environment";
+  import AppRunFileDownload from "$lib/features/apps/components/AppRunFileDownload.svelte";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
   import { fade, fly } from "svelte/transition";
@@ -18,7 +16,6 @@
 
   const { data } = $props();
 
-  const eneo = getEneo();
   const attachmentUrlService = getAttachmentUrlService();
 
   const run = createAppRunResult(() => data);
@@ -110,29 +107,22 @@
             />
 
             <div class="border-stronger bg-secondary rounded-xl border">
-              {#if url}
-                <div class="border-stronger bg-primary rounded-t-xl border-b p-2">
-                  <div class="flex items-center justify-between gap-4 px-1 pb-2">
-                    <div class="flex gap-2">
-                      <UploadedFileIcon {file} />
-                      <span class="truncate">{file.name}</span>
-                    </div>
-                    <Button
-                      href={url}
-                      variant="ghost"
-                      size="icon"
-                      aria-label={`${m.download()} ${file.name}`}
-                    >
-                      <IconDownload />
-                    </Button>
+              <div class="border-stronger bg-primary rounded-t-xl border-b p-2">
+                <div class="flex items-center justify-between gap-4 px-1 pb-2">
+                  <div class="flex gap-2">
+                    <UploadedFileIcon {file} />
+                    <span class="truncate">{file.name}</span>
                   </div>
+                  <AppRunFileDownload {file} compact />
+                </div>
+                {#if url}
                   <audio
                     controls
                     src={url}
                     class="border-stronger h-8 w-full rounded-full border shadow-sm"
                   ></audio>
-                </div>
-              {/if}
+                {/if}
+              </div>
               <div class="prose p-4">
                 <Markdown source={file.transcription} />
               </div>
@@ -153,16 +143,11 @@
         >
           <Markdown source={run.result.output} />
         </div>
-      {:else if browser && run.result.status === "failed" && run.result.input.files.length > 0}
+      {:else if run.result.status === "failed" && run.result.input.files.length > 0}
         <div class="flex flex-col items-center justify-center gap-4 py-8">
           <span class="text-secondary">{m.app_run_failed_files_list()}</span>
           {#each run.result.input.files as file (file.id)}
-            {#await eneo.files.generateSignedUrl( { fileId: file.id, expiresIn: 3600, contentDisposition: "attachment" } ) then signedFile}
-              <Button href={signedFile.url} variant="outline">
-                <IconDownload />
-                {m.download()} "{file.name}"
-              </Button>
-            {/await}
+            <AppRunFileDownload {file} />
           {/each}
         </div>
       {:else}
@@ -174,6 +159,9 @@
       <div class="flex h-[50vh] flex-col items-center justify-center gap-2">
         <IconLoadingSpinner class="animate-spin" />
         <span class="text-secondary">{m.result_being_generated()}</span>
+        {#each run.recordings as file (file.id)}
+          <AppRunFileDownload {file} />
+        {/each}
       </div>
     {/if}
 

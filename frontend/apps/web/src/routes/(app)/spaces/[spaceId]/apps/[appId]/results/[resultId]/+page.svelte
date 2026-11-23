@@ -1,7 +1,6 @@
 <script lang="ts">
   import { formatDateTime } from "$lib/core/formatting/dateTime";
   import { Page } from "$lib/components/layout";
-  import { IconDownload } from "@eneo/icons/download";
   import { Markdown } from "$lib/components/markdown/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
@@ -13,8 +12,7 @@
   import Tab from "$lib/components/layout/Page/Tab.svelte";
   import UploadedFileIcon from "$lib/features/attachments/components/UploadedFileIcon.svelte";
   import { getAttachmentUrlService } from "$lib/features/attachments/AttachmentUrlService.svelte.js";
-  import { getEneo } from "$lib/core/Eneo.js";
-  import { browser } from "$app/environment";
+  import AppRunFileDownload from "$lib/features/apps/components/AppRunFileDownload.svelte";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
 
@@ -24,7 +22,6 @@
     state: { currentSpace }
   } = getSpacesManager();
 
-  const eneo = getEneo();
   const attachmentUrlService = getAttachmentUrlService();
 
   const run = createAppRunResult(() => data);
@@ -50,6 +47,16 @@
       class="hidden-in-print absolute -right-[5.5rem] z-10"
     />
     <Markdown source={run.result.output}></Markdown>
+  {:else if run.result.status === "failed" && run.result.input.files.length > 0}
+    <div class="flex flex-grow flex-col items-center justify-center gap-2">
+      <span class="py-2">
+        {m.app_run_failed_files_list()}
+      </span>
+
+      {#each run.result.input.files as file (file.id)}
+        <AppRunFileDownload {file} />
+      {/each}
+    </div>
   {:else}
     <div class="flex items-center justify-center gap-2">
       <span class="text-secondary">{m.no_output_generated()}</span>
@@ -110,27 +117,24 @@
                     />
 
                     <div class="border-stronger bg-secondary rounded-xl border print:border-none">
-                      {#if url}
-                        <div
-                          class="hidden-in-print border-stronger bg-primary -m-[1px] rounded-xl border p-2 shadow"
-                        >
-                          <div class="flex items-center justify-between gap-4 px-1 pb-2">
-                            <div class="flex gap-2">
-                              <UploadedFileIcon {file}></UploadedFileIcon>
-                              {file.name}
-                            </div>
-                            <Button variant="ghost" href={url}>
-                              <IconDownload></IconDownload>
-                              {m.download()}</Button
-                            >
+                      <div
+                        class="hidden-in-print border-stronger bg-primary -m-[1px] rounded-xl border p-2 shadow"
+                      >
+                        <div class="flex items-center justify-between gap-4 px-1 pb-2">
+                          <div class="flex gap-2">
+                            <UploadedFileIcon {file}></UploadedFileIcon>
+                            {file.name}
                           </div>
+                          <AppRunFileDownload {file} compact />
+                        </div>
+                        {#if url}
                           <audio
                             controls
                             src={url}
                             class="border-stronger h-8 w-full rounded-full border shadow-sm"
                           ></audio>
-                        </div>
-                      {/if}
+                        {/if}
+                      </div>
                       <div class="p-4">
                         <Markdown source={file.transcription}></Markdown>
                       </div>
@@ -138,27 +142,8 @@
                   {/each}
                 </div>
               </Tab>
-            {:else if run.result.output}
-              {@render formattedResult()}
-              <!-- Need to check for browser as we make a fetch request in the await -->
-            {:else if browser && run.result.status === "failed" && run.result.input.files.length > 0}
-              <div class="flex flex-grow flex-col items-center justify-center gap-2">
-                <span class="py-2">
-                  {m.app_run_failed_files_list()}
-                </span>
-
-                {#each run.result.input.files as file (file.id)}
-                  {#await eneo.files.generateSignedUrl( { fileId: file.id, contentDisposition: "attachment" } ) then { url }}
-                    <Button variant="ghost" href={url} class="no-underline"
-                      ><IconDownload></IconDownload>{m.download()} "{file.name}"</Button
-                    >
-                  {/await}
-                {/each}
-              </div>
             {:else}
-              <div class="flex flex-grow flex-col items-center justify-center gap-2">
-                <span class="py-2">{m.no_outputs_generated()}</span>
-              </div>
+              {@render formattedResult()}
             {/if}
           {:else}
             <div class="flex h-[50vh] flex-col items-center justify-center gap-4">
@@ -170,6 +155,9 @@
                 <div class="wave-bar" style="animation-delay: 0.4s"></div>
               </div>
               <span class="text-secondary">{m.result_being_generated()}</span>
+              {#each run.recordings as file (file.id)}
+                <AppRunFileDownload {file} />
+              {/each}
             </div>
           {/if}
         </div>

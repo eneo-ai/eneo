@@ -5,6 +5,19 @@
       "version": "next",
       "entries": [
         {
+          "id": "app-run-transcript-download",
+          "type": "fixed",
+          "area": "spaces",
+          "title": {
+            "en": "Download the transcript from an app result",
+            "sv": "Ladda ner transkriptet från en appkörning"
+          },
+          "body": {
+            "en": "You can download the recording while the app runs. The result page catches up if it misses the completion notice. You can download a saved transcript even if the app fails to generate a summary.",
+            "sv": "Du kan ladda ner inspelningen medan appen körs. Resultatsidan uppdateras även om den missar beskedet att jobbet är klart. Du kan ladda ner ett sparat transkript även om appen misslyckas med att skapa sammanfattningen."
+          }
+        },
+        {
           "id": "web-widgets",
           "permissions": {
             "anyOf": ["widgets", "admin"]

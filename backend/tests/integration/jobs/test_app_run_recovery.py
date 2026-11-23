@@ -30,15 +30,13 @@ from eneo.worker import task_manager
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
 
-async def test_audio_run_reaches_worker_after_commit_and_publishes_saved_result(
+@pytest.fixture
+async def recovery_recording(
     client,
     admin_user_api_key,
     db_container,
-    db_session,
     completion_model_factory,
     transcription_model_factory,
-    redis_client,
-    monkeypatch,
 ):
     async with db_container() as container:
         session = container.session()
@@ -70,6 +68,25 @@ async def test_audio_run_reaches_worker_after_commit_and_publishes_saved_result(
         headers=headers,
     )
     assert upload.status_code == 200, upload.text
+    return app_url, upload.json()["id"], recording.getvalue()
+
+
+@pytest.mark.parametrize(
+    ("terminal", "drop_reply"),
+    [(Status.COMPLETE, False), (Status.FAILED, False), (Status.COMPLETE, True)],
+)
+async def test_audio_run_reaches_worker_after_commit_and_publishes_saved_result(
+    terminal,
+    drop_reply,
+    client,
+    admin_user_api_key,
+    recovery_recording,
+    db_session,
+    redis_client,
+    monkeypatch,
+):
+    headers = {"X-API-Key": admin_user_api_key.key}
+    app_url, file_id, recording = recovery_recording
 
     summary_started = asyncio.Event()
     finish_summary = asyncio.Event()
@@ -78,6 +95,8 @@ async def test_audio_run_reaches_worker_after_commit_and_publishes_saved_result(
         summary_started.set()
         await finish_summary.wait()
         assert transcription_inputs == ["meeting transcript"]
+        if terminal == Status.FAILED:
+            raise RuntimeError("Summary provider unavailable")
         return CompletionModelResponse(
             completion=Completion(text="meeting summary"),
             model=model,
@@ -90,6 +109,19 @@ async def test_audio_run_reaches_worker_after_commit_and_publishes_saved_result(
         AsyncMock(return_value="meeting transcript"),
     )
     monkeypatch.setattr(CompletionService, "get_response", complete)
+
+    if drop_reply:
+        enqueue = job_manager.enqueue
+        lost_reply = asyncio.get_running_loop().create_future()
+
+        async def enqueue_without_reply(task, job_id, params):
+            delivery = await enqueue(task, job_id, params)
+            if task == Task.RUN_APP:
+                lost_reply.set_result(asyncio.current_task())
+                raise ConnectionError("lost enqueue acknowledgement")
+            return delivery
+
+        monkeypatch.setattr(job_manager, "enqueue", enqueue_without_reply)
 
     # Pause the real request just after queue_app_run so a worker could observe
     # any delivery made before the API transaction commits.
@@ -107,7 +139,7 @@ async def test_audio_run_reaches_worker_after_commit_and_publishes_saved_result(
     request = asyncio.create_task(
         client.post(
             f"{app_url}runs/",
-            json={"files": [{"id": upload.json()["id"]}]},
+            json={"files": [{"id": file_id}]},
             headers=headers,
         )
     )
@@ -121,6 +153,13 @@ async def test_audio_run_reaches_worker_after_commit_and_publishes_saved_result(
         release.set()
         response = await asyncio.wait_for(request, timeout=5)
     assert response.status_code == 203, response.text
+    if drop_reply:
+        callback = await asyncio.wait_for(lost_reply, 5)
+        await asyncio.wait_for(asyncio.shield(callback), 5)
+    pending = await client.get(f"/api/v1/app-runs/{run.id}/", headers=headers)
+    assert pending.status_code == 200, pending.text
+    assert pending.json()["status"] == Status.QUEUED
+    assert pending.json()["input"]["files"][0]["transcription"] is None
 
     assert job_manager._redis is not None
     delivery = ArqJob(str(run.job_id), redis=job_manager._redis)
@@ -137,7 +176,7 @@ async def test_audio_run_reaches_worker_after_commit_and_publishes_saved_result(
 
     async def publish_and_wait(channel, message):
         await publish(channel, message)
-        if message.status == Status.COMPLETE:
+        if message.status == terminal:
             await release_terminal_publish.wait()
 
     monkeypatch.setattr(task_manager, "publish_task_status", publish_and_wait)
@@ -165,21 +204,94 @@ async def test_audio_run_reaches_worker_after_commit_and_publishes_saved_result(
                     event = await subscription.get_message(timeout=1)
                     if event is not None:
                         update = RedisMessage.model_validate_json(event["data"])
-                        if update.id == run.id and update.status == Status.COMPLETE:
+                        if update.id == run.id and update.status == terminal:
                             break
             result = await client.get(f"/api/v1/app-runs/{run.id}/", headers=headers)
             assert result.status_code == 200, result.text
-            assert result.json()["status"] == "complete"
-            assert result.json()["output"] == "meeting summary"
+            assert result.json()["status"] == terminal
+            expected_output = "meeting summary" if terminal == Status.COMPLETE else None
+            assert result.json()["output"] == expected_output
+            assert (
+                result.json()["input"]["files"][0]["transcription"]
+                == "meeting transcript"
+            )
             file_id = result.json()["input"]["files"][0]["id"]
             audio = await client.get(f"/api/v1/files/{file_id}/", headers=headers)
             assert audio.status_code == 200, audio.text
             assert audio.json()["transcription"] == "meeting transcript"
+            signed = await client.post(
+                f"/api/v1/files/{file_id}/signed-url/",
+                json={"content_disposition": "attachment"},
+                headers=headers,
+            )
+            assert signed.status_code == 200, signed.text
+            downloaded = await client.get(signed.json()["url"])
+            assert downloaded.status_code == 200, downloaded.text
+            assert downloaded.headers["content-disposition"].startswith("attachment")
+            assert downloaded.content == recording
         finally:
             finish_summary.set()
             release_terminal_publish.set()
             succeeded = await asyncio.wait_for(running, timeout=5)
-        assert succeeded is True
+        assert succeeded is (terminal == Status.COMPLETE)
+
+
+@pytest.mark.parametrize(
+    ("claimed", "can_check", "expected"),
+    [
+        (False, True, Status.FAILED),
+        (True, True, Status.IN_PROGRESS),
+        (False, False, Status.QUEUED),
+    ],
+)
+async def test_app_dispatch_error_fails_only_an_unclaimed_run(
+    claimed,
+    can_check,
+    expected,
+    db_session,
+    client,
+    admin_user_api_key,
+    recovery_recording,
+    monkeypatch,
+):
+    headers = {"X-API-Key": admin_user_api_key.key}
+    app_url, file_id, _ = recovery_recording
+    enqueue = job_manager.enqueue
+    delivery = asyncio.get_running_loop().create_future()
+    if not can_check:
+        monkeypatch.setattr(
+            job_manager, "get_job_status", AsyncMock(side_effect=ConnectionError())
+        )
+    async with db_session() as worker:
+
+        async def lose_acknowledgement(task, job_id, params):
+            if task != Task.RUN_APP:
+                return await enqueue(task, job_id, params)
+            if claimed:
+                assert await JobRepository(worker).mark_job_started(job_id)
+            delivery.set_result((job_id, params, asyncio.current_task()))
+            raise ConnectionError("queue unavailable")
+
+        monkeypatch.setattr(job_manager, "enqueue", lose_acknowledgement)
+        response = await client.post(
+            f"{app_url}runs/", json={"files": [{"id": file_id}]}, headers=headers
+        )
+        assert response.status_code == 203, response.text
+        job_id, params, callback = await asyncio.wait_for(delivery, 5)
+        await asyncio.wait_for(asyncio.shield(callback), 5)
+
+    detail = await client.get(f"/api/v1/app-runs/{params.id}/", headers=headers)
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["status"] == expected
+    async with db_session() as session:
+        job = await session.get(Jobs, job_id)
+        assert job is not None
+        if expected != Status.FAILED:
+            assert job.failure_code is None
+        else:
+            assert job.failure_code == JobFailureCode.DISPATCH_FAILED
+            assert job.finished_at is not None
+            assert not await JobRepository(session).mark_job_started(job_id)
 
 
 @pytest.fixture
