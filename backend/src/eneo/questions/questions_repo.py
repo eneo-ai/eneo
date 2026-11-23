@@ -60,6 +60,8 @@ class QuestionRepository:
         self,
         session: AsyncSession,
         file_content_loader: FileContentLoader | None = None,
+        *,
+        include_user_uploads: bool,
     ) -> None:
         super().__init__()
         self.delegate: BaseRepositoryDelegate[Question] = BaseRepositoryDelegate(
@@ -70,6 +72,8 @@ class QuestionRepository:
         )
         self.session = session
         self.file_content_loader = file_content_loader
+        # The principal's ``files`` read grant; see ``attach_question_files``.
+        self.include_user_uploads = include_user_uploads
 
     async def _hydrate_questions(
         self,
@@ -79,13 +83,10 @@ class QuestionRepository:
             info_blob for question in questions for info_blob in question.info_blobs
         ]
         await InfoBlobRepository(self.session).hydrate_original_availability(info_blobs)
-        if self.file_content_loader is None:
-            if any(question.questions_files for question in questions):
-                raise RuntimeError("Question files require FileContentLoader")
-            return questions
         await attach_question_files(
             questions,
             loader=self.file_content_loader,
+            include_user_uploads=self.include_user_uploads,
         )
         return questions
 
@@ -391,9 +392,7 @@ class QuestionRepository:
             update_values["completion_model_id"] = completion_model_id
         if tool_calls is not None:
             # JSON mode: the column is JSONB and the records carry UUIDs.
-            update_values["tool_calls"] = [
-                tc.model_dump(mode="json") for tc in tool_calls
-            ]
+            update_values["tool_calls"] = [tc.storage_record() for tc in tool_calls]
         if reasoning is not None:
             update_values["reasoning"] = reasoning
         update_values.update(
@@ -512,9 +511,9 @@ class QuestionRepository:
             question_values["skill_provenance"] = None
         if question.tool_calls is not None:
             # JSONB column; the records carry UUIDs.
-            question_values["tool_calls"] = question.model_dump(
-                mode="json", include={"tool_calls"}
-            )["tool_calls"]
+            question_values["tool_calls"] = [
+                tc.storage_record() for tc in question.tool_calls
+            ]
         question_values["skill_activation_data"] = (
             question.skill_activation.model_dump(mode="json")
             if question.skill_activation is not None

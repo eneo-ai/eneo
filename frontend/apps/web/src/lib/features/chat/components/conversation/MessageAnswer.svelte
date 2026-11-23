@@ -247,6 +247,7 @@
         skillName: isSkillActivation(tc) ? (tc.title ?? tc.tool_name) : null,
         args: tc.arguments,
         toolCallId: tc.tool_call_id,
+        renderKey: `${tc.tool_call_id ?? ""}:${i}`,
         status,
         previousAttempt: status === "failed" && !isSkillActivation(tc) && previousAttempts.has(i),
         // Function steps (capability calls, whichever provider served them)
@@ -504,7 +505,7 @@
         {/if}
         {#if !folded || openInternalRuns.has(runIndex)}
           <div class="flex flex-col {rowGap} {folded ? 'pl-7' : ''}">
-            {#each visibleSteps as step, i (step.toolCallId ?? i)}
+            {#each visibleSteps as step (step.renderKey)}
               {#if step.skillName !== null}
                 <SkillActivationStep
                   name={step.skillName}
@@ -536,7 +537,7 @@
           </div>
         {/if}
         {#if folded && !openInternalRuns.has(runIndex)}
-          {#each run.steps.filter(createdDocument) as step, i (step.toolCallId ?? i)}
+          {#each run.steps.filter(createdDocument) as step (step.renderKey)}
             <InternalToolStep
               runningLabel={step.toolName}
               doneLabel={step.doneLabel}

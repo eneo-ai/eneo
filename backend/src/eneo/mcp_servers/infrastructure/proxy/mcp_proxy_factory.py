@@ -62,6 +62,8 @@ class MCPProxySessionFactory:
         mcp_server_tool_repo: "MCPServerToolRepository | None" = None,
         app_view_repo: "McpAppViewRepo | None" = None,
         for_view: bool = False,
+        *,
+        tool_context_without_uploads: bool = False,
     ) -> MCPProxySession:
         """
         Create a new MCPProxySession for the given servers.
@@ -99,4 +101,5 @@ class MCPProxySessionFactory:
             mcp_server_tool_repo=mcp_server_tool_repo,
             app_view_repo=app_view_repo,
             for_view=for_view,
+            tool_context_without_uploads=tool_context_without_uploads,
         )

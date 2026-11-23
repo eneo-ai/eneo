@@ -131,7 +131,8 @@ def _session(*, prior_turns: int = 0):
         user_id=uuid4(),
         assistant=SimpleNamespace(id=uuid4()),
         questions=[
-            SimpleNamespace(files=[], generated_files=[]) for _ in range(prior_turns)
+            SimpleNamespace(files=[], generated_files=[], tool_calls=[])
+            for _ in range(prior_turns)
         ],
     )
 
@@ -158,9 +159,51 @@ async def test_url_only_attachment_is_minted_and_withheld_when_tools_present():
         mcp_servers=[_server()],
     )
 
+    assert (
+        service._mcp_proxy_factory.create.call_args.kwargs[
+            "tool_context_without_uploads"
+        ]
+        is True
+    )
     assert minted["files"] == [kontoplan]
     assert builder.kwargs["url_only_prompt_file_ids"] == {kontoplan.id}
     assert builder.kwargs["prompt_files"] == [kontoplan, guide]
+
+
+@pytest.mark.parametrize(
+    "exposure", ["turn", "history", "replayed-result", "transcript", "rejected-skill"]
+)
+async def test_generic_tool_details_follow_the_context_the_model_can_read(exposure):
+    model = _model()
+    service, _, _ = _service(model)
+    attachment = _attachment()
+    session = _session(prior_turns=1)
+    if exposure == "history":
+        session.questions[0].files = [attachment]
+    if exposure in ("replayed-result", "rejected-skill"):
+        session.questions[0].tool_calls = [
+            SimpleNamespace(
+                result="Previous tool output",
+                tool_call_id="call-1",
+                upload_free_reference_ids=None,
+                mcp_tool_name="eneo_activate_skill"
+                if exposure == "rejected-skill"
+                else "web__lookup",
+            )
+        ]
+    await _run(
+        service,
+        model,
+        session=session,
+        files=[attachment] if exposure == "turn" else [],
+        transcription_inputs=["Transcribed file"] if exposure == "transcript" else [],
+        prompt_files=[attachment],
+        url_only_prompt_file_ids={attachment.id},
+        mcp_servers=[_server()],
+    )
+    assert service._mcp_proxy_factory.create.call_args.kwargs[
+        "tool_context_without_uploads"
+    ] is (exposure == "rejected-skill")
 
 
 @pytest.mark.asyncio

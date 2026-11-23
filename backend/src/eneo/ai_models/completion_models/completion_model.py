@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 from decimal import Decimal
 from enum import Enum
@@ -135,6 +136,65 @@ class ToolCallMetadata:
     # the call is announced, so a client can show the view while the call's
     # arguments are still being written.
     app_view: Optional[dict[str, Any]] = None
+    # Server-issued resource IDs for a step whose details may be shown
+    # without the files grant. An empty tuple means it produced no sources.
+    upload_free_reference_ids: tuple[UUID, ...] | None = None
+
+    @property
+    def unfinished(self) -> bool:
+        return self.result is None and self.result_status in (
+            None,
+            "pending",
+            "approved",
+            "awaiting_approval",
+        )
+
+    def record(self, steps: list[ToolCallMetadata], event: ResponseType | None) -> bool:
+        """Apply one provider event. Return True when it starts a new stored step."""
+        step = deepcopy(self)
+        if event == ResponseType.TOOL_APPROVAL_TIMEOUT:
+            step.approved = False
+            step.result_status = step.result_status or "timeout_denied"
+        for index in reversed(range(len(steps))):
+            previous = steps[index]
+            if not step.tool_call_id or previous.tool_call_id != step.tool_call_id:
+                continue
+            if (previous.server_name, previous.tool_name) != (
+                step.server_name,
+                step.tool_name,
+            ):
+                break
+            # A denial decision and its final JSON payload are separate events.
+            if not previous.unfinished:
+                if previous == step:
+                    return False
+                if (
+                    previous.result is None
+                    and previous.result_status in ("denied", "timeout_denied")
+                    and previous.result_status == step.result_status
+                ):
+                    if step.result is not None:
+                        previous.result = step.result
+                        previous.upload_free_reference_ids = (
+                            step.upload_free_reference_ids
+                        )
+                    return False
+                break
+            # Approval events may carry only status. Keep the pending request,
+            # never a completed result or an earlier step's visibility decision.
+            if event in (
+                ResponseType.TOOL_APPROVAL_REQUIRED,
+                ResponseType.TOOL_APPROVAL_TIMEOUT,
+            ):
+                previous.approved = step.approved
+                previous.result_status = step.result_status
+                if step.arguments is not None:
+                    previous.arguments = step.arguments
+            else:
+                steps[index] = step
+            return False
+        steps.append(step)
+        return True
 
 
 @dataclass

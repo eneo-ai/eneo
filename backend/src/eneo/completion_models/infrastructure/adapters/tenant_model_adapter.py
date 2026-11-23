@@ -6,6 +6,7 @@ import json
 import logging
 import re
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from typing import (
     TYPE_CHECKING,
@@ -54,6 +55,7 @@ from eneo.completion_models.infrastructure.context_builder import (
     MIN_PERCENTAGE_KNOWLEDGE,
 )
 from eneo.completion_models.infrastructure.message_payload import (
+    TurnToolCallIds,
     build_content,
     build_turn_messages,
 )
@@ -144,6 +146,14 @@ def _mint_ref_id(existing_prefixes: set[str]) -> uuid.UUID:
         attempt += 1
     existing_prefixes.add(str(ref_id)[:8])
     return ref_id
+
+
+def _upload_free_reference_ids(
+    proxy: "MCPProxySession | None", references: Sequence[McpToolReference] = ()
+) -> tuple[uuid.UUID, ...] | None:
+    if proxy is not None and proxy.tool_context_without_uploads:
+        return tuple(reference.id for reference in references)
+    return None
 
 
 def _build_tool_result_with_references(
@@ -833,7 +843,10 @@ class TenantModelAdapter(CompletionModelAdapter):
             metadata.append(
                 ToolCallMetadata(
                     server_name="skills",
-                    tool_name=outcome.activation_key or "unknown",
+                    tool_name=(outcome.activation_key or "unknown")
+                    if not rejected
+                    else SKILL_ACTIVATION_TOOL_NAME,
+                    upload_free_reference_ids=None if rejected else (),
                     title=outcome.display_name,
                     arguments=arguments,
                     tool_call_id=outcome.call_id,
@@ -865,6 +878,7 @@ class TenantModelAdapter(CompletionModelAdapter):
             ToolCallMetadata(
                 server_name="skills",
                 tool_name=key,
+                upload_free_reference_ids=(),
                 title=display_name,
                 arguments={"skill_key": key, "mode": "always"},
                 tool_call_id=f"skill-always-{key}",
@@ -1456,6 +1470,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                 choice = response.choices[0]
                 msg = choice.message
 
+                call_ids = TurnToolCallIds()
                 tool_round = 0
                 max_rounds = get_settings().max_tool_rounds
                 seen_prefixes: set[str] = set()
@@ -1566,7 +1581,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                             assistant_content=msg.content,
                             calls=[
                                 ProviderToolCall(
-                                    call_id=tc.id,
+                                    call_id=call_ids.claim(tc.id),
                                     name=tc.function.name,
                                     arguments=tc.function.arguments,
                                 )
@@ -1581,7 +1596,8 @@ class TenantModelAdapter(CompletionModelAdapter):
 
                     provider_calls = tuple(
                         ProviderToolCall(
-                            call_id=tc.id,
+                            call_id=call_ids.claim(tc.id),
+                            provider_id=tc.id,
                             name=tc.function.name,
                             arguments=tc.function.arguments,
                         )
@@ -1712,6 +1728,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 result_status=result_status,
                                 result=display_text,
                                 mcp_tool_name=call.name,
+                                upload_free_reference_ids=_upload_free_reference_ids(
+                                    mcp_proxy, refs_for_call
+                                ),
                                 purpose=mcp_proxy.get_tool_purpose(call.name),
                                 is_internal=mcp_proxy.is_internal_tool(call.name),
                                 is_bundled=mcp_proxy.is_bundled_tool(call.name),
@@ -1975,6 +1994,8 @@ class TenantModelAdapter(CompletionModelAdapter):
             def _tool_is_bundled(name: str) -> bool:
                 return mcp_proxy.is_bundled_tool(name) if mcp_proxy else False
 
+            call_ids = TurnToolCallIds()
+
             # Shared state for tool call accumulation and usage across stream draining
             class _StreamResult:
                 def __init__(self) -> None:
@@ -2081,12 +2102,14 @@ class TenantModelAdapter(CompletionModelAdapter):
                             idx = tc_delta.index
                             if idx not in res.tool_calls_acc:
                                 res.tool_calls_acc[idx] = {
-                                    "id": tc_delta.id,
+                                    "id": None,
                                     "type": "function",
                                     "function": {"name": "", "arguments": ""},
                                 }
-                            if tc_delta.id:
-                                res.tool_calls_acc[idx]["id"] = tc_delta.id
+                            if tc_delta.id and not res.tool_calls_acc[idx]["id"]:
+                                res.tool_calls_acc[idx]["id"] = call_ids.claim(
+                                    tc_delta.id
+                                )
                             if tc_delta.function:
                                 fn = tc_delta.function
                                 if fn.name:
@@ -2291,6 +2314,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                     provider_calls = tuple(
                         ProviderToolCall(
                             call_id=cast(str, tool_call["id"]),
+                            provider_id=call_ids.provider_id_for(
+                                cast(str, tool_call["id"])
+                            ),
                             name=tool_call["function"]["name"],
                             arguments=tool_call["function"]["arguments"],
                         )
@@ -2340,6 +2366,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                                         title=title,
                                         tool_call_id=call.call_id,
                                         result_status="deferred",
+                                        upload_free_reference_ids=_upload_free_reference_ids(
+                                            mcp_proxy
+                                        ),
                                         purpose=_tool_purpose(call.name),
                                         is_internal=_tool_is_internal(call.name),
                                         is_bundled=_tool_is_bundled(call.name),
@@ -2626,6 +2655,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                                     result_status=result_status,
                                     result=display_text,
                                     meta=result_data.get("meta") or None,
+                                    upload_free_reference_ids=_upload_free_reference_ids(
+                                        mcp_proxy, refs_for_call
+                                    ),
                                     structured_content=(
                                         result_data.get("structured_content")
                                         if has_app_view
@@ -2667,6 +2699,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                                     "timeout_denied" if timed_out else "denied"
                                 ),
                                 result=json.dumps(denial_payload),
+                                upload_free_reference_ids=_upload_free_reference_ids(
+                                    mcp_proxy
+                                ),
                             )
                         )
 
@@ -2755,7 +2790,16 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 )
                             except OpenAIException:
                                 args = None
-                            server_name, tool_name, title = _resolve_tool_names(name)
+                            registered = name in _allowed_tool_names() or (
+                                name == SKILL_ACTIVATION_TOOL_NAME
+                                and activation_available
+                            )
+                            display_name = name if registered else "unknown_tool"
+                            server_name, tool_name, title = (
+                                _resolve_tool_names(name)
+                                if registered
+                                else ("", display_name, None)
+                            )
                             refused_metadata.append(
                                 ToolCallMetadata(
                                     server_name=server_name,
@@ -2765,7 +2809,10 @@ class TenantModelAdapter(CompletionModelAdapter):
                                     tool_call_id=tool_call["id"],
                                     result_status="failed",
                                     result=refusal_payload,
-                                    mcp_tool_name=name,
+                                    upload_free_reference_ids=_upload_free_reference_ids(
+                                        mcp_proxy
+                                    ),
+                                    mcp_tool_name=display_name,
                                     purpose=_tool_purpose(name),
                                     is_internal=_tool_is_internal(name),
                                     is_bundled=_tool_is_bundled(name),

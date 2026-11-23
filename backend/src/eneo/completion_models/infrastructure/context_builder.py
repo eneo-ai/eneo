@@ -47,6 +47,13 @@ from eneo.tokens.token_utils import (
 logger = logging.getLogger(__name__)
 
 
+def replayable_tool_call_id(step: ToolCallInfo) -> str | None:
+    # Skill activations are rebuilt from the turn's own runtime.
+    if step.result is None or step.mcp_tool_name == SKILL_ACTIVATION_TOOL_NAME:
+        return None
+    return step.tool_call_id or None
+
+
 def _replayable_tool_calls(
     tool_calls: Optional[list[ToolCallInfo]],
     file_reference_urls: Optional[dict[UUID, str]] = None,
@@ -81,17 +88,12 @@ def _replayable_tool_calls(
     revisions = current_user_revisions(tool_made, generated_files)
     replayable: list[MessageToolCall] = []
     for tc in tool_calls:
-        if tc.tool_call_id is None or tc.tool_call_id == "":
-            continue
-        if tc.result is None:
-            continue
-        # Skill activations are rebuilt from the turn's own Skill runtime; the
-        # activation tool may not even be registered on a later turn.
-        if tc.mcp_tool_name == SKILL_ACTIVATION_TOOL_NAME:
+        call_id = replayable_tool_call_id(tc)
+        if call_id is None:
             continue
         replayable.append(
             MessageToolCall(
-                tool_call_id=tc.tool_call_id,
+                tool_call_id=call_id,
                 tool_name=tc.mcp_tool_name or tc.tool_name,
                 # Legacy URLs become credential-free handles on replay, too.
                 arguments=cast(

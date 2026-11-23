@@ -3,6 +3,7 @@ from typing import cast
 from uuid import UUID
 
 from eneo.apps.app_runs.api.app_run_models import AppRunParams
+from eneo.apps.app_runs.app_run_repo import get_update_targets_for_jobs
 from eneo.database.database import AsyncSession
 from eneo.jobs.job_models import JobFailureCode, Task
 from eneo.main.container.container import Container
@@ -68,7 +69,7 @@ async def fail_expired_app_runs(container: Container) -> None:
         if not failed_ids:
             return
 
-        targets = await container.app_run_repo().get_update_targets_for_jobs(failed_ids)
+        targets = await get_update_targets_for_jobs(session, failed_ids)
 
     logger.warning("Expired app runs failed", extra={"count": len(failed_ids)})
     for run_id, user_id, app_id, space_id, personal in targets:
