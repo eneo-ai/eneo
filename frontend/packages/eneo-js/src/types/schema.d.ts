@@ -8910,7 +8910,7 @@ export interface paths {
     };
     /**
      * Get flow retention policy
-     * @description Return the independent eligibility windows for stored Flow debug evidence and abandoned runtime uploads. Flow run-history retention is configured through the dedicated hierarchical policy endpoints. Reading this endpoint never previews, deletes, or redacts Flow data.
+     * @description Return the independent eligibility windows for stored Flow debug evidence and abandoned runtime uploads. Flow run history follows the Space's time and each Flow's own time, set through the Flow run-history retention endpoints. Reading this endpoint never previews, deletes, or redacts Flow data.
      */
     get: operations["get_flow_retention_policy"];
     put?: never;
@@ -8925,30 +8925,6 @@ export interface paths {
     patch: operations["update_flow_retention_policy"];
     trace?: never;
   };
-  "/api/v1/settings/flow-run-retention-policy": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /**
-     * Get the Organization Flow run-history retention policy
-     * @description Return the Organization default and its effective Flow run-history policy. No configured policy means run history has no age threshold and remains stored.
-     */
-    get: operations["get_organization_flow_run_retention_policy"];
-    /**
-     * Replace the Organization Flow run-history retention policy
-     * @description Replace the complete Organization policy or clear it. The initial modes either preserve eligible data for explicit administrator purge or require human review; neither mode deletes data automatically. The change waits for an open history deletion to finish.
-     */
-    put: operations["replace_organization_flow_run_retention_policy"];
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   "/api/v1/settings/flow-run-retention-policy/flows/{flow_id}": {
     parameters: {
       query?: never;
@@ -8958,12 +8934,12 @@ export interface paths {
     };
     /**
      * Get a Flow run-history retention policy
-     * @description Return the Flow override, the inherited Space or Organization policy, and the effective policy. A complete Flow policy replaces its inherited policy, which allows one Flow to keep 90 days while its Space keeps 60 and the Organization default remains 30. Reading the policy never deletes run data. A deleted Flow is accepted.
+     * @description Return the Flow's own time, its Space's time and the time that applies. The Space's time caps every Flow in the Space, and a Flow may choose a shorter one: with the Space at 60 days, a Flow can keep 30, and a stored 90 applies as 60. Reading the policy never deletes run data. A deleted Flow is accepted.
      */
     get: operations["get_flow_run_retention_policy"];
     /**
      * Replace a Flow run-history retention policy
-     * @description Replace the complete Flow override or clear it to inherit. Operational retention remains editable after a Flow definition is published because it does not mutate the published definition. The initial modes require a later explicit administrator action; saving this policy never schedules deletion. A deleted Flow is accepted. The change waits for an open history deletion to finish.
+     * @description Replace the Flow's own time, or clear it to follow the Space. Operational retention remains editable after a Flow definition is published because it does not mutate the published definition. Only an explicit administrator purge removes runs; saving this policy never schedules deletion. A deleted Flow is accepted. The change waits for an open history deletion to finish.
      */
     put: operations["replace_flow_run_retention_policy"];
     post?: never;
@@ -8984,29 +8960,9 @@ export interface paths {
     put?: never;
     /**
      * Preview or purge due Flow run history
-     * @description Apply the administrator purge to one Flow in the authenticated tenant. Dry-run is the default and reports candidates without deleting anything. Real batches delete due terminal runs under the effective preserve policy and expired unbound live transcripts in this Flow, with a transaction audit. The limit applies separately to runs and transcripts, with separate counts. Review-required runs, unresolved deliveries and runs under a legal hold remain stored. A deleted Flow is accepted.
+     * @description Apply the administrator purge to one Flow in the authenticated tenant. Dry-run is the default and reports candidates without deleting anything. Real batches delete due terminal runs past the time that applies to them and expired unbound live transcripts in this Flow, with a transaction audit. The limit applies separately to runs and transcripts, with separate counts. Runs with unresolved deliveries and runs under a legal hold remain stored. A deleted Flow is accepted.
      */
     post: operations["purge_flow_run_history"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/v1/settings/flow-run-retention-policy/flows/{flow_id}/review-queue": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /**
-     * List runs awaiting retention review for one Flow
-     * @description List terminal runs for one Flow whose effective review_required policy has reached its age threshold, including a policy inherited from its Space or Organization. The bounded response deliberately omits inputs and outputs. Reading it is side-effect free and cannot approve or delete run history. A deleted Flow is accepted.
-     */
-    get: operations["list_flow_run_retention_review_queue"];
-    put?: never;
-    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -9048,53 +9004,9 @@ export interface paths {
     put?: never;
     /**
      * Preview or purge due Organization Flow run history
-     * @description Administrators can preview or explicitly purge one bounded batch of due terminal runs under the effective preserve policy, plus expired unbound live transcripts in the authenticated tenant. The limit applies separately to runs and transcripts, with separate candidate and deletion counts. Dry runs select candidates but delete nothing and emit no audit event. Real purges require an audit row in the same transaction. Review-required runs, unresolved deliveries and runs under a legal hold are excluded.
+     * @description Administrators can preview or explicitly purge one bounded batch of due terminal runs past the time that applies to their Flow, plus expired unbound live transcripts in the authenticated tenant. The limit applies separately to runs and transcripts, with separate candidate and deletion counts. Dry runs select candidates but delete nothing and emit no audit event. Real purges require an audit row in the same transaction. Runs with unresolved deliveries and runs under a legal hold are excluded.
      */
     post: operations["purge_organization_flow_run_history"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/v1/settings/flow-run-retention-policy/review-queue": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /**
-     * List Flow runs awaiting Organization retention review
-     * @description List terminal Flow runs whose effective review_required policy has reached its age threshold across the Organization. The bounded page contains only identifiers, names, lifecycle dates, and policy facts; it never returns run inputs or outputs. Reading this queue does not approve or delete anything.
-     */
-    get: operations["list_organization_flow_run_retention_review_queue"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/v1/settings/flow-run-retention-policy/spaces/{space_id}": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /**
-     * Get a Space Flow run-history retention policy
-     * @description Return the Space override, the inherited Organization policy, and the effective policy. A complete Space policy replaces the Organization default for every Flow in that Space unless a Flow has its own complete override. The response names the winning source so an administrator can verify the result before any separate purge action. Reading it never deletes data.
-     */
-    get: operations["get_space_flow_run_retention_policy"];
-    /**
-     * Replace a Space Flow run-history retention policy
-     * @description Replace the complete Space override or clear it to inherit the Organization policy. The mode and day count move together, preventing ambiguous mixed inheritance. This setting controls Flow run history only: it does not change conversation retention, and it never schedules deletion. The change waits for an open history deletion to finish.
-     */
-    put: operations["replace_space_flow_run_retention_policy"];
-    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -9112,29 +9024,9 @@ export interface paths {
     put?: never;
     /**
      * Preview or purge due Space Flow run history
-     * @description Apply the administrator purge to one Space in the authenticated tenant. Dry-run is the default and reports candidates without deleting anything. Real batches delete due terminal runs under the effective preserve policy and expired unbound live transcripts in this Space, with a transaction audit. The limit applies separately to runs and transcripts, with separate counts. Review-required runs, unresolved deliveries and runs under a legal hold remain stored.
+     * @description Apply the administrator purge to one Space in the authenticated tenant. Dry-run is the default and reports candidates without deleting anything. Real batches delete due terminal runs past the time that applies to them and expired unbound live transcripts in this Space, with a transaction audit. The limit applies separately to runs and transcripts, with separate counts. Runs with unresolved deliveries and runs under a legal hold remain stored.
      */
     post: operations["purge_space_flow_run_history"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/v1/settings/flow-run-retention-policy/spaces/{space_id}/review-queue": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /**
-     * List Flow runs awaiting retention review in a Space
-     * @description List terminal Flow runs in one Space whose effective review_required policy has reached its age threshold. A Flow-level preserve override is excluded, even when the surrounding Space requires review. The bounded response omits run content, and reading it never approves or deletes data.
-     */
-    get: operations["list_space_flow_run_retention_review_queue"];
-    put?: never;
-    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -9916,7 +9808,7 @@ export interface paths {
     head?: never;
     /**
      * Update Space
-     * @description Update a space's settings (name, description, models, MCP servers, security classification, data retention).
+     * @description Update a space's settings (name, description, models, MCP servers, security classification, data retention). The space's time is also the cap on its Flows' run history: in a shared space, changing it needs the `retention_manage` permission and a signed-in person (an API key gets 403 `retention_person_required`), and it waits for an open Flow history deletion (409 `flow_retention_lock_busy` when that takes too long). Sending the stored value is no change.
      */
     patch: operations["update_space_api_v1_spaces__id___patch"];
     trace?: never;
@@ -21272,20 +21164,13 @@ export interface components {
      *       "run_history_retention": {
      *         "contributors": {
      *           "flow": {
-     *             "days": 30,
-     *             "mode": "preserve"
-     *           },
-     *           "organization": {
-     *             "days": 90,
-     *             "mode": "preserve"
+     *             "days": 30
      *           },
      *           "space": {
-     *             "days": 14,
-     *             "mode": "review_required"
+     *             "days": 90
      *           }
      *         },
      *         "effective_days": 30,
-     *         "mode": "preserve",
      *         "source": "flow",
      *         "state": "configured"
      *       },
@@ -21359,7 +21244,7 @@ export interface components {
       published_version?: number | null;
       /**
        * Run History Retention
-       * @description Effective Flow run-history retention policy. A complete Flow policy overrides its complete Space policy, and Space overrides the Organization default. Preserve requires an explicit administrator purge; review_required requires human approval. Off means no eligibility policy is configured.
+       * @description The Flow run-history time that applies. The Space's time caps every Flow in the Space, and a Flow may choose a shorter one. Runs past it are removed only by an explicit administrator purge. Off means neither the Space nor the Flow has a time.
        */
       run_history_retention:
         | components["schemas"]["FlowRunRetentionOff"]
@@ -24926,8 +24811,6 @@ export interface components {
        * @description Due terminal runs that an active legal hold keeps. They are counted apart (up to the window size) and take no place in the window below.
        */
       legal_hold: number;
-      /** Review Required */
-      review_required: number;
       /** Undelivered Audit */
       undelivered_audit: number;
       /** Unresolved Webhook */
@@ -24938,9 +24821,8 @@ export interface components {
      * @example {
      *       "blocked": {
      *         "complete": true,
-     *         "counted_runs": 3,
+     *         "counted_runs": 2,
      *         "legal_hold": 0,
-     *         "review_required": 1,
      *         "undelivered_audit": 0,
      *         "unresolved_webhook": 0
      *       },
@@ -25547,12 +25429,12 @@ export interface components {
       contributors: components["schemas"]["FlowRunRetentionContributors"];
       /** Effective Days */
       effective_days: number;
-      mode: components["schemas"]["FlowRunRetentionMode"];
       /**
        * Source
+       * @description The level whose time applies: the Flow's own when it is at most the Space's, otherwise the Space's.
        * @enum {string}
        */
-      source: "organization" | "space" | "flow";
+      source: "space" | "flow";
       /**
        * @description discriminator enum property added by openapi-typescript
        * @enum {string}
@@ -25561,8 +25443,9 @@ export interface components {
     };
     /** FlowRunRetentionContributors */
     FlowRunRetentionContributors: {
+      /** @description The Flow's own time, or null when it has none. */
       flow: components["schemas"]["FlowRunRetentionPolicy"] | null;
-      organization: components["schemas"]["FlowRunRetentionPolicy"] | null;
+      /** @description The Space's time, the cap for every Flow in the Space. */
       space: components["schemas"]["FlowRunRetentionPolicy"] | null;
     };
     /** FlowRunRetentionFlowTarget */
@@ -25622,18 +25505,11 @@ export interface components {
       /** Items */
       items: components["schemas"]["FlowRunRetentionFlowTarget"][];
     };
-    /**
-     * FlowRunRetentionMode
-     * @enum {string}
-     */
-    FlowRunRetentionMode: "preserve" | "review_required";
     /** FlowRunRetentionOff */
     FlowRunRetentionOff: {
       contributors: components["schemas"]["FlowRunRetentionContributors"];
       /** Effective Days */
       effective_days?: null;
-      /** Mode */
-      mode?: null;
       /**
        * Source
        * @default none
@@ -25649,30 +25525,26 @@ export interface components {
     /**
      * FlowRunRetentionPolicy
      * @example {
-     *       "days": 60,
-     *       "mode": "review_required"
+     *       "days": 30
      *     }
      */
     FlowRunRetentionPolicy: {
       /**
        * Days
-       * @description Age in days after which completed Flow run history becomes eligible under this policy. Eligibility alone never deletes data.
+       * @description Age in days after which completed Flow run history becomes eligible for an explicit administrator purge. At most the Space's time, which caps every Flow in the Space. Eligibility alone never deletes data.
        */
       days: number;
-      /** @description Preserve makes records eligible only for an explicit administrator purge. Review_required additionally requires human approval before that purge. Neither mode schedules automatic deletion. */
-      mode: components["schemas"]["FlowRunRetentionMode"];
     };
     /**
      * FlowRunRetentionPolicyReplaceRequest
      * @example {
      *       "policy": {
-     *         "days": 60,
-     *         "mode": "review_required"
+     *         "days": 30
      *       }
      *     }
      */
     FlowRunRetentionPolicyReplaceRequest: {
-      /** @description Complete local policy, or null to clear this level and inherit its parent. */
+      /** @description The Flow's own time, at most its Space's, or null to follow the Space. */
       policy: components["schemas"]["FlowRunRetentionPolicy"] | null;
     };
     /**
@@ -25681,30 +25553,21 @@ export interface components {
      *       "effective": {
      *         "contributors": {
      *           "flow": {
-     *             "days": 90,
-     *             "mode": "preserve"
-     *           },
-     *           "organization": {
-     *             "days": 30,
-     *             "mode": "preserve"
+     *             "days": 3
      *           },
      *           "space": {
-     *             "days": 60,
-     *             "mode": "review_required"
+     *             "days": 7
      *           }
      *         },
-     *         "effective_days": 90,
-     *         "mode": "preserve",
+     *         "effective_days": 3,
      *         "source": "flow",
      *         "state": "configured"
      *       },
      *       "inherited_policy": {
-     *         "days": 60,
-     *         "mode": "review_required"
+     *         "days": 7
      *       },
      *       "local_policy": {
-     *         "days": 90,
-     *         "mode": "preserve"
+     *         "days": 3
      *       },
      *       "scope": "flow",
      *       "scope_id": "00000000-0000-0000-0000-000000000301"
@@ -25713,123 +25576,23 @@ export interface components {
     FlowRunRetentionPolicySettings: {
       /**
        * Effective
-       * @description Resolved policy after applying Flow, Space, then Organization precedence.
+       * @description The time that applies: the Flow's own when it is at most the Space's, otherwise the Space's.
        */
       effective:
         | components["schemas"]["FlowRunRetentionOff"]
         | components["schemas"]["FlowRunRetentionConfigured"];
-      /** @description Nearest complete parent policy, or null when no parent policy exists. */
+      /** @description The Space's time, which caps this Flow, or null when the Space has none. */
       inherited_policy: components["schemas"]["FlowRunRetentionPolicy"] | null;
-      /** @description Policy stored at this level, or null when it inherits. */
+      /** @description The Flow's own time, or null when it follows its Space. */
       local_policy: components["schemas"]["FlowRunRetentionPolicy"] | null;
-      /** @description Level whose local policy is being inspected. */
+      /** @description Level whose local policy is being inspected: the Flow. */
       scope: components["schemas"]["FlowRunRetentionScope"];
       /**
        * Scope Id
        * Format: uuid
-       * @description Organization, Space, or Flow identifier.
+       * @description Flow identifier.
        */
       scope_id: string;
-    };
-    /** FlowRunRetentionReviewItem */
-    FlowRunRetentionReviewItem: {
-      /** @description Complete review_required policy effective for this run. */
-      effective_policy: components["schemas"]["FlowRunRetentionPolicy"];
-      /**
-       * Eligible Since
-       * Format: date-time
-       * @description Timestamp when the effective review_required age threshold was reached. This is review eligibility, not approval or deletion.
-       */
-      eligible_since: string;
-      /**
-       * Flow Id
-       * Format: uuid
-       * @description Flow that owns the run.
-       */
-      flow_id: string;
-      /**
-       * Flow Name
-       * @description Current Flow name for administrator context.
-       */
-      flow_name: string;
-      /**
-       * Policy Source
-       * @description Most-specific level that supplied the effective policy.
-       * @enum {string}
-       */
-      policy_source: "organization" | "space" | "flow";
-      /**
-       * Retention Anchor
-       * Format: date-time
-       * @description Timestamp from which the policy age is measured: finished_at when available, otherwise created_at.
-       */
-      retention_anchor: string;
-      /**
-       * Run Id
-       * Format: uuid
-       * @description Terminal Flow run awaiting retention review.
-       */
-      run_id: string;
-      /**
-       * Space Id
-       * Format: uuid
-       * @description Space that owns the Flow.
-       */
-      space_id: string;
-      /**
-       * Space Name
-       * @description Current Space name for administrator context.
-       */
-      space_name: string;
-      /** @description Terminal run status. */
-      status: components["schemas"]["FlowRunStatus"];
-    };
-    /**
-     * FlowRunRetentionReviewPage
-     * @example {
-     *       "count": 1,
-     *       "has_more": true,
-     *       "items": [
-     *         {
-     *           "effective_policy": {
-     *             "days": 60,
-     *             "mode": "review_required"
-     *           },
-     *           "eligible_since": "2026-06-30T10:00:00Z",
-     *           "flow_id": "00000000-0000-0000-0000-000000000301",
-     *           "flow_name": "Supplier assessment",
-     *           "policy_source": "space",
-     *           "retention_anchor": "2026-05-01T10:00:00Z",
-     *           "run_id": "00000000-0000-0000-0000-000000000501",
-     *           "space_id": "00000000-0000-0000-0000-000000000201",
-     *           "space_name": "Procurement",
-     *           "status": "completed"
-     *         }
-     *       ],
-     *       "next_cursor": "v1.eyJyZXRlbnRpb25fYW5jaG9yIjoiMjAyNi0wNS0wMVQxMDowMDowMFoiLCJydW5faWQiOiIwMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMDA1MDEifQ"
-     *     }
-     */
-    FlowRunRetentionReviewPage: {
-      /**
-       * Count
-       * @description Number of review items returned in this page.
-       */
-      readonly count: number;
-      /**
-       * Has More
-       * @description Whether another page exists after this page.
-       */
-      has_more: boolean;
-      /**
-       * Items
-       * @description Runs eligible for administrator review. Run inputs and outputs are deliberately omitted.
-       */
-      items: components["schemas"]["FlowRunRetentionReviewItem"][];
-      /**
-       * Next Cursor
-       * @description Opaque cursor for the next page, or null on the final page.
-       */
-      next_cursor: string | null;
     };
     /**
      * FlowRunRetentionScope
@@ -28312,20 +28075,13 @@ export interface components {
      *       "run_history_retention": {
      *         "contributors": {
      *           "flow": {
-     *             "days": 30,
-     *             "mode": "preserve"
-     *           },
-     *           "organization": {
-     *             "days": 90,
-     *             "mode": "preserve"
+     *             "days": 30
      *           },
      *           "space": {
-     *             "days": 14,
-     *             "mode": "review_required"
+     *             "days": 90
      *           }
      *         },
      *         "effective_days": 30,
-     *         "mode": "preserve",
      *         "source": "flow",
      *         "state": "configured"
      *       },
@@ -28368,7 +28124,7 @@ export interface components {
       published_version?: number | null;
       /**
        * Run History Retention
-       * @description Effective Flow run-history retention policy. A complete Flow policy overrides its complete Space policy, and Space overrides the Organization default. Preserve requires an explicit administrator purge; review_required requires human approval. Off means no eligibility policy is configured.
+       * @description The Flow run-history time that applies. The Space's time caps every Flow in the Space, and a Flow may choose a shorter one. Runs past it are removed only by an explicit administrator purge. Off means neither the Space nor the Flow has a time.
        */
       run_history_retention:
         | components["schemas"]["FlowRunRetentionOff"]
@@ -29985,20 +29741,13 @@ export interface components {
      *         "run_history_retention": {
      *           "contributors": {
      *             "flow": {
-     *               "days": 30,
-     *               "mode": "preserve"
-     *             },
-     *             "organization": {
-     *               "days": 90,
-     *               "mode": "preserve"
+     *               "days": 30
      *             },
      *             "space": {
-     *               "days": 14,
-     *               "mode": "review_required"
+     *               "days": 90
      *             }
      *           },
      *           "effective_days": 30,
-     *           "mode": "preserve",
      *           "source": "flow",
      *           "state": "configured"
      *         },
@@ -63945,20 +63694,13 @@ export interface operations {
            *           "run_history_retention": {
            *             "contributors": {
            *               "flow": {
-           *                 "days": 30,
-           *                 "mode": "preserve"
-           *               },
-           *               "organization": {
-           *                 "days": 90,
-           *                 "mode": "preserve"
+           *                 "days": 30
            *               },
            *               "space": {
-           *                 "days": 14,
-           *                 "mode": "review_required"
+           *                 "days": 90
            *               }
            *             },
            *             "effective_days": 30,
-           *             "mode": "preserve",
            *             "source": "flow",
            *             "state": "configured"
            *           },
@@ -77805,107 +77547,6 @@ export interface operations {
       };
     };
   };
-  get_organization_flow_run_retention_policy: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["FlowRunRetentionPolicySettings"];
-        };
-      };
-      /** @description Caller lacks retention_manage or retention_holds (`retention_permission_required`), or used an API key: retention is changed or stopped by signed-in people only (`retention_person_required`). */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          /**
-           * @example {
-           *       "code": "retention_permission_required",
-           *       "eneo_error_code": 9001,
-           *       "message": "Need permission retention_manage or retention_holds."
-           *     }
-           */
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-    };
-  };
-  replace_organization_flow_run_retention_policy: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["FlowRunRetentionPolicyReplaceRequest"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["FlowRunRetentionPolicySettings"];
-        };
-      };
-      /** @description Caller lacks retention_manage (`retention_permission_required`), or used an API key: retention is changed or stopped by signed-in people only (`retention_person_required`). */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          /**
-           * @example {
-           *       "code": "retention_permission_required",
-           *       "eneo_error_code": 9001,
-           *       "message": "Need permission retention_manage."
-           *     }
-           */
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Another retention change or history deletion held the retention lock too long (`flow_retention_lock_busy`). Nothing changed; retry. */
-      409: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          /**
-           * @example {
-           *       "code": "flow_retention_lock_busy",
-           *       "eneo_error_code": 9073,
-           *       "message": "Flow history retention is busy with another change or deletion."
-           *     }
-           */
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-    };
-  };
   get_flow_run_retention_policy: {
     parameters: {
       query?: never;
@@ -77991,6 +77632,22 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["FlowRunRetentionPolicySettings"];
+        };
+      };
+      /** @description The Flow time is longer than its Space's time (`retention_exceeds_space`). `context` names the cap in days and the level it comes from. Nothing changed. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "retention_exceeds_space",
+           *       "eneo_error_code": 9086,
+           *       "message": "The retention period is longer than the limit that applies here."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Caller lacks retention_manage (`retention_permission_required`), or used an API key: retention is changed or stopped by signed-in people only (`retention_person_required`). */
@@ -78119,89 +77776,6 @@ export interface operations {
            *       "code": "flow_retention_lock_busy",
            *       "eneo_error_code": 9073,
            *       "message": "Flow history retention is busy with another change or deletion."
-           *     }
-           */
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-    };
-  };
-  list_flow_run_retention_review_queue: {
-    parameters: {
-      query?: {
-        limit?: number;
-        /** @description Opaque cursor returned as next_cursor by the previous page. */
-        cursor?: string | null;
-      };
-      header?: never;
-      path: {
-        flow_id: string;
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["FlowRunRetentionReviewPage"];
-        };
-      };
-      /** @description The Flow retention review cursor is malformed or unsupported. */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          /**
-           * @example {
-           *       "code": "invalid_flow_retention_review_cursor",
-           *       "eneo_error_code": 9007,
-           *       "message": "Invalid Flow retention review cursor."
-           *     }
-           */
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Caller lacks retention_manage (`retention_permission_required`), or used an API key: retention is changed or stopped by signed-in people only (`retention_person_required`). */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          /**
-           * @example {
-           *       "code": "retention_permission_required",
-           *       "eneo_error_code": 9001,
-           *       "message": "Need permission retention_manage."
-           *     }
-           */
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Flow not found in the administrator's Organization. */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          /**
-           * @example {
-           *       "code": "not_found",
-           *       "eneo_error_code": 9000,
-           *       "message": "Flow not found."
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];
@@ -78384,217 +77958,6 @@ export interface operations {
       };
     };
   };
-  list_organization_flow_run_retention_review_queue: {
-    parameters: {
-      query?: {
-        limit?: number;
-        /** @description Opaque cursor returned as next_cursor by the previous page. */
-        cursor?: string | null;
-      };
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["FlowRunRetentionReviewPage"];
-        };
-      };
-      /** @description The Flow retention review cursor is malformed or unsupported. */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          /**
-           * @example {
-           *       "code": "invalid_flow_retention_review_cursor",
-           *       "eneo_error_code": 9007,
-           *       "message": "Invalid Flow retention review cursor."
-           *     }
-           */
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Caller lacks retention_manage (`retention_permission_required`), or used an API key: retention is changed or stopped by signed-in people only (`retention_person_required`). */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          /**
-           * @example {
-           *       "code": "retention_permission_required",
-           *       "eneo_error_code": 9001,
-           *       "message": "Need permission retention_manage."
-           *     }
-           */
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-    };
-  };
-  get_space_flow_run_retention_policy: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        space_id: string;
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["FlowRunRetentionPolicySettings"];
-        };
-      };
-      /** @description Caller lacks retention_manage or retention_holds (`retention_permission_required`), or used an API key: retention is changed or stopped by signed-in people only (`retention_person_required`). */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          /**
-           * @example {
-           *       "code": "retention_permission_required",
-           *       "eneo_error_code": 9001,
-           *       "message": "Need permission retention_manage or retention_holds."
-           *     }
-           */
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Space not found in the administrator's Organization. */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          /**
-           * @example {
-           *       "code": "not_found",
-           *       "eneo_error_code": 9000,
-           *       "message": "Space not found."
-           *     }
-           */
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-    };
-  };
-  replace_space_flow_run_retention_policy: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        space_id: string;
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["FlowRunRetentionPolicyReplaceRequest"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["FlowRunRetentionPolicySettings"];
-        };
-      };
-      /** @description Caller lacks retention_manage (`retention_permission_required`), or used an API key: retention is changed or stopped by signed-in people only (`retention_person_required`). */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          /**
-           * @example {
-           *       "code": "retention_permission_required",
-           *       "eneo_error_code": 9001,
-           *       "message": "Need permission retention_manage."
-           *     }
-           */
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Space not found in the administrator's Organization. */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          /**
-           * @example {
-           *       "code": "not_found",
-           *       "eneo_error_code": 9000,
-           *       "message": "Space not found."
-           *     }
-           */
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Another retention change or history deletion held the retention lock too long (`flow_retention_lock_busy`). Nothing changed; retry. */
-      409: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          /**
-           * @example {
-           *       "code": "flow_retention_lock_busy",
-           *       "eneo_error_code": 9073,
-           *       "message": "Flow history retention is busy with another change or deletion."
-           *     }
-           */
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-    };
-  };
   purge_space_flow_run_history: {
     parameters: {
       query?: never;
@@ -78662,89 +78025,6 @@ export interface operations {
            *       "code": "flow_retention_lock_busy",
            *       "eneo_error_code": 9073,
            *       "message": "Flow history retention is busy with another change or deletion."
-           *     }
-           */
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-    };
-  };
-  list_space_flow_run_retention_review_queue: {
-    parameters: {
-      query?: {
-        limit?: number;
-        /** @description Opaque cursor returned as next_cursor by the previous page. */
-        cursor?: string | null;
-      };
-      header?: never;
-      path: {
-        space_id: string;
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["FlowRunRetentionReviewPage"];
-        };
-      };
-      /** @description The Flow retention review cursor is malformed or unsupported. */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          /**
-           * @example {
-           *       "code": "invalid_flow_retention_review_cursor",
-           *       "eneo_error_code": 9007,
-           *       "message": "Invalid Flow retention review cursor."
-           *     }
-           */
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Caller lacks retention_manage (`retention_permission_required`), or used an API key: retention is changed or stopped by signed-in people only (`retention_person_required`). */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          /**
-           * @example {
-           *       "code": "retention_permission_required",
-           *       "eneo_error_code": 9001,
-           *       "message": "Need permission retention_manage."
-           *     }
-           */
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Space not found in the administrator's Organization. */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          /**
-           * @example {
-           *       "code": "not_found",
-           *       "eneo_error_code": 9000,
-           *       "message": "Space not found."
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];
@@ -80855,6 +80135,15 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };

@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
+import { useAppContext } from "@/components/providers/app-context";
 import {
   QueryAppContextProvider,
   type AppContextEnv
 } from "@/components/providers/app-context-from-queries";
-import { FlowRetentionPage } from "@/features/admin/flow-retention/flow-retention-page";
 import type { EneoClient } from "@/lib/api/browser";
 import { loadSession } from "@/lib/api/session";
 import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
@@ -35,13 +35,6 @@ const env: AppContextEnv = {
   backendVersion: "1.2.3"
 };
 const answered = (data: unknown) => Promise.resolve({ data, response: new Response("{}") });
-const policy = {
-  scope: "organization",
-  scope_id: "tenant-1",
-  local_policy: { days: 60, mode: "preserve" },
-  inherited_policy: null,
-  effective: { state: "off", source: "none", contributors: {} }
-};
 
 // The backend's state: the signed-in user's only role, as the role editor changes it.
 let ownRole: { id: string; name: string; permissions: string[]; predefined_source: string };
@@ -65,16 +58,7 @@ beforeEach(() => {
         name,
         description: name
       })),
-    "/api/v1/roles/templates/": () => [{ name: "Owner", permissions: TEMPLATE }],
-    "/api/v1/settings/flow-run-retention-policy": () => policy,
-    "/api/v1/settings/flow-run-retention-policy/targets/spaces": () => ({
-      items: [],
-      has_more: false
-    }),
-    "/api/v1/settings/flow-retention-policy": () => ({
-      run_debug_evidence_days: 30,
-      flow_runtime_upload_abandonment_days: null
-    })
+    "/api/v1/roles/templates/": () => [{ name: "Owner", permissions: TEMPLATE }]
   };
   backend.GET.mockImplementation((path: string) => answered(routes[path]!()));
   backend.POST.mockImplementation(
@@ -84,8 +68,12 @@ beforeEach(() => {
       return answered(structuredClone(ownRole));
     }
   );
-  backend.PUT.mockImplementation(() => answered({ ...policy, local_policy: null }));
 });
+
+/** What a screen that asks for retention_manage sees, such as a space's time. */
+function ManagesRetention() {
+  return <p>{useAppContext().can("retention_manage") ? "manages" : "does not manage"}</p>;
+}
 
 async function renderAdmin() {
   const queryClient = testQueryClient();
@@ -93,17 +81,15 @@ async function renderAdmin() {
   renderInApp(
     <QueryAppContextProvider env={env}>
       <RolesPage />
-      <FlowRetentionPage />
+      <ManagesRetention />
     </QueryAppContextProvider>,
     { queryClient }
   );
 }
 
-const noAccess = "Du har inte behörighet att se gallringsreglerna.";
-
-it("lets an administrator grant their own role retention_manage, change a rule and lose it on a reset, without a reload", async () => {
+it("lets an administrator grant their own role retention_manage and lose it on a reset, without a reload", async () => {
   await renderAdmin();
-  expect(await screen.findByText(noAccess)).toBeTruthy();
+  expect(await screen.findByText("does not manage")).toBeTruthy();
 
   const row = (await screen.findByText("Ägare")).closest("article")!;
   fireEvent.click(within(row).getByRole("button", { name: /Redigera/ }));
@@ -111,14 +97,8 @@ it("lets an administrator grant their own role retention_manage, change a rule a
   fireEvent.click(within(dialog).getByRole("checkbox", { name: /^Gallring – hantera regler/ }));
   fireEvent.click(within(dialog).getByRole("button", { name: "Spara ändringar" }));
 
-  // The page follows the new grant: the rules load and can be changed.
-  const none = await screen.findByRole("radio", { name: /^Ingen gallringstid/ });
-  expect((none as HTMLInputElement).disabled).toBe(false);
-  expect(screen.queryByText(noAccess)).toBeNull();
-  fireEvent.click(none);
-  fireEvent.click(screen.getAllByRole("button", { name: "Spara inställningar" })[0]!);
-  await waitFor(() => expect(backend.PUT).toHaveBeenCalledTimes(1));
-  expect(backend.PUT.mock.calls[0]![1].body).toEqual({ policy: null });
+  // The session follows the new grant.
+  expect(await screen.findByText("manages")).toBeTruthy();
 
   // Resetting the role to its template takes the grant away again.
   const trigger = within(row).getByRole("button", { name: "Fler åtgärder för Ägare" });
@@ -130,6 +110,5 @@ it("lets an administrator grant their own role retention_manage, change a rule a
     within(screen.getByRole("alertdialog")).getByRole("button", { name: "Återställ" })
   );
 
-  expect(await screen.findByText(noAccess)).toBeTruthy();
-  expect(screen.queryByRole("radio")).toBeNull();
+  expect(await screen.findByText("does not manage")).toBeTruthy();
 });

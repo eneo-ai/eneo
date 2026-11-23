@@ -2,139 +2,60 @@ import { Button } from "@astryxdesign/core/Button";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
 import { NumberInput } from "@astryxdesign/core/NumberInput";
-import { RadioList, RadioListItem } from "@astryxdesign/core/RadioList";
-import { Selector } from "@astryxdesign/core/Selector";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useId, useState } from "react";
 import { useTranslations } from "use-intl";
 import { LoadingState } from "@/components/composites/loading-state";
 import { ListError } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
-import { unwrap } from "@/lib/api/errors";
+import { EneoApiError, unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import { toastApiError } from "@/lib/api/toast";
 import { usePhoneScreen } from "@/lib/hooks/use-media-match";
 import { toast } from "@/lib/toast";
 import { flowKeys, type FlowPublic } from "./flows-api";
 
-type Policy = Schema<"FlowRunRetentionPolicy">;
-type Mode = Policy["mode"];
-
 /** The backend's bounds (MIN_RETENTION_DAYS, MAX_RETENTION_DAYS); it checks them again. */
 const MIN_DAYS = 1;
 const MAX_DAYS = 2555;
-const MODES: Record<
-  Mode,
-  "flows_retention_mode_preserve" | "flows_retention_mode_review_required"
-> = {
-  preserve: "flows_retention_mode_preserve",
-  review_required: "flows_retention_mode_review_required"
-};
 
 const policyKey = (flowId: string) => ["flows", "retention", flowId] as const;
-
-export type RetentionDraft = { own: boolean; days: number | null; mode: Mode };
-
-/** A form's starting point: the scope's own policy, or what it inherits to start from. */
-export function retentionDraft(settings: Schema<"FlowRunRetentionPolicySettings">): RetentionDraft {
-  const start = settings.local_policy ?? settings.inherited_policy;
-  return {
-    own: settings.local_policy !== null,
-    days: start?.days ?? null,
-    mode: start?.mode ?? "review_required"
-  };
-}
 
 export function retentionDaysValid(days: number | null): days is number {
   return days !== null && Number.isInteger(days) && days >= MIN_DAYS && days <= MAX_DAYS;
 }
 
+/** The space's cap from a 9086 refusal, or null for any other error. */
+function refusedCap(error: unknown): number | null {
+  if (!(error instanceof EneoApiError) || error.code !== 9086) return null;
+  const { cap_days: days, cap_origin: origin } = error.context ?? {};
+  return origin === "space" && typeof days === "number" ? days : null;
+}
+
 /**
- * The choice every level of retention has: nothing of its own, or a period. `refused`
- * says the form was sent without valid days, which is when the field says so.
+ * What applies to the flow's run history, in a line: the days and where from. A saved
+ * flow time longer than the space's is shown too, since the space's shorter time wins.
  */
-export function RetentionFields({
-  draft,
-  onChange,
-  refused,
-  noneLabel,
-  noneDescription,
-  ownLabel,
-  isDisabled = false
-}: {
-  draft: RetentionDraft;
-  onChange: (next: RetentionDraft) => void;
-  refused: boolean;
-  noneLabel: string;
-  noneDescription: string;
-  ownLabel: string;
-  isDisabled?: boolean;
-}) {
+export function FlowRetentionSummary({ flow }: { flow: FlowPublic }) {
   const t = useTranslations();
+  const retention = flow.run_history_retention;
+  if (retention.state === "off") return <>{t("flows_retention_off")}</>;
+  const saved = retention.contributors.flow?.days;
   return (
     <>
-      <RadioList
-        isDisabled={isDisabled}
-        label={t("flows_retention_choice_label")}
-        value={draft.own ? "own" : "none"}
-        onChange={(value) => onChange({ ...draft, own: value === "own" })}
-      >
-        <RadioListItem value="none" label={noneLabel} description={noneDescription} />
-        <RadioListItem value="own" label={ownLabel} />
-      </RadioList>
-      {draft.own ? (
-        <>
-          <NumberInput
-            isDisabled={isDisabled}
-            label={t("flows_retention_days_label")}
-            value={draft.days}
-            onChange={(days) => onChange({ ...draft, days })}
-            min={MIN_DAYS}
-            max={MAX_DAYS}
-            isRequired
-            status={
-              retentionDaysValid(draft.days) || !refused
-                ? undefined
-                : {
-                    type: "error",
-                    message: t("flows_retention_days_range", { min: MIN_DAYS, max: MAX_DAYS })
-                  }
-            }
-          />
-          <Selector
-            isDisabled={isDisabled}
-            label={t("flows_retention_mode_label")}
-            value={draft.mode}
-            onChange={(mode) => onChange({ ...draft, mode: mode as Mode })}
-            options={(Object.keys(MODES) as Mode[]).map((value) => ({
-              value,
-              label: t(MODES[value])
-            }))}
-          />
-        </>
+      {t("flows_retention_days", { days: retention.effective_days })},{" "}
+      {t(`flows_retention_source_${retention.source}`)}
+      {saved !== undefined && saved > retention.effective_days ? (
+        <span className="text-ax-text-secondary mt-0.5 block text-sm">
+          {t("flows_retention_longer_saved", { days: saved })}
+        </span>
       ) : null}
     </>
   );
 }
 
-/** What applies to the flow's run history, in a line: the days, what follows and where from. */
-export function FlowRetentionSummary({ flow }: { flow: FlowPublic }) {
-  const t = useTranslations();
-  const retention = flow.run_history_retention;
-  if (retention.state === "off") return <>{t("flows_retention_off")}</>;
-  return (
-    <>
-      {t("flows_retention_days", { days: retention.effective_days })},{" "}
-      {t(`flows_retention_source_${retention.source}`)}
-      <span className="text-ax-text-secondary mt-0.5 block text-sm">
-        {t(MODES[retention.mode])}
-      </span>
-    </>
-  );
-}
-
 /**
- * The flow's own retention, or none to inherit. It has an endpoint of its own and
+ * The flow's own time, or none to use the space's. It has an endpoint of its own and
  * stays open on a published flow: it changes when runs may be purged, not the
  * definition, so it is no part of the settings form. Saving deletes nothing.
  */
@@ -213,16 +134,19 @@ function RetentionForm({
   const t = useTranslations();
   const formId = useId();
   const queryClient = useQueryClient();
-  const inherited = settings.inherited_policy;
-  const [draft, setDraft] = useState(() => retentionDraft(settings));
+  const spaceDays = settings.inherited_policy?.days ?? null;
+  const savedDays = settings.local_policy?.days ?? null;
+  const [days, setDays] = useState(savedDays);
   const [refused, setRefused] = useState(false);
+  // The cap a refusal named; it may be newer than the one this form read.
+  const [cap, setCap] = useState<number | null>(null);
 
   const save = useMutation({
-    mutationFn: () =>
+    mutationFn: (sent: number | null) =>
       unwrap(
         browserApi.PUT("/api/v1/settings/flow-run-retention-policy/flows/{flow_id}", {
           params: { path: { flow_id: flow.id } },
-          body: { policy: draft.own ? { days: draft.days!, mode: draft.mode } : null }
+          body: { policy: sent === null ? null : { days: sent } }
         })
       ),
     onSuccess: (saved) => {
@@ -233,8 +157,27 @@ function RetentionForm({
       toast.success(t("flows_retention_saved"));
       onClose();
     },
-    onError: (error) => toastApiError(error, t)
+    onError: (error) => {
+      const refusedAt = refusedCap(error);
+      if (refusedAt === null) toastApiError(error, t);
+      setCap(refusedAt);
+    }
   });
+
+  const problem =
+    refused && days !== null && !retentionDaysValid(days)
+      ? t("flows_retention_days_range", { min: MIN_DAYS, max: MAX_DAYS })
+      : cap !== null
+        ? t("flows_retention_cap_space", { days: cap })
+        : undefined;
+  const applies =
+    days !== null
+      ? spaceDays !== null && days === savedDays && days > spaceDays
+        ? t("flows_retention_longer_saved", { days })
+        : undefined
+      : spaceDays !== null
+        ? t("flows_retention_applies_space", { days: spaceDays })
+        : t("flows_retention_applies_none");
 
   return (
     <Layout
@@ -256,21 +199,22 @@ function RetentionForm({
             onSubmit={(event) => {
               event.preventDefault();
               if (save.isPending) return;
-              if (!draft.own || retentionDaysValid(draft.days)) save.mutate();
+              if (days === null || retentionDaysValid(days)) save.mutate(days);
               else setRefused(true);
             }}
           >
-            <RetentionFields
-              draft={draft}
-              onChange={setDraft}
-              refused={refused}
-              noneLabel={t("flows_retention_inherit")}
-              noneDescription={
-                inherited
-                  ? t("flows_retention_inherit_policy", { days: inherited.days })
-                  : t("flows_retention_inherit_none")
-              }
-              ownLabel={t("flows_retention_own")}
+            <NumberInput
+              label={t("flows_retention_days_label")}
+              description={applies}
+              value={days}
+              onChange={(next) => {
+                setDays(next);
+                setCap(null);
+              }}
+              min={MIN_DAYS}
+              max={MAX_DAYS}
+              hasClear
+              status={problem ? { type: "error", message: problem } : undefined}
             />
           </form>
         </LayoutContent>
