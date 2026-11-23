@@ -15,7 +15,8 @@ async function providerModel(
   page: Page,
   type: "vllm" | "openai",
   kind: "transcription" | "completion",
-  model: object
+  model: object,
+  config: object = { endpoint: "http://e2e-mock-model:8200/v1" }
 ) {
   await page.goto("/admin/models");
   const providerName = uniqueName(`E2E ${type}`);
@@ -24,7 +25,7 @@ async function providerModel(
     name: providerName,
     provider_type: type,
     credentials: { api_key: "e2e-capability-fixture" },
-    config: { endpoint: "http://e2e-mock-model:8200/v1" }
+    config
   });
   await apiPost(page, `/admin/tenant-models/${kind}/`, {
     provider_id: providerId,
@@ -50,7 +51,7 @@ async function save(dialog: Locator) {
 }
 
 test(
-  "an admin turns live transcription on and off for a vLLM transcription model",
+  "an admin turns live text on and off for a vLLM transcription model",
   { tag: "@vite" },
   async ({ page }) => {
     const { provider, open, edit } = await providerModel(page, "vllm", "transcription", {
@@ -58,42 +59,63 @@ test(
       supports_realtime: false
     });
     let details = await open();
-    await expect(detailValue(details, "Livetranskribering")).toHaveText("Nej");
+    await expect(detailValue(details, "Livetext")).toHaveText("Nej");
     await page.keyboard.press("Escape");
 
     let form = await edit();
-    await form.getByRole("switch", { name: "Livetranskribering", exact: true }).check();
+    await form.getByRole("switch", { name: "Livetext", exact: true }).check();
     await save(form);
     // The backend accepted it for a vLLM provider and returns it.
     // The row lists its capabilities twice (column and under the name); the width shows one.
     await expect(
-      provider.getByText("Livetranskribering", { exact: true }).filter({ visible: true })
+      provider.getByText("Livetext", { exact: true }).filter({ visible: true })
     ).toBeVisible();
     details = await open();
-    await expect(detailValue(details, "Livetranskribering")).toHaveText("Ja");
+    await expect(detailValue(details, "Livetext")).toHaveText("Ja");
     await page.keyboard.press("Escape");
 
     form = await edit();
-    await form.getByRole("switch", { name: "Livetranskribering", exact: true }).uncheck();
+    await form.getByRole("switch", { name: "Livetext", exact: true }).uncheck();
     await save(form);
     details = await open();
-    await expect(detailValue(details, "Livetranskribering")).toHaveText("Nej");
+    await expect(detailValue(details, "Livetext")).toHaveText("Nej");
   }
 );
 
 test(
-  "live transcription cannot be turned on for a provider that is not vLLM",
+  "an admin turns live text on for a gateway registered as OpenAI",
   { tag: "@vite" },
   async ({ page }) => {
-    const { edit } = await providerModel(page, "openai", "transcription", {
-      name: uniqueName("e2e-whisper")
+    const { open, edit } = await providerModel(page, "openai", "transcription", {
+      name: uniqueName("e2e-gateway"),
+      supports_realtime: false
     });
     const form = await edit();
+    await form.getByRole("switch", { name: "Livetext", exact: true }).check();
+    await save(form);
+    const details = await open();
+    await expect(detailValue(details, "Livetext")).toHaveText("Ja");
+  }
+);
+
+test(
+  "live text cannot be turned on for an OpenAI provider without a server address",
+  { tag: "@vite" },
+  async ({ page }) => {
+    const { edit } = await providerModel(
+      page,
+      "openai",
+      "transcription",
+      { name: uniqueName("e2e-whisper") },
+      {}
+    );
+    const form = await edit();
+    await expect(form.getByRole("switch", { name: "Livetext", exact: true })).toBeDisabled();
     await expect(
-      form.getByRole("switch", { name: "Livetranskribering", exact: true })
-    ).toBeDisabled();
-    await expect(
-      form.getByText("Kräver en leverantör av typen vLLM.", { exact: true })
+      form.getByText(
+        "Ange adressen till servern eller gatewayen på leverantören. OpenAI:s egen tjänst har inte vLLM:s realtids-API.",
+        { exact: true }
+      )
     ).toBeVisible();
   }
 );
