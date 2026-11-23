@@ -7,7 +7,13 @@ from uuid import uuid4
 import pytest
 from arq.worker import Function, create_worker
 
-from eneo.jobs.job_manager import CRAWLER_QUEUE_NAME, DEFAULT_QUEUE_NAME
+from eneo.apps.app_runs.app_run_dispatch import claim_app_job
+from eneo.jobs.job_manager import (
+    CRAWLER_QUEUE_NAME,
+    DEFAULT_QUEUE_NAME,
+    DURABLE_APP_FUNCTION,
+)
+from eneo.jobs.job_models import JobFailureCode, Task
 from eneo.main.config import get_settings
 from eneo.websites.application.crawl_dispatch import CrawlReconciliationResult
 from eneo.worker import arq as worker_arq
@@ -50,6 +56,16 @@ def test_arq_constructs_crawler_with_shared_runtime_settings() -> None:
     assert crawler.job_serializer is general.job_serializer
     assert crawler.job_deserializer is general.job_deserializer
     assert crawler.functions["crawl"].keep_result_s == 0
+
+
+@pytest.mark.parametrize("name", [Task.RUN_APP.value, DURABLE_APP_FUNCTION])
+def test_arq_registers_app_deliveries_without_replay_or_result_retention(
+    name: str,
+) -> None:
+    function = create_worker(WorkerSettings).functions[name]
+
+    assert function.max_tries == 1
+    assert function.keep_result_s == 0
 
 
 async def test_crawler_startup_cleans_orphans_before_runtime_start(
@@ -237,3 +253,206 @@ def test_job_id_from_ctx_parses_uuid_strings():
 
 def test_job_id_from_ctx_returns_none_for_invalid_ids():
     assert _job_id_from_ctx({"job_id": "arq:cron:job"}) is None
+
+
+class _AsyncContext:
+    def __init__(self, value: Any = None, exit_error: Exception | None = None):
+        self.value = value
+        self.exit_error = exit_error
+        self.committed = False
+        self.rolled_back = False
+
+    async def __aenter__(self) -> Any:
+        return self.value
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        if exc_type is not None:
+            self.rolled_back = True
+            return
+        if self.exit_error is not None:
+            self.rolled_back = True
+            raise self.exit_error
+        self.committed = True
+
+
+async def test_commit_failure_records_the_job_failure_in_a_fresh_session(
+    monkeypatch,
+) -> None:
+    """A guard raised at commit time must not leave the job pending."""
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from eneo.worker import worker as worker_module
+    from eneo.worker.task_manager import TaskManager
+
+    job_id = uuid4()
+    sessions: list[_AsyncContext] = [
+        _AsyncContext(),
+        _AsyncContext(exit_error=RuntimeError("storage quota exceeded")),
+        _AsyncContext(),
+    ]
+
+    def session() -> _AsyncContext:
+        db = MagicMock()
+        db.begin.return_value = sessions.pop(0)
+        return _AsyncContext(db)
+
+    monkeypatch.setattr(
+        worker_module, "sessionmanager", SimpleNamespace(session=session)
+    )
+
+    task_job_service = AsyncMock()
+    task_manager = TaskManager(
+        user=MagicMock(), job_id=job_id, job_service=task_job_service
+    )
+    task_container = MagicMock()
+    task_container.task_manager.return_value = task_manager
+    monkeypatch.setattr(
+        worker_module.JobRepository, "mark_job_started", AsyncMock(return_value=True)
+    )
+    task_container.job_repo.return_value.touch_job = AsyncMock(return_value=True)
+    recovery_container = MagicMock()
+    recovery_container.job_service.return_value = AsyncMock()
+    containers = [task_container, recovery_container]
+
+    async def create_container(session, user_id=None):
+        return containers.pop(0)
+
+    worker = worker_module.Worker()
+    monkeypatch.setattr(worker, "_create_container", create_container)
+
+    async def body(params, container):
+        return "done"
+
+    wrapper = worker.task(claim_before_run=claim_app_job)(body)
+    params = SimpleNamespace(user_id=uuid4(), id=uuid4())
+
+    with pytest.raises(RuntimeError, match="storage quota exceeded"):
+        await wrapper({"job_id": str(job_id)}, params)
+
+    # The task body succeeded inside the transaction that was then lost...
+    task_job_service.complete_job.assert_awaited_once_with(job_id, "done")
+    # ...so the failure is written where it survives, as its code.
+    recovery_container.job_service.return_value.fail_job.assert_awaited_once_with(
+        job_id, failure_code=JobFailureCode.PROCESSING_FAILED, only_if_queued=False
+    )
+
+
+async def test_cancelled_task_records_cancelled_in_fresh_session_after_rollback(
+    monkeypatch,
+) -> None:
+    """Cancelling a @worker.task rolls back its transaction (including the inner
+    fail_job write), so the CANCELLED status must be committed in a fresh
+    session before CancelledError is re-raised to ARQ."""
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from eneo.main.models import ChannelType
+    from eneo.worker import task_manager as task_manager_module
+    from eneo.worker import worker as worker_module
+    from eneo.worker.task_manager import TaskManager
+
+    job_id = uuid4()
+    run_id = uuid4()
+    user_id = uuid4()
+    claim_tx, task_tx, failure_tx = _AsyncContext(), _AsyncContext(), _AsyncContext()
+    pending = [claim_tx, task_tx, failure_tx]
+
+    def session() -> _AsyncContext:
+        db = MagicMock()
+        db.begin.return_value = pending.pop(0)
+        return _AsyncContext(db)
+
+    monkeypatch.setattr(
+        worker_module, "sessionmanager", SimpleNamespace(session=session)
+    )
+    published_when_recovery_committed: list[bool] = []
+
+    async def fake_publish(_channel: str, _payload: str) -> None:
+        published_when_recovery_committed.append(failure_tx.committed)
+
+    monkeypatch.setattr(task_manager_module, "r", SimpleNamespace(publish=fake_publish))
+
+    task_job_service = AsyncMock()
+    task_manager = TaskManager(
+        user=MagicMock(id=user_id),
+        job_id=job_id,
+        job_service=task_job_service,
+        channel_type=ChannelType.APP_RUN_UPDATES,
+        resource_id=run_id,
+    )
+    task_container = MagicMock()
+    task_container.task_manager.return_value = task_manager
+    monkeypatch.setattr(
+        worker_module.JobRepository, "mark_job_started", AsyncMock(return_value=True)
+    )
+    task_container.job_repo.return_value.touch_job = AsyncMock(return_value=True)
+    recovery_container = MagicMock()
+    recovery_container.job_service.return_value = AsyncMock()
+    containers = [task_container, recovery_container]
+
+    async def create_container(session, user_id=None):
+        return containers.pop(0)
+
+    worker = worker_module.Worker()
+    monkeypatch.setattr(worker, "_create_container", create_container)
+
+    started = asyncio.Event()
+
+    async def body(params, container):
+        started.set()
+        await asyncio.Event().wait()
+
+    wrapper = worker.task(
+        channel_type=ChannelType.APP_RUN_UPDATES, claim_before_run=claim_app_job
+    )(body)
+    params = SimpleNamespace(user_id=user_id, id=run_id)
+
+    running = asyncio.create_task(wrapper({"job_id": str(job_id)}, params))
+    await started.wait()
+    running.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await running
+
+    assert claim_tx.committed is True
+    assert task_tx.rolled_back is True
+    assert task_tx.committed is False
+    assert failure_tx.committed is True
+    recovery_container.job_service.return_value.fail_job.assert_awaited_once_with(
+        job_id, failure_code=JobFailureCode.CANCELLED, only_if_queued=False
+    )
+    assert published_when_recovery_committed[-1] is True
+
+
+async def test_immediate_dispatch_does_not_require_a_committed_job_row(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from eneo.main.models import Status
+    from eneo.worker import worker as worker_module
+    from eneo.worker.task_manager import TaskManager
+
+    job_id = uuid4()
+    db = MagicMock()
+    db.begin.return_value = _AsyncContext()
+    monkeypatch.setattr(
+        worker_module.sessionmanager, "session", lambda: _AsyncContext(db)
+    )
+    job_service = AsyncMock()
+    container = MagicMock()
+    container.job_repo.return_value.mark_job_started = AsyncMock(return_value=False)
+    container.task_manager.return_value = TaskManager(
+        user=MagicMock(), job_id=job_id, job_service=job_service
+    )
+    worker = worker_module.Worker()
+    monkeypatch.setattr(worker, "_create_container", AsyncMock(return_value=container))
+
+    async def integration(params, container):
+        return "/integration-result"
+
+    params = SimpleNamespace(user_id=uuid4(), id=uuid4())
+    assert await worker.task()(integration)({"job_id": str(job_id)}, params)
+    container.job_repo.return_value.mark_job_started.assert_not_awaited()
+    job_service.set_status.assert_awaited_once_with(job_id, Status.IN_PROGRESS)
+    job_service.complete_job.assert_awaited_once_with(job_id, "/integration-result")

@@ -14,6 +14,7 @@ from eneo.authentication.endpoint_access import (
     endpoint_access,
 )
 from eneo.main.container.container import Container
+from eneo.main.models import Status
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 
@@ -41,7 +42,16 @@ async def get_app_run(
 
     app_run = await service.get_app_run(id)
 
-    return assembler.from_app_run_to_model(app_run)
+    files = None
+    if (
+        app_run.input_files
+        and app_run.job
+        and app_run.job.status in (Status.IN_PROGRESS, Status.COMPLETE, Status.FAILED)
+    ):
+        files = await container.file_service().get_public_files_by_ids(
+            [file.id for file in app_run.input_files]
+        )
+    return assembler.from_app_run_to_model(app_run, files=files)
 
 
 @router.delete(

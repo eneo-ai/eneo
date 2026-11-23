@@ -39,7 +39,7 @@ def _repo(session: Session, job_id: UUID) -> MagicMock:
     repo = MagicMock()
     repo.delegate.session.sync_session = session
     repo.add_job = AsyncMock()
-    repo.add_durable_knowledge_job = AsyncMock(
+    repo.add_durable_job = AsyncMock(
         return_value=JobInDb(
             id=job_id,
             user_id=TEST_USER.id,
@@ -241,7 +241,7 @@ async def test_durable_queue_rejects_creation_inside_savepoint() -> None:
                     task_params=_params(),
                 )
 
-    repo.add_durable_knowledge_job.assert_not_awaited()
+    repo.add_durable_job.assert_not_awaited()
 
 
 async def test_immediate_session_reuse_dispatches_exactly_once(monkeypatch) -> None:
@@ -277,7 +277,7 @@ async def test_durable_queue_rejects_mismatched_user_before_persisting() -> None
             task_params=params,
         )
 
-    repo.add_durable_knowledge_job.assert_not_awaited()
+    repo.add_durable_job.assert_not_awaited()
 
 
 def test_durable_envelope_has_no_filesystem_path() -> None:

@@ -19,8 +19,11 @@ class AppRunAssembler:
 
         return None, None
 
-    def from_app_run_to_model(self, app_run: AppRun):
-        files = [self._to_file_public(file) for file in app_run.input_files]
+    def from_app_run_to_model(
+        self, app_run: AppRun, *, files: list[FilePublic] | None = None
+    ):
+        if files is None:
+            files = [self._to_file_public(file) for file in app_run.input_files]
         finished_at, status = self._get_job_fields(app_run.job)
         if app_run.id is None:
             raise ValueError("App run must have an id before assembly")

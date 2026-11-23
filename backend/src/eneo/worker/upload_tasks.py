@@ -302,12 +302,18 @@ async def _run_knowledge_heartbeat(
     job_id: UUID,
     owner_task: asyncio.Task[object],
 ) -> None:
-    while True:
+    heartbeat = asyncio.current_task()
+    assert heartbeat is not None
+    # Database cleanup may consume cancellation or replace it with an error.
+    # The stop request still belongs to this task; never start another beat.
+    while not heartbeat.cancelling():
         await asyncio.sleep(KNOWLEDGE_HEARTBEAT_INTERVAL_SECONDS)
         try:
             async with Container.session_scope():
                 lease_live = await container.job_repo().touch_job(job_id)
         except Exception as exc:
+            if heartbeat.cancelling():
+                raise asyncio.CancelledError from exc
             logger.warning(
                 "Knowledge job heartbeat failed",
                 extra={"job_id": str(job_id), "error": str(exc)},

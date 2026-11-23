@@ -179,19 +179,27 @@ describe("whatsNewStore", () => {
   it("isolates reminders by account and release, including newer versions and rollback", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-10-20T10:00:00Z"));
-    makeStore(null, "2.3.0-rc.1", true, "2.3.0-rc.1").store.snoozeLatest();
+    makeStore(null, `${version}-rc.1`, true, `${version}-rc.1`).store.snoozeLatest();
     expect(
-      makeStore(null, "2.3.0-rc.1", true, "2.3.0-rc.2").store.pendingAnnouncement()?.version
-    ).toBe("2.3.0-rc.2");
+      makeStore(null, `${version}-rc.1`, true, `${version}-rc.2`).store.pendingAnnouncement()
+        ?.version
+    ).toBe(`${version}-rc.2`);
     vi.setSystemTime(new Date("2026-10-21T10:00:00Z"));
     expect(
-      makeStore(null, "2.3.0-rc.1", true, "2.3.0-rc.1").store.pendingAnnouncement()?.version
-    ).toBe("2.3.0-rc.1");
+      makeStore(null, `${version}-rc.1`, true, `${version}-rc.1`).store.pendingAnnouncement()
+        ?.version
+    ).toBe(`${version}-rc.1`);
     expect(
-      makeStore(null, "2.3.0-rc.1", true, "2.3.0-rc.1", "user-2").store.pendingAnnouncement()
+      makeStore(
+        null,
+        `${version}-rc.1`,
+        true,
+        `${version}-rc.1`,
+        "user-2"
+      ).store.pendingAnnouncement()
     ).toBeNull();
     expect(
-      makeStore(null, "2.3.0-rc.2", true, "2.3.0-rc.1").store.pendingAnnouncement()
+      makeStore(null, `${version}-rc.2`, true, `${version}-rc.1`).store.pendingAnnouncement()
     ).toBeNull();
   });
 
@@ -256,7 +264,7 @@ describe("whatsNewStore", () => {
   it("announces every RC and the final once, and keeps read progress independent", async () => {
     let seen: Marker = "2.2.0";
     let announced: Marker = "2.2.0";
-    for (const installed of ["2.3.0-rc.0", "2.3.0-rc.1", "2.3.0-rc.10", "2.3.0"]) {
+    for (const installed of [`${version}-rc.0`, `${version}-rc.1`, `${version}-rc.10`, version]) {
       const { store, client } = makeStore(seen, announced, true, installed);
       expect(store.pendingAnnouncement()?.version).toBe(installed);
       expect(get(store.hasUnseen)).toBe(true);
@@ -273,8 +281,8 @@ describe("whatsNewStore", () => {
   });
 
   it("does not announce an older RC or move markers backwards after rollback", async () => {
-    for (const recorded of ["2.3.0-rc.10", "2.3.0"]) {
-      const { store, client } = makeStore(recorded, recorded, true, "2.3.0-rc.1");
+    for (const recorded of [`${version}-rc.10`, version]) {
+      const { store, client } = makeStore(recorded, recorded, true, `${version}-rc.1`);
       expect(store.pendingAnnouncement()).toBeNull();
       expect(get(store.hasUnseen)).toBe(false);
       await store.markLatestSeen();

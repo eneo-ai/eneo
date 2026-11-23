@@ -18,7 +18,9 @@ class Jobs(BasePublic):
     failure_code: Mapped[Optional[str]] = mapped_column(String(64))
     name: Mapped[Optional[str]] = mapped_column()
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
-    dispatch_envelope: Mapped[Optional[dict[str, object]]] = mapped_column(JSONB)
+    dispatch_envelope: Mapped[Optional[dict[str, object]]] = mapped_column(
+        JSONB(none_as_null=True)
+    )
     dispatch_attempted_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True)
     )

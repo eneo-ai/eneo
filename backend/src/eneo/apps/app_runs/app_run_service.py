@@ -11,6 +11,7 @@ from eneo.completion_models.infrastructure.context_builder import count_tokens
 from eneo.files.file_service import FileService
 from eneo.jobs.job_models import Task
 from eneo.jobs.job_service import JobService
+from eneo.jobs.task_models import AppDispatchEnvelope
 from eneo.main.exceptions import (
     BadRequestException,
     NotFoundException,
@@ -69,9 +70,11 @@ class AppRunService:
                 id=app_run_in_db.id,
                 user_id=self.user.id,
                 file_ids=file_ids,
-                text=text,
+                text=None,
                 app_id=app.id,
             ),
+            after_commit=True,
+            dispatch_envelope=AppDispatchEnvelope(version=1, file_ids=file_ids),
         )
 
         app_run_in_db.update(job_id=job.id)
@@ -111,15 +114,13 @@ class AppRunService:
 
         await self.repo.delete(id)
 
-    async def run_app(
-        self, app_id: UUID, app_run_id: UUID, file_ids: list[UUID], text: str | None
-    ):
+    async def run_app(self, app_id: UUID, app_run_id: UUID, file_ids: list[UUID]):
         app_run = await self.get_app_run(app_run_id)
 
         execution: AppExecutionResult = await self.app_service.run_app(
             app_id,
             file_ids=file_ids,
-            text=text,
+            text=app_run.input_text,
             skill_provenance=app_run.skill_provenance,
         )
         response = execution.response
