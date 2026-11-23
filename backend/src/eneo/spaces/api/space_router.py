@@ -317,7 +317,12 @@ async def get_space(
 async def update_space(
     id: UUID,
     update_space_req: UpdateSpaceRequest,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    # A change of the space's time writes a required audit row; it must
+    # commit before the 200 is sent, not after.
+    container: Annotated[
+        Container,
+        Depends(get_container(with_user=True, transaction_scope="function")),
+    ],
 ):
     service = container.space_service()
     current_user = container.user()
