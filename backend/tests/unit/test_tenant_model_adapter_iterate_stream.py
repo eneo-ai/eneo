@@ -3958,13 +3958,95 @@ async def test_a_withheld_reused_id_takes_no_place_in_the_window(monkeypatch):
 
     manager.request_approval.assert_not_awaited()
     assert proxy.calls == [[("flows__read_flow", {"q": "y"})]]
-    # The decisions event lists only the call that ran; the group is refused.
+    # The group is refused first; the decisions event lists only the call
+    # that ran.
     assert _decided_calls(completions) == [
-        ("y", "flows__read_flow", "approved"),
-        ("y", "flows__read_flow", "succeeded"),
         ("x", "flows__read_flow", "denied"),
         ("x", "flows__run_flow", "denied"),
+        ("y", "flows__read_flow", "approved"),
+        ("y", "flows__read_flow", "succeeded"),
     ]
+
+
+@pytest.mark.parametrize(
+    ("can_ask", "needs_decision", "beside"),
+    [
+        (False, "flows__run_flow", "server__tool"),
+        (True, "server__tool", "flows__read_flow"),
+    ],
+    ids=["nobody_to_ask", "someone_to_ask"],
+)
+async def test_a_withheld_reused_id_is_denied_before_a_later_call_can_fail(
+    can_ask, needs_decision, beside
+):
+    """The calls withheld under a reused id are decided as soon as the round
+    is read. Their denials reach the chat and the widget audit before a later
+    call of the round can end the turn with an error, so neither shows them
+    as cut off."""
+    proxy = _ConfirmingMCPProxy()
+    manager = _decided()
+    widget = Widget.create(
+        tenant_id=uuid4(), space_id=uuid4(), target_id=uuid4(), name="Test"
+    )
+    widget.id = uuid4()
+    sink = AsyncMock()
+    audit = widget_ask_service.ExternalToolCallAudit(
+        sink,
+        widget,
+        visitor_id=uuid4(),
+        session_id=uuid4(),
+        question_id=None,
+        preview=False,
+    )
+    stream = PreparedModelStream(
+        stream=_AsyncChunkStream(
+            [
+                _tool_call_delta_chunk(
+                    index=0, tool_call_id="x", tool_name=needs_decision, arguments="{}"
+                ),
+                _tool_call_delta_chunk(
+                    index=1, tool_call_id="x", tool_name=beside, arguments="{}"
+                ),
+                _tool_call_delta_chunk(
+                    index=2,
+                    tool_call_id="y",
+                    tool_name=beside,
+                    arguments="not json",
+                    finish_reason="tool_calls",
+                ),
+            ]
+        ),
+        messages=[],
+        kwargs={},
+        mcp_proxy=proxy,
+        has_tools=True,
+    )
+    completions = []
+    async for event in _make_adapter().iterate_stream(
+        stream,
+        require_tool_approval=can_ask,
+        approval_manager=manager if can_ask else None,
+        approval_context=_approval_context() if can_ask else None,
+        pending_approval_ids=set(),
+    ):
+        completions.append(event)
+        await audit.observe(event)
+    await audit.settle()
+
+    # y's arguments end the turn with an error, after the denials.
+    assert completions[-1].response_type is ResponseType.ERROR
+    assert proxy.calls == []
+    manager.request_approval.assert_not_awaited()
+    assert _decided_calls(completions) == [
+        ("x", needs_decision, "denied"),
+        ("x", beside, "denied"),
+        ("y", beside, "approved"),
+    ]
+    assert [
+        entry.kwargs["metadata"]["tool_call_id"]
+        for entry in sink.log_async.await_args_list
+        if entry.kwargs["metadata"]["tool_call_id"] == "x"
+    ] == []
 
 
 async def test_the_model_reads_the_replies_in_the_order_of_its_calls(monkeypatch):

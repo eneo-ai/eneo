@@ -859,23 +859,49 @@ def _unasked_call_metadata(
     )
 
 
+def _answer_withheld_calls(
+    mcp_proxy: "MCPProxySession",
+    calls: list[_RoundCall],
+    *,
+    can_ask: bool,
+    replies: _Replies,
+) -> list[ToolCallMetadata]:
+    """Answer the calls of a streamed round withheld under a reused id
+    (_split_shared_id_calls).
+
+    Each gets its _withheld_result as the tool result in ``replies``. The
+    records returned show the reader that it was denied, with the same text.
+    """
+    records: list[ToolCallMetadata] = []
+    for tc, tool_metadata in calls:
+        payload = json.dumps(
+            _withheld_result(mcp_proxy, tc["function"]["name"], can_ask=can_ask)
+        )
+        replies[id(tc)] = {"role": "tool", "tool_call_id": tc["id"], "content": payload}
+        records.append(
+            replace(
+                tool_metadata, approved=False, result_status="denied", result=payload
+            )
+        )
+    return records
+
+
 def _answer_calls_not_run(
     *,
     replies: _Replies,
     denied: list[_RoundCall],
-    withheld: list[tuple[_RoundCall, dict[str, Any]]],
     over_limit: list[_RoundCall],
     decisions: dict[str, tuple[bool, str | None]],
     unasked_call_ids: set[str],
     confirmation_call_ids: set[str],
     timed_out: bool,
 ) -> list[ToolCallMetadata]:
-    """Answer the calls of a streamed round that did not run.
+    """Answer the calls of a streamed round that were decided and did not run.
 
     A call the person denied, or that nobody could be asked about, gets its
-    denial as the tool result; a call withheld under a reused id gets the
-    result it is paired with (_withheld_result); a call beyond a limit gets
-    the limit message.
+    denial as the tool result; a call beyond a limit gets the limit message.
+    The calls withheld under a reused id are answered earlier
+    (_answer_withheld_calls).
     The records returned show the reader what happened to each, built from
     the call's own parsed metadata.
     """
@@ -900,17 +926,6 @@ def _answer_calls_not_run(
                 approved=False,
                 result_status="timeout_denied" if timed_out else "denied",
                 result=json.dumps(denial_payload),
-            )
-        )
-    for (tc, tool_metadata), result in withheld:
-        payload = json.dumps(result)
-        replies[id(tc)] = {"role": "tool", "tool_call_id": tc["id"], "content": payload}
-        denied_metadata.append(
-            replace(
-                tool_metadata,
-                approved=False,
-                result_status="denied",
-                result=payload,
             )
         )
     denied_metadata.extend(_refuse_over_limit_calls(over_limit, replies=replies))
@@ -3670,15 +3685,19 @@ class TenantModelAdapter(CompletionModelAdapter):
                             mcp_proxy, call[1], require_tool_approval=asks_approval
                         ),
                     )
-                    withheld = [
-                        (
-                            (tc, metadata),
-                            _withheld_result(
-                                mcp_proxy, tc["function"]["name"], can_ask=can_ask
-                            ),
+                    replies: _Replies = {}
+                    # The withheld calls are decided now, so their denials
+                    # reach the reader before another call of the round can
+                    # end the turn with an error. Their replies wait for the
+                    # order of the calls.
+                    withheld_metadata = _answer_withheld_calls(
+                        mcp_proxy, withheld_calls, can_ask=can_ask, replies=replies
+                    )
+                    if withheld_metadata:
+                        yield Completion(
+                            response_type=ResponseType.TOOL_CALL,
+                            tool_calls_metadata=withheld_metadata,
                         )
-                        for tc, metadata in withheld_calls
-                    ]
                     window = call_budget.available if can_ask else len(tool_calls)
                     # The calls cut here are never decided: each ends as an
                     # over-limit record.
@@ -3832,7 +3851,6 @@ class TenantModelAdapter(CompletionModelAdapter):
                             }
                         )
 
-                    replies: _Replies = {}
                     # Execute approved tools
                     if approved_calls:
                         proxy_calls: list[tuple[str, dict[str, Any]]] = [
@@ -3924,7 +3942,6 @@ class TenantModelAdapter(CompletionModelAdapter):
                     denied_metadata = _answer_calls_not_run(
                         replies=replies,
                         denied=denied_calls,
-                        withheld=withheld,
                         over_limit=over_limit_calls,
                         decisions=decision_map,
                         unasked_call_ids=unasked_call_ids,
