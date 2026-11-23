@@ -306,3 +306,21 @@ async def test_a_change_waiting_on_another_compares_with_the_committed_time(
     assert sorted((a["previous_value"], a["new_value"]) for a in audits) == sorted(
         [(30, 3)] + ([(3, sent)] if sent != 3 else [])
     )
+
+
+async def test_a_personal_space_owner_still_cannot_change_its_time(
+    client, db_container, admin_user, patch_auth_service_jwt
+):
+    """A personal space has no admin to edit it, so its owner gains no right to
+    cap their flows, even with `retention_manage`."""
+    async with db_container() as container:
+        token = container.auth_service().create_access_token_for_user(admin_user)
+    headers = {"Authorization": f"Bearer {token}"}
+    personal = await client.get("/api/v1/spaces/type/personal/", headers=headers)
+    assert personal.status_code == 200, personal.text
+    space_id = personal.json()["id"]
+    refused = await client.patch(
+        f"/api/v1/spaces/{space_id}/", json={"data_retention_days": 7}, headers=headers
+    )
+    assert refused.status_code == 403, refused.text
+    assert (await _stored(db_container, UUID(space_id)))[1] is None
