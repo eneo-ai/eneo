@@ -226,11 +226,11 @@ def _add_file_ownership() -> None:
     Five steps still read the whole table: validating the two owner foreign keys
     and the two owner checks, and building the service-owner index. The user key
     must be validated because Postgres cannot change the ON DELETE rule of an
-    existing foreign key, so the CASCADE key is replaced by a RESTRICT one. The
-    migration chain runs in one transaction (``alembic/env.py``), so NOT VALID
-    followed by VALIDATE does not shorten the lock: ``files`` stays locked until
-    the upgrade commits. Upgrade with the application stopped; the cost is the
-    time these reads take.
+    existing foreign key, so the CASCADE key is replaced by a RESTRICT one. This
+    revision has no autocommit block, so its steps run in one transaction and
+    NOT VALID followed by VALIDATE does not shorten the lock: ``files`` stays
+    locked until that transaction commits. Upgrade with the application
+    stopped; the cost is the time these reads take.
     """
     logger = logging.getLogger("alembic.runtime.migration")
     op.add_column(

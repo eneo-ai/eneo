@@ -15,11 +15,15 @@ lose the origin. They have no index.
 
 Cost: adding nullable columns without a default changes only the catalogue.
 The check is added NOT VALID and then validated, which reads ``files`` once.
-The migration chain runs in one transaction (``alembic/env.py``), so this does
-not shorten the lock on ``files``; upgrade with the application stopped.
+This revision has no autocommit block, so its steps share one transaction and
+this does not shorten the lock on ``files``; upgrade with the application
+stopped.
 
 The downgrade drops the columns and the check, and with them every recorded
-origin. Upgrading again leaves those files with NULL.
+origin. Upgrading again leaves those files with NULL. A downgrade below
+``202608201100`` commits this drop when an autocommit block in a revision
+between the two begins, so if that downgrade is then refused (service-owned
+files exist), the origins are already gone.
 
 Revision ID: 202611181900
 Revises: 202611111000
