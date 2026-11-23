@@ -1139,7 +1139,8 @@ describe("the Leverans section's reader from a later prompt, while the prompts a
   it("keeps the reader on screen through the editor's own save", async () => {
     await renderPage("?step=step-1");
     expect(await within(await delivery()).findByText(reader)).toBeTruthy();
-    // Every render from the save to its settling shows the line.
+    // The save's answer reaches the form a moment before the page: the line is
+    // there each time the page has changed, from the save to its settling.
     let gone = false;
     const observer = new MutationObserver(() => {
       if (!document.body.textContent?.includes(reader)) gone = true;
