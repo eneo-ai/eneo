@@ -331,6 +331,84 @@ async def test_a_change_waiting_on_another_compares_with_the_committed_time(
     )
 
 
+def _record_space_updates(monkeypatch) -> list[dict]:
+    """The metadata of every `space_updated` the router queues, with the action
+    switched on."""
+    monkeypatch.setattr(
+        AuditService, "_should_log_action", AsyncMock(return_value=True)
+    )
+    recorded: list[dict] = []
+    log_async = AuditService.log_async
+
+    async def record(self, **kwargs):
+        if kwargs["action"].value == "space_updated":
+            recorded.append(kwargs["metadata"])
+        return await log_async(self, **kwargs)
+
+    monkeypatch.setattr(AuditService, "log_async", record)
+    return recorded
+
+
+@pytest.mark.parametrize("sent", [3, 5], ids=["the-new-time", "another-time"])
+async def test_the_space_update_event_carries_the_change_made_under_the_lock(
+    client,
+    db_container,
+    admin_user,
+    user_factory,
+    patch_auth_service_jwt,
+    monkeypatch,
+    sent,
+):
+    """B's PATCH reads 30 and waits while A changes it to 3. Mutant: the router
+    takes the change from its read before the lock, so `space_updated` says
+    30 -> 3 for a write B never made, or 30 -> 5 where the change is 3 -> 5."""
+    user, token, space_id = await _space_admin(
+        db_container, admin_user, user_factory, ["assistants", "retention_manage"]
+    )
+    recorded = _record_space_updates(monkeypatch)
+
+    async with db_container(user=user) as first:
+        await first.space_service().update_space(space_id, data_retention_days=3)
+        waiting = asyncio.create_task(
+            client.patch(
+                f"/api/v1/spaces/{space_id}/",
+                json={"data_retention_days": sent},
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        )
+        try:
+            await _wait_for_a_lock_waiter(db_container)
+        except BaseException:
+            waiting.cancel()
+            raise
+    response = await waiting
+    assert response.status_code == 200, response.text
+    [metadata] = recorded
+    changes = metadata.get("changes", {})
+    if sent == 3:
+        assert "data_retention_days" not in changes
+    else:
+        assert changes["data_retention_days"] == {"old": 3, "new": 5}
+
+
+async def test_the_space_update_event_still_carries_a_change_of_the_time(
+    client, db_container, admin_user, user_factory, patch_auth_service_jwt, monkeypatch
+):
+    """Mutant: the router leaves the time out of `space_updated` altogether."""
+    _, token, space_id = await _space_admin(
+        db_container, admin_user, user_factory, ["assistants", "retention_manage"]
+    )
+    recorded = _record_space_updates(monkeypatch)
+    response = await client.patch(
+        f"/api/v1/spaces/{space_id}/",
+        json={"data_retention_days": 7},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200, response.text
+    [metadata] = recorded
+    assert metadata["changes"]["data_retention_days"] == {"old": 30, "new": 7}
+
+
 async def test_a_personal_space_owner_still_cannot_change_its_time(
     client, db_container, admin_user, patch_auth_service_jwt
 ):

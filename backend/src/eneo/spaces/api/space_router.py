@@ -57,7 +57,6 @@ from eneo.main.models import (
     GeneralError,
     ModelId,
     PaginatedResponse,
-    is_provided,
 )
 from eneo.roles.permissions import Permission
 from eneo.server import protocol
@@ -356,7 +355,7 @@ async def update_space(
     if "icon_id" in original_request:
         icon_id = update_space_req.icon_id
 
-    space = await service.update_space(
+    space, retention_change = await service.update_space(
         id=id,
         name=update_space_req.name,
         description=update_space_req.description,
@@ -388,14 +387,10 @@ async def update_space(
             "old": old_space.description,
             "new": update_space_req.description,
         }
-    if (
-        is_provided(data_retention_days)
-        and data_retention_days != old_space.data_retention_days
-    ):
-        changes["data_retention_days"] = {
-            "old": old_space.data_retention_days,
-            "new": data_retention_days,
-        }
+    # The time's change as decided under the lock, not from the read above:
+    # another change may have committed in between.
+    if retention_change is not None:
+        changes["data_retention_days"] = retention_change
 
     # Track model-link changes as SET comparisons (avoids false positives from
     # ordering) over every linked model, whether a model list or a

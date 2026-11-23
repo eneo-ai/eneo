@@ -398,10 +398,12 @@ class SpaceService:
         security_classification: Union[ModelId, NotProvided, None] = NOT_PROVIDED,
         data_retention_days: Union[int, None, NotProvided] = NOT_PROVIDED,
         icon_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
-    ) -> Space:
+    ) -> tuple[Space, dict[str, object] | None]:
         # The space's time is also the cap on its Flow run history. An equal
         # value is no change and is never written, so a stale resend beside a
-        # rename cannot undo a concurrent change.
+        # rename cannot undo a concurrent change. The change decided under the
+        # lock, {"old", "new"} or None, is returned so that the caller's space
+        # update event records the same change as the required row.
         changes_retention = False
         if is_provided(data_retention_days):
             current = await self.get_space(id)
@@ -426,6 +428,11 @@ class SpaceService:
         if changes_retention and data_retention_days == previous_retention_days:
             data_retention_days = NOT_PROVIDED
             changes_retention = False
+        retention_change: dict[str, object] | None = (
+            {"old": previous_retention_days, "new": data_retention_days}
+            if changes_retention
+            else None
+        )
         previous_icon_id = space.icon_id
         await self.icon_repo.ensure_attachable(
             previous_icon_id,
@@ -670,14 +677,12 @@ class SpaceService:
             ),
         )
         await self.icon_repo.release_replaced(previous_icon_id, icon_id)
-        if changes_retention:
-            await self._audit_retention_change(
-                id, previous=previous_retention_days, new=data_retention_days
-            )
-        return await self.get_space(id)
+        if retention_change is not None:
+            await self._audit_retention_change(id, retention_change)
+        return await self.get_space(id), retention_change
 
     async def _audit_retention_change(
-        self, space_id: UUID, *, previous: int | None, new: object
+        self, space_id: UUID, change: dict[str, object]
     ) -> None:
         """The cap on Flow run history changed: a required row in the request's
         transaction, so the change and its record commit or fail together."""
@@ -694,8 +699,8 @@ class SpaceService:
                 "scope": "space",
                 "scope_id": str(space_id),
                 "setting": "data_retention_days",
-                "previous_value": previous,
-                "new_value": new,
+                "previous_value": change["old"],
+                "new_value": change["new"],
             },
             required=True,
         )
