@@ -54,11 +54,16 @@ the audit queue is unavailable, the test result can still be returned and no
 durable HTTP evidence is guaranteed. Use executed Flow runs when durable runtime
 evidence is required.
 
-The future explicit Flow purge consumes the same required transaction contract.
-Its immutable receipt records the requester, reason, eligibility snapshot, eligible
-and deleted run counts, deleted bytes, outcome, correlation/idempotency identity,
-and receipt id. Saving a retention policy still never performs or schedules a
-purge.
+The explicit Flow purge writes the required action `flow_run_history_purged` in
+the same transaction as its deletes, so an audit failure rolls the deletion back.
+It is written only for a real purge (`dry_run: false`), also when nothing was
+deleted, and never for a preview. The actor is the signed-in person who requested
+the purge. The metadata holds `scope`, `scope_id`, `tenant_id`, `space_id`,
+`flow_id`, `limit`, `purged_count`, `purged_run_ids`,
+`transcript_candidate_count`, `transcript_purged_count` and `blocked`
+(`undelivered_audit`, `unresolved_webhook`, `legal_hold`, `counted_runs`,
+`complete`), plus the `actor` snapshot (see [Actor attribution](#actor-attribution));
+it holds no file names or run content. Saving a retention time never performs or schedules this purge.
 
 ## Storage model
 

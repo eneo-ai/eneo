@@ -17,10 +17,12 @@ There is no automatic Flow run-history deletion. History is deleted only by the 
 - A space's time (`data_retention_days`, the same time its conversations use) caps every Flow in the space.
 - A Flow may choose a shorter time of its own, never a longer one. A longer one is refused with code 9086.
 - A Flow without its own time uses the space's. A space without a time sets no cap, and its Flows' runs become eligible only through a time of their own.
-- No time means no age threshold: nothing is eligible for a purge.
+- No time means no age threshold: no run history is eligible for a purge. The same purge still deletes expired live transcripts that no run uses (see [Administrator purge of due run history](/guides/flows-api-guide#administrator-purge-of-due-run-history)).
 - The organisation sets no time for Flows.
 - Changing a shared space's time and a Flow's own time, and purging, need `retention_manage`; placing, reviewing and releasing holds need `retention_holds` (see [Who may change or stop retention](#who-may-change-or-stop-retention)).
 - A Flow's time can be changed after the Flow is published.
+
+On upgrade to this version, every Flow's own time is cleared without an audit row and the space's time applies to its Flows, so an administrator should check the spaces' times before the next purge.
 
 ```mermaid
 flowchart TD
@@ -233,7 +235,7 @@ completed.
 
 ## Audit and authorization
 
-Every time change requires `retention_manage` (see above). Space and Flow lookups remain scoped to the caller's Organization. A successful change writes the required audit action `flow_run_retention_policy_changed` in the same transaction as the update; a change of a space's time also writes the ordinary space update event.
+Every time change requires `retention_manage` (see above). Space and Flow lookups remain scoped to the caller's Organization. A successful change writes the required audit action `flow_run_retention_policy_changed` in the same transaction as the update. A change of a space's time also queues the ordinary space update event (`space_updated`), but that event is best effort and follows the Organization's audit settings; the required record is `flow_run_retention_policy_changed`.
 
 The audit metadata records the scope, scope identifier, and the old and new time; for a Flow also the resulting effective time and source. It does not copy Flow run content into the audit log. Saving the same value again is a no-op and does not create a misleading change event.
 
