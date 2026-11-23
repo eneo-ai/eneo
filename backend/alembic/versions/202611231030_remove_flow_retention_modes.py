@@ -48,6 +48,7 @@ def _drop_checks(table: str, *names: str) -> None:
 
 
 def upgrade() -> None:
+    op.execute("SET LOCAL lock_timeout = '5s'")
     for table in ("tenants", "spaces"):
         _drop_checks(
             table,
@@ -72,6 +73,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.execute("SET LOCAL lock_timeout = '5s'")
     op.add_column(
         "tenants",
         sa.Column("flow_run_history_retention_days", sa.Integer(), nullable=True),
