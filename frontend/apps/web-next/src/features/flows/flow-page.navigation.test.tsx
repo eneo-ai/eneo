@@ -6,12 +6,13 @@ import {
   type RouterHistory
 } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { SpaceProvider } from "@/features/spaces/use-space";
 import { makeSpace } from "@/features/spaces/testing/space-fixture";
 import { renderWithRouter } from "@/test/router";
 import { testAppContext, testQueryClient } from "@/test/render";
 import messages from "@/lib/i18n/messages/sv.json";
+import { toast } from "@/lib/toast";
 import type { QueryClient } from "@tanstack/react-query";
 import { flowEditorKeys } from "./editor/editor-api";
 import { makeAssistant, makeKindOption, makeKindPlace } from "./editor/testing/fixtures";
@@ -934,6 +935,31 @@ describe("the Leverans section's reader from a later prompt, while the prompts a
       release();
     };
   }
+  /**
+   * Holds each read of the later step's prompt until it is let go, answered
+   * with the prompt as it was when the read was made.
+   */
+  function holdLaterReads() {
+    const get = api.stub.client.GET;
+    const held: (() => void)[] = [];
+    api.stub.client.GET = ((
+      path: string,
+      init?: { params?: { path?: { assistant_id?: string } } }
+    ) => {
+      if (path !== ASSISTANT || init?.params?.path?.assistant_id !== "assistant-3") {
+        return get(path, init);
+      }
+      const answer = get(path, init);
+      return new Promise<Awaited<typeof answer>>((resolve) => held.push(() => resolve(answer)));
+    }) as typeof get;
+    return {
+      held,
+      restore: () => {
+        api.stub.client.GET = get;
+        for (const release of held) release();
+      }
+    };
+  }
   const delivery = () =>
     screen.findByRole("region", { name: messages.flow_step_editor_delivery_title });
   /** The later prompt's first read has landed, so what is held next is a read again. */
@@ -1187,5 +1213,65 @@ describe("the Leverans section's reader from a later prompt, while the prompts a
     }
     expect(gone).toBe(false);
     expect(within(await delivery()).getByText(reader)).toBeTruthy();
+  });
+
+  /** The page has taken a new revision and marked the later prompt to be read again. */
+  const laterInvalidated = (queryClient: QueryClient) =>
+    waitFor(() =>
+      expect(
+        queryClient.getQueryState(flowEditorKeys.assistant("flow-1", "assistant-3"))?.isInvalidated
+      ).toBe(true)
+    );
+
+  it("reads a later prompt again when the flow changes during its first read, and takes no answer from before the change", async () => {
+    withChat();
+    let prompt = "Jämför med {{step_1}}.";
+    laterPrompt(() => prompt);
+    const reads = holdLaterReads();
+    try {
+      const { queryClient } = await renderPage("?step=step-1");
+      await waitFor(() => expect(reads.held).toHaveLength(1));
+      // The chat put a step first: this one is at place 2 now, and the prompt names it there.
+      prompt = "Jämför med {{step_2}}.";
+      flow = inserted();
+      fireEvent.click(await screen.findByRole("button", { name: "Verktyg klart" }));
+      await laterInvalidated(queryClient);
+      // The read from before the change answers, with the prompt from before it.
+      reads.held[0]!();
+      await waits(await delivery(), "Läses av Steg 4: Skriv svar.");
+      expect(reads.held).toHaveLength(2);
+    } finally {
+      reads.restore();
+    }
+    expect(await within(await delivery()).findByText("Läses av Steg 4: Skriv svar.")).toBeTruthy();
+  });
+
+  it("shows the open step's own prompt as saved when the flow changes during its first read", async () => {
+    withChat();
+    let prompt = "Skriv ett svar.";
+    laterPrompt(() => prompt);
+    const failed = vi.spyOn(toast, "error");
+    onTestFinished(() => failed.mockRestore());
+    const reads = holdLaterReads();
+    try {
+      const { queryClient } = await renderPage("?step=step-3");
+      await waitFor(() => expect(reads.held).toHaveLength(1));
+      prompt = "Skriv ett kort svar.";
+      flow = makeFlow({ draft_revision: 5, steps: [first, second, third(3)] });
+      fireEvent.click(await screen.findByRole("button", { name: "Verktyg klart" }));
+      await laterInvalidated(queryClient);
+      expect(screen.queryByText(messages.flow_step_editor_assistant_failed)).toBeNull();
+      // The read made after the change answers first, the one from before it last.
+      reads.held[1]?.();
+      reads.held[0]!();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    } finally {
+      reads.restore();
+    }
+    expect(((await screen.findByLabelText(/^Instruktion/)) as HTMLTextAreaElement).value).toBe(
+      "Skriv ett kort svar."
+    );
+    expect(screen.queryByText(messages.flow_step_editor_assistant_failed)).toBeNull();
+    expect(failed).not.toHaveBeenCalled();
   });
 });

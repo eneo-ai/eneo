@@ -571,6 +571,11 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
         (current || queryClient.getQueryData<boolean>(heldKey) === true)
     );
     ownSave.current = null;
+    // Invalidation would otherwise reuse a first read under way, and its answer land as current.
+    void queryClient.cancelQueries({
+      queryKey: flowEditorKeys.assistants(flowId),
+      predicate: (query) => query.state.data === undefined
+    });
     void queryClient.invalidateQueries({ queryKey: flowEditorKeys.assistants(flowId) });
   }, [flow.draft_revision, flowId, queryClient]);
 
