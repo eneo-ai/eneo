@@ -173,6 +173,67 @@ describe("flow retention", () => {
     expect(await screen.findByText(/Från ytan: 14 dagar/)).toBeTruthy();
   });
 
+  it("lets an untouched field follow a later read, and an untouched save sends nothing", async () => {
+    backend.GET.mockResolvedValue(settings({ days: 3 }, { days: 60 }));
+    const { queryClient } = renderSettings(["retention_manage"]);
+    fireEvent.click(screen.getByRole("button", { name: "Ändra gallring" }));
+    const days = (await screen.findByRole("spinbutton", {
+      name: /Egen tid för det här flödet/
+    })) as HTMLInputElement;
+    expect(days.value).toBe("3");
+    // Another admin saved 10 meanwhile; the dialog reads it.
+    backend.GET.mockResolvedValue(settings({ days: 10 }, { days: 60 }));
+    await queryClient.refetchQueries({ queryKey: policyKey, exact: true });
+    await waitFor(() => expect(days.value).toBe("10"));
+    // Nothing was edited, so there is nothing to save, not even while a read is in flight.
+    const release = heldRead();
+    void queryClient.refetchQueries({ queryKey: policyKey, exact: true });
+    await waitFor(() => expect(backend.GET).toHaveBeenCalledTimes(3));
+    fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
+    await waitFor(() => expect(screen.queryByRole("spinbutton")).toBeNull());
+    release(settings({ days: 10 }, { days: 60 }));
+    await settle();
+    expect(backend.PUT).not.toHaveBeenCalled();
+  });
+
+  it("keeps an edited flow time when a later read brings another", async () => {
+    backend.GET.mockResolvedValue(settings({ days: 3 }, { days: 60 }));
+    backend.PUT.mockResolvedValue(settings({ days: 5 }, { days: 60 }));
+    const { queryClient } = renderSettings(["retention_manage"]);
+    fireEvent.click(screen.getByRole("button", { name: "Ändra gallring" }));
+    const days = (await screen.findByRole("spinbutton", {
+      name: /Egen tid för det här flödet/
+    })) as HTMLInputElement;
+    fireEvent.change(days, { target: { value: "5" } });
+    fireEvent.blur(days);
+    backend.GET.mockResolvedValue(settings({ days: 10 }, { days: 60 }));
+    await queryClient.refetchQueries({ queryKey: policyKey, exact: true });
+    await settle();
+    expect(days.value).toBe("5");
+    fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
+    await waitFor(() => expect(backend.PUT).toHaveBeenCalledTimes(1));
+    expect(backend.PUT.mock.calls[0]![1].body).toEqual({ policy: { days: 5 } });
+  });
+
+  it("keeps a deliberately cleared field when a later read brings a time", async () => {
+    backend.GET.mockResolvedValue(settings({ days: 3 }, { days: 60 }));
+    backend.PUT.mockResolvedValue(settings(null, { days: 60 }));
+    const { queryClient } = renderSettings(["retention_manage"]);
+    fireEvent.click(screen.getByRole("button", { name: "Ändra gallring" }));
+    const days = (await screen.findByRole("spinbutton", {
+      name: /Egen tid för det här flödet/
+    })) as HTMLInputElement;
+    fireEvent.change(days, { target: { value: "" } });
+    fireEvent.blur(days);
+    backend.GET.mockResolvedValue(settings({ days: 10 }, { days: 60 }));
+    await queryClient.refetchQueries({ queryKey: policyKey, exact: true });
+    await settle();
+    expect(days.value).toBe("");
+    fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
+    await waitFor(() => expect(backend.PUT).toHaveBeenCalledTimes(1));
+    expect(backend.PUT.mock.calls[0]![1].body).toEqual({ policy: null });
+  });
+
   it("says the space has no time when nothing applies", async () => {
     backend.GET.mockResolvedValue(settings(null, null));
     await openDialog();

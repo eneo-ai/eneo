@@ -136,7 +136,10 @@ function RetentionForm({
   const formId = useId();
   const queryClient = useQueryClient();
   const savedDays = settings.local_policy?.days ?? null;
-  const [days, setDays] = useState(savedDays);
+  // Until the person edits it, the field shows the Flow's time as last read, so a
+  // read that brings another admin's change replaces it. A clear is an edit too.
+  const [draft, setDraft] = useState<{ days: number | null } | null>(null);
+  const days = draft ? draft.days : savedDays;
   const [refused, setRefused] = useState(false);
   // The space's time as the server last gave it, by a read or by a refusal.
   const spaceDays = settings.inherited_policy?.days ?? null;
@@ -228,7 +231,10 @@ function RetentionForm({
             onSubmit={(event) => {
               event.preventDefault();
               if (save.isPending) return;
-              if (days === null || retentionDaysValid(days)) save.mutate(days);
+              // Nothing edited is nothing to save: resending the time as read could
+              // overwrite a newer one.
+              if (!draft) onClose();
+              else if (days === null || retentionDaysValid(days)) save.mutate(days);
               else setRefused(true);
             }}
           >
@@ -238,7 +244,7 @@ function RetentionForm({
               description={applies}
               value={days}
               onChange={(next) => {
-                setDays(next);
+                setDraft({ days: next });
                 setOverCap(false);
               }}
               min={MIN_DAYS}
