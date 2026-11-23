@@ -5,6 +5,8 @@ from uuid import UUID
 
 from sqlalchemy.exc import IntegrityError
 
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.entity_types import EntityType
 from eneo.authentication.api_key_scope_revoker import ApiKeyScopeRevoker
 from eneo.authentication.auth_models import ApiKeyScopeType, ApiKeyStateReasonCode
 from eneo.completion_models.application.completion_model_crud_service import (
@@ -13,9 +15,15 @@ from eneo.completion_models.application.completion_model_crud_service import (
 from eneo.completion_models.domain.completion_model_service import (
     CompletionModelService,
 )
+from eneo.data_retention.infrastructure.gallring_lock import (
+    GallringSubject,
+    acquire_exclusive,
+    acquire_shared,
+)
 from eneo.embedding_models.application.embedding_model_crud_service import (
     EmbeddingModelCRUDService,
 )
+from eneo.flows.application.flow_retention_authz import require_retention_manage
 from eneo.icons.icon_repo import IconRepository
 from eneo.main.datetime_utils import datetime_or_utc_min
 from eneo.main.exceptions import (
@@ -62,6 +70,7 @@ if TYPE_CHECKING:
     from eneo.actors.actors.space_actor import SpaceAccessFacts, SpaceActor
     from eneo.apps import App
     from eneo.assistants.assistant import Assistant
+    from eneo.audit.application.audit_service import AuditService
     from eneo.completion_models.domain.completion_model import CompletionModel
     from eneo.embedding_models.domain.embedding_model import EmbeddingModel
     from eneo.group_chat.domain.entities.group_chat import GroupChat
@@ -164,6 +173,7 @@ class SpaceService:
         security_classification_service: "SecurityClassificationService",
         icon_repo: IconRepository,
         api_key_scope_revoker: ApiKeyScopeRevoker | None = None,
+        audit_service: "AuditService | None" = None,
     ):
         super().__init__()
         self.user = user
@@ -180,6 +190,7 @@ class SpaceService:
         self.security_classification_service = security_classification_service
         self.icon_repo = icon_repo
         self.api_key_scope_revoker = api_key_scope_revoker
+        self.audit_service = audit_service
         self._logger = get_logger(__name__)
 
     async def is_space_member(self, space_id: UUID, user_id: UUID) -> bool:
@@ -388,13 +399,34 @@ class SpaceService:
         data_retention_days: Union[int, None, NotProvided] = NOT_PROVIDED,
         icon_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
     ) -> Space:
-        if is_provided(icon_id):
+        # The space's time is also the cap on its Flow run history. An equal
+        # value is no change and is never written, so a stale resend beside a
+        # rename cannot undo a concurrent change.
+        changes_retention = False
+        if is_provided(data_retention_days):
+            current = await self.get_space(id)
+            if data_retention_days == current.data_retention_days:
+                data_retention_days = NOT_PROVIDED
+            else:
+                if not self._get_actor(current).can_edit_space():
+                    raise UnauthorizedException(
+                        "User does not have permission to edit space"
+                    )
+                if not current.is_personal():
+                    require_retention_manage(self.user)
+                await acquire_exclusive(self.repo.session, GallringSubject.FLOW_HISTORY)
+                changes_retention = True
+        if changes_retention or is_provided(icon_id):
             await self.repo.lock(id)
         space = await self.get_space(id)
         actor = self._get_actor(space)
 
         if not actor.can_edit_space():
             raise UnauthorizedException("User does not have permission to edit space")
+        previous_retention_days = space.data_retention_days
+        if changes_retention and data_retention_days == previous_retention_days:
+            data_retention_days = NOT_PROVIDED
+            changes_retention = False
         previous_icon_id = space.icon_id
         await self.icon_repo.ensure_attachable(
             previous_icon_id,
@@ -639,7 +671,35 @@ class SpaceService:
             ),
         )
         await self.icon_repo.release_replaced(previous_icon_id, icon_id)
+        if changes_retention:
+            await self._audit_retention_change(
+                id, previous=previous_retention_days, new=data_retention_days
+            )
         return await self.get_space(id)
+
+    async def _audit_retention_change(
+        self, space_id: UUID, *, previous: int | None, new: object
+    ) -> None:
+        """The cap on Flow run history changed: a required row in the request's
+        transaction, so the change and its record commit or fail together."""
+        if self.audit_service is None:
+            raise RuntimeError("A change of a space's time needs the audit service.")
+        await self.audit_service.log(
+            tenant_id=self.user.tenant_id,
+            user=self.user,
+            action=ActionType.FLOW_RUN_RETENTION_POLICY_CHANGED,
+            entity_type=EntityType.SPACE,
+            entity_id=space_id,
+            description="Changed the space's time, the cap on its Flow run history.",
+            metadata={
+                "scope": "space",
+                "scope_id": str(space_id),
+                "setting": "data_retention_days",
+                "previous_value": previous,
+                "new_value": new,
+            },
+            required=True,
+        )
 
     async def security_classification_impact_analysis(
         self, id: UUID, security_classification_id: UUID
@@ -831,6 +891,9 @@ class SpaceService:
     async def _delete_with_icons(self, space: Space) -> None:
         """Delete the space; its resources cascade, so their icons are released here."""
         assert space.id is not None
+        # The retention lock before the first row lock, the order a change of
+        # the space's time takes them in, so the two never deadlock.
+        await acquire_shared(self.repo.session, GallringSubject.FLOW_HISTORY)
         icon_ids = await self.icon_repo.lock_shown_in_space(space.id)
 
         if await self.repo.has_flow_delete_blockers(space.id):

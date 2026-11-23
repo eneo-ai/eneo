@@ -300,9 +300,14 @@ async def get_space(
     status_code=200,
     description=(
         "Update a space's settings (name, description, models, MCP servers, "
-        "security classification, data retention)."
+        "security classification, data retention). The space's time is also the "
+        "cap on its Flows' run history: in a shared space, changing it needs the "
+        "`retention_manage` permission and a signed-in person (an API key gets "
+        "403 `retention_person_required`), and it waits for an open Flow history "
+        "deletion (409 `flow_retention_lock_busy` when that takes too long). "
+        "Sending the stored value is no change."
     ),
-    responses=responses.get_responses([400, 403, 404]),
+    responses=responses.get_responses([400, 403, 404, 409]),
 )
 @endpoint_access(
     authentication=Authentication.USER,

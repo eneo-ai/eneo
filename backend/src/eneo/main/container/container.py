@@ -1372,6 +1372,7 @@ class Container(containers.DeclarativeContainer):
         security_classification_service=security_classification_service,
         icon_repo=icon_repo,
         api_key_scope_revoker=api_key_scope_revoker,
+        audit_service=audit_service,
     )
     skill_service = providers.Factory(
         SkillService,
