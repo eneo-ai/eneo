@@ -157,7 +157,9 @@ describe("AddStepDialog", () => {
       "Gör text av data",
       "Anropa webbtjänst"
     ]);
-    expect(within(dialog).getByText("Hamnar efter Steg 1: Sammanfatta")).toBeTruthy();
+    expect(
+      within(dialog).getByText("Hamnar efter Steg 1: Sammanfatta, före Steg 2: Skriv svar")
+    ).toBeTruthy();
     // Word cannot stand before a step that reads JSON: one folded line, then the reasons.
     expect(within(dialog).queryByRole("radio", { name: "Skapa dokument" })).toBeNull();
     fireEvent.click(within(dialog).getByText("2 stegtyper går inte att lägga till här"));
@@ -176,8 +178,10 @@ describe("AddStepDialog", () => {
       "Plocka ut uppgifter",
       "Klassificera",
       "Skapa dokument",
-      "Fyll i Word-mall"
+      "Fyll i Word-mall",
+      "Skicka körningens resultat"
     ]);
+    expect(within(after.dialog).getByText("Hamnar efter Steg 1: Sammanfatta")).toBeTruthy();
     expect(within(after.dialog).queryByRole("radio", { name: "Gör text av data" })).toBeNull();
     cleanup();
 
@@ -187,8 +191,55 @@ describe("AddStepDialog", () => {
       "Plocka ut uppgifter",
       "Transkribera ljud"
     ]);
-    expect(within(first.dialog).getByText(messages.flow_add_step_lands_first)).toBeTruthy();
+    expect(within(first.dialog).getByText("Hamnar före Steg 1: Sammanfatta")).toBeTruthy();
     expect(rowsOf(first.dialog, messages.flow_add_step_more).at(-1)).toBe("Tomt steg");
+    cleanup();
+
+    const empty = await openDialog(1, makeFlow({ steps: [] }));
+    expect(within(empty.dialog).getByText(messages.flow_add_step_lands_first)).toBeTruthy();
+  });
+
+  it("recommends sending the run's result after a document, and only where the core allows it", async () => {
+    const wordFlow = makeFlow({
+      steps: [makeStep({ output_type: "docx", output_mode: "render_verbatim" })]
+    });
+    api.routes[KINDS] = textKinds;
+    const last = await openDialog(2, wordFlow);
+    expect(rowsOf(last.dialog, messages.flow_add_step_recommended)).toEqual([
+      "Skapa dokument",
+      "Fyll i Word-mall",
+      "Skicka körningens resultat"
+    ]);
+    cleanup();
+
+    // Mid-flow the core refuses it: it is not recommended there.
+    api.routes[KINDS] = ({ params }: { params: { query: { position: number } } }) => ({
+      body: {
+        flow_id: "flow-1",
+        draft_revision: 4,
+        insertions: [
+          makeKindPlace(params.query.position, [
+            makeKindOption("send_run_result", {
+              refusals: [makeKindRefusal({ step_order: params.query.position })]
+            })
+          ])
+        ],
+        steps: []
+      }
+    });
+    const middle = await openDialog(
+      2,
+      makeFlow({
+        steps: [
+          makeStep(),
+          makeStep({ id: "step-2", step_order: 2, user_description: "Skriv svar" })
+        ]
+      })
+    );
+    expect(rowsOf(middle.dialog, messages.flow_add_step_recommended)).toContain("Sammanfatta");
+    expect(rowsOf(middle.dialog, messages.flow_add_step_recommended)).not.toContain(
+      "Skicka körningens resultat"
+    );
   });
 
   it("starts on the first recommendation and adds it, named after it, with its instruction", async () => {

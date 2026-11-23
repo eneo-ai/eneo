@@ -113,7 +113,8 @@ function renderList(
   canEdit = true,
   speakerOffer: SpeakerStepOffer | null = null,
   suggestionActions: { suggestionFix?: SuggestionFix; onAskChat?: (text: string) => void } = {},
-  mayEdit = canEdit
+  mayEdit = canEdit,
+  list = steps
 ) {
   const actions = {
     onOpen: vi.fn(),
@@ -123,11 +124,11 @@ function renderList(
   };
   // The page's one FlowReferences, so references show as the chat's pills.
   const ui = (draftRevision: number) => (
-    <FlowReferences flow={makeFlow({ steps })} onShowStep={() => true}>
+    <FlowReferences flow={makeFlow({ steps: list })} onShowStep={() => true}>
       <FlowStepList
         flowId="flow-1"
         draftRevision={draftRevision}
-        steps={steps}
+        steps={list}
         canEdit={canEdit}
         mayEdit={mayEdit}
         headingRef={createRef()}
@@ -367,6 +368,33 @@ describe("FlowStepList", () => {
     expect(actions.onOpen).toHaveBeenCalledWith(steps[1]);
     fireEvent.click(screen.getByRole("button", { name: "Lägg till steg" }));
     expect(actions.onAdd).toHaveBeenCalledWith(4);
+  });
+
+  it("adds a step before a last step that sends, and offers no step after any that sends", () => {
+    const post = (order: number, body: string) =>
+      makeStep(order, {
+        user_description: "Skicka",
+        output_mode: "http_post",
+        output_config: {
+          url: "https://startsidan.example.org/in",
+          auth: { mode: "none" },
+          body: { mode: body }
+        }
+      });
+    for (const body of ["run_result", "auto"]) {
+      const { actions } = renderList(true, null, {}, true, [steps[0]!, steps[1]!, post(3, body)]);
+      fireEvent.click(screen.getByRole("button", { name: messages.flows_add_step }));
+      expect(actions.onAdd).toHaveBeenLastCalledWith(3);
+      const trigger = screen.getByRole("button", { name: "Fler åtgärder för Steg 3: Skicka" });
+      fireEvent.click(trigger);
+      const menu = document.getElementById(trigger.getAttribute("aria-controls") ?? "")!;
+      expect(
+        within(menu).queryByRole("menuitem", { name: messages.flows_step_add_after })
+      ).toBeNull();
+      fireEvent.click(within(menu).getByRole("menuitem", { name: messages.flows_step_add_before }));
+      expect(actions.onAdd).toHaveBeenLastCalledWith(3);
+      cleanup();
+    }
   });
 
   it("names the steps that read a step before it is removed", async () => {

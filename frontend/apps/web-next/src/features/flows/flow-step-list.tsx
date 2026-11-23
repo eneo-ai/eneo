@@ -210,12 +210,17 @@ function StepCard({
                     label: t("flows_step_add_before"),
                     onClick: () => actions.onAdd(step.step_order)
                   },
-                  {
-                    id: "after",
-                    label: t("flows_step_add_after"),
-                    onClick: () => actions.onAdd(step.step_order + 1)
-                  },
-                  { type: "divider" },
+                  // A step that sends must stay last: the core refuses any step after it.
+                  ...(step.output_mode === "http_post"
+                    ? []
+                    : [
+                        {
+                          id: "after",
+                          label: t("flows_step_add_after"),
+                          onClick: () => actions.onAdd(step.step_order + 1)
+                        }
+                      ]),
+                  { type: "divider" as const },
                   {
                     id: "remove",
                     label: t("flows_step_remove"),
@@ -383,7 +388,10 @@ export function FlowStepList({
       label={t("flows_add_step")}
       icon={<Plus aria-hidden="true" />}
       size="sm"
-      onClick={() => actions.onAdd(steps.length + 1)}
+      // A last step that sends stays last: the new step goes before it.
+      onClick={() =>
+        actions.onAdd(steps.at(-1)?.output_mode === "http_post" ? steps.length : steps.length + 1)
+      }
     />
   );
 

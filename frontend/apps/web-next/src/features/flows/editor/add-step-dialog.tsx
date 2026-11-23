@@ -47,7 +47,7 @@ import {
   taskStepName,
   type StepTask
 } from "./step-tasks";
-import type { FlowPublic, ToolOption } from "./step-types";
+import type { FlowPublic, FlowStep, ToolOption } from "./step-types";
 
 type Field = "url" | "tool";
 type Problems = Partial<Record<Field, string>>;
@@ -453,11 +453,16 @@ function AddStepPicker({
     );
   }
 
-  const lands = before
-    ? t("flow_add_step_lands_after", {
-        step: stepLabel(before.step_order, before.user_description, t)
-      })
-    : t("flow_add_step_lands_first");
+  const after = ordered[position - 1] ?? null;
+  const label = (step: FlowStep) => stepLabel(step.step_order, step.user_description, t);
+  const lands =
+    before && after
+      ? t("flow_add_step_lands_between", { before: label(before), after: label(after) })
+      : after
+        ? t("flow_add_step_lands_before", { step: label(after) })
+        : before
+          ? t("flow_add_step_lands_after", { step: label(before) })
+          : t("flow_add_step_lands_first");
 
   return (
     <Layout

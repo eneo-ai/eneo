@@ -2289,6 +2289,8 @@
   "flow_add_step_search_result": "{count, plural, one {# stegtyp. Enter lägger till {name}.} other {# stegtyper. Enter lägger till {name}.}}",
   "flow_add_step_refused": "{count, plural, one {# stegtyp går inte att lägga till här} other {# stegtyper går inte att lägga till här}}",
   "flow_add_step_lands_after": "Hamnar efter {step}",
+  "flow_add_step_lands_before": "Hamnar före {step}",
+  "flow_add_step_lands_between": "Hamnar efter {before}, före {after}",
   "flow_add_step_lands_first": "Hamnar först i flödet",
   "flow_add_step_submit": "Lägg till {name}",
   "flow_add_step_io_spoken": "Från {from} till {to}.",

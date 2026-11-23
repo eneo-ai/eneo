@@ -8336,6 +8336,8 @@
   "flow_add_step_search_result": "{count, plural, one {# step type. Enter adds {name}.} other {# step types. Enter adds {name}.}}",
   "flow_add_step_refused": "{count, plural, one {# step type cannot be added here} other {# step types cannot be added here}}",
   "flow_add_step_lands_after": "Goes after {step}",
+  "flow_add_step_lands_before": "Goes before {step}",
+  "flow_add_step_lands_between": "Goes after {before}, before {after}",
   "flow_add_step_lands_first": "Goes first in the flow",
   "flow_add_step_submit": "Add {name}",
   "flow_add_step_io_spoken": "From {from} to {to}.",
