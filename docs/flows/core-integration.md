@@ -76,9 +76,35 @@ editing (Svelte and web-next). Startup never rewrites an existing role; a reset
 to the template removes them. The downgrade of `202610041000` removes both from
 every role, and upgrading again does not give them back. The web-next page
 `/admin/flow-data-retention` stays in the admin menu for `admin` when Flows
-are on, because its upload and debug windows are admin settings; the retention
-rules on it follow the two permissions, and the backend checks every request
+are on, because its upload and debug windows are admin settings; it has no
+retention rules of its own any more, and the backend checks every request
 (`flow_retention_authz.py`).
+
+### Run history follows the space's time
+
+From `202611231030`, a Flow's run history has one rule: the space's time
+(`spaces.data_retention_days`, the time its conversations already use) caps
+every Flow in the space, and a Flow may choose a shorter time of its own. What
+an upgrade changes:
+
+- Every Flow's own time is emptied; an administrator chooses again. The modes
+  (`preserve`, `review_required`) are gone, and a request that still sends
+  `mode` gets 422.
+- The organisation and space Flow-policy routes
+  (`/api/v1/settings/flow-run-retention-policy` and `.../spaces/{space_id}`)
+  and the three review-queue routes are gone. The Flow route, the targets,
+  the holds and the three purges with `dry_run` stay.
+- A space's existing time now also decides what an explicit purge may remove
+  from its Flows. Nothing is removed automatically.
+- A Flow time longer than its space's is refused with 400 and code 9086
+  (`retention_exceeds_space`), naming the cap.
+- Changing a shared space's time needs `retention_manage` as well as the
+  right to edit the space, and a signed-in person: an API key gets 403
+  `retention_person_required`. No role holds `retention_manage` after an
+  upgrade unless it was granted, so until an administrator grants it to a
+  role, no space administrator can change a space's time, for conversations
+  too, and the Svelte app shows a 403. Existing grants keep working. A change
+  writes an audit row with the earlier and the new time.
 
 ## Starting points
 

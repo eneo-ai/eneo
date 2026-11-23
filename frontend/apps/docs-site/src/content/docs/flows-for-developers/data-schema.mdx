@@ -67,17 +67,18 @@ the repository transition that depends on the constraint.
 
 ## Retention
 
-Run-history retention resolves one complete policy in this order:
+Run-history retention reads two columns:
 
-1. Flow `flow_run_history_retention_mode` and `flow_run_history_retention_days`
-2. Space `flow_run_history_retention_mode` and `flow_run_history_retention_days`
-3. Organization `flow_run_history_retention_mode` and `flow_run_history_retention_days`
+1. Space `spaces.data_retention_days`, the time its conversations use, which
+   caps every Flow in the space
+2. Flow `flows.flow_run_history_retention_days`, a shorter time of the Flow's own
 
-At every level both columns are null (inherit) or both are present (replace the
-complete parent policy). The first complete policy wins. `preserve` marks age
-eligibility for an explicit purge; `review_required` additionally routes
-matching terminal runs to the read-only review queue. No policy means there is
-no run-history age threshold.
+The shorter of the two applies; a null Flow time uses the space's. One rule
+declaration (`RetentionRule.FLOW_RUN_HISTORY`) holds the levels and caps, and
+both the Python resolver and the SQL in the purge selector read it. A run is
+eligible when its anchor (`finished_at`, else `created_at`) plus the days, in
+calendar time, has passed. No time at either level means there is no run-history
+age threshold.
 
 These values never authorize scheduled deletion: the shared retention worker
 does not mutate Flow-owned data. The existing administrator settings API

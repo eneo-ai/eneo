@@ -159,20 +159,19 @@ meet the same publish.
 
 ## Retention and deletion
 
-Flow run history uses a complete `{mode, days}` policy resolved from Flow, then
-Space, then Organization. A child either inherits the complete parent policy or
-replaces both fields. The most specific policy wins, so a Flow may deliberately
-retain history longer than its Space or Organization default. Dedicated Flow
-policy columns keep this independent from `Spaces.data_retention_days`, which
-continues to govern conversations and App runs.
+Flow run history follows the space's time (`Spaces.data_retention_days`, the
+time its conversations and App runs use), which caps every Flow in the space. A
+Flow may set a shorter time of its own (`flows.flow_run_history_retention_days`);
+a longer one is refused with code 9086, and a time stored before the space's
+was lowered gives way to the shorter one. The organisation sets no time for
+Flows. One rule declaration (`RetentionRule.FLOW_RUN_HISTORY`) holds the levels
+and caps for both the Python resolver and the purge selector's SQL.
 
-The current modes mark history for a later explicit administrator workflow:
-`preserve` makes aged history eligible for manual purge, while
-`review_required` places it in a read-only human-review queue. Neither mode
-schedules deletion, and saving or reading a policy never deletes data. A future
-purge path must retain parent ownership and foreign-key safety, block on pending
-or dead-lettered audit delivery, and produce an immutable audit receipt. There
-is no classification policy plane or retention tombstone.
+A time only makes aged history eligible for an explicit administrator purge.
+It never schedules deletion, and saving or reading a time never deletes data.
+The purge keeps parent ownership and foreign-key safety, blocks on pending or
+dead-lettered audit delivery and on legal holds, and writes an audit receipt.
+There is no classification policy plane or retention tombstone.
 
 ## Tenancy and audit invariants
 

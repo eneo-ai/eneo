@@ -207,9 +207,11 @@ class UpdateSpaceRequest(BaseModel):
         description=(
             "Number of days to retain conversation history for this space. "
             "Applies to all assistants and apps in the space that don't have "
-            "their own retention policy. It does not govern Flow run history; use "
-            "the dedicated Flow run-retention Space endpoint for that policy. "
-            "Set to null to disable the space-level conversation policy. "
+            "their own retention policy. It also caps the run history of every "
+            "Flow in the space: a Flow may choose a shorter time, never a longer "
+            "one. In a shared space, changing it needs the `retention_manage` "
+            "permission and a signed-in person. Sending the stored value is no "
+            "change. Set to null to disable the space-level policy. "
             "Omit to keep the current retention policy unchanged. "
             "Valid range: 1-2555 days (1 day to 7 years)."
         ),
@@ -290,8 +292,8 @@ class SpaceSparse(InDB, ResourcePermissionsMixin):
         default=None,
         description=(
             "Configured Space retention days. This governs conversation history "
-            "for assistants and apps. It does not govern Flow run history, which "
-            "uses the dedicated Organization, Space, and Flow policy hierarchy."
+            "for assistants and apps, and caps the run history of every Flow in "
+            "the space, which may choose a shorter time of its own."
         ),
     )
 

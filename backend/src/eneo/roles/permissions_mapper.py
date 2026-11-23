@@ -22,7 +22,7 @@ PERMISSIONS_WITH_DESCRIPTION = {
     Permission.FLOWS_RUN: "Run published flows, upload runtime inputs, and manage flow runs.",
     Permission.FLOWS_MANAGE: "Create, update, publish, and delete flows and flow-managed resources.",
     Permission.FLOWS_TRACE: "Inspect and export rich flow evidence, provenance, and trace data.",
-    Permission.RETENTION_MANAGE: "Manage retention (gallring) rules for Flow run history at Organization, Space and Flow level, review due history and run the explicit purge. Signed-in people only; API keys are refused.",
+    Permission.RETENTION_MANAGE: "Change a shared space's retention time, which also caps its Flows' run history, and a Flow's own time, and run the explicit purge. Signed-in people only; API keys are refused.",
     Permission.RETENTION_HOLDS: "Place, extend the review of, and release legal holds that stop deletion of Flow run history. Signed-in people only; API keys are refused.",
     Permission.STORAGE: "Administer file storage. Required for connecting an S3-compatible destination, changing it, rotating its keys, and setting upload limits.",
     Permission.MODULES: "Install and configure modules for the current Eneo organization.",

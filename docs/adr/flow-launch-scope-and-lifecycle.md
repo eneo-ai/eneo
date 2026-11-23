@@ -554,6 +554,13 @@ WI-MKT-02.
 
 ### 14. Flow run-history policies classify data but do not delete it
 
+- **Revised:** The modes, the review queue and the Organization and Space
+  Flow-policy columns and routes are removed. A Space's `data_retention_days`
+  now caps every Flow in it, and a Flow may set only a shorter time; a longer
+  one is refused with code 9086. Changing a shared Space's time needs
+  `retention_manage`. The deletion boundary below still holds: no time
+  schedules deletion, and only the explicit purge removes history. The rest of
+  this decision records the launch design.
 - **Decision:** An Organization administrator may set a complete `{mode, days}`
   policy at Organization, Space, or individual Flow scope. Resolution checks
   Flow, then Space, then Organization; the first complete policy wins. A child

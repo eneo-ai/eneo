@@ -293,7 +293,7 @@ These are admin surfaces, not end-user runtime endpoints:
 | Flow evidence policy        | `GET/PATCH /api/v1/settings/flow-evidence-policy`                              | Control stricter raw evidence export behavior for classification-3 evidence                                              |
 | Knowledge evidence policy   | `GET/PATCH /api/v1/settings/flow-rag-evidence-policy`                          | Control how much retrieval evidence a run records and exposes                                                            |
 | Flow data eligibility       | `GET/PATCH /api/v1/settings/flow-retention-policy`                             | Inspect and change never-attached-upload and debug-evidence eligibility                                                  |
-| Flow run-history retention  | `GET/PUT /api/v1/settings/flow-run-retention-policy` and its Space/Flow routes | Inspect, replace, or inherit complete run-history policies and read the review queue                                     |
+| Flow run-history retention  | `GET/PUT /api/v1/settings/flow-run-retention-policy/flows/{flow_id}`            | Inspect, set, or clear a Flow's own run-history time, capped by its space's time                                         |
 
 File and audio sizes are managed deployment-wide in **Admin > File storage**.
 The Flow settings PATCH no longer accepts `file_max_size_bytes` or
@@ -326,32 +326,23 @@ PATCH requests distinguish omission from null: omit a field to preserve it, or s
 
 The inputs are nullable integers in the range `1..2555`. `flow_runtime_upload_abandonment_days` sets eligibility for runtime uploads that were never attached to a run input. Debug-evidence eligibility remains independently configured. Saving either value does not delete or redact Flow data, and the shared scheduled retention worker does not mutate Flow-owned data.
 
-Run and step history uses dedicated hierarchical endpoints:
+Run and step history follows the space's time (`data_retention_days` on `PATCH /api/v1/spaces/{id}/`, the time its conversations use), which caps every Flow in the space. A Flow may set a shorter time of its own:
 
-| Scope        | Read                                                               | Replace or clear                                                   |
-| ------------ | ------------------------------------------------------------------ | ------------------------------------------------------------------ |
-| Organization | `GET /api/v1/settings/flow-run-retention-policy`                   | `PUT /api/v1/settings/flow-run-retention-policy`                   |
-| Space        | `GET /api/v1/settings/flow-run-retention-policy/spaces/{space_id}` | `PUT /api/v1/settings/flow-run-retention-policy/spaces/{space_id}` |
-| Flow         | `GET /api/v1/settings/flow-run-retention-policy/flows/{flow_id}`   | `PUT /api/v1/settings/flow-run-retention-policy/flows/{flow_id}`   |
-
-Each write replaces one complete local policy:
+| Scope | Read                                                             | Replace or clear                                                 |
+| ----- | ---------------------------------------------------------------- | ---------------------------------------------------------------- |
+| Flow  | `GET /api/v1/settings/flow-run-retention-policy/flows/{flow_id}` | `PUT /api/v1/settings/flow-run-retention-policy/flows/{flow_id}` |
 
 ```json
 {
   "policy": {
-    "mode": "review_required",
-    "days": 60
+    "days": 30
   }
 }
 ```
 
-Send `{ "policy": null }` to clear the local value and inherit. Partial policies are invalid. `days` accepts `1..2555`; `mode` is `preserve` or `review_required`. The most specific complete Flow, Space, or Organization policy wins. A Flow can therefore use 90 days while its Space uses 60 and the Organization default remains 30.
+Send `{ "policy": null }` to clear the Flow's time and use the space's. `days` accepts `1..2555`; any other field, such as the removed `mode`, is rejected with 422. A time longer than the space's is refused with 400 and `eneo_error_code` 9086 (`retention_exceeds_space`), and `context` names the cap: `{ "cap_days": 7, "cap_origin": "space" }`. Changing a shared space's time needs `retention_manage` and a signed-in person; an API key gets 403 `retention_person_required`. Neither time schedules or performs deletion by itself.
 
-`preserve` makes history eligible for an explicit administrator purge without a separate review requirement. `review_required` adds eligible terminal runs to the read-only retention review queue and excludes them from this purge action. Neither mode schedules or performs deletion by itself.
-
-Queue reads are available at the Organization route ending in `/review-queue` and equivalent Space and Flow routes. They accept a bounded `limit` and an opaque keyset `cursor`, omit run inputs and outputs, and cannot approve or delete data. When `has_more` is true, pass `next_cursor` unchanged as the next request's `cursor`.
-
-Every Flow response includes a `run_history_retention` projection with `state`, `mode`, `effective_days`, `source`, and complete Organization, Space, and Flow contributors. The projection reports policy resolution; it does not claim that a particular run has been approved or purged.
+Every Flow response includes a `run_history_retention` projection with `state`, `effective_days`, `source` (`space` or `flow`), and the Space and Flow contributors. The projection reports what applies; it does not claim that a particular run has been purged. A Flow time stored before the space's time was lowered shows in `contributors.flow` while the shorter `effective_days` applies.
 
 See [Flow run-history retention](/guides/flows/retention-policy) for the administrator workflow and [Data retention and deletion](/guides/data-retention) for the separate conversation and audit-log behavior.
 
@@ -367,9 +358,9 @@ An administrator can preview or delete one bounded batch of due Flow runs. These
 
 Send `{ "dry_run": true, "limit": 100 }` to preview. Both fields are optional: `dry_run` defaults to `true`, and `limit` defaults to `100` with an allowed range of `1..500`. The response includes `scope`, `dry_run`, `candidate_count`, `purged_count`, `purged_run_ids`, and `blocked` counts. `candidate_count` describes this bounded batch; it is not a total of all eligible runs.
 
-Only terminal runs whose effective policy is `preserve` and whose age has reached the configured threshold can be purged. The effective policy follows the same Flow, Space, then Organization inheritance as policy reads. Runs with no configured policy stay stored. Non-terminal runs are excluded from both deletion and diagnostics; the response does not include a `not_terminal` counter.
+Only terminal runs whose anchor plus the effective time has passed can be purged. The effective time is the Flow's own or its space's, whichever is shorter, as in the projection. Runs with no time stay stored. Non-terminal runs are excluded from both deletion and diagnostics; the response does not include a `not_terminal` counter.
 
-Blocked counts cover the oldest 500 due terminal runs in the scope, ordered by retention anchor and then run ID, independently of the deletion batch limit. Each blocked run is counted once, in this order: `review_required`, `undelivered_audit`, then `unresolved_webhook`. `blocked.counted_runs` reports how many runs were examined, including eligible runs with no blocker. A one-row lookahead sets `blocked.complete` to `false` when more due terminal runs exist; those runs are not included in the counts. When `complete` is `true`, the counts cover all due terminal runs in the scope at the time of the diagnostic query. For example, a scope containing 501 due terminal runs returns `counted_runs: 500` and `complete: false`; exactly 500 returns `complete: true`.
+Blocked counts cover the oldest 500 due terminal runs in the scope, ordered by retention anchor and then run ID, independently of the deletion batch limit. Each blocked run is counted once, in this order: `undelivered_audit`, then `unresolved_webhook`. `legal_hold` counts held due runs apart, up to the window size; they take no place in the window. `blocked.counted_runs` reports how many runs were examined, including eligible runs with no blocker. A one-row lookahead sets `blocked.complete` to `false` when more due terminal runs exist; those runs are not included in the counts. When `complete` is `true`, the counts cover all due terminal runs in the scope at the time of the diagnostic query. For example, a scope containing 501 due terminal runs returns `counted_runs: 500` and `complete: false`; exactly 500 returns `complete: true`.
 
 Send `dry_run: false` to delete a batch. Previewing does not reserve or approve candidates, so a later purge can return different counts. Concurrent work can defer runs, and `purged_count` can be lower than `candidate_count`. Each real request, including an empty batch, records one audit event with the resolved scope, deleted run IDs, and blocked counts. An audit failure rolls back deletion. Dry runs write no audit event.
 
