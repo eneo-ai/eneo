@@ -31,10 +31,7 @@ from eneo.authentication.auth_dependencies import (
     require_resource_permission_for_method,
     require_user_for_creation,
 )
-from eneo.authentication.auth_models import (
-    ApiKeyNotificationTargetType,
-    audit_actor_for,
-)
+from eneo.authentication.auth_models import ApiKeyNotificationTargetType
 from eneo.authentication.endpoint_access import (
     Authentication,
     Authorization,
@@ -959,11 +956,9 @@ async def ask_assistant(
     }
 
     audit_service = container.audit_service()
-    actor_id, actor_type = audit_actor_for(user)
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=actor_id,
-        actor_type=actor_type,
+        user=user,
         action=ActionType.SESSION_STARTED,
         entity_type=EntityType.ASSISTANT,
         entity_id=id,
@@ -1096,11 +1091,9 @@ async def delete_assistant_session(
     }
 
     audit_service = container.audit_service()
-    actor_id, actor_type = audit_actor_for(user)
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=actor_id,
-        actor_type=actor_type,
+        user=user,
         action=ActionType.SESSION_ENDED,
         entity_type=EntityType.ASSISTANT,
         entity_id=id,
