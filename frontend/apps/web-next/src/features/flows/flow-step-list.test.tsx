@@ -397,6 +397,76 @@ describe("FlowStepList", () => {
     }
   });
 
+  it("marks the run's deliverables, and says on the sending card what it sends and to whom", async () => {
+    const sender = (url: string) =>
+      makeStep(4, {
+        user_description: "Skicka",
+        input_type: "text",
+        output_mode: "http_post",
+        output_config: { url, auth: { mode: "none" }, body: { mode: "run_result" } }
+      });
+    const marked = makeStep(1, {
+      user_description: "Mötesanteckningar",
+      output_type: "text",
+      output_config: { deliverable: { label: "Mötesanteckningar" } }
+    });
+    const middle = makeStep(2, { user_description: "Sammanfatta", output_type: "text" });
+    const word = makeStep(3, {
+      user_description: "Protokoll",
+      output_type: "docx",
+      output_mode: "render_verbatim"
+    });
+    const { container } = renderList(true, null, {}, true, [
+      marked,
+      middle,
+      word,
+      sender("https://startsidan.example.org/in")
+    ]);
+    const card = (name: string) => screen.getByRole("article", { name });
+    expect(within(card("Steg 1 Mötesanteckningar")).getByText("Leverans")).toBeTruthy();
+    expect(within(card("Steg 2 Sammanfatta")).queryByText("Leverans")).toBeNull();
+    expect(within(card("Steg 3 Protokoll")).getByText("Leverans")).toBeTruthy();
+    const sending = card("Steg 4 Skicka");
+    expect(within(sending).queryByText("Leverans")).toBeNull();
+    expect(
+      within(sending).getByText("Mötesanteckningar (Text), Protokoll (Word-dokument)")
+    ).toBeTruthy();
+    expect(within(sending).getByText("startsidan.example.org")).toBeTruthy();
+    for (const row of [
+      messages.flows_step_reads,
+      messages.flows_step_takes,
+      messages.flows_step_produces
+    ]) {
+      expect(within(sending).queryByText(row)).toBeNull();
+    }
+    expect(within(sending).getByText(messages.flows_step_sends)).toBeTruthy();
+    expect(
+      within(sending).getByText(messages.flow_step_editor_run_result_receiver_title)
+    ).toBeTruthy();
+    await expectNoAxeViolations(container);
+    cleanup();
+
+    // Nothing to send and no address yet: both rows say so.
+    renderList(true, null, {}, true, [makeStep(1, { output_type: "json" }), sender("")]);
+    const empty = screen.getByRole("article", { name: "Steg 4 Skicka" });
+    expect(within(empty).getByText(messages.flows_step_sends_nothing)).toBeTruthy();
+    expect(within(empty).getByText(messages.flows_step_receiver_missing)).toBeTruthy();
+    cleanup();
+
+    // A plain request sends what it reads: its card keeps the three rows.
+    renderList(true, null, {}, true, [
+      marked,
+      makeStep(2, {
+        user_description: "Skicka",
+        output_mode: "http_post",
+        output_config: { url: "https://startsidan.example.org/in", auth: { mode: "none" } }
+      })
+    ]);
+    const plain = screen.getByRole("article", { name: "Steg 2 Skicka" });
+    expect(within(plain).getByText(messages.flows_step_reads)).toBeTruthy();
+    expect(within(plain).queryByText(messages.flows_step_sends)).toBeNull();
+  });
+
   it("names the steps that read a step before it is removed", async () => {
     const { actions } = renderList();
     const trigger = screen.getByRole("button", { name: "Fler åtgärder för Steg 1: Sammanfatta" });
