@@ -591,18 +591,15 @@ class FileService:
         self._require_owner(metadata, action="read")
         return (await self._project_public_files([metadata]))[0]
 
-    async def require_upload_read(self) -> None:
-        await require_file_read_permission(
-            self._authenticated_user(), self._audit_service
-        )
-
     async def get_files_by_ids(
         self,
         file_ids: list[UUID],
         include_transcription: bool = True,
     ) -> list[File]:
         if file_ids:
-            await self.require_upload_read()
+            await require_file_read_permission(
+                self._authenticated_user(), self._audit_service
+            )
         metadata = await self.repo.get_list_by_id_and_user(
             ids=file_ids,
             user_id=self._authenticated_user().id,
@@ -638,7 +635,9 @@ class FileService:
         # A queued App run resolves its inputs here and later executes as the
         # plain owner, so the caller's grant is checked where the ids are named.
         if file_ids:
-            await self.require_upload_read()
+            await require_file_read_permission(
+                self._authenticated_user(), self._audit_service
+            )
         metadata = await self.repo.get_by_ids(file_ids)
         for file in metadata:
             self._require_owner(file, action="read")

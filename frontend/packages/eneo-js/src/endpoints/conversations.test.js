@@ -166,7 +166,7 @@ test("consultations update by server ID and preserve separate follow-ups", async
   );
   const observed = [];
   const answer = await api.ask({
-    chatPartner: { id: "group", type: "group-chat" },
+    chatPartner: { id: "coordinator", type: "assistant" },
     question: "Check",
     files: [],
     callbacks: { onEneoEvent: (event) => observed.push(event) }

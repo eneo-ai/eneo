@@ -37,12 +37,8 @@ from eneo.data_retention.infrastructure.retention_job_run_repo import (
 )
 from eneo.database.database import sessionmanager
 from eneo.database.tables.app_table import AppRuns, Apps
-from eneo.database.tables.assistant_table import Assistants
+from eneo.database.tables.assistant_table import Assistants, AssistantSpecialists
 from eneo.database.tables.audit_log_table import AuditLog
-from eneo.database.tables.group_chats_table import (
-    GroupChatsAssistantsMapping,
-    GroupChatsTable,
-)
 from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import Spaces
@@ -118,7 +114,6 @@ async def _conversation(
     named_days_ago: int,
     feedback_days_ago: int | None = None,
     assistant_id: UUID | None = None,
-    group_chat_id: UUID | None = None,
     widget_id: UUID | None = None,
 ) -> tuple[UUID, str, str]:
     name = f"Name {uuid4()}"
@@ -129,7 +124,6 @@ async def _conversation(
         widget_id=widget_id,
         visitor_id=uuid4() if widget_id is not None else None,
         assistant_id=assistant_id,
-        group_chat_id=group_chat_id,
         name=name,
         name_set_at=_ago(named_days_ago),
         feedback_value=1,
@@ -333,51 +327,41 @@ async def test_a_name_outside_any_period_or_in_a_widget_stays(
     )
 
 
-async def test_a_group_chat_name_follows_its_shortest_assistant_period(
-    retention_session: AsyncSession, test_tenant, admin_user, completion_model_factory
+@pytest.mark.parametrize(
+    "metadata", [None, {"migrated_from_group_chat": "not-a-boolean"}]
+)
+async def test_an_assistant_name_follows_its_own_period_with_specialists(
+    retention_session: AsyncSession,
+    test_tenant,
+    admin_user,
+    completion_model_factory,
+    metadata: dict[str, object] | None,
 ):
-    """Mutant: a group chat's name follows its space, or its longest assistant
-    period, and outlives questions an assistant with a shorter period lost."""
+    """Consultations belong to the orchestrator's conversation; a specialist's
+    own retention period must not replace the conversation's period."""
     model_id = (await completion_model_factory(retention_session, "gpt-4")).id
     space = await _space(retention_session, tenant_id=test_tenant.id, days=20)
-    # One assistant keeps 90 days; the other has none of its own, so the
-    # space's 20 days apply to its questions.
-    long_kept = await _assistant(
-        retention_session,
-        model_id,
-        space=space,
-        user_id=admin_user.id,
-        days=90,
+    orchestrator = await _assistant(
+        retention_session, model_id, space=space, user_id=admin_user.id, days=None
     )
-    space_kept = await _assistant(
-        retention_session,
-        model_id,
-        space=space,
-        user_id=admin_user.id,
-        days=None,
+    orchestrator.metadata_json = metadata
+    specialist = await _assistant(
+        retention_session, model_id, space=space, user_id=admin_user.id, days=5
     )
-    group_chat = GroupChatsTable(
-        name="Name retention group chat", space_id=space.id, user_id=admin_user.id
+    retention_session.add(
+        AssistantSpecialists(assistant_id=orchestrator.id, specialist_id=specialist.id)
     )
-    retention_session.add(group_chat)
-    await retention_session.flush()
-    for assistant in (long_kept, space_kept):
-        retention_session.add(
-            GroupChatsAssistantsMapping(
-                group_chat_id=group_chat.id, assistant_id=assistant.id
-            )
-        )
     gone, _, _ = await _conversation(
         retention_session,
         user_id=admin_user.id,
-        group_chat_id=group_chat.id,
+        assistant_id=orchestrator.id,
         created_days_ago=21,
         named_days_ago=21,
     )
     kept, kept_name, kept_feedback = await _conversation(
         retention_session,
         user_id=admin_user.id,
-        group_chat_id=group_chat.id,
+        assistant_id=orchestrator.id,
         created_days_ago=19,
         named_days_ago=19,
     )
@@ -386,6 +370,137 @@ async def test_a_group_chat_name_follows_its_shortest_assistant_period(
 
     assert await _texts(retention_session, gone) == ("", 1, None)
     assert await _texts(retention_session, kept) == (kept_name, 1, kept_feedback)
+
+
+@pytest.mark.parametrize(
+    ("own_days", "member_days", "space_days", "expected_days"),
+    [(None, 5, None, 5), (None, 90, 20, 90), (None, None, 20, 20), (3, 5, 20, 3)],
+)
+async def test_former_group_text_keeps_the_shortest_effective_member_period(
+    retention_session: AsyncSession,
+    test_tenant,
+    admin_user,
+    completion_model_factory,
+    own_days: int | None,
+    member_days: int | None,
+    space_days: int | None,
+    expected_days: int,
+):
+    model_id = (await completion_model_factory(retention_session, "gpt-4")).id
+    space = await _space(retention_session, tenant_id=test_tenant.id, days=space_days)
+    migrated = await _assistant(
+        retention_session, model_id, space=space, user_id=admin_user.id, days=own_days
+    )
+    migrated.metadata_json = {"migrated_from_group_chat": True}
+    for days in (member_days, 120):
+        member = await _assistant(
+            retention_session, model_id, space=space, user_id=admin_user.id, days=days
+        )
+        retention_session.add(
+            AssistantSpecialists(assistant_id=migrated.id, specialist_id=member.id)
+        )
+    gone, _, _ = await _conversation(
+        retention_session,
+        user_id=admin_user.id,
+        assistant_id=migrated.id,
+        created_days_ago=expected_days + 1,
+        named_days_ago=expected_days + 1,
+    )
+    kept, name, feedback = await _conversation(
+        retention_session,
+        user_id=admin_user.id,
+        assistant_id=migrated.id,
+        created_days_ago=expected_days - 1,
+        named_days_ago=expected_days - 1,
+    )
+    await retention_session.flush()
+    now = datetime.now(timezone.utc)
+    await ConversationNameRepository(retention_session, now=now).clear_due([gone, kept])
+    assert await _texts(retention_session, gone) == ("", 1, None)
+    assert await _texts(retention_session, kept) == (name, 1, feedback)
+
+
+async def test_editing_assistant_metadata_preserves_its_migrated_retention_policy(
+    client, db_container, admin_user, patch_auth_service_jwt
+):
+    async with db_container() as container:
+        token = container.auth_service().create_access_token_for_user(admin_user)
+    headers = {"Authorization": f"Bearer {token}"}
+    space = await client.post(
+        "/api/v1/spaces/", headers=headers, json={"name": f"Retention-{uuid4()}"}
+    )
+    assert space.status_code == 201, space.text
+    assistant = await client.post(
+        "/api/v1/assistants/",
+        headers=headers,
+        json={"name": "Policy", "space_id": space.json()["id"]},
+    )
+    assert assistant.status_code == 200, assistant.text
+    assistant_id = UUID(assistant.json()["id"])
+    url = f"/api/v1/assistants/{assistant_id}/"
+    marker = {"migrated_from_group_chat": True}
+
+    attempted = await client.post(
+        url, headers=headers, json={"metadata_json": {**marker, "label": "new"}}
+    )
+    assert attempted.status_code == 200, attempted.text
+    assert attempted.json()["metadata_json"] == {"label": "new"}
+
+    async with db_container() as container:
+        await container.session().execute(
+            sa.update(Assistants)
+            .where(Assistants.id == assistant_id)
+            .values(metadata_json=marker)
+        )
+    for replacement, expected in [
+        ({"label": "changed"}, {**marker, "label": "changed"}),
+        (None, marker),
+        ({"migrated_from_group_chat": False}, marker),
+    ]:
+        updated = await client.post(
+            url, headers=headers, json={"metadata_json": replacement}
+        )
+        assert updated.status_code == 200, updated.text
+        assert updated.json()["metadata_json"] == expected
+
+
+async def test_former_group_inherits_current_settings_without_restarting_old_text(
+    retention_session: AsyncSession, test_tenant, admin_user, completion_model_factory
+):
+    model_id = (await completion_model_factory(retention_session, "gpt-4")).id
+    space = await _space(retention_session, tenant_id=test_tenant.id)
+    migrated = await _assistant(
+        retention_session, model_id, space=space, user_id=admin_user.id, days=None
+    )
+    migrated.metadata_json = {"migrated_from_group_chat": True}
+    member = await _assistant(
+        retention_session, model_id, space=space, user_id=admin_user.id, days=None
+    )
+    retention_session.add(
+        AssistantSpecialists(assistant_id=migrated.id, specialist_id=member.id)
+    )
+    identifier, _, _ = await _conversation(
+        retention_session,
+        user_id=admin_user.id,
+        assistant_id=migrated.id,
+        created_days_ago=60,
+        named_days_ago=60,
+    )
+    repository = ConversationNameRepository(
+        retention_session, now=datetime.now(timezone.utc)
+    )
+    assert await repository.count_due([identifier]) == 0
+    space.data_retention_days = 30
+    await retention_session.flush()
+    assert await repository.count_due([identifier]) == 1
+    member.data_retention_days = 90
+    await retention_session.flush()
+    assert await repository.count_due([identifier]) == 0
+    member.data_retention_days = None
+    await retention_session.flush()
+    assert await repository.count_due([identifier]) == 1
+    await repository.clear_due([identifier])
+    assert await _texts(retention_session, identifier) == ("", 1, None)
 
 
 async def test_writing_a_name_or_feedback_text_starts_its_time_again(

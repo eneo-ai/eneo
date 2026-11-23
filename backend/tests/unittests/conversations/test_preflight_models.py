@@ -9,7 +9,7 @@ from eneo.conversations.conversation_models import PreflightRequest
 
 
 def test_preflight_request_rejects_multiple_targets():
-    """Exactly one of session/assistant/group_chat — multiple is rejected."""
+    """Exactly one of session/assistant — multiple is rejected."""
     with pytest.raises(ValidationError):
         PreflightRequest(
             question="hi",
@@ -39,10 +39,11 @@ def test_preflight_request_rejects_empty_session_input():
         PreflightRequest(session_id=uuid4())
 
 
-def test_preflight_request_rejects_empty_group_chat_input():
-    """Group chats have no single assistant baseline to report."""
-    with pytest.raises(ValidationError):
-        PreflightRequest(group_chat_id=uuid4())
+def test_preflight_request_passes_a_retired_group_chat_target_to_the_router():
+    """The router answers group_chat_id with 410; a 422 here would hide that."""
+    req = PreflightRequest(question="hi", group_chat_id=uuid4())
+    assert req.assistant_id is None
+    assert req.session_id is None
 
 
 def test_preflight_request_accepts_question_only():

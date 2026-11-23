@@ -138,12 +138,20 @@ test.describe("a tablet that becomes a phone's layout with a dialog open", () =>
   test("keeps the dialog, and focus comes back to the page, not to a hidden opener", async ({
     page
   }) => {
+    // The create menu's only dialog is the template gallery, offered with templates on.
+    await page.route("**/api/v1/settings/", async (route) => {
+      const response = await route.fetch();
+      await route.fulfill({
+        response,
+        json: { ...(await response.json()), using_templates: true }
+      });
+    });
     const { space } = await spaceWithAssistant(page);
     await page.goto(`${space}/overview`);
     const more = page.getByRole("button", { name: "Fler sätt att skapa" }).first();
     await more.click();
-    await page.getByRole("menuitem", { name: "Skapa ny gruppchatt" }).click();
-    const dialog = page.getByRole("dialog");
+    await page.getByRole("menuitem", { name: "Börja med en mall..." }).click();
+    const dialog = page.getByRole("dialog", { name: "Välj en mall" });
     await expect(dialog).toBeVisible();
 
     // An iPad into Split View.

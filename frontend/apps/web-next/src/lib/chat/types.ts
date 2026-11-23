@@ -2,7 +2,7 @@ import type { UIMessage } from "ai";
 import type { Schema } from "@/lib/api/models";
 
 /** Chat partner discriminator; mirrors the Svelte app's URL contract. */
-export type ChatPartnerType = "default-assistant" | "assistant" | "group-chat";
+export type ChatPartnerType = "default-assistant" | "assistant";
 
 /** A knowledge source attached to a partner (collection or crawled website). */
 export type KnowledgeOrigin = { id: string; name: string; kind: "collection" | "website" };
@@ -25,14 +25,9 @@ export type ChatPartner = {
      */
     supports_tool_calling?: boolean | null;
   } | null;
-  /** Group chats: assistants available for @mentions. */
-  mentionableAssistants?: { id: string; handle: string }[];
-  /** Group chats: how many assistants take part (none: nobody can answer). */
-  assistantCount?: number;
-  /** Group chats: label which assistant answered. */
-  showResponseLabel?: boolean;
   /** MCP servers that can be toggled for this partner when no policy overrides them. */
   mcpServers?: Schema<"MCPServerPublicDict">[];
+  hasSpecialists?: boolean;
   enabledCapabilities?: Schema<"AssistantPublic">["enabled_capabilities"];
   availableCapabilities?: Schema<"AssistantPublic">["available_capabilities"];
   /** Personal-assistant governance hints, including enforced MCP defaults. */
@@ -42,7 +37,7 @@ export type ChatPartner = {
   /** Invalidate estimates when this partner's saved context configuration changes. */
   preflightRevision?: string;
   permissions?: Schema<"AssistantPublic">["permissions"];
-  /** Short description shown on the start screen (assistants, group chats). */
+  /** Short description shown on the start screen (assistants). */
   description?: string | null;
   /** Uploaded icon id (tile image), when the partner has one. */
   iconId?: string | null;
@@ -72,7 +67,7 @@ export type SessionData = {
   files: Schema<"FilePublic">[];
   web_search_references: { id: string; title: string; url: string }[];
   mcp_tool_references?: Schema<"McpToolReferencePublic">[];
-  /** Group chats: which member assistant answered (null = none / clarification). */
+  /** The assistant that authored the answer, including directed and historical replies. */
   answering_assistant?: { id: string; handle: string } | null;
 };
 
@@ -157,6 +152,7 @@ export type EneoDataParts = {
   "mcp-tool-references": { mcp_tool_references: Schema<"McpToolReferencePublic">[] };
   "token-usage": TokenUsageData;
   "tool-approval": ToolApprovalData;
+  consultation: Schema<"ConsultationInfo">;
   error: { code?: number | null; reason?: string | null };
 };
 
@@ -173,7 +169,7 @@ export type EneoMessageMetadata = {
   mcpToolReferences?: Schema<"McpToolReferencePublic">[];
   tokens?: { prompt?: number | null; completion?: number | null };
   completionModel?: CompletionModelInfo | null;
-  /** Group chats: which member assistant answered this message. */
+  /** The assistant the backend names as the answerer, when it names one. */
   answeringAssistant?: { id: string; handle: string } | null;
   /** When the message was created (ISO 8601), for the timestamp under answers. */
   createdAt?: string | null;
@@ -188,9 +184,7 @@ export type ConversationBody = {
   question: string;
   session_id?: string | null;
   assistant_id?: string | null;
-  group_chat_id?: string | null;
   files: { id: string }[];
-  tools?: { assistants: { id: string; handle: string }[] } | null;
   stream: true;
   disabled_capabilities?: Schema<"ConversationRequest">["disabled_capabilities"];
   require_tool_approval?: boolean;

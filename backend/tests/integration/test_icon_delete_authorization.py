@@ -1,8 +1,8 @@
 """An icon id never authorizes removing an icon another resource still shows.
 
 Icon ids are public: ``GET /icons/{id}/`` is unauthenticated and the id sits in
-every ``<img src>``. Assistants, apps, spaces and group chats reference icons
-with ``ON DELETE SET NULL``, so a delete that only checks the tenant silently
+every ``<img src>``. Assistants, apps and spaces reference icons with
+``ON DELETE SET NULL``, so a delete that only checks the tenant silently
 clears whatever resource uses the icon. A resource releases its icon itself
 when an update replaces or clears it, or when the resource is deleted, and
 only an icon the caller uploaded in their tenant can be attached. Changes lock
@@ -26,7 +26,6 @@ from alembic.operations import Operations
 from alembic.script import ScriptDirectory
 from eneo.database.tables.app_table import Apps
 from eneo.database.tables.assistant_table import Assistants
-from eneo.database.tables.group_chats_table import GroupChatsTable
 from eneo.database.tables.spaces_table import Spaces
 from eneo.icons.icon import IconInUseError, IconNotAttachableError
 from eneo.main.exceptions import ErrorCodes, NotFoundException
@@ -44,12 +43,10 @@ _RESOURCE_PATHS = {
     "assistant": "/api/v1/assistants/{id}/",
     "app": "/api/v1/apps/{id}/",
     "space": "/api/v1/spaces/{id}/",
-    "group_chat": "/api/v1/group-chats/{id}/",
 }
 _CREATE_PATHS = {
     "assistant": "assistants",
     "app": "apps",
-    "group_chat": "group-chats",
 }
 
 
@@ -224,7 +221,7 @@ async def test_an_icon_of_another_tenant_cannot_be_deleted(client, owner, other_
 
 
 @pytest.mark.parametrize("change", ["replace", "clear"])
-@pytest.mark.parametrize("kind", ["assistant", "app", "space", "group_chat"])
+@pytest.mark.parametrize("kind", ["assistant", "app", "space"])
 async def test_changing_the_icon_deletes_the_one_it_replaced(
     client, owner, apps_enabled, kind, change
 ):
@@ -261,7 +258,7 @@ async def test_an_icon_another_resource_shows_survives_a_release(
 
 
 @pytest.mark.parametrize("uploader", ["member", "other_tenant"])
-@pytest.mark.parametrize("kind", ["assistant", "app", "space", "group_chat"])
+@pytest.mark.parametrize("kind", ["assistant", "app", "space"])
 async def test_a_resource_refuses_an_icon_the_caller_did_not_upload(
     client, owner, member, other_tenant, apps_enabled, kind, uploader
 ):
@@ -313,7 +310,7 @@ async def test_another_editor_may_send_the_current_icon_again(
     assert await _icon_status(client, icon_id) == 200
 
 
-@pytest.mark.parametrize("kind", ["assistant", "app", "space", "group_chat"])
+@pytest.mark.parametrize("kind", ["assistant", "app", "space"])
 async def test_deleting_the_last_resource_that_shows_an_icon_deletes_it(
     client, owner, apps_enabled, kind
 ):
@@ -332,14 +329,14 @@ async def test_deleting_a_space_deletes_the_icons_of_the_resources_in_it(
 ):
     space_id, space_icon = await _with_icon(client, owner, "space")
     icons = [space_icon]
-    for kind in ("assistant", "app", "group_chat"):
+    for kind in ("assistant", "app"):
         _, icon_id = await _with_icon(client, owner, kind, space_id=space_id)
         icons.append(icon_id)
 
     deleted = await client.delete(f"/api/v1/spaces/{space_id}/", headers=owner)
 
     assert deleted.status_code == 204, deleted.text
-    assert [await _icon_status(client, icon_id) for icon_id in icons] == [404] * 4
+    assert [await _icon_status(client, icon_id) for icon_id in icons] == [404] * 3
 
 
 def _racing(db_container, work: Callable[[Any], Awaitable[object]]):
@@ -372,10 +369,6 @@ async def _change_icon(container, kind: str, resource_id: str, icon_id: str) -> 
             await container.app_service().update_app(resource, icon_id=icon)
         case "space":
             await container.space_service().update_space(resource, icon_id=icon)
-        case _:
-            await container.group_chat_service().update_group_chat(
-                resource, icon_id=icon
-            )
 
 
 async def _delete(container, kind: str, resource_id: str) -> None:
@@ -387,8 +380,6 @@ async def _delete(container, kind: str, resource_id: str) -> None:
             await container.app_service().delete_app(resource)
         case "space":
             await container.space_service().delete_space(resource)
-        case _:
-            await container.group_chat_service().delete_group_chat(resource)
 
 
 async def _wait_until_blocked(session, racer: asyncio.Task, racer_pid) -> None:
@@ -447,7 +438,7 @@ async def test_a_delete_that_waited_for_another_delete_finds_nothing(
         await second
 
 
-@pytest.mark.parametrize("kind", ["assistant", "app", "space", "group_chat"])
+@pytest.mark.parametrize("kind", ["assistant", "app", "space"])
 async def test_two_updates_swapping_icons_do_not_deadlock(
     client, owner, apps_enabled, db_container, kind
 ):
@@ -478,7 +469,7 @@ async def test_two_updates_swapping_icons_do_not_deadlock(
     assert await _shown_icon(client, owner, second, kind) == first_icon
 
 
-@pytest.mark.parametrize("kind", ["assistant", "app", "space", "group_chat"])
+@pytest.mark.parametrize("kind", ["assistant", "app", "space"])
 async def test_concurrent_icon_changes_release_every_replaced_icon(
     client, owner, apps_enabled, db_container, kind
 ):
@@ -525,7 +516,6 @@ async def test_an_icon_deleted_while_an_update_attaches_it_is_refused(
         ("assistant", "assistant"),
         ("app", "app"),
         ("space", "space"),
-        ("group_chat", "group_chat"),
         pytest.param("app", "space", id="app-in-space"),
     ],
 )
@@ -568,7 +558,6 @@ async def test_the_upgrade_clears_icons_borrowed_from_another_tenant(
         "assistant": Assistants,
         "app": Apps,
         "space": Spaces,
-        "group_chat": GroupChatsTable,
     }
     borrowing = {kind: await _create(client, owner, kind) for kind in tables}
     foreign_icon = await _upload(client, other_tenant)
@@ -584,6 +573,14 @@ async def test_the_upgrade_clears_icons_borrowed_from_another_tenant(
                 .where(table.id == UUID(resource_id))
                 .values(icon_id=UUID(foreign_icon))
             )
+        # The migration runs before group chats are retired; their table is
+        # gone at head, so its group chat step gets an empty stand-in.
+        await session.execute(
+            sa.text(
+                "CREATE TEMPORARY TABLE group_chats"
+                " (id uuid, space_id uuid, icon_id uuid) ON COMMIT DROP"
+            )
+        )
         connection = await session.connection()
         await connection.run_sync(_upgrade, "202610261300")
 

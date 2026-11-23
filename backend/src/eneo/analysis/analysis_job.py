@@ -11,8 +11,7 @@ class AnalysisJob(BaseModel):
     tenant_id: UUID
     status: AnalysisJobStatus
     question: str
-    assistant_id: UUID | None = None
-    group_chat_id: UUID | None = None
+    assistant_id: UUID
     answer: str | None = None
     error: str | None = None
     created_at: datetime

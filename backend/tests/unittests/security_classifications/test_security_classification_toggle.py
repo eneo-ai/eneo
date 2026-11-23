@@ -81,7 +81,6 @@ def test_toggle_security_classification():
         collections=[],
         integration_knowledge_list=[],
         members={},
-        group_chats=[],
         security_classification=security_classification_low,
     )
 

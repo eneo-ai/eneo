@@ -6,15 +6,7 @@
   import type { ResourcePermission } from "@eneo/eneo-js";
 
   export type SpaceMenuResource =
-    | "space"
-    | "assistant"
-    | "group_chat"
-    | "app"
-    | "service"
-    | "collection"
-    | "website"
-    | "skill"
-    | "member";
+    "space" | "assistant" | "app" | "service" | "collection" | "website" | "skill" | "member";
 
   export type SpaceMenuContext = {
     routeId: string;

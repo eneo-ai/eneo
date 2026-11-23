@@ -72,7 +72,6 @@ function show(space: Space) {
 const busySpace = () =>
   makeSpace({
     assistants: [makeAssistant(), makeAssistant({ id: "a2" }), makeAssistant({ id: "a3" })],
-    groupChats: [{ id: "g1" }],
     apps: [{ id: "p1" }],
     collections: [makeCollection(), makeCollection({ id: "shared", space_id: "other" })],
     websites: [makeWebsite()],
@@ -103,7 +102,7 @@ describe("SpaceOverview", () => {
   it("counts the space's own content in a tile per kind, each a link to its tab", () => {
     show(busySpace());
     expect(tiles()).toEqual([
-      ["Assistenter 4", "/spaces/space-1/assistants"],
+      ["Assistenter 3", "/spaces/space-1/assistants"],
       ["Appar 1", "/spaces/space-1/apps"],
       // The collection shared in from another space is not this space's.
       ["Samlingar 1", "/spaces/space-1/knowledge?tab=collections"],

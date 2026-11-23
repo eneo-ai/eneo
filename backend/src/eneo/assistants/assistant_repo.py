@@ -7,6 +7,7 @@ from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy import Select
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.engine import ScalarResult
 from sqlalchemy.orm import selectinload
 
@@ -19,6 +20,7 @@ from eneo.database.association_writes import (
 )
 from eneo.database.database import AsyncSession
 from eneo.database.tables.assistant_table import (
+    MIGRATED_GROUP_CHAT_METADATA_KEY,
     AssistantIntegrationKnowledge,
     AssistantMCPServers,
     AssistantMCPServerTools,
@@ -32,10 +34,6 @@ from eneo.database.tables.assistant_template_table import AssistantTemplates
 from eneo.database.tables.capabilities_table import AssistantCapabilities
 from eneo.database.tables.collections_table import CollectionsTable
 from eneo.database.tables.document_templates_table import AssistantDocumentTemplates
-from eneo.database.tables.group_chats_table import (
-    GroupChatsAssistantsMapping,
-    GroupChatsTable,
-)
 from eneo.database.tables.help_assistant_assignment_history_table import (
     HelpAssistantAssignmentHistory,
 )
@@ -58,6 +56,7 @@ from eneo.files.file_content_loader import FileAttachmentGroup, FileContentLoade
 from eneo.files.file_models import File, FileMetadata, FileType
 from eneo.files.file_repo import FileRepository
 from eneo.main.exceptions import BadRequestException, NotFoundException
+from eneo.main.models import is_provided
 from eneo.mcp_servers.infrastructure.mappers.mcp_server_mapper import MCPServerMapper
 from eneo.prompts.prompt import Prompt
 from eneo.skills.domain.skill import PersonalDefaultsSnapshot
@@ -69,6 +68,16 @@ if TYPE_CHECKING:
     )
     from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
     from eneo.users.user import UserInDB
+
+
+def _editable_metadata(metadata: dict[str, object] | None) -> dict[str, object] | None:
+    if metadata is None:
+        return None
+    return {
+        key: value
+        for key, value in metadata.items()
+        if key != MIGRATED_GROUP_CHAT_METADATA_KEY
+    }
 
 
 @dataclass(frozen=True)
@@ -589,7 +598,7 @@ class AssistantRepository:
                 inline_file_text=assistant.inline_file_text,
                 knowledge_mode=assistant.knowledge_mode,
                 data_retention_days=assistant.data_retention_days,
-                metadata_json=assistant.metadata_json,
+                metadata_json=_editable_metadata(assistant.metadata_json),
                 icon_id=assistant.icon_id,
                 rerank_model_id=assistant.rerank_model_id,
             )
@@ -936,6 +945,18 @@ class AssistantRepository:
     ) -> None:
         await self.lock(assistant_id, space_id)
         values = change.scalar_values()
+        if is_provided(change.metadata_json):
+            metadata = _editable_metadata(change.metadata_json)
+            marker = {MIGRATED_GROUP_CHAT_METADATA_KEY: True}
+            # Preserve the database's retention policy even when an editor clears
+            # all custom metadata or sends a stale copy of the assistant.
+            values["metadata_json"] = sa.case(
+                (
+                    Assistants.metadata_json.contains(marker),
+                    sa.literal({**(metadata or {}), **marker}, type_=JSONB),
+                ),
+                else_=sa.literal(metadata, type_=JSONB),
+            )
         if any(
             selection is not None
             for selection in (
@@ -1099,15 +1120,5 @@ class AssistantRepository:
                     AssistantSpecialists.assistant_id == assistant_id,
                     AssistantSpecialists.specialist_id == assistant_id,
                 )
-            )
-        )
-        await self.session.execute(
-            sa.delete(GroupChatsAssistantsMapping).where(
-                GroupChatsAssistantsMapping.assistant_id == assistant_id,
-                GroupChatsAssistantsMapping.group_chat_id.in_(
-                    sa.select(GroupChatsTable.id).where(
-                        GroupChatsTable.space_id == source_space_id,
-                    )
-                ),
             )
         )

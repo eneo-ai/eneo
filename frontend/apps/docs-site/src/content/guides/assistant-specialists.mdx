@@ -29,8 +29,8 @@ configuration has been corrected.
 
 ## Read the answer and its steps
 
-The main answer is the orchestrating assistant's synthesis. Expand **View
-steps** to see each question sent to a specialist, its actual answer, its
+The main answer is the orchestrating assistant's synthesis. In either web
+app, expand **View steps** to see each question sent to a specialist, its actual answer, its
 sources and the tools it used. Repeated questions to the same specialist appear
 as separate steps. Opening a saved conversation restores these recorded steps
 without running the assistants again.
@@ -111,5 +111,32 @@ and must identify missing evidence.
 
 This version is available through interactive user sessions. An API key asking
 an assistant that has specialists receives `400` with
-`code: "orchestration_requires_session"`. Group chats are unchanged: they route
-each question to one member assistant.
+`code: "orchestration_requires_session"`.
+
+## Former group chats
+
+Group chats no longer exist as a separate kind of application. Every group chat
+became an assistant with the same id, in the same Space, with the same owner,
+name, icon, publication and insight setting, and its members became that
+assistant's specialists with their routing descriptions.
+
+To find your earlier messages, open the same Space, choose **Assistants**, open
+the assistant with the group's former name and select **History**. Each conversation
+keeps its session ID and messages. Saved conversation links open that session.
+The assistant's ordinary access rules apply to History and Insights. If the
+assistant is missing, ask your administrator to review your assistant access.
+Administrators should also review who can read shared transcripts through Insights.
+
+To continue an old session that now uses specialists, sign in to Eneo. Sending a
+new turn to an orchestrating assistant with an API key returns HTTP 400 with
+`orchestration_requires_session`. Integrations that need an API key can start a
+new conversation with a standalone assistant within the key's scope.
+
+The migrated assistant uses the oldest eligible tool-capable model from its
+Space's catalog. If none qualifies, an editor must choose an eligible model.
+It has no instructions, so review each former group: give it a prompt that says
+what the combined answer should look like, and check the specialists and their
+descriptions. Mentions (`@assistant`) and the "show response labels" setting are
+gone. Earlier messages show the recorded author when it differs from the chat assistant.
+For new turns, open **View steps** in either web app to see who said what. Calls to the old
+`/api/v1/group-chats/` endpoints answer `410` with `code: "group_chats_retired"`.
