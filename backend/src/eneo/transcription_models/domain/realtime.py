@@ -73,7 +73,9 @@ def realtime_eligibility(
 
 def _is_gateway(endpoint: str) -> bool:
     try:
-        host = parse_destination(endpoint).host
+        # IDNA turns a fullwidth or ideographic full stop at the end into a
+        # root dot, which the parser leaves in place: drop it before comparing.
+        host = parse_destination(endpoint).host.rstrip(".")
     except InvalidDestination:
         return False
     return host != _OPENAI_DOMAIN and not host.endswith(f".{_OPENAI_DOMAIN}")

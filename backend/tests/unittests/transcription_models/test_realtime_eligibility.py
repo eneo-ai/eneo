@@ -90,6 +90,13 @@ def test_every_eligible_endpoint_opens_the_realtime_socket_on_the_same_host(
         ("openai", {"endpoint": "https://api.openai.com/v1/"}, {}),
         ("openai", {"endpoint": "HTTPS://API.OPENAI.COM:443/v1"}, {}),
         ("openai", {"endpoint": "https://api.openai.com./v1"}, {}),
+        # IDNA maps the ideographic and fullwidth full stops to a root dot.
+        ("openai", {"endpoint": "https://api.openai.com。"}, {}),
+        ("openai", {"endpoint": "https://api.openai.com。/v1"}, {}),
+        ("openai", {"endpoint": "https://api.openai.com．"}, {}),
+        ("openai", {"endpoint": "https://api.openai.com．/v1"}, {}),
+        ("openai", {"endpoint": "https://api.openai.com｡"}, {}),
+        ("openai", {"endpoint": "https://api.openai.com｡/v1"}, {}),
         ("openai", {"endpoint": "https://eu.api.openai.com/v1"}, {}),
         ("openai", {"endpoint": "https://openai.com"}, {}),
         ("openai", {}, {"endpoint": "https://api.openai.com/v1"}),
