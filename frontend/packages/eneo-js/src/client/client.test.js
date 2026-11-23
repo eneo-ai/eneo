@@ -48,6 +48,53 @@ describe("createClient path parameters", () => {
     expect(fetch.mock.calls[0][0]).toBe("https://api.example.test/api/v1/apps/app-1/");
   });
 
+  it("keeps a value with a slash and dot segments inside its own path segment", async () => {
+    const fetch = vi.fn(async () => new Response("{}", { status: 200 }));
+    const client = createClient({ baseUrl: "https://api.example.test", fetch });
+
+    await client.fetch("/api/v1/widgets/{public_id}/config/", {
+      method: "get",
+      params: { path: { public_id: "wgt_x/../../foo" } }
+    });
+
+    // Unencoded, `url.pathname = …` would normalise the dots away and the
+    // request would reach /api/v1/foo/config/ instead.
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][0]).toBe(
+      "https://api.example.test/api/v1/widgets/wgt_x%2F..%2F..%2Ffoo/config/"
+    );
+  });
+
+  it.each([".", ".."])("refuses %j, a dot segment however it is encoded", async (value) => {
+    const fetch = vi.fn();
+    const client = createClient({ baseUrl: "https://api.example.test", fetch });
+
+    await expect(
+      client.fetch("/api/v1/widgets/{public_id}/config/", {
+        method: "get",
+        params: { path: { public_id: value } }
+      })
+    ).rejects.toThrow(
+      new RegExp(`Path parameter "public_id" .* cannot be "${value.replaceAll(".", "\\.")}"`)
+    );
+
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("leaves an ordinary identifier as it is", async () => {
+    const fetch = vi.fn(async () => new Response("{}", { status: 200 }));
+    const client = createClient({ baseUrl: "https://api.example.test", fetch });
+
+    await client.fetch("/api/v1/widgets/{public_id}/config/", {
+      method: "get",
+      params: { path: { public_id: "wgt_0123456789abcdefABCDEF" } }
+    });
+
+    expect(fetch.mock.calls[0][0]).toBe(
+      "https://api.example.test/api/v1/widgets/wgt_0123456789abcdefABCDEF/config/"
+    );
+  });
+
   it("authenticates apiKey clients with the canonical X-API-Key header", async () => {
     const fetch = vi.fn(
       async () => new Response(JSON.stringify({ statuses: [] }), { status: 200 })

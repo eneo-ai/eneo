@@ -219,7 +219,7 @@ class AuditService:
         if actor_type == ActorType.API_KEY:
             if actor_api_key_id is None:
                 raise ValueError("actor_api_key_id required for api_key actions")
-        elif actor_type != ActorType.SYSTEM and actor_id is None:
+        elif actor_type.requires_actor_id and actor_id is None:
             raise ValueError("actor_id required for non-system actions")
         metadata = _with_actor_snapshot(
             metadata, user=user, actor_type=actor_type, action=action
@@ -395,7 +395,7 @@ class AuditService:
         if actor_type == ActorType.API_KEY:
             if actor_api_key_id is None:
                 raise ValueError("actor_api_key_id required for api_key actions")
-        elif actor_type != ActorType.SYSTEM and actor_id is None:
+        elif actor_type.requires_actor_id and actor_id is None:
             raise ValueError("actor_id required for non-system actions")
         metadata = _with_actor_snapshot(
             metadata, user=user, actor_type=actor_type, action=action

@@ -6,7 +6,7 @@
 <script lang="ts">
   import type { Eneo, Widget } from "@eneo/eneo-js";
   import { Button } from "$lib/components/ui/button/index.js";
-  import { onDestroy } from "svelte";
+  import { onDestroy, untrack } from "svelte";
   import { page } from "$app/state";
   import { toastError } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
@@ -31,6 +31,8 @@
   let destroyed = false;
 
   const active = $derived(element !== null);
+  // No preview token is minted for a paused widget (the pause is the kill switch).
+  const paused = $derived(widget.status === "paused");
   // The loader build the widget page loaded; null when this installation has none.
   const release = $derived((page.data?.release ?? null) as LoaderRelease | null);
 
@@ -89,6 +91,12 @@
     element = null;
   }
 
+  // Pausing invalidates the preview token, so a test started before it could
+  // only answer that the widget is unavailable: it ends with the pause.
+  $effect(() => {
+    if (paused) untrack(stop);
+  });
+
   onDestroy(() => {
     destroyed = true;
     stop();
@@ -106,11 +114,19 @@
       {m.widget_admin_snippet_not_built()}
     </p>
   {/if}
+  {#if paused && !active}
+    <p id="widget-live-test-paused" class="text-secondary text-sm">
+      {m.widget_admin_live_test_paused()}
+    </p>
+  {/if}
   <div>
     {#if active}
       <Button variant="outline" onclick={stop}>{m.widget_admin_live_test_stop()}</Button>
     {:else}
-      <Button onclick={start} disabled={loading || !release}
+      <Button
+        onclick={start}
+        disabled={loading || !release || paused}
+        aria-describedby={paused ? "widget-live-test-paused" : undefined}
         >{m.widget_admin_live_test_start()}</Button
       >
     {/if}

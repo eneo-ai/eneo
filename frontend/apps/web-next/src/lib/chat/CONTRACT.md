@@ -407,7 +407,10 @@ and ordinary tool parts.
    conversation even without the flag. Where nobody can be asked (no stream,
    a group chat, a visitor) such a call is not run: its tool part ends in
    `tool-output-error "denied"` and the model is told why
-   (`reason: "confirmation_unavailable"`).
+   (`reason: "confirmation_unavailable"`). A call also ends that way, with
+   `reason: "shared_call_id"`, when the model gave its call id to more than
+   one call and a call under that id needs a decision, which names a call
+   only by its id.
 2. When the model calls MCP tools that need approval the backend registers
    an `approval_id` (uuid, Redis, TTL `mcp_tool_approval_ttl_seconds`, 305 s
    by default) and emits `data-tool-approval` with `status: "pending"`,

@@ -11,7 +11,7 @@ pattern to prevent regressions from commit 58b73e9e.
 import uuid
 from dataclasses import replace
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import HTTPException, Request
@@ -31,8 +31,10 @@ from eneo.assistants.api.assistant_router import (
     update_assistant,
 )
 from eneo.assistants.assistant import AssistantOrigin
+from eneo.audit.application.audit_service import AuditService
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication.auth_models import ApiKeyOwnership
 from eneo.main.exceptions import UnauthorizedException
 from eneo.main.models import NOT_PROVIDED, ModelId
 from eneo.sessions.session import (
@@ -262,7 +264,7 @@ class TestAskAssistant:
     async def test_audit_logs_with_correct_user_context(
         self, mock_container, mock_user, monkeypatch
     ):
-        """Verify audit logging includes correct tenant_id and actor_id from user."""
+        """Verify audit logging gets the tenant and the user, who names the actor."""
         mock_to_response = AsyncMock(return_value=MagicMock())
         monkeypatch.setattr(
             "eneo.assistants.api.assistant_router.assistant_protocol.to_response",
@@ -283,7 +285,7 @@ class TestAskAssistant:
         call_kwargs = audit_service.log_async.call_args.kwargs
 
         assert call_kwargs["tenant_id"] == mock_user.tenant_id
-        assert call_kwargs["actor_id"] == mock_user.id
+        assert call_kwargs["user"] is mock_user
 
     async def test_audit_logs_file_metadata(self, mock_container, monkeypatch):
         """Verify file count is captured in audit metadata when files are provided."""
@@ -370,6 +372,66 @@ class TestAskAssistant:
         # Audit logging should still happen
         audit_service = mock_container.audit_service.return_value
         audit_service.log_async.assert_called_once()
+
+
+def _service_key_user():
+    key = SimpleNamespace(
+        id=uuid.uuid4(),
+        name="Ingest key",
+        key_prefix="sk_ab",
+        ownership=ApiKeyOwnership.SERVICE,
+    )
+    return SimpleNamespace(
+        id=uuid.uuid4(),
+        tenant_id=uuid.uuid4(),
+        username="Service Key (Ingest key)",
+        email="sk-xxxx@service.key",
+        active_api_key=key,
+        active_widget=None,
+        can_view_model_pricing=False,
+    )
+
+
+async def _start_session(container):
+    await ask_assistant(
+        id=uuid.uuid4(),
+        ask=AskAssistant(question="Test question"),
+        version=1,
+        container=container,
+    )
+
+
+async def _end_session(container):
+    container.session_service.return_value = AsyncMock()
+    await delete_assistant_session(
+        id=uuid.uuid4(), session_id=uuid.uuid4(), container=container
+    )
+
+
+@pytest.mark.parametrize("act", [_start_session, _end_session])
+async def test_a_service_key_session_is_audited_under_the_key(
+    act, mock_container, monkeypatch
+):
+    # A service key has no users row: its entry names the key, not a user.
+    key_user = _service_key_user()
+    mock_container.user.return_value = key_user
+    mock_container.audit_service.return_value = AuditService(AsyncMock())
+    monkeypatch.setattr(
+        "eneo.assistants.api.assistant_router.assistant_protocol.to_response",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(assistant_router, "to_session_public", MagicMock())
+
+    with patch("eneo.audit.application.audit_service.job_manager") as job_manager:
+        job_manager.enqueue = AsyncMock()
+        await act(mock_container)
+
+    params = job_manager.enqueue.await_args.args[2]
+    assert (params["actor_type"], params["actor_id"], params["actor_api_key_id"]) == (
+        "api_key",
+        None,
+        str(key_user.active_api_key.id),
+    )
 
 
 class TestUpdateAssistant:

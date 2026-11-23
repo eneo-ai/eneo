@@ -278,6 +278,6 @@ describe("Assistant edit loader and web widgets", () => {
 
   test("a failed status check claims nothing and keeps the page loading", async () => {
     const { event } = widgetEvent(vi.fn().mockRejectedValue(new Error("offline")));
-    expect((await load(event as never)).servesActiveWidget).toBe(false);
+    expect((await load(event as never)).servesActiveWidget).toBeNull();
   });
 });

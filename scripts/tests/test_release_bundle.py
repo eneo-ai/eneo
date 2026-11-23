@@ -174,8 +174,8 @@ vm.runInNewContext(process.argv[1], {
         for version, allowed in [
             ("20.20.2", False),
             ("22.22.0", False),
-            ("22.23.3", False),
-            ("22.23.4", True),
+            ("22.23.4", False),
+            ("22.23.5", True),
             ("22.24.0", True),
         ]:
             with self.subTest(version=version):

@@ -202,6 +202,36 @@ class WidgetPolicyViolationError(WidgetPublicError):
         return {"violations": list(self.violations)}
 
 
+class WidgetAdminRequiredError(WidgetPublicError):
+    """An editor changed a setting a tenant admin reviewed at activation while
+    the widget is active. Pausing the widget first reopens the setting."""
+
+    status_code = 403
+    code = "admin_required_while_active"
+
+    def __init__(self, fields: list[str]) -> None:
+        super().__init__(
+            "Only a tenant admin can change "
+            + ", ".join(fields)
+            + " while the widget is active. Pause the widget first."
+        )
+        self.fields = fields
+
+    def details(self) -> dict[str, Any]:
+        return {"fields": list(self.fields)}
+
+
+class WidgetPreviewUnavailableError(WidgetPublicError):
+    """No preview of a paused widget: the pause is the kill switch, and a
+    preview token would admit the embed page behind it."""
+
+    status_code = 400
+    code = "preview_unavailable_while_paused"
+
+    def __init__(self) -> None:
+        super().__init__("A paused widget cannot be previewed. Resume it first.")
+
+
 class WidgetServingBlockedError(WidgetPublicError):
     """The widget cannot serve visitors as configured: activation was refused,
     or an edit would leave an active widget unable to serve."""
