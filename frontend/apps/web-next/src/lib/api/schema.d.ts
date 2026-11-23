@@ -25585,8 +25585,12 @@ export interface components {
       inherited_policy: components["schemas"]["FlowRunRetentionPolicy"] | null;
       /** @description The Flow's own time, or null when it follows its Space. */
       local_policy: components["schemas"]["FlowRunRetentionPolicy"] | null;
-      /** @description Level whose local policy is being inspected: the Flow. */
-      scope: components["schemas"]["FlowRunRetentionScope"];
+      /**
+       * Scope
+       * @description Level whose local policy is being inspected: the Flow.
+       * @constant
+       */
+      scope: "flow";
       /**
        * Scope Id
        * Format: uuid

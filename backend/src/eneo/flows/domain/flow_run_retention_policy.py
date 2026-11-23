@@ -110,7 +110,7 @@ class FlowRunRetentionPolicySettings(BaseModel):
         },
     )
 
-    scope: FlowRunRetentionScope = Field(
+    scope: Literal[FlowRunRetentionScope.FLOW] = Field(
         description="Level whose local policy is being inspected: the Flow."
     )
     scope_id: UUID = Field(description="Flow identifier.")

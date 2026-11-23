@@ -5,6 +5,7 @@ from pydantic import ValidationError
 
 from eneo.flows.domain.flow_run_retention_policy import (
     FlowRunRetentionPolicy,
+    FlowRunRetentionPolicySettings,
     resolve_flow_run_retention_policy,
 )
 
@@ -55,3 +56,11 @@ def test_a_policy_with_a_mode_is_refused(payload: dict[str, object]) -> None:
 def test_policy_days_follow_the_existing_retention_bounds(days: int) -> None:
     with pytest.raises(ValidationError):
         FlowRunRetentionPolicy(days=days)
+
+
+def test_the_settings_response_names_only_the_flow_scope() -> None:
+    """Only a Flow's settings are read or written, so the response's scope is
+    the Flow; the purge receipt and the audit keep the three levels."""
+    scope = FlowRunRetentionPolicySettings.model_json_schema()["properties"]["scope"]
+
+    assert scope.get("const", scope.get("enum")) in ("flow", ["flow"])
