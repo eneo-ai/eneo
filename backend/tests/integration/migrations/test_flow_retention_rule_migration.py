@@ -14,7 +14,7 @@ from tests.integration.migrations.alembic_test_utils import reset_public_schema
 
 pytestmark = pytest.mark.migration_isolation
 
-PREVIOUS_REVISION = "202611230556"
+PREVIOUS_REVISION = "202611231020"
 RULE_REVISION = "202611231030"
 
 REMOVED_COLUMNS = {

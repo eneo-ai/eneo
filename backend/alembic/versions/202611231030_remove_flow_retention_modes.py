@@ -12,7 +12,7 @@ each flow time chosen since the upgrade the mode `preserve`, the earlier
 meaning of a time that only an explicit purge acts on.
 
 Revision ID: 202611231030
-Revises: 202611230556
+Revises: 202611231020
 """
 
 from collections.abc import Sequence
@@ -22,7 +22,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "202611231030"
-down_revision: str | None = "202611230556"
+down_revision: str | None = "202611231020"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
