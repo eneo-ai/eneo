@@ -46,6 +46,8 @@ export type TranscriptionModelLink = {
   name: string;
   nickname?: string | null;
   can_access?: boolean;
+  /** Marked for live text by an administrator, whether or not it can stream now. */
+  supports_realtime?: boolean;
   /** Can stream live text now: marked and its provider can carry it (backend's answer). */
   streams_live?: boolean;
   /** Tells apart models of the same name from different providers. */

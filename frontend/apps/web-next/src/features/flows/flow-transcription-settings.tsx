@@ -98,14 +98,15 @@ function modelOption(model: TranscriptionModelLink, t: Translate, showsRole: boo
 
 /**
  * A streaming model chosen to write files, while the space has a model made
- * for files: the one to suggest instead.
+ * for files: the one to suggest instead. A model marked for live text is not
+ * made for files, even while its provider cannot carry live text.
  */
 function fileModelInstead(
   model: TranscriptionModelLink | undefined,
   models: readonly TranscriptionModelLink[]
 ): TranscriptionModelLink | undefined {
   if (!model?.streams_live) return undefined;
-  return models.find((candidate) => !candidate.streams_live && candidate.can_access !== false);
+  return models.find((candidate) => !candidate.supports_realtime && candidate.can_access !== false);
 }
 
 function serviceName(service: SpeakerServiceLink, t: Translate): string {
