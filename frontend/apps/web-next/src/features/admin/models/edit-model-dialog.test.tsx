@@ -388,7 +388,7 @@ async function editLiveTranscription(model: AdminModel) {
     />
   );
   await waitFor(() => expect(api.GET).toHaveBeenCalled());
-  return screen.getByRole("switch", { name: "Livetranskribering" });
+  return screen.getByRole("switch", { name: "Livetext" });
 }
 
 /** The texts a control's aria-describedby points at. */
@@ -424,7 +424,7 @@ it("points each open form's switch at its own help, not at another form's", asyn
     </>
   );
   await screen.findByText(REASONS.endpoint_required);
-  for (const toggle of screen.getAllByRole("switch", { name: "Livetranskribering" })) {
+  for (const toggle of screen.getAllByRole("switch", { name: "Livetext" })) {
     for (const id of (toggle.getAttribute("aria-describedby") ?? "").split(" ")) {
       // An id the page has twice names whichever comes first, perhaps the other dialog's.
       expect(document.querySelectorAll(`[id="${id}"]`)).toHaveLength(1);

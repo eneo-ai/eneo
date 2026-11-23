@@ -82,7 +82,7 @@ describe("ModelDetailDialog", () => {
           onOpenChange={() => {}}
         />
       );
-      const term = await screen.findByText("Livetranskribering", { selector: "dt" });
+      const term = await screen.findByText("Livetext", { selector: "dt" });
       expect(term.nextElementSibling?.textContent).toBe(answer);
     }
   );
@@ -103,7 +103,7 @@ describe("ModelDetailDialog", () => {
         onOpenChange={() => {}}
       />
     );
-    const term = await screen.findByText("Livetranskribering", { selector: "dt" });
+    const term = await screen.findByText("Livetext", { selector: "dt" });
     await within(term.nextElementSibling as HTMLElement).findByText(
       "Ange adressen till servern eller gatewayen på leverantören. OpenAI:s egen tjänst har inte vLLM:s realtids-API."
     );

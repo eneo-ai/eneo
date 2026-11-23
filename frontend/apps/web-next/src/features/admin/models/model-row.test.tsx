@@ -32,7 +32,7 @@ it.each([
     />
   );
   const capabilities = screen.queryByRole("list", { name: "Funktioner" });
-  expect(capabilities?.textContent ?? "").toBe(on ? "Livetranskribering" : "");
+  expect(capabilities?.textContent ?? "").toBe(on ? "Livetext" : "");
 });
 
 it("locks a historical migrated model even when rendered directly", () => {

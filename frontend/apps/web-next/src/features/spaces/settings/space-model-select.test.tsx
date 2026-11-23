@@ -193,9 +193,9 @@ describe("SpaceModelSelect", () => {
     ]);
     openCard();
     // In words, not only a hover tooltip: read with the switch, seen without a pointer.
-    expect(Boolean(screen.queryByText("Livetranskribering"))).toBe(on);
+    expect(Boolean(screen.queryByText("Livetext"))).toBe(on);
     const toggle = screen.getByRole("switch", { name: "Pianissimo" });
-    expect(describedText(toggle)).toBe(on ? "Livetranskribering" : "");
+    expect(describedText(toggle)).toBe(on ? "Livetext" : "");
     await expectNoAxeViolations(container);
   });
 

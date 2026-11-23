@@ -223,7 +223,11 @@ export function providerFieldHint(
       return t("will_be_encrypted");
     case "endpoint":
       if (providerType === "azure") return t("endpoint_required_azure");
-      if (providerType === "hosted_vllm") return t("endpoint_required_vllm");
+      // The two types that can carry live text, which streams from this address.
+      if (providerType === "hosted_vllm")
+        return `${t("endpoint_required_vllm")} ${t("endpoint_live_text_note")}`;
+      if (providerType === "openai")
+        return `${t("endpoint_optional_generic")} ${t("endpoint_live_text_note")}`;
       if (!required) return t("endpoint_optional_generic");
       return "";
     case "api_version":

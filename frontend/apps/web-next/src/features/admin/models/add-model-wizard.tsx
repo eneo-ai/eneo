@@ -473,7 +473,14 @@ export function AddModelWizard({
             <Text type="label" display="block">
               {providerDisplayName(providerType)}
             </Text>
-            <Text type="supporting">{t("enter_provider_credentials")}</Text>
+            <Text type="supporting" display="block">
+              {t("enter_provider_credentials")} {t("provider_type_fixed_note")}
+            </Text>
+            {(providerType === "hosted_vllm" || providerType === "openai") && (
+              <Text type="supporting" display="block">
+                {t("provider_gateway_as_openai_note")}
+              </Text>
+            )}
           </div>
         </div>
         <form id={credentialsFormId} onSubmit={submitCredentials} noValidate>
