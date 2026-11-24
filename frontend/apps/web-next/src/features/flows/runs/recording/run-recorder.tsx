@@ -24,7 +24,7 @@ import { EneoApiError } from "@/lib/api/errors";
 import { formatBytes } from "@/lib/format";
 import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
 import { holdRecording } from "@/lib/recording-activity";
-import type { RecordingPartInfo, UploadEntry } from "../run-contract";
+import { stays, type RecordingPartInfo, type UploadEntry } from "../run-contract";
 import {
   liveSocketUrl,
   openLiveTranscription,
@@ -169,14 +169,6 @@ function awaitingUpload(
 function refusalReason(error: unknown): string {
   const reason = error instanceof EneoApiError ? error.context?.reason : undefined;
   return typeof reason === "string" ? reason : "unavailable";
-}
-
-/**
- * Whether a file stays on the form: one that did not fail, or a recorded
- * part whose upload will be sent again (it exists nowhere else).
- */
-function stays(entry: UploadEntry): boolean {
-  return entry.state !== "failed" || Boolean(entry.recording && entry.retryable);
 }
 
 /** Free file slots of a step: every file that stays takes one. */
@@ -696,7 +688,13 @@ export function RunRecorder({
     const before = partsOf(current, now);
     // Recording again while the last recording's parts are on the form goes on with it.
     const sessionId = before.length > 0 && current ? current : crypto.randomUUID();
-    const firstIndex = before.reduce((next, part) => Math.max(next, part.index + 1), 0);
+    // After every part of the recording the form has seen, one the core refused for good included:
+    // its copy on the device keeps its own place.
+    const firstIndex = now.reduce(
+      (next, entry) =>
+        entry.recording?.sessionId === sessionId ? Math.max(next, entry.recording.index + 1) : next,
+      0
+    );
     const recordedBeforeMs = before.reduce((sum, part) => sum + part.durationMs, 0);
     if (
       byItself &&

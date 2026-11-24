@@ -135,6 +135,45 @@ it("sends a recorded part again when the session check could not reach the serve
   expect(UploadRequest.sent).toHaveLength(0);
 });
 
+it("keeps a recorded part's slot while it waits to be sent again", async () => {
+  const hook = renderHookInApp(() => useRuntimeUploads("flow-1", undefined));
+  const input = makeInput({ step_id: "step-1", max_files: 2, accepted_mimetypes: ["audio/webm"] });
+  const record = (index: number) =>
+    act(() =>
+      hook.result.current.add(
+        input,
+        [new File(["audio"], `del-${index}.webm`, { type: "audio/webm" })],
+        {
+          recording: { sessionId: "rec-1", index, durationMs: 1000, streamed: false },
+          label: "Inspelning"
+        }
+      )
+    );
+  record(0);
+  await waitFor(() => expect(UploadRequest.sent).toHaveLength(1));
+  act(() => UploadRequest.sent[0]!.answer(201, { id: "file-1" }));
+  record(1);
+  await waitFor(() => expect(UploadRequest.sent).toHaveLength(2));
+  act(() => UploadRequest.sent[1]!.onerror?.());
+  await waitFor(() =>
+    expect(hook.result.current.uploads["step-1"]?.[1]).toMatchObject({
+      state: "failed",
+      retryable: true
+    })
+  );
+
+  // The part exists nowhere else and is sent again: a picked file does not take its slot.
+  act(() =>
+    hook.result.current.add(input, [new File(["audio"], "fil.webm", { type: "audio/webm" })])
+  );
+  expect(hook.result.current.uploads["step-1"]?.[2]).toMatchObject({
+    name: "fil.webm",
+    state: "failed",
+    refused: true
+  });
+  expect(UploadRequest.sent).toHaveLength(2);
+});
+
 it("aborts outstanding uploads on session change and releases settled request listeners", async () => {
   const hook = await uploadFiles(2);
   act(() => UploadRequest.sent[0]!.answer(201, { id: "file-1" }));

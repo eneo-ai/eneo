@@ -10,7 +10,12 @@ import { apiErrorFromResponse, EneoApiError } from "@/lib/api/errors";
 import { formatBytes } from "@/lib/format";
 import type { Schema } from "@/lib/api/models";
 import { UploadRetries } from "./recording/upload-retry";
-import type { RecordingPartInfo, UploadEntry, UploadsByStep } from "./run-contract";
+import {
+  stays,
+  type RecordingPartInfo,
+  type UploadEntry,
+  type UploadsByStep
+} from "./run-contract";
 import { refusalText, type Translator } from "./run-messages";
 import { deleteRuntimeFile, type RuntimeInput, type UploadedFile } from "./runs-api";
 
@@ -325,9 +330,7 @@ export function useRuntimeUploads(flowId: string, policy: UploadPolicy | undefin
     }
     const existing = current.current[input.step_id] ?? [];
     let slots =
-      input.max_files == null
-        ? Infinity
-        : input.max_files - existing.filter((entry) => entry.state !== "failed").length;
+      input.max_files == null ? Infinity : input.max_files - existing.filter(stays).length;
     const started: { entry: UploadEntry; file: File }[] = [];
     const added = picked.map((file): UploadEntry => {
       const base = {

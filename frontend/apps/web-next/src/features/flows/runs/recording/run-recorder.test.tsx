@@ -48,6 +48,8 @@ class FakeUpload {
   static sent: File[] = [];
   static failNext = false;
   static failAll = false;
+  /** The core refuses the next upload for good (a 4xx that sending again does not change). */
+  static refuseNext = false;
   status = 0;
   responseText = "";
   upload = { onprogress: null as ((event: ProgressEvent) => void) | null };
@@ -66,6 +68,13 @@ class FakeUpload {
       if (FakeUpload.failNext || FakeUpload.failAll) {
         FakeUpload.failNext = false;
         this.onerror?.();
+        return;
+      }
+      if (FakeUpload.refuseNext) {
+        FakeUpload.refuseNext = false;
+        this.status = 422;
+        this.responseText = JSON.stringify({ message: "Refused" });
+        this.onload?.();
         return;
       }
       FakeUpload.sent.push(file);
@@ -272,6 +281,7 @@ beforeEach(async () => {
   FakeUpload.sent = [];
   FakeUpload.failNext = false;
   FakeUpload.failAll = false;
+  FakeUpload.refuseNext = false;
   FakeSocket.instances = [];
   FakeNode.instances = [];
   microphone.mockReset();
@@ -440,6 +450,35 @@ describe("RunRecorder in the start dialog", () => {
     expect(startBody()?.step_inputs).toEqual({
       "step-1": { file_ids: ["file-1", "file-2"], single_recording: true }
     });
+  });
+
+  it("numbers the next part after a part the core refused, so its copy on the device stays its own", async () => {
+    installBrowser();
+    grantMicrophone();
+    const stored = vi.spyOn(device.db, "putPart");
+    const { dialog } = await openDialog(audioContract());
+    await recordAndStop(dialog);
+    await waitFor(() => expect(FakeUpload.sent).toHaveLength(1));
+
+    // The second part is refused for good: it leaves the parts that stay on the form.
+    FakeUpload.refuseNext = true;
+    fireEvent.click(button(dialog, messages.flow_transcript_rec_continue));
+    fireEvent.click(
+      await within(dialog).findByRole("button", { name: messages.flow_transcript_rec_stop })
+    );
+    await within(dialog).findByText(/^Inspelning, del 2/);
+    await waitFor(() => expect(stored).toHaveBeenCalledTimes(2));
+
+    fireEvent.click(
+      await within(dialog).findByRole("button", { name: messages.flow_transcript_rec_continue })
+    );
+    fireEvent.click(
+      await within(dialog).findByRole("button", { name: messages.flow_transcript_rec_stop })
+    );
+    await waitFor(() => expect(FakeUpload.sent).toHaveLength(2));
+    expect(FakeUpload.sent[1]!.name).toMatch(/-seg02-/);
+    await waitFor(() => expect(stored).toHaveBeenCalledTimes(3));
+    expect(stored.mock.calls.map(([part]) => part.index)).toEqual([0, 1, 2]);
   });
 
   it("asks to stop the recording before the run starts", async () => {
