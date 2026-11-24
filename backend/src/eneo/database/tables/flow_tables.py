@@ -1166,6 +1166,19 @@ class FlowRuns(BasePublic):
                 FLOW_RUN_TERMINAL_RETENTION_ANCHOR_INDEX_PREDICATE
             ),
         ),
+        # The automatic removal and its probe over marked runs, per flow by
+        # anchor: chosen over anchor order alone, which the planner left
+        # unused under default statistics (revision 202611241100). The
+        # predicate holds no status: the statements bind the statuses as
+        # parameters, which a generic plan cannot match to a partial index.
+        Index(
+            "ix_flow_runs_marked_flow_retention_anchor",
+            "flow_id",
+            sa.text("coalesce(finished_at, created_at)"),
+            "id",
+            postgresql_include=("tenant_id",),
+            postgresql_where=sa.text("started_under_space_retention IS TRUE"),
+        ),
         _flow_run_listing_index(
             "ix_flow_runs_flow_listing", postgresql_include=("status",)
         ),
