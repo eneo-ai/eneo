@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
@@ -10,6 +10,7 @@ vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 vi.mock("@/lib/toast", () => ({ toast }));
 
 import { EditModelDialog } from "./edit-model-dialog";
+import { PROVIDERS_KEY } from "./model-providers";
 import type { AdminModel } from "./models";
 
 const ok = (data: unknown) => Promise.resolve({ data, response: new Response("{}") });
@@ -505,6 +506,56 @@ describe("live text on a transcription model", () => {
 
     await waitFor(() =>
       expect(api.PUT.mock.calls[0]?.[1]?.body).toMatchObject({ supports_realtime: false })
+    );
+  });
+
+  it("can turn off a mark not yet saved when the provider stops carrying live text", async () => {
+    providersSay({ p1: "eligible" });
+    api.PUT.mockImplementation(() => ok({}));
+    const { queryClient } = renderInApp(
+      <EditModelDialog
+        model={transcriptionModel("p1")}
+        kind="transcription"
+        classifications={[]}
+        securityEnabled={false}
+        open
+        onOpenChange={vi.fn()}
+      />
+    );
+    const toggle = screen.getByRole("switch", { name: "Livetext" });
+    // Locked until the provider list says the provider can carry it.
+    await waitFor(() => expect(toggle.getAttribute("aria-disabled")).toBeNull());
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+
+    // The provider is switched off in another tab, and the list is fetched again.
+    providersSay({ p1: "provider_inactive" });
+    act(() =>
+      queryClient.setQueryData(PROVIDERS_KEY, [
+        { id: "p1", realtime_eligibility: "provider_inactive" }
+      ])
+    );
+    await screen.findByText(REASONS.provider_inactive);
+    expect(toggle.getAttribute("aria-disabled")).toBeNull();
+    expect(descriptions(toggle)).toEqual([
+      "Visar texten medan någon spelar in. Modellens server behöver stödja vLLM:s realtids-API.",
+      REASONS.provider_inactive
+    ]);
+
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    // Off, it is locked again: a second press changes nothing.
+    expect(toggle.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+
+    fireEvent.change(screen.getByDisplayValue("Pianissimo"), { target: { value: "Forte" } });
+    fireEvent.click(screen.getByRole("button", { name: "Spara" }));
+    await waitFor(() =>
+      expect(api.PUT.mock.calls[0]?.[1]?.body).toMatchObject({
+        display_name: "Forte",
+        supports_realtime: false
+      })
     );
   });
 

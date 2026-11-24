@@ -215,9 +215,10 @@ function EditModelForm({
       ? "unsupported_provider"
       : providers.data?.find((provider) => provider.id === model.provider_id)?.realtime_eligibility;
   const realtimeRefusal = realtimeRefusalKey(realtimeEligibility);
-  // A saved mark can always be kept or turned off, even when the provider no
-  // longer carries live text; only turning it on needs an eligible provider.
-  const realtimeLocked = realtimeEligibility !== "eligible" && !savedRealtime;
+  // Only turning on a mark that is not saved needs an eligible provider. A mark
+  // that is on, saved or only in this form, can always be turned off, and a
+  // saved one kept, even when the provider no longer carries live text.
+  const realtimeLocked = realtimeEligibility !== "eligible" && !savedRealtime && !realtime;
   // A saved mark the provider cannot carry: say so before the reason.
   const realtimeKeptUnused = savedRealtime && realtimeRefusal !== null;
 
