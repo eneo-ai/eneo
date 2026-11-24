@@ -19,6 +19,7 @@ from eneo.flows.domain.flow_run_retention_policy import (
     FlowRunRetentionScope,
     FlowRunRetentionSpaceTargetPage,
 )
+from eneo.flows.flow_access_policy import FlowApiAction, user_can_perform_flow_action
 from eneo.flows.infrastructure.flow_retention_repo import FlowRetentionRepository
 from eneo.flows.infrastructure.flow_run_retention_policy_repo import (
     FlowRunRetentionPolicyChange,
@@ -104,16 +105,28 @@ class FlowRunRetentionPolicyService:
         return change.after
 
     async def _require_space_retention_role(self, flow_id: UUID) -> None:
-        """A Flow's time is set by whoever sets retention in its space: the
-        space admin, or a personal space's owner. The same rule as the space
-        time and the assistant and app times (``SpaceActor.can_edit_retention``)."""
+        """Who may set a Flow's own time, after ``require_retention_manage``.
+
+        In a personal space, its owner with the right to edit Flows there:
+        ``flows_manage`` (the Flow API's EDIT) and
+        ``SpaceActor.can_edit_flows``. This mirrors ``_ensure_can_mutate``
+        behind the Flow API's ``can_edit``, without its draft-owner check,
+        which a personal space's owner always passes. In any other space,
+        whoever sets retention there (``SpaceActor.can_edit_retention``):
+        the space admin."""
         space_id = await self.repository.get_flow_space_id(
             tenant_id=self.user.tenant_id, flow_id=flow_id
         )
-        actor = self.actor_manager.get_space_actor(
-            await self.space_repo.get_space_access_facts(space_id)
-        )
-        if not actor.can_edit_retention():
+        facts = await self.space_repo.get_space_access_facts(space_id)
+        actor = self.actor_manager.get_space_actor(facts)
+        if facts.is_personal():
+            allowed = (
+                user_can_perform_flow_action(self.user, FlowApiAction.EDIT)
+                and actor.can_edit_flows()
+            )
+        else:
+            allowed = actor.can_edit_retention()
+        if not allowed:
             raise UnauthorizedException(
                 "Only space admins can change a Flow's retention time",
                 code="forbidden_action",

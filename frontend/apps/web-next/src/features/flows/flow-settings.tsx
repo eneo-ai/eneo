@@ -415,7 +415,8 @@ export function FlowSettings({
   canEdit: boolean;
   /**
    * Whether the person sets retention in the flow's space: its admin, or a
-   * personal space's owner. The backend refuses everyone else a flow time.
+   * personal space's owner who may edit the flow. The backend refuses
+   * everyone else a flow time.
    */
   setsSpaceRetention?: boolean;
   /** The space's transcription models and services. */
