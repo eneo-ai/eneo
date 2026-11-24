@@ -25,6 +25,12 @@ download policy or an engine's limits.
   (an MCP App, `src/tools/tabular/view/`) that hosts showing tool views render
   with its result. Set `display: "none"` for intermediate queries used by charts
   or other tools; the default `display: "table"` preserves in-chat browsing.
+  The same endpoint has `extract_images`, which takes the pictures out of an
+  attached PDF, Word or PowerPoint file and returns them as MCP image blocks, a
+  few per call with an `offset` for the rest. A PDF picture is located where a
+  page places an image and cut from a rendering of that region by the Python
+  sidecar (`scripts/extract_images.py`, pypdfium2 and Pillow), so every codec
+  comes out as PNG or JPEG; vector drawings are not pictures and are not found.
 - `POST /mcp/charts` (`create_chart`) provides the **Charts** function: interactive
   MCP App charts from inline series or CSV/XLSX sources. Explicit PNG/SVG
   requests and hosts without app views use MCP image blocks. The view and the

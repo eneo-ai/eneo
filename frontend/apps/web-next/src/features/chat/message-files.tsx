@@ -60,7 +60,13 @@ const BUNDLE_BUTTON_CLASS =
 const BUNDLE_SHOWN_CLASS = "border-ax-accent";
 
 /** Opens a message attachment in the shared preview dialog (signs the URL on open). */
-function MessageFilePreview({ file, onClose }: { file: MessageFile; onClose: () => void }) {
+function MessageFilePreview({
+  file,
+  onClose
+}: {
+  file: Pick<MessageFile, "id" | "name" | "mimetype">;
+  onClose: () => void;
+}) {
   const { url, error, resign } = useSignedUrl(file.id);
   return (
     <AttachmentPreviewDialog
@@ -72,6 +78,38 @@ function MessageFilePreview({ file, onClose }: { file: MessageFile; onClose: () 
       error={error}
       onImageError={resign}
     />
+  );
+}
+
+type Picture = Pick<MessageFile, "id" | "name" | "mimetype">;
+
+/**
+ * The pictures a tool took out of a file, as a row of thumbnails: they are
+ * material for a document, so they stay small under the answer. One opens
+ * full size in the preview dialog.
+ */
+export function PictureThumbnails({ pictures }: { pictures: Picture[] }) {
+  const t = useTranslations();
+  const [preview, setPreview] = useState<Picture | null>(null);
+  if (pictures.length === 0) return null;
+  return (
+    <>
+      <ul aria-label={t("chat_extracted_pictures")} className="flex flex-wrap gap-1.5">
+        {pictures.map((picture) => (
+          <li key={picture.id}>
+            <button
+              type="button"
+              aria-label={t("chat_preview_file", { name: picture.name })}
+              onClick={() => setPreview(picture)}
+              className="focus-visible:outline-ring rounded-ax-container block focus-visible:outline-2 focus-visible:outline-offset-2"
+            >
+              <InlineImage file={picture} thumbnail />
+            </button>
+          </li>
+        ))}
+      </ul>
+      {preview && <MessageFilePreview file={preview} onClose={() => setPreview(null)} />}
+    </>
   );
 }
 

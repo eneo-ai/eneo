@@ -64,6 +64,8 @@ export function requireExtension(
     `${tools} read ${extensionList(extensions)} files only, not a .${extension} file. Do not call them again with this file: read it with the file reading tool, or pass a CSV or Excel file.`,
   );
 }
+/** A file whose pictures are taken out: PDF, Word or PowerPoint. */
+export const pictureSourceReference = referenceTo(["pdf", "docx", "pptx"]);
 /** Raster images embedded in documents; bytes are validated in the sandbox. */
 export const imageReference = referenceTo(["png", "jpg", "jpeg"]);
 /** A Word document used as a template. */
