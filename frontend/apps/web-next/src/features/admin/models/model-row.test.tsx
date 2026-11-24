@@ -73,9 +73,10 @@ function liveRow(
 }
 
 it.each([
-  ["endpoint_required", "Ange adressen till servern eller gatewayen på leverantören."],
-  ["unsupported_provider", "Välj en leverantör som stöds"],
-  ["outbound_headers_configured", "Använd en leverantör utan utgående rubriker."]
+  ["endpoint_required", "Livetext kräver att leverantörens Endpoint-URL går till en server"],
+  ["unsupported_provider", "Livetext kräver en leverantör av typen vLLM"],
+  ["outbound_headers_configured", "Livetext kan inte skicka utgående headers."],
+  ["provider_inactive", "Leverantören är avstängd, så den kan inte bära livetext."]
 ] as const)(
   "says a marked model is not in use on a provider that cannot carry live text: %s",
   async (eligibility, reason) => {

@@ -124,7 +124,7 @@ test(
     await expect(live).toHaveAttribute("aria-checked", "false");
     await expect(
       form.getByText(
-        "Ange adressen till servern eller gatewayen på leverantören. OpenAI:s egen tjänst har inte vLLM:s realtids-API.",
+        "Livetext kräver att leverantörens Endpoint-URL går till en server eller gateway med vLLM:s realtids-API. OpenAI:s egen tjänst har inte det API:t.",
         { exact: true }
       )
     ).toBeVisible();

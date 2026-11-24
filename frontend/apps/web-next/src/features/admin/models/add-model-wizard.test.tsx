@@ -892,17 +892,18 @@ describe("the add-model wizard's catalog", () => {
   it.each([
     [
       "endpoint_required",
-      "Ange adressen till servern eller gatewayen på leverantören. OpenAI:s egen tjänst har inte vLLM:s realtids-API."
+      "Livetext kräver att leverantörens Endpoint-URL går till en server eller gateway med vLLM:s realtids-API. OpenAI:s egen tjänst har inte det API:t."
     ],
     [
       "unsupported_provider",
-      "Välj en leverantör som stöds: vLLM, eller OpenAI med adressen till en server som har vLLM:s realtids-API."
+      "Livetext kräver en leverantör av typen vLLM, eller OpenAI med en Endpoint-URL till en server med vLLM:s realtids-API."
     ],
     [
       "outbound_headers_configured",
-      "Använd en leverantör utan utgående rubriker. Livetext kan inte skicka dem."
-    ]
-  ] as const)("says what to do when the provider says %s", async (eligibility, reason) => {
+      "Livetext kan inte skicka utgående headers. Lägg modellen på en leverantör utan sådana, eller ta bort dem på leverantören om inget annat behöver dem."
+    ],
+    ["provider_inactive", "Leverantören är avstängd, så den kan inte bära livetext."]
+  ] as const)("says why live text is locked when the provider says %s", async (eligibility, reason) => {
     const { dialog, onOpenChange } = renderTranscriptionStep(eligibility);
     fireEvent.click(await within(dialog).findByRole("checkbox", { name: /pianissimo-sv/ }));
     const live = within(dialog).getByRole("checkbox", { name: /^Livetext$/ });
@@ -960,7 +961,7 @@ describe("the add-model wizard's catalog", () => {
     const live = await createProviderThatSays("endpoint_required");
     expect(live.getAttribute("aria-disabled")).toBe("true");
     expect(describedBy(live)).toContain(
-      "Ange adressen till servern eller gatewayen på leverantören. OpenAI:s egen tjänst har inte vLLM:s realtids-API."
+      "Livetext kräver att leverantörens Endpoint-URL går till en server eller gateway med vLLM:s realtids-API. OpenAI:s egen tjänst har inte det API:t."
     );
   });
 

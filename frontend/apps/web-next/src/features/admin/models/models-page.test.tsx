@@ -698,7 +698,7 @@ describe("ModelsPage", () => {
     );
     // The page refetches providers and models; no reload.
     expect(await within(card).findByText("Markerad, används inte")).toBeTruthy();
-    expect(within(card).getByText(/^Använd en leverantör utan utgående rubriker\./)).toBeTruthy();
+    expect(within(card).getByText(/^Livetext kan inte skicka utgående headers\./)).toBeTruthy();
   });
 
   it("deletes a provider without models after confirmation and keeps focus on the page", async () => {

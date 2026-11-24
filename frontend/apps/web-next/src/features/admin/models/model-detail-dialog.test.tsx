@@ -105,7 +105,7 @@ describe("ModelDetailDialog", () => {
     );
     const term = await screen.findByText("Livetext", { selector: "dt" });
     await within(term.nextElementSibling as HTMLElement).findByText(
-      "Ange adressen till servern eller gatewayen på leverantören. OpenAI:s egen tjänst har inte vLLM:s realtids-API."
+      "Livetext kräver att leverantörens Endpoint-URL går till en server eller gateway med vLLM:s realtids-API. OpenAI:s egen tjänst har inte det API:t."
     );
     expect(term.nextElementSibling?.textContent).toContain("Markerad, används inte");
     expect(term.nextElementSibling?.textContent).not.toBe("Ja");
