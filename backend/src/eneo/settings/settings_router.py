@@ -196,13 +196,22 @@ _RETENTION_PERMISSION_TEXT = {
 }
 
 
-def _retention_forbidden_response(kind: str) -> dict[str, object]:
+def _retention_forbidden_response(
+    kind: str, *, space_role: bool = False
+) -> dict[str, object]:
     return _settings_error_response(
         description=(
             f"Caller lacks {_RETENTION_PERMISSION_TEXT[kind]} "
             f"(`{RETENTION_PERMISSION_REQUIRED_CODE}`), or used an API key: "
             f"retention is changed or stopped by signed-in people only "
             f"(`{RETENTION_PERSON_REQUIRED_CODE}`)."
+            + (
+                " A Flow's time also needs the role that sets retention in its "
+                "Space: a space admin in a shared space, or in a personal space "
+                "its owner with the right to edit Flows (`forbidden_action`)."
+                if space_role
+                else ""
+            )
         ),
         message=f"Need permission {_RETENTION_PERMISSION_TEXT[kind]}.",
         eneo_error_code=ErrorCodes.UNAUTHORIZED,
@@ -1168,8 +1177,11 @@ async def get_flow_run_retention_policy(
     description=(
         "Replace the Flow's own time, or clear it to follow the Space. Operational "
         "retention remains editable after a Flow definition is published because it "
-        "does not mutate the published definition. Only an explicit administrator "
-        "purge removes runs; saving this policy never schedules deletion."
+        "does not mutate the published definition. A run that started while its "
+        "shared Space had a time is removed automatically once the shorter of the "
+        "Space's and the Flow's time has passed, as long as the Space keeps its "
+        "time. Without a Space time, only an explicit administrator purge removes "
+        "runs."
         " A deleted Flow is accepted. The change waits for an open history deletion "
         "to finish."
     ),
@@ -1184,7 +1196,7 @@ async def get_flow_run_retention_policy(
             eneo_error_code=ErrorCodes.RETENTION_EXCEEDS_SPACE,
             code="retention_exceeds_space",
         ),
-        403: _retention_forbidden_response("manage"),
+        403: _retention_forbidden_response("manage", space_role=True),
         404: _flow_retention_not_found_response("Flow"),
         409: _flow_retention_lock_busy_response(),
     },
@@ -1218,7 +1230,9 @@ async def replace_flow_run_retention_policy(
         "Dry runs select candidates but delete nothing "
         "and emit no audit event. Real purges require an audit row in the same "
         "transaction. Runs with unresolved deliveries and runs under a legal hold "
-        "are excluded."
+        "are excluded. Runs that started while their shared Space had a time are "
+        "also removed automatically; this purge also reaches the runs that removal "
+        "leaves, such as runs from before the Space had a time."
     ),
     responses={
         403: _retention_forbidden_response("manage"),
@@ -1310,8 +1324,9 @@ async def purge_flow_run_history(
 
 _FLOW_RETENTION_HOLD_EFFECT = (
     "Until the hold is released or its end date passes, whatever the "
-    "space's time or the Flow's time says, the explicit purge and the "
-    "debug-evidence redaction skip held runs, and the Space cannot be deleted "
+    "space's time or the Flow's time says, the automatic removal, the explicit "
+    "purge and the debug-evidence redaction skip held runs, and the Space cannot "
+    "be deleted "
     "(space_contains_legal_hold)."
 )
 
