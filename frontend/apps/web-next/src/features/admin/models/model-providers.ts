@@ -201,7 +201,7 @@ export function providerFieldPlaceholder(
       return t("enter_api_key");
     case "endpoint":
       if (providerType === "azure") return "https://your-resource.openai.azure.com";
-      if (providerType === "hosted_vllm") return "https://your-vllm-server.com";
+      if (providerType === "hosted_vllm") return "https://your-vllm-server.com/v1";
       return "https://api.example.com/v1";
     case "api_version":
       return t("api_version_placeholder");

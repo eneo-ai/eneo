@@ -222,7 +222,7 @@ describe("the add-provider wizard's credentials", () => {
     expect(within(dialog).getByText(/^API-nyckel/).textContent).toContain("Obligatoriskt");
     expect(
       within(dialog).getByText(
-        "Ange den om leverantören är självhostad eller har en egen endpoint. Livetext använder vLLM:s realtids-API under /v1/realtime på adressen."
+        "Ange den om leverantören är självhostad eller har en egen endpoint. Livetext använder vLLM:s realtids-API (/v1/realtime) på servern."
       )
     ).toBeTruthy();
     await expectNoAxeViolations(document.body);
@@ -262,7 +262,7 @@ describe("the add-provider wizard's credentials", () => {
       .split(" ")
       .map((id) => document.getElementById(id)?.textContent ?? "")
       .join(" ");
-    expect(help).toContain("Livetext använder vLLM:s realtids-API under /v1/realtime på adressen.");
+    expect(help).toContain("Livetext använder vLLM:s realtids-API (/v1/realtime) på servern.");
   });
 
   it("creates the provider with its key expiry and moves on to its models", async () => {
@@ -976,12 +976,11 @@ describe("the add-model wizard's catalog", () => {
     const lines = (live.getAttribute("aria-describedby") ?? "")
       .split(" ")
       .map((id) => document.getElementById(id));
-    expect(lines.map((line) => line?.textContent)).toEqual(
-      expect.arrayContaining([
-        "Visar texten medan någon spelar in. Modellens server behöver stödja vLLM:s realtids-API.",
-        "Livetext kräver att leverantörens Endpoint-URL går till en server eller gateway med vLLM:s realtids-API. OpenAI:s egen tjänst har inte det API:t."
-      ])
-    );
+    // The reason comes first: Astryx puts the caller's description before its own.
+    expect(lines.map((line) => line?.textContent)).toEqual([
+      "Livetext kräver att leverantörens Endpoint-URL går till en server eller gateway med vLLM:s realtids-API. OpenAI:s egen tjänst har inte det API:t.",
+      "Visar texten medan någon spelar in. Modellens server behöver stödja vLLM:s realtids-API."
+    ]);
     const reason = lines.find(
       (line) =>
         line?.textContent ===
