@@ -933,9 +933,7 @@ async def test_a_run_kept_after_a_released_file_still_charges_that_file(
     kept_id, image_id, later_id = kept.run.id, image.id, later.run.id
     kept_result_id = kept.generated_file.id
     await session.commit()
-    settings = get_settings().model_copy(
-        update={"retention_max_files_per_run": 2, "retention_max_family_rows": 3}
-    )
+    settings = get_settings().model_copy(update={"retention_max_files_per_run": 2})
 
     async with sessionmanager.session() as holder, holder.begin():
         await holder.execute(
