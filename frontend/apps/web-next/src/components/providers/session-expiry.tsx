@@ -24,7 +24,9 @@ const LONGEST_TIMEOUT_MS = 2 ** 31 - 1;
  * (ACCESSIBILITY.md rule 15). At the end it keeps the page and offers to sign
  * in again, back to the same place. While a recording runs or is paused, before
  * and after the end, it says to stop the recording before signing in again:
- * in some browsers the part being recorded lives only in the tab.
+ * in some browsers the part being recorded lives only in the tab. Once the
+ * session has ended, or staying signed in failed, it can then also be closed
+ * by a button, so a phone reaches Stop.
  */
 export function SessionExpiryDialog({
   expiresAt,
@@ -172,6 +174,11 @@ export function SessionExpiryDialog({
           <LayoutFooter>
             <div className="flex flex-wrap justify-end gap-2">
               {!expired && <Button as={DocumentLink} href="/logout" label={t("logout")} />}
+              {/* The advice says to stop the recording first: a phone has no Esc to
+                  reach Stop behind the notice, so it gets a way to put it away. */}
+              {recording && !limited && (expired || failed) && (
+                <Button label={t("close")} clickAction={() => setDismissed(notice)} />
+              )}
               {/* One control for every state, so focus stays on it when the time
                   runs out. At the maximum age a session that is still valid is
                   not signed in again (the login page would continue it): the
