@@ -341,6 +341,31 @@ describe("prompt reads", () => {
     expect(stepReaders(steps[1]!, steps, prompts)).toEqual([steps[2]]);
     expect(stepReaders(steps[1]!, steps)).toEqual([]);
   });
+
+  it("leaves out the prompt of a Word step that shares an assistant with a model step", () => {
+    // Prompts are keyed by assistant: the Word step would find the model step's prompt.
+    const shared = [
+      makeStep(1),
+      makeStep(2, { assistant_id: "assistant-shared" }),
+      makeStep(3, {
+        assistant_id: "assistant-shared",
+        output_mode: "template_fill",
+        output_type: "docx",
+        output_config: {
+          placeholders: ["granskning"],
+          bindings: { granskning: "{{step_2.output.text}}" }
+        }
+      })
+    ];
+    const sharedPrompts = new Map([["assistant-shared", "Granska {{step_1.output.text}}."]]);
+    // The core never calls a Word step's assistant: only its field is read.
+    expect(stepReads(shared[2]!, shared, sharedPrompts)).toEqual([
+      { kind: "step", order: 2, step: shared[1] }
+    ]);
+    expect(stepReaders(shared[0]!, shared, sharedPrompts)).toEqual([shared[1]]);
+    // Leverans counts no prompt, so it never named the Word step.
+    expect(stepReadersByNameOrPlace(shared[0]!, shared)).toEqual([shared[1]]);
+  });
 });
 
 describe("the reference grammar", () => {
