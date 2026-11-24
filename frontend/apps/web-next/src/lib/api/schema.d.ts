@@ -8846,13 +8846,13 @@ export interface paths {
     };
     /**
      * List legal holds on Flow run history
-     * @description List the Organization's legal holds, newest first: active ones by default, or all including released and expired ones, optionally for one Flow. Each hold names who placed and released it as recorded at that time. Until the hold is released or its end date passes, whatever the space's time or the Flow's time says, the automatic removal, the explicit purge and the debug-evidence redaction skip held runs, and the Space cannot be deleted (space_contains_legal_hold).
+     * @description List the Organization's legal holds, newest first: active ones by default, or all including released and expired ones, optionally for one Flow. Each hold names who placed and released it as recorded at that time. Until the hold is released or its end date passes, whatever the space's time or the Flow's time says, the automatic removal and the explicit purge skip held runs, and the Space cannot be deleted (space_contains_legal_hold).
      */
     get: operations["list_flow_retention_holds"];
     put?: never;
     /**
      * Place a legal hold on Flow run history
-     * @description Hold a whole Flow (every run, including runs created later) or named runs of it, with a reason, a review date and an optional end date. The review date never ends the hold: past it, the hold is flagged review overdue (also in Flow runtime health) until the review is extended or the hold is released. A deleted Flow can be held. Until the hold is released or its end date passes, whatever the space's time or the Flow's time says, the automatic removal, the explicit purge and the debug-evidence redaction skip held runs, and the Space cannot be deleted (space_contains_legal_hold). The hold and its required audit event commit together; the request waits for an open history deletion to finish first.
+     * @description Hold a whole Flow (every run, including runs created later) or named runs of it, with a reason, a review date and an optional end date. The review date never ends the hold: past it, the hold is flagged review overdue (also in Flow runtime health) until the review is extended or the hold is released. A deleted Flow can be held. Until the hold is released or its end date passes, whatever the space's time or the Flow's time says, the automatic removal and the explicit purge skip held runs, and the Space cannot be deleted (space_contains_legal_hold). The hold and its required audit event commit together; the request waits for an open history deletion to finish first.
      */
     post: operations["place_flow_retention_hold"];
     delete?: never;

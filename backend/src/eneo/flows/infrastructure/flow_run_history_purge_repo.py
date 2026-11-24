@@ -437,11 +437,14 @@ class FlowRunHistoryPurgeRepository:
     ) -> FlowRunRemoval:
         """Remove one selected run whole, with its files, or nothing.
 
-        The caller holds the gallring lock and passes ``max_rows >= 1``. Every
-        lock is taken without waiting, so a row another transaction holds
-        gives LOCKED instead of a wait that could end in a deadlock: a
-        transcript edit locks the step result and then reaches the run through
-        a foreign key, the opposite order. Anything but REMOVED rolls the
+        The caller holds the gallring lock and passes ``max_rows >= 1``. The
+        run, its step results, upload bindings, live texts and file families
+        are locked without waiting, so a row another transaction holds gives
+        LOCKED instead of a wait that could end in a deadlock: a transcript
+        edit locks the step result and then reaches the run through a foreign
+        key, the opposite order. The deletes of the run's outbox rows and of
+        its cascade can still wait for a row, up to the lock timeout, which
+        ends the chunk. Anything but REMOVED rolls the
         savepoint back, so a run is never gone while one of its files can
         still be read. An error rolls the savepoint back and gives FAILED
         with the error; the caller decides whether it is the run's own."""
@@ -548,6 +551,9 @@ class FlowRunHistoryPurgeRepository:
                 )
             ),
         ):
+            # A run without input files has no binding or live text to lock.
+            if not input_file_ids:
+                break
             locked = await self._lock_all(uses, cap=max_rows - work.rows)
             if locked is None:
                 return stopped(FlowRunRemovalOutcome.LOCKED)

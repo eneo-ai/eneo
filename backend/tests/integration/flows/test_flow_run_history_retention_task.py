@@ -1277,10 +1277,12 @@ async def test_a_link_signed_before_the_removal_finds_nothing(
         headers={"X-API-Key": admin_user_api_key.key},
     )
     assert signed.status_code == 200, signed.text
+    url = urlsplit(signed.json()["url"])
+    before = await client.get(f"{url.path}?{url.query}")
+    assert before.status_code == 200, before.text
 
     report = await _run(session)
 
     assert _counts(report)["runs.runs_deleted"] == 1, report
-    url = urlsplit(signed.json()["url"])
     download = await client.get(f"{url.path}?{url.query}")
     assert download.status_code == 404, download.text
