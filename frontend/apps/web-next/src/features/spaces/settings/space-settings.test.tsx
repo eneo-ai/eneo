@@ -493,6 +493,23 @@ it("decides on its own read, not on a read of the space already on its way", asy
   expect(api.PATCH).not.toHaveBeenCalled();
 });
 
+it("decides on its own read when another save cancels the space's reads meanwhile", async () => {
+  const { queryClient } = showSettings();
+  const counted = countSpaceReads();
+  let answer!: (value: unknown) => void;
+  counted.hold = { answer: new Promise((resolve) => (answer = resolve)) };
+  state.space = { ...state.space, data_retention_days: 90 };
+  enterRetention("60");
+  await waitFor(() => expect(counted.reads).toBe(1));
+  // Another setting on the page saved: its success cancels the space's reads in flight.
+  await act(() => queryClient.cancelQueries({ queryKey: ["spaces", "space-1"], exact: true }));
+  await act(async () => answer({ data: state.space, response: new Response("{}") }));
+  expect(await screen.findByRole("alertdialog", { name: "Korta gallringstiden?" })).toBeTruthy();
+  expect(api.PATCH).not.toHaveBeenCalled();
+  // The read the decision made is what the page shows now.
+  expect(queryClient.getQueryData<Space>(["spaces", "space-1"])?.data_retention_days).toBe(90);
+});
+
 it("reads the space again on the next change after a read that failed", async () => {
   showSettings();
   const counted = countSpaceReads();
