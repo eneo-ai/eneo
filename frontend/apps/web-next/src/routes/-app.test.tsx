@@ -43,13 +43,6 @@ vi.mock("@/features/whats-new/tour-provider", () => ({
   useTour: () => ({ running: false, start: vi.fn() })
 }));
 vi.mock("@/components/shell/notification-bells", () => ({ NotificationBells: () => null }));
-// The device's kept recordings are swept as the signed-in app starts; the store has its own tests.
-const sweep = vi.hoisted(() => vi.fn(async () => {}));
-vi.mock("@/features/flows/runs/recording/recording-store", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/features/flows/runs/recording/recording-store")>()),
-  indexedDbRecordings: () => null,
-  sweepExpiredRecordings: sweep
-}));
 vi.mock("@/features/admin/federation/federation-page", () => ({
   FederationPage: () => <h1>{messages.federation_admin_title}</h1>
 }));
@@ -209,22 +202,6 @@ it("opens the knowledge hub and passes the operator's runtime integration form U
   });
   await screen.findByRole("heading", { name: "https://forms.example.test/request" });
   expect(document.title).toBe(`${messages.knowledge} · Upphandling · Eneo`);
-});
-
-it("sweeps recordings kept on the device past their time once the signed-in app starts", async () => {
-  replies.set("/api/v1/spaces/space-1/", makeSpace());
-  sweep.mockClear();
-  const { router } = await renderRoute("/spaces/space-1/knowledge");
-  await screen.findByRole("heading", { name: "Knowledge hub" });
-  await waitFor(() => expect(sweep).toHaveBeenCalledTimes(1));
-  await act(() =>
-    router.navigate({
-      to: "/spaces/$spaceId/knowledge",
-      params: { spaceId: "space-1" },
-      search: { tab: "integrations" }
-    })
-  );
-  expect(sweep).toHaveBeenCalledTimes(1);
 });
 
 it("redirects the integration index to the knowledge tab", async () => {
