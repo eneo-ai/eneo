@@ -2,6 +2,7 @@ import { Badge } from "@astryxdesign/core/Badge";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { Switch as SettingSwitch } from "@astryxdesign/core/Switch";
 import { Banner } from "@astryxdesign/core/Banner";
+import { useAnnounce } from "@astryxdesign/core/hooks";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "@/lib/link";
 import { useRouter } from "@/lib/navigation";
@@ -33,7 +34,11 @@ import {
   type SettingsSection
 } from "@/components/composites/sectioned-settings";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
-import { useAutosave, useAutosaveField } from "@/components/composites/use-autosave";
+import {
+  useAutosave,
+  useAutosaveField,
+  useDirtySaveStatus
+} from "@/components/composites/use-autosave";
 import { useAppContext } from "@/components/providers/app-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -418,9 +423,14 @@ function SecuritySection() {
 }
 
 /**
- * The space's time, which is also the cap on its flows' run history. Changing it
- * takes the right to edit the space and the permission to manage retention (the
- * backend refuses everyone else); the rest read the value.
+ * The space's time: assistants and apps without their own time follow it, and it
+ * caps its flows' run history, whose runs started under a time are removed by it.
+ * Changing it takes the right to edit the space and the permission to manage
+ * retention (the backend refuses everyone else); the rest read the value.
+ *
+ * It saves on blur like the other fields, but a shorter time removes content for
+ * good, so it waits for a confirmation instead, and a draft is never sent when the
+ * page is left (no unmount flush, unlike `useAutosaveField`).
  */
 function RetentionSection() {
   const t = useTranslations();
@@ -428,29 +438,53 @@ function RetentionSection() {
   const managesRetention = useAppContext().can("retention_manage");
   const queryClient = useQueryClient();
   const update = useUpdateSpace();
+  const autosave = useAutosave("retention-days");
+  const announce = useAnnounce();
   const readOnlyHintId = useId();
   const editsSpace = can("edit", "space");
   const canEditRetention = editsSpace && managesRetention;
+  const saved = space.data_retention_days ?? null;
+  // Until the person edits it, the field shows the saved time.
+  const [draft, setDraft] = useState<string | null>(null);
+  const value = draft ?? saved?.toString() ?? "";
+  const days = parseRetentionDays(value);
   const [daysVisited, setDaysVisited] = useState(false);
+  // A shorter time waiting for its confirmation.
+  const [shorter, setShorter] = useState<number | null>(null);
+  // What applies from now, after this page saved a time.
+  const [note, setNote] = useState<string | null>(null);
+  useDirtySaveStatus("retention-days", days !== saved);
 
-  const days = useAutosaveField({
-    key: "retention-days",
-    value: space.data_retention_days?.toString() ?? "",
-    save: (value) => update.mutateAsync({ data_retention_days: parseRetentionDays(value) }),
-    // Empty means "keep forever".
-    validate: (value) => parseRetentionDays(value) !== undefined,
+  const daysProblem = daysVisited && days === undefined ? t("space_retention_invalid") : null;
+
+  async function save(next: number | null) {
+    const result = await autosave(() => update.mutateAsync({ data_retention_days: next }));
+    if (result === undefined) return false;
+    // A value typed while the save ran stays the draft.
+    setDraft((current) =>
+      current !== null && parseRetentionDays(current) === next ? null : current
+    );
     // The flows' effective times follow the new cap.
-    onSaved: () => void queryClient.invalidateQueries({ queryKey: ["flows"] })
-  });
-  const daysProblem =
-    daysVisited && parseRetentionDays(days.value) === undefined
-      ? t("space_retention_invalid")
-      : null;
+    void queryClient.invalidateQueries({ queryKey: ["flows"] });
+    const said =
+      next === null
+        ? t("space_retention_saved_off")
+        : t("space_retention_saved_on", { days: next });
+    setNote(said);
+    announce(said);
+    return true;
+  }
+
+  function commit() {
+    if (days === undefined || days === saved || update.isPending) return;
+    if (days !== null && saved !== null && days < saved) setShorter(days);
+    else void save(days);
+  }
 
   return (
     <SettingsRow
-      title={t("conversation_retention_title")}
-      description={t("conversation_retention_space_description")}
+      title={t("space_retention_title")}
+      description={t("space_retention_description")}
       htmlFor="retention-days"
     >
       <div className="flex flex-wrap items-center gap-2">
@@ -459,12 +493,12 @@ function RetentionSection() {
           type="text"
           inputMode="numeric"
           className="w-32"
-          value={days.value}
+          value={value}
           placeholder={t("space_retention_no_limit_placeholder")}
-          onChange={(event) => days.setValue(event.target.value)}
+          onChange={(event) => setDraft(event.target.value)}
           onBlur={() => {
             setDaysVisited(true);
-            void days.commit();
+            commit();
           }}
           disabled={!canEditRetention}
           {...fieldProblemProps(
@@ -476,7 +510,7 @@ function RetentionSection() {
         <span className="text-muted-foreground text-sm">{t("days")}</span>
       </div>
       <FieldProblem id="retention-days" problem={daysProblem} />
-      <p className="text-muted-foreground text-sm">{t("space_retention_flows_cap")}</p>
+      {note ? <p className="text-muted-foreground text-sm">{note}</p> : null}
       {!canEditRetention && (
         <p id={readOnlyHintId} className="text-muted-foreground text-sm">
           {editsSpace
@@ -486,6 +520,24 @@ function RetentionSection() {
             : t("conversation_retention_space_admin_only")}
         </p>
       )}
+      <ConfirmDialogControlled
+        open={shorter !== null}
+        onOpenChange={(open) => {
+          if (open) return;
+          // Not confirmed: the saved time stays, in the field too.
+          setShorter(null);
+          setDraft(null);
+        }}
+        title={t("space_retention_shorten_title")}
+        description={t("space_retention_shorten_description", { days: shorter ?? 0 })}
+        confirmLabel={t("space_retention_shorten_confirm")}
+        pending={update.isPending}
+        onConfirm={() => {
+          if (shorter === null) return;
+          // A failed save keeps the dialog, so the same time can be tried again.
+          void save(shorter).then((done) => done && setShorter(null));
+        }}
+      />
     </SettingsRow>
   );
 }
