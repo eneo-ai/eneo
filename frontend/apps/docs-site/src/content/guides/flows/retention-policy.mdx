@@ -159,7 +159,7 @@ The target endpoints use an Organization-wide administrative catalog. They inclu
 
 A deleted Flow that still has run history stays in the Flow targets, marked `retired`. Deleting a Flow retires it: it can no longer run, but its runs, results, reviews and evidence stay readable with each reader's current permissions and follow the Flow's retention rule. Runs that were still queued, running or waiting for review are cancelled by a maintenance sweep that runs every minute by default, so they become finished history too. Its Flow time and purge keep working. A deleted Flow without runs is not listed.
 
-1. Set the space's time, or leave it empty when the space keeps its content. A time removes the runs that start from then on once they are older than it. In the new web app a shorter time asks for a confirmation first.
+1. Set the space's time, or leave it empty when the space keeps its content. A time removes the runs that start from then on once they are older than it. In the new web app a time on a space without one, or a shorter time, asks for a confirmation first.
 2. Set a Flow time only when the Flow needs a shorter one. The Flow's settings warn before a shorter time is saved.
 3. Check `effective` in the response. It shows the resolved number of days and the level it comes from.
 4. The audit event names the scope and the old and new time.

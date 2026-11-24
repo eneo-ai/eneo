@@ -93,8 +93,9 @@ retention setting):
   days (1 to 2555), **Save changes**.
 - **React app (beta):** **Spaces**, the space, **Settings**, **Security and
   privacy**, **Space retention time**. Empty means **No limit**. It saves when
-  you leave the field; a shorter time asks you to confirm first. A line under
-  the field then says what applies to the space's Flow runs.
+  you leave the field; a time on a space without one, or a shorter time, asks
+  you to confirm first. A line under the field then says what applies to the
+  space's Flow runs.
 - **API:** `PATCH /api/v1/spaces/{space_id}/` with
   `{"data_retention_days": 30}`; `null` removes the time, leaving it out keeps it.
 

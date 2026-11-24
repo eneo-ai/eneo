@@ -1,6 +1,6 @@
 ---
 title: Gallring
-translationSource: guides/data-retention.mdx@ab10aec478d8
+translationSource: guides/data-retention.mdx@e84a5ad6d0e8
 ---
 
 # Gallring
@@ -98,8 +98,9 @@ och tar bort deras körningar; organisationsytan har ingen gallringsinställning
   policy**, ange dagarna (1 till 2555), **Spara ändringar**.
 - **React-appen (beta):** **Delat**, ytan, **Inställningar**, **Säkerhet och
   integritet**, **Gallringstid för ytan**. Tomt betyder **Ingen gräns**. Värdet
-  sparas när du lämnar fältet; en kortare tid ber dig bekräfta först. En rad
-  under fältet säger sedan vad som gäller för körningarna i ytans Flöden.
+  sparas när du lämnar fältet; en tid på en yta som saknar tid, eller en
+  kortare tid, ber dig bekräfta först. En rad under fältet säger sedan vad som
+  gäller för körningarna i ytans Flöden.
 - **API:** `PATCH /api/v1/spaces/{space_id}/` med
   `{"data_retention_days": 30}`; `null` tar bort tiden, utelämnat behåller den.
 

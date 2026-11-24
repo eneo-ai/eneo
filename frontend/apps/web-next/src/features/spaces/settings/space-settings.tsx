@@ -434,11 +434,11 @@ function SecuritySection() {
  * Changing it takes the right to edit the space and the permission to manage
  * retention (the backend refuses everyone else); the rest read the value.
  *
- * It saves on blur like the other fields, but a shorter time removes content for
- * good, so it waits for a confirmation instead, and a draft is never sent when the
- * page is left (no unmount flush, unlike `useAutosaveField`). Whether a time is
- * shorter is decided on the time the server has now, read again on blur: another
- * administrator may have changed it since this page read it.
+ * It saves on blur like the other fields, but a time set where there was none, or a
+ * shorter one, removes content for good, so it waits for a confirmation instead, and
+ * a draft is never sent when the page is left (no unmount flush, unlike
+ * `useAutosaveField`). That is decided on the time the server has now, read again on
+ * blur: another administrator may have changed it since this page read it.
  */
 function RetentionSection() {
   const t = useTranslations();
@@ -457,8 +457,8 @@ function RetentionSection() {
   const value = draft ?? saved?.toString() ?? "";
   const days = parseRetentionDays(value);
   const [daysVisited, setDaysVisited] = useState(false);
-  // A shorter time waiting for its confirmation.
-  const [shorter, setShorter] = useState<number | null>(null);
+  // A time that removes content, waiting for its confirmation.
+  const [asked, setAsked] = useState<number | null>(null);
   // What applies from now, after this page saved a time.
   const [note, setNote] = useState<string | null>(null);
   // The space's time is being read again; the field waits for it.
@@ -516,7 +516,7 @@ function RetentionSection() {
       setChecking(false);
     }
     if (days === current) setDraft(null);
-    else if (days !== null && current !== null && days < current) setShorter(days);
+    else if (days !== null && (current === null || days < current)) setAsked(days);
     else void save(days);
   }
 
@@ -566,23 +566,23 @@ function RetentionSection() {
         </p>
       )}
       <ConfirmDialogControlled
-        open={shorter !== null}
+        open={asked !== null}
         onOpenChange={(open) => {
           if (open) return;
           // Not confirmed: the saved time stays, in the field too.
-          setShorter(null);
+          setAsked(null);
           setDraft(null);
         }}
         title={t("space_retention_shorten_title")}
-        description={t("space_retention_shorten_description", { days: shorter ?? 0 })}
+        description={t("space_retention_shorten_description", { days: asked ?? 0 })}
         confirmLabel={t("space_retention_shorten_confirm")}
         pending={update.isPending}
         // Its blur asked: after a click elsewhere nothing focused opened it.
         returnFocusRef={fieldRef}
         onConfirm={() => {
-          if (shorter === null) return;
+          if (asked === null) return;
           // A failed save keeps the dialog, so the same time can be tried again.
-          void save(shorter).then((done) => done && setShorter(null));
+          void save(asked).then((done) => done && setAsked(null));
         }}
       />
     </SettingsRow>

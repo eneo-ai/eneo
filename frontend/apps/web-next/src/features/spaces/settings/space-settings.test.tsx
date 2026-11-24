@@ -315,7 +315,6 @@ function enterRetention(value: string) {
 }
 
 it.each([
-  ["sets a time on a space without one", null, "7", 7],
   ["lengthens the time", 30, "60", 60],
   ["clears the time", 30, "", null]
 ])("%s without asking and says what applies from now", async (_, saved, typed, sent) => {
@@ -346,6 +345,65 @@ it.each([
   expect(await within(section).findByText(note)).toBeTruthy();
   await waitFor(() => expect(said).toContain(note));
   await expectNoAxeViolations(container);
+});
+
+// A time that removes content asks first: one set on a space without a time, or a shorter one.
+it.each([
+  ["a time on a space without one", null, "7", "asks"],
+  ["a shorter time", 30, "7", "asks"],
+  ["a longer time", 30, "60", "saves"],
+  ["a cleared time", 30, "", "saves"],
+  ["the same time", 30, "30", "nothing"]
+] as const)("decides on %s against the server's time", async (_, saved, typed, outcome) => {
+  showSettings(
+    undefined,
+    [],
+    [],
+    "space-1",
+    makeSpace({
+      overrides: { data_retention_days: saved, completion_models: [], embedding_models: [] }
+    })
+  );
+  const counted = countSpaceReads();
+  const sent = typed === "" ? null : Number(typed);
+  const body = { params: { path: { id: "space-1" } }, body: { data_retention_days: sent } };
+  if (outcome === "nothing") {
+    // The field shows this time already: another value first, so the typed one is a change.
+    fireEvent.change(retentionField(), { target: { value: "45" } });
+    enterRetention(typed);
+    await waitFor(() => expect(counted.reads).toBe(1));
+    await waitFor(() => expect(retentionField().readOnly).toBe(false));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(api.PATCH).not.toHaveBeenCalled();
+    return;
+  }
+  if (outcome === "saves") {
+    enterRetention(typed);
+    await waitFor(() =>
+      expect(api.PATCH).toHaveBeenCalledExactlyOnceWith("/api/v1/spaces/{id}/", body)
+    );
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    return;
+  }
+  enterRetention(typed);
+  const title = { name: messages.space_retention_shorten_title };
+  fireEvent.click(
+    within(await screen.findByRole("alertdialog", title)).getByRole("button", { name: "Avbryt" })
+  );
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  expect(api.PATCH).not.toHaveBeenCalled();
+  expect(retentionField().value).toBe(saved === null ? "" : String(saved));
+  enterRetention(typed);
+  const dialog = await screen.findByRole("alertdialog", title);
+  expect(api.PATCH).not.toHaveBeenCalled();
+  fireEvent.click(
+    within(dialog).getByRole("button", { name: messages.space_retention_shorten_confirm })
+  );
+  await waitFor(() =>
+    expect(api.PATCH).toHaveBeenCalledExactlyOnceWith("/api/v1/spaces/{id}/", body)
+  );
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  expect(retentionField().value).toBe(typed);
 });
 
 it("promises nothing about flow runs in a personal space", async () => {
@@ -382,7 +440,7 @@ it("promises nothing about flow runs in a personal space", async () => {
 it("asks before a shorter time is saved and saves it once confirmed", async () => {
   showSettings();
   enterRetention("7");
-  const dialog = await screen.findByRole("alertdialog", { name: "Korta gallringstiden?" });
+  const dialog = await screen.findByRole("alertdialog", { name: "Spara gallringstiden?" });
   expect(api.PATCH).not.toHaveBeenCalled();
   expect(
     within(dialog).getByText(
@@ -395,7 +453,7 @@ it("asks before a shorter time is saved and saves it once confirmed", async () =
   ).toBe(true);
   await expectNoAxeViolations(dialog);
 
-  fireEvent.click(within(dialog).getByRole("button", { name: "Korta tiden" }));
+  fireEvent.click(within(dialog).getByRole("button", { name: "Spara tiden" }));
   await waitFor(() =>
     expect(api.PATCH).toHaveBeenCalledExactlyOnceWith("/api/v1/spaces/{id}/", {
       params: { path: { id: "space-1" } },
@@ -431,7 +489,7 @@ it("decides on the space's time as the server has it now, not as the page read i
   // Another administrator lengthened the time after this page read 30.
   state.space = { ...state.space, data_retention_days: 90 };
   enterRetention("60");
-  expect(await screen.findByRole("alertdialog", { name: "Korta gallringstiden?" })).toBeTruthy();
+  expect(await screen.findByRole("alertdialog", { name: "Spara gallringstiden?" })).toBeTruthy();
   expect(api.PATCH).not.toHaveBeenCalled();
 });
 
@@ -488,7 +546,7 @@ it("decides on its own read, not on a read of the space already on its way", asy
   // Another administrator lengthened the time meanwhile.
   state.space = { ...state.space, data_retention_days: 90 };
   enterRetention("60");
-  expect(await screen.findByRole("alertdialog", { name: "Korta gallringstiden?" })).toBeTruthy();
+  expect(await screen.findByRole("alertdialog", { name: "Spara gallringstiden?" })).toBeTruthy();
   expect(counted.reads).toBe(2);
   await act(async () => answer({ data: stale, response: new Response("{}") }));
   expect(api.PATCH).not.toHaveBeenCalled();
@@ -505,7 +563,7 @@ it("decides on its own read when another save cancels the space's reads meanwhil
   // Another setting on the page saved: its success cancels the space's reads in flight.
   await act(() => queryClient.cancelQueries({ queryKey: ["spaces", "space-1"], exact: true }));
   await act(async () => answer({ data: state.space, response: new Response("{}") }));
-  expect(await screen.findByRole("alertdialog", { name: "Korta gallringstiden?" })).toBeTruthy();
+  expect(await screen.findByRole("alertdialog", { name: "Spara gallringstiden?" })).toBeTruthy();
   expect(api.PATCH).not.toHaveBeenCalled();
   // The read the decision made is what the page shows now.
   expect(queryClient.getQueryData<Space>(["spaces", "space-1"])?.data_retention_days).toBe(90);
@@ -576,7 +634,7 @@ it("keeps a grant saved while it reads the space's time, so the next save sends 
     ).toEqual(["A", "B"])
   );
   await act(async () => answer({ data: before, response: new Response("{}") }));
-  const dialog = await screen.findByRole("alertdialog", { name: "Korta gallringstiden?" });
+  const dialog = await screen.findByRole("alertdialog", { name: "Spara gallringstiden?" });
   fireEvent.click(within(dialog).getByRole("button", { name: "Avbryt" }));
   await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
   // The field shows the time the read found.
