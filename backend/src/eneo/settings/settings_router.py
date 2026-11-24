@@ -42,7 +42,7 @@ from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.main.container.container import Container
 from eneo.main.exceptions import ErrorCodes
 from eneo.main.logging import get_logger
-from eneo.main.models import GeneralError, PaginatedResponse
+from eneo.main.models import NOT_PROVIDED, GeneralError, PaginatedResponse
 from eneo.roles.permissions import Permission
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses, to_paginated_response
@@ -241,6 +241,46 @@ def _flow_retention_lock_busy_response() -> dict[str, object]:
         eneo_error_code=ErrorCodes.CONFLICT,
         code=_FLOW_RETENTION_LOCK_BUSY_CODE,
     )
+
+
+def _flow_retention_time_conflict_response() -> dict[str, object]:
+    """The busy lock, or a Flow time chosen against a time that no longer
+    applies."""
+    return {
+        "model": GeneralError,
+        "description": (
+            "Another retention change or history deletion held the retention lock "
+            f"too long (`{_FLOW_RETENTION_LOCK_BUSY_CODE}`); retry. Or the time "
+            "that applies to the Flow is no longer `expected_effective_days` "
+            "(`retention_time_changed`); `context.current_days` names it. Nothing "
+            "changed."
+        ),
+        "content": {
+            "application/json": {
+                "examples": {
+                    _FLOW_RETENTION_LOCK_BUSY_CODE: {
+                        "summary": "Another retention change held the lock",
+                        "value": {
+                            "message": "Flow history retention is busy with "
+                            "another change or deletion.",
+                            "eneo_error_code": int(ErrorCodes.CONFLICT),
+                            "code": _FLOW_RETENTION_LOCK_BUSY_CODE,
+                        },
+                    },
+                    "retention_time_changed": {
+                        "summary": "The time was changed by someone else",
+                        "value": {
+                            "message": "The retention time was changed by someone "
+                            "else. Check it and save again.",
+                            "eneo_error_code": int(ErrorCodes.RETENTION_TIME_CHANGED),
+                            "code": "retention_time_changed",
+                            "context": {"current_days": 60},
+                        },
+                    },
+                }
+            }
+        },
+    }
 
 
 def _flow_settings_invalid_payload_response(
@@ -1183,7 +1223,8 @@ async def get_flow_run_retention_policy(
         "time. Without a Space time, only an explicit administrator purge removes "
         "runs."
         " A deleted Flow is accepted. The change waits for an open history deletion "
-        "to finish."
+        "to finish. A change sent with `expected_effective_days` is refused when "
+        "the time that applies is another (409 `retention_time_changed`)."
     ),
     responses={
         400: _settings_error_response(
@@ -1198,7 +1239,7 @@ async def get_flow_run_retention_policy(
         ),
         403: _retention_forbidden_response("manage", space_role=True),
         404: _flow_retention_not_found_response("Flow"),
-        409: _flow_retention_lock_busy_response(),
+        409: _flow_retention_time_conflict_response(),
     },
 )
 @endpoint_access(
@@ -1214,6 +1255,11 @@ async def replace_flow_run_retention_policy(
     return await container.flow_run_retention_policy_service().replace_flow(
         flow_id=flow_id,
         policy=payload.policy,
+        expected_effective_days=(
+            payload.expected_effective_days
+            if "expected_effective_days" in payload.model_fields_set
+            else NOT_PROVIDED
+        ),
     )
 
 

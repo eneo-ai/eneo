@@ -15,6 +15,7 @@ from eneo.completion_models.application.completion_model_crud_service import (
 from eneo.completion_models.domain.completion_model_service import (
     CompletionModelService,
 )
+from eneo.data_retention.domain.rules import RetentionTimeChangedError
 from eneo.data_retention.infrastructure.gallring_lock import (
     GallringSubject,
     acquire_exclusive,
@@ -398,10 +399,13 @@ class SpaceService:
         security_classification: Union[ModelId, NotProvided, None] = NOT_PROVIDED,
         data_retention_days: Union[int, None, NotProvided] = NOT_PROVIDED,
         icon_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
+        expected_data_retention_days: Union[int, None, NotProvided] = NOT_PROVIDED,
     ) -> tuple[Space, dict[str, object] | None]:
         # The space's time is also the cap on its Flow run history. An equal
         # value is no change and is never written, so a stale resend beside a
-        # rename cannot undo a concurrent change. The change decided under the
+        # rename cannot undo a concurrent change. A change sent with the time
+        # it replaces is refused, before anything is written, when the time
+        # stored under the lock is another. The change decided under the
         # lock, {"old", "new"} or None, is returned so that the caller's space
         # update event records the same change as the required row.
         changes_retention = False
@@ -428,6 +432,12 @@ class SpaceService:
         if changes_retention and data_retention_days == previous_retention_days:
             data_retention_days = NOT_PROVIDED
             changes_retention = False
+        if (
+            changes_retention
+            and is_provided(expected_data_retention_days)
+            and expected_data_retention_days != previous_retention_days
+        ):
+            raise RetentionTimeChangedError(current_days=previous_retention_days)
         retention_change: dict[str, object] | None = (
             {"old": previous_retention_days, "new": data_retention_days}
             if changes_retention

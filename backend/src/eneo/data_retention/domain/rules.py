@@ -116,6 +116,24 @@ class RetentionExceedsSpaceError(Exception):
         }
 
 
+class RetentionTimeChangedError(Exception):
+    """A change of a retention time made against a time no longer stored.
+
+    The caller sent the time it saw beside the new one, and another change has
+    replaced it since, so nothing is written. The context carries the time
+    stored now in days, or None when none is set, so the caller can decide
+    again against it.
+    """
+
+    code = "retention_time_changed"
+
+    def __init__(self, *, current_days: int | None) -> None:
+        super().__init__(
+            "The retention time was changed by someone else. Check it and save again."
+        )
+        self.context: dict[str, object] = {"current_days": current_days}
+
+
 def fewer_days(candidate: int, current: int) -> bool:
     return candidate < current
 
