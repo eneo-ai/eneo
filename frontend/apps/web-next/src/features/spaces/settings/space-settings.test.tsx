@@ -339,7 +339,7 @@ it.each([
   const note =
     sent === null
       ? messages.space_retention_saved_off
-      : `Körningar i ytans flöden som startar medan ytan har en tid tas bort när de är äldre än ${sent} dagar, eller flödets kortare tid. Körningar som startade medan ytan saknade tid rörs inte. Kontrollen görs var femte minut.`;
+      : `Körningar i ytans flöden som startar medan ytan har en tid räknas som förfallna när de är äldre än ${sent} dagar, eller flödets kortare tid, och tas bort vid en kommande kontroll. Kontrollen görs var femte minut; en spärr, en kö eller ett lås kan fördröja borttagningen. Körningar som startade medan ytan saknade tid rörs inte.`;
   // Shown under the field and said once, politely, without moving the focus.
   const section = document.getElementById("security")!;
   expect(await within(section).findByText(note)).toBeTruthy();
@@ -354,7 +354,7 @@ it("asks before a shorter time is saved and saves it once confirmed", async () =
   expect(api.PATCH).not.toHaveBeenCalled();
   expect(
     within(dialog).getByText(
-      "Innehåll som följer ytans tid och redan är äldre än 7 dagar tas bort vid nästa kontroll. Det går inte att återställa."
+      "Innehåll som följer ytans tid och redan är äldre än 7 dagar räknas som förfallet och tas bort vid en kommande kontroll. Det går inte att återställa."
     )
   ).toBeTruthy();
   // The least destructive choice has the focus.

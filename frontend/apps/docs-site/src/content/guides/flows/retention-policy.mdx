@@ -8,7 +8,7 @@ This page explains how the time for Flow runs, steps and their run-owned history
 
 **A space's time removes runs, and they cannot be restored.**
 
-A Flow run that starts while its space has a time is removed automatically, with its steps, transcripts and files, once it is older than the time. A task checks every five minutes. Runs that started while the space had no time are never removed automatically. A legal hold keeps the runs it covers. See [Automatic removal](#automatic-removal).
+A Flow run that starts while its space has a time is due once it is older than the time, and is then removed automatically with its steps, transcripts and files. A task checks every five minutes; a legal hold, a pending delivery or a lock can delay the removal. Runs that started while the space had no time are never removed automatically. A legal hold keeps the runs it covers. See [Automatic removal](#automatic-removal).
 
 </Callout>
 
@@ -163,7 +163,7 @@ A deleted Flow that still has run history stays in the Flow targets, marked `ret
 3. Check `effective` in the response. It shows the resolved number of days and the level it comes from.
 4. The audit event names the scope and the old and new time.
 
-A Flow whose time is cleared (`"policy": null`) stores no time and uses the space's. If the space's time later changes, the Flow follows it. A shorter time also applies to runs that started earlier under a time: those already older than it are removed at the next check.
+A Flow whose time is cleared (`"policy": null`) stores no time and uses the space's. If the space's time later changes, the Flow follows it. A shorter time also applies to runs that started earlier under a time: those already older than it are due and are removed at a coming check.
 
 ## API contract
 

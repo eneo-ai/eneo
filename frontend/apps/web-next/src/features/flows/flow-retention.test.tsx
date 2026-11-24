@@ -258,7 +258,7 @@ describe("flow retention", () => {
     fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
     // The first press shows the warning instead of saving: it was not on screen before.
     const warning = await screen.findByText(
-      "Körningar som redan är äldre än den nya tiden tas bort vid nästa kontroll och går inte att återställa. Spara igen för att använda den."
+      "Körningar som redan är äldre än den nya tiden räknas som förfallna och tas bort vid en kommande kontroll. Det går inte att återställa. Spara igen för att använda den."
     );
     expect(days.getAttribute("aria-describedby")).toContain(
       warning.closest("[id]")?.getAttribute("id")
@@ -279,7 +279,7 @@ describe("flow retention", () => {
     const days = await openDialog();
     fireEvent.change(days, { target: { value: typed } });
     fireEvent.blur(days);
-    expect(screen.queryByText(/tas bort vid nästa kontroll/)).toBeNull();
+    expect(screen.queryByText(/tas bort vid en kommande kontroll/)).toBeNull();
     pressSave();
     await waitFor(() => expect(backend.PUT).toHaveBeenCalledTimes(1));
   });
@@ -354,7 +354,7 @@ describe("flow retention", () => {
       fireEvent.blur(days);
       fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
       await waitFor(() => expect(backend.PUT).toHaveBeenCalledTimes(1));
-      expect(screen.queryByText(/tas bort vid nästa kontroll/)).toBeNull();
+      expect(screen.queryByText(/tas bort vid en kommande kontroll/)).toBeNull();
     }
   );
 
