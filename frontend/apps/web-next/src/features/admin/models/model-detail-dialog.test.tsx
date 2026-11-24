@@ -107,7 +107,7 @@ describe("ModelDetailDialog", () => {
     await within(term.nextElementSibling as HTMLElement).findByText(
       "Livetext kräver att leverantörens Endpoint-URL går till en server eller gateway med vLLM:s realtids-API. OpenAI:s egen tjänst har inte det API:t."
     );
-    expect(term.nextElementSibling?.textContent).toContain("Markerad, används inte");
+    expect(term.nextElementSibling?.textContent).toContain("Livetext används inte");
     expect(term.nextElementSibling?.textContent).not.toBe("Ja");
   });
 

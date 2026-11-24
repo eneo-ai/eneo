@@ -200,9 +200,9 @@ export function ProviderCard({
   const dependencyCount = section.models.length;
   const visibleModelCount = models.length;
   // Also those the filters hide: a save that stops live text affects them all.
-  const markedLiveTextModels = section.models.filter(
-    ({ model }) => "supports_realtime" in model && model.supports_realtime === true
-  ).length;
+  const markedLiveTextModels = section.models
+    .filter(({ model }) => "supports_realtime" in model && model.supports_realtime === true)
+    .map(({ model }) => modelDisplayName(model));
 
   // The card, its menu and the dialog go with the provider: focus moves to
   // the page's RemovalFocusScope (the tab panel) once the lists refetched.

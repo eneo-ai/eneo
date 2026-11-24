@@ -82,7 +82,7 @@ it.each([
   async (eligibility, reason) => {
     for (const layout of ["list", "table"] as const) {
       const { unmount } = liveRow(true, false, eligibility, layout);
-      expect(screen.getByText("Markerad, används inte")).toBeTruthy();
+      expect(screen.getByText("Livetext används inte")).toBeTruthy();
       expect(screen.getByText(new RegExp(`^${reason}`))).toBeTruthy();
       await expectNoAxeViolations(document.body);
       unmount();
@@ -98,7 +98,7 @@ it.each([
   "says nothing about live text for a model that streams or is not marked: marked %s",
   (marked, streams, eligibility) => {
     liveRow(marked, streams, eligibility);
-    expect(screen.queryByText("Markerad, används inte")).toBeNull();
+    expect(screen.queryByText("Livetext används inte")).toBeNull();
     expect(screen.queryByText(/leverantör/)).toBeNull();
   }
 );

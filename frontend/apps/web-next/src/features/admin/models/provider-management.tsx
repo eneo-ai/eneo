@@ -5,7 +5,7 @@ import { Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
 import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@/components/astryx/text-input";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useTranslations } from "use-intl";
+import { useFormatter, useTranslations } from "use-intl";
 import { useEffect, useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { Switch } from "@astryxdesign/core/Switch";
@@ -331,6 +331,9 @@ function ProviderEditForm({
   );
 }
 
+/** How many marked models the save notice names before "and N more". */
+const LISTED_MODELS = 3;
+
 /**
  * "Redigera leverantör", opened from the provider card's menu: name, on/off,
  * a new API key (typed twice), the key's expiry date and the type's config
@@ -338,17 +341,18 @@ function ProviderEditForm({
  */
 export function ProviderEditDialog({
   provider,
-  markedLiveTextModels = 0,
+  markedLiveTextModels = [],
   open,
   onOpenChange
 }: {
   provider: ModelProvider;
-  /** The provider's models marked for live text, filtered out or not. */
-  markedLiveTextModels?: number;
+  /** The names of the provider's models marked for live text, filtered out or not. */
+  markedLiveTextModels?: readonly string[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
   const t = useTranslations();
+  const format = useFormatter();
   const queryClient = useQueryClient();
   const formId = useId();
   // The menu item that opened the dialog is gone once it is open.
@@ -364,16 +368,26 @@ export function ProviderEditDialog({
     onSuccess: (saved) => {
       void queryClient.invalidateQueries({ queryKey: PROVIDERS_KEY });
       void queryClient.invalidateQueries({ queryKey: MODELS_KEY });
-      // The saved provider's own answer: its marked models now do nothing,
-      // which the plain confirmation would hide.
+      // The server's answers before and after the save: the marked models now
+      // do nothing, or do again, which the plain confirmation would hide.
+      const count = markedLiveTextModels.length;
       const refusal = realtimeRefusalKey(saved.realtime_eligibility);
-      if (refusal && markedLiveTextModels > 0) {
-        toast.warning(
-          t("live_text_provider_saved_unused", {
-            count: markedLiveTextModels,
-            reason: t(refusal)
-          })
-        );
+      const models = format.list(
+        count > LISTED_MODELS
+          ? [
+              ...markedLiveTextModels.slice(0, LISTED_MODELS),
+              t("live_text_models_more", { count: count - LISTED_MODELS })
+            ]
+          : markedLiveTextModels
+      );
+      if (refusal && count > 0) {
+        toast.warning(t("live_text_provider_saved_unused", { models, count, reason: t(refusal) }));
+      } else if (
+        count > 0 &&
+        saved.realtime_eligibility === "eligible" &&
+        realtimeRefusalKey(provider.realtime_eligibility) !== null
+      ) {
+        toast.success(t("live_text_provider_saved_in_use_again", { models }));
       } else {
         toast.success(t("provider_updated_success"));
       }

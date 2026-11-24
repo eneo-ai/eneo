@@ -663,9 +663,9 @@ describe("ModelsPage", () => {
       );
     renderPage(live(true));
     const card = screen.getByRole("region", { name: "vLLM" });
-    expect(within(card).queryByText("Markerad, används inte")).toBeNull();
+    expect(within(card).queryByText("Livetext används inte")).toBeNull();
     expect(within(card).getByRole("button", { name: "Forte" })).toBeTruthy();
-    // The search hides one of the two marked models; the notice still counts both.
+    // The search hides one of the two marked models; the notice still names both.
     fireEvent.change(screen.getByRole("textbox", { name: "Sök modeller och leverantörer" }), {
       target: { value: "pianissimo" }
     });
@@ -693,11 +693,12 @@ describe("ModelsPage", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Spara" }));
 
     await waitFor(() => expect(toast.warning).toHaveBeenCalledTimes(1));
+    // Forte, hidden by the search, is named too.
     expect(toast.warning.mock.calls[0]?.[0]).toContain(
-      "2 modeller visas nu som ”Markerad, används inte”."
+      "livetext används inte för Pianissimo och Forte."
     );
     // The page refetches providers and models; no reload.
-    expect(await within(card).findByText("Markerad, används inte")).toBeTruthy();
+    expect(await within(card).findByText("Livetext används inte")).toBeTruthy();
     expect(within(card).getByText(/^Livetext kan inte skicka utgående headers\./)).toBeTruthy();
   });
 
