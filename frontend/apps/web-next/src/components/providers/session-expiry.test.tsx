@@ -3,6 +3,8 @@ import { act, cleanup, fireEvent, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
+import { holdRecording } from "@/lib/recording-activity";
+import messages from "@/lib/i18n/messages/sv.json";
 import { SessionExpiryDialog } from "./session-expiry";
 
 const spies = vi.hoisted(() => ({
@@ -60,6 +62,23 @@ it("opens two minutes before the end with focus on staying signed in", async () 
   expect(spies.announce).not.toHaveBeenCalled();
   vi.useRealTimers();
   await expectNoAxeViolations(container);
+});
+
+it("says what happens to a recording that runs when the session ends", () => {
+  renderInApp(<SessionExpiryDialog expiresAt={NOW + 120_000} />);
+  const dialog = screen.getByRole("dialog", { name: "Din session går snart ut" });
+  expect(dialog.textContent).not.toContain(messages.session_expiring_recording);
+
+  // A recording starts (or is paused) while the warning is open.
+  let release = () => {};
+  act(() => {
+    release = holdRecording();
+  });
+  const description = document.getElementById(dialog.getAttribute("aria-describedby")!);
+  expect(description?.textContent).toContain(messages.session_expiring_recording);
+
+  act(() => release());
+  expect(dialog.textContent).not.toContain(messages.session_expiring_recording);
 });
 
 it("waits out a session longer than a timer can wait", () => {

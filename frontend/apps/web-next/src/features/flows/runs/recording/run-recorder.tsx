@@ -23,6 +23,7 @@ import { Banner } from "@astryxdesign/core/Banner";
 import { EneoApiError } from "@/lib/api/errors";
 import { formatBytes } from "@/lib/format";
 import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
+import { holdRecording } from "@/lib/recording-activity";
 import type { RecordingPartInfo, UploadEntry } from "../run-contract";
 import {
   liveSocketUrl,
@@ -476,6 +477,9 @@ export function RunRecorder({
     recorder.getSnapshot
   );
   const text = useSyncExternalStore(live.subscribe, live.getSnapshot, live.getSnapshot);
+  // The warning before the sign-in ends says what happens to a recording that runs or is paused.
+  const holding = snapshot.phase === "recording" || snapshot.phase === "paused";
+  useEffect(() => (holding ? holdRecording() : undefined), [holding]);
 
   useEffect(
     () => () => {
