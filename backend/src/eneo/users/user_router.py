@@ -766,8 +766,8 @@ async def update_user(
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
 
-    # Update user. Only the fields sent are written: an omitted one given as None
-    # would be written as null, and the state column does not take it.
+    # Update user. Only the fields sent are written, and null means the same as
+    # an omitted field: this endpoint cannot clear a user's roles.
     fields: dict[str, Any] = {}
     if user_update.role:
         fields["roles"] = [user_update.role]
