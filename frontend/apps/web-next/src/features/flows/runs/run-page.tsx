@@ -94,6 +94,9 @@ const INPUT_LOSS_CODES = new Set([
 /** The step's diagnostic for a step that sends the run's result once the run has completed. */
 const SENT_AFTER_RUN = "run_result_sent_after_run";
 
+/** How often an open page checks that its finished run still exists (retention can remove it). */
+const FINISHED_RUN_CHECK_MS = 60_000;
+
 /**
  * Where the run's sent result stands, in the result's words: the same state
  * as the delivery's own row, so the two never say different things.
@@ -430,12 +433,14 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
     ...runProgressQueryOptions(flowId, runId),
     // One clock: while the run moves, it follows what the run shows; once the run has finished, it
     // follows the result sent after it, its status alone, until it has landed or was given up.
+    // After that, a check once a minute while the tab shows sees a run removed under the page
+    // (its 404 says so below); the detail and steps are read again only when this pair moved.
     refetchInterval: pollEvery<RunProgress>((data) => {
       if (!data) return false;
       const { status, graph } = data;
       const delivery = status.result_delivery;
       return isTerminal(status.status)
-        ? clock(deliverySignature(delivery), deliveryUnderWay(delivery))
+        ? clock(deliverySignature(delivery), deliveryUnderWay(delivery)) || FINISHED_RUN_CHECK_MS
         : clock(progressSignature(status, graph), shouldPoll(status.status));
     }),
     refetchIntervalInBackground: false,
