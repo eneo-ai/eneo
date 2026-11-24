@@ -24,10 +24,13 @@ function setup({ locks = true } = {}) {
   const db = memoryRecordings();
   const lockManager = fakeLocks();
   let now = START;
-  const keeper = new RecordingKeeper("flow-1", db, locks ? lockManager.locks : null, () => now);
+  /** The form as a person opens it in this browser; null while their id is not known. */
+  const as = (userId: string | null) =>
+    new RecordingKeeper("flow-1", userId, db, locks ? lockManager.locks : null, () => now);
   return {
     db,
-    keeper,
+    keeper: as("user-a"),
+    as,
     lockManager,
     later: (ms: number) => {
       now += ms;
@@ -345,6 +348,94 @@ describe("RecordingKeeper", () => {
     expect(db.parts.size).toBe(0);
   });
 
+  it("offers a kept recording only to the person who recorded it", async () => {
+    const { keeper, as, db } = setup();
+    await keeper.keepPart("step-1", {
+      sessionId: "rec-1",
+      index: 0,
+      blob: new Blob(["audio"], { type: "audio/webm" }),
+      mimeType: "audio/webm",
+      durationMs: 1_000,
+      capturedAt: START,
+      contract: CONTRACT,
+      streamed: false
+    });
+    expect([...db.parts.values()][0]).toMatchObject({ userId: "user-a" });
+
+    // Someone else signs in on the same browser: nothing to continue, read or rebuild.
+    const other = as("user-b");
+    expect(await other.scan("step-1")).toEqual({ saved: [], incomplete: false });
+    expect(await other.readSession("step-1", "rec-1")).toEqual([]);
+    // Nor while the person's id is not known.
+    expect((await as(null).scan("step-1")).saved).toEqual([]);
+    expect(db.parts.size).toBe(1);
+
+    // The person who recorded it signs in again and gets it back.
+    expect((await as("user-a").scan("step-1")).saved).toHaveLength(1);
+    expect(await as("user-a").readSession("step-1", "rec-1")).toHaveLength(1);
+  });
+
+  it("rebuilds only the person's own journals, and leaves another person's alone", async () => {
+    const { keeper, as, db } = setup();
+    const journal = keeper.journalFor(
+      "step-1",
+      () => CONTRACT,
+      () => false
+    );
+    journal.begin(part(0));
+    journal.append(part(0), new Blob(["a"], { type: "audio/webm" }), 1_000);
+    journal.leave(part(0));
+    await settle();
+    expect([...db.journals.values()][0]).toMatchObject({ userId: "user-a" });
+
+    expect(await as("user-b").scan("step-1")).toEqual({ saved: [], incomplete: false });
+    expect(db.journals.size).toBe(1);
+    expect(db.parts.size).toBe(0);
+
+    expect((await as("user-a").scan("step-1")).saved).toHaveLength(1);
+    expect([...db.parts.values()][0]).toMatchObject({ userId: "user-a", interrupted: true });
+  });
+
+  it("offers no recording kept before it carried who recorded it, and lets it age out", async () => {
+    const { keeper, db, later } = setup();
+    await db.putPart({
+      flowId: "flow-1",
+      stepId: "step-1",
+      sessionId: "rec-old",
+      index: 0,
+      blob: new Blob(["audio"]),
+      mimeType: "audio/webm",
+      durationMs: 1_000,
+      capturedAt: START,
+      interrupted: false,
+      contract: CONTRACT,
+      streamed: false
+    });
+    expect((await keeper.scan("step-1")).saved).toEqual([]);
+    expect(await keeper.readSession("step-1", "rec-old")).toEqual([]);
+    expect(db.parts.size).toBe(1);
+    later(RECORDING_TTL_MS + 2_000);
+    await keeper.scan("step-1");
+    expect(db.parts.size).toBe(0);
+  });
+
+  it("deletes anyone's recording with no activity for a day", async () => {
+    const { keeper, as, db, later } = setup();
+    await keeper.keepPart("step-1", {
+      sessionId: "rec-1",
+      index: 0,
+      blob: new Blob(["audio"]),
+      mimeType: "audio/webm",
+      durationMs: 1_000,
+      capturedAt: START,
+      contract: CONTRACT,
+      streamed: false
+    });
+    later(RECORDING_TTL_MS + 2_000);
+    await as("user-b").scan("step-1");
+    expect(db.parts.size).toBe(0);
+  });
+
   it("says when kept recordings could not be read", async () => {
     const { keeper, db } = setup();
     vi.spyOn(db, "listParts").mockRejectedValue(new Error("blocked"));
@@ -352,7 +443,7 @@ describe("RecordingKeeper", () => {
   });
 
   it("works without storage: nothing is kept and nothing is offered", async () => {
-    const keeper = new RecordingKeeper("flow-1", null, null);
+    const keeper = new RecordingKeeper("flow-1", "user-a", null, null);
     expect(keeper.available).toBe(false);
     expect(await keeper.scan("step-1")).toEqual({ saved: [], incomplete: false });
     keeper

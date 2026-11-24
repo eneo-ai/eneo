@@ -28,6 +28,13 @@ import {
  *
  * Every storage access is guarded: without storage, or when it fails, the
  * recording works as before and lives only in this tab, which the form says.
+ *
+ * The device's store is shared by everyone who signs in on this browser, so
+ * each part and journal carries who recorded it, and a form offers, reads
+ * and rebuilds only the signed-in person's own; without their id, nothing.
+ * That is a choice of what to offer, not a protection against someone who
+ * reads the browser's storage directly. Recordings with no activity for a
+ * day are deleted whoever made them.
  */
 
 /** A recording kept on the device, as the resume prompt describes it. */
@@ -136,6 +143,7 @@ export type ScanResult = {
 
 export class RecordingKeeper {
   #flowId: string;
+  #userId: string | null;
   #db: RecordingDatabase | null;
   #locks: JournalLocks | null;
   #now: () => number;
@@ -151,13 +159,16 @@ export class RecordingKeeper {
   #degraded = new Map<string, JournalDegradation>();
   #version = 0;
 
+  /** `userId`: the signed-in person, whose recordings are kept and offered; null while not known. */
   constructor(
     flowId: string,
+    userId: string | null,
     db: RecordingDatabase | null = browserRecordings(),
     locks: JournalLocks | null = browserLocks(),
     now: () => number = Date.now
   ) {
     this.#flowId = flowId;
+    this.#userId = userId;
     this.#db = db;
     this.#locks = locks;
     this.#now = now;
@@ -213,7 +224,8 @@ export class RecordingKeeper {
           mimeType: part.mimeType,
           capturedAt: part.capturedAt,
           contract: contract(),
-          streamed: streamed()
+          streamed: streamed(),
+          ...this.#owner()
         };
         this.#journal.begin(meta);
       },
@@ -236,7 +248,7 @@ export class RecordingKeeper {
    */
   keepPart(
     stepId: string,
-    part: Omit<StoredPart, "flowId" | "stepId" | "interrupted" | "liveTranscript">
+    part: Omit<StoredPart, "flowId" | "stepId" | "interrupted" | "liveTranscript" | "userId">
   ): Promise<PartKeeping> {
     const storing = this.#store(stepId, part);
     this.#storing.set(
@@ -270,7 +282,7 @@ export class RecordingKeeper {
 
   async #store(
     stepId: string,
-    part: Omit<StoredPart, "flowId" | "stepId" | "interrupted" | "liveTranscript">
+    part: Omit<StoredPart, "flowId" | "stepId" | "interrupted" | "liveTranscript" | "userId">
   ): Promise<PartKeeping> {
     const address: PartAddress = {
       flowId: this.#flowId,
@@ -282,7 +294,7 @@ export class RecordingKeeper {
     let keeping: PartKeeping = "tab";
     if (this.#db && !this.#isForgotten(stepId, part.sessionId)) {
       try {
-        await this.#db.putPart({ ...part, ...address, interrupted: false });
+        await this.#db.putPart({ ...part, ...address, interrupted: false, ...this.#owner() });
         keeping = "device";
       } catch {
         keeping = "tab";
@@ -340,9 +352,9 @@ export class RecordingKeeper {
   }
 
   /**
-   * The recordings kept for a step, newest first, after parts the page left
-   * mid-recording are rebuilt from their journals. Recordings with no
-   * activity for a day are deleted.
+   * The signed-in person's recordings kept for a step, newest first, after
+   * parts they left mid-recording are rebuilt from their journals.
+   * Recordings with no activity for a day are deleted, whoever made them.
    */
   async scan(stepId: string): Promise<ScanResult> {
     const db = this.#db;
@@ -373,28 +385,32 @@ export class RecordingKeeper {
         await db.deleteSession(this.#flowId, stepId, sessionId).catch(() => undefined);
         continue;
       }
-      const interrupted = list.filter((part) => part.interrupted);
+      const own = list.filter(this.#mine);
+      if (own.length === 0) continue;
+      const interrupted = own.filter((part) => part.interrupted);
       saved.push({
         sessionId,
-        parts: list.length,
-        durationMs: list.reduce((sum, part) => sum + part.durationMs, 0),
-        startedAt: Math.min(...list.map((part) => part.capturedAt)),
+        parts: own.length,
+        durationMs: own.reduce((sum, part) => sum + part.durationMs, 0),
+        startedAt: Math.min(...own.map((part) => part.capturedAt)),
         interruptedAt:
           interrupted.length > 0
             ? Math.max(...interrupted.map((part) => part.capturedAt + part.durationMs))
             : null,
-        contract: list[0]!.contract
+        contract: own[0]!.contract
       });
     }
     saved.sort((a, b) => b.startedAt - a.startedAt);
     return { saved, incomplete };
   }
 
-  /** A kept recording's parts, in order; rejects when they could not be read. */
+  /** The signed-in person's kept recording's parts, in order; rejects when they could not be read. */
   async readSession(stepId: string, sessionId: string): Promise<StoredPart[]> {
     if (!this.#db) return [];
     const parts = await this.#db.listParts(this.#flowId, stepId);
-    return parts.filter((part) => part.sessionId === sessionId).sort((a, b) => a.index - b.index);
+    return parts
+      .filter((part) => part.sessionId === sessionId && this.#mine(part))
+      .sort((a, b) => a.index - b.index);
   }
 
   /** A kept recording goes on in this form: its parts count as kept on the device. */
@@ -407,10 +423,11 @@ export class RecordingKeeper {
   }
 
   /**
-   * Journals with no stored part become their recording's parts, under a
-   * lock per step so two tabs never rebuild the same part; a journal whose
-   * part another tab still records holds its lock and is left alone. False
-   * when a part could not be rebuilt (the journal stays for another try).
+   * The signed-in person's journals with no stored part become their
+   * recording's parts, under a lock per step so two tabs never rebuild the
+   * same part; a journal whose part another tab still records holds its lock
+   * and is left alone, as is another person's until it expires. False when a
+   * part could not be rebuilt (the journal stays for another try).
    */
   async #recoverJournals(db: RecordingDatabase, stepId: string): Promise<boolean> {
     const locks = this.#locks;
@@ -419,7 +436,9 @@ export class RecordingKeeper {
     return locks.request(`eneo-flow-recovery:${this.#flowId}::${stepId}`, async () => {
       let complete = true;
       const journals = await db.listJournals(this.#flowId, stepId);
+      const cutoff = this.#now() - RECORDING_TTL_MS;
       for (const meta of journals) {
+        if (!this.#mine(meta) && meta.lastChunkAt >= cutoff) continue;
         await locks.request(journalLockName(meta), { ifAvailable: true }, async (lock) => {
           if (!lock) return;
           complete = (await this.#recoverJournal(db, meta)) && complete;
@@ -458,7 +477,8 @@ export class RecordingKeeper {
             capturedAt: meta.capturedAt,
             interrupted: true,
             contract: meta.contract,
-            streamed: meta.streamed
+            streamed: meta.streamed,
+            ...(meta.userId === undefined ? {} : { userId: meta.userId })
           });
         } catch {
           return false;
@@ -467,6 +487,15 @@ export class RecordingKeeper {
     }
     await db.dropJournal(meta).catch(() => undefined);
     return true;
+  }
+
+  /** Whether the signed-in person recorded it; never while their id is not known. */
+  #mine = (row: { userId?: string }): boolean =>
+    this.#userId !== null && row.userId === this.#userId;
+
+  /** Who records what this form keeps, as each part and journal carries it. */
+  #owner(): { userId?: string } {
+    return this.#userId === null ? {} : { userId: this.#userId };
   }
 
   #track(stepId: string, sessionId: string) {

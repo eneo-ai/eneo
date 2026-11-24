@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 
 import { initializeBrowserSession, SESSION_GENERATION_HEADER } from "@/lib/api/refusal";
 import messages from "@/lib/i18n/messages/sv.json";
 import { expectNoAxeViolations } from "@/test/axe";
-import { renderInApp } from "@/test/render";
+import { renderInApp, testAppContext } from "@/test/render";
 import { setViewport } from "@/test/setup-dom";
 import { makeFlow } from "../../flow-fixtures";
 import { makeContract, makeInput } from "../run-fixtures";
@@ -173,6 +173,8 @@ function keptPart(index: number, overrides: Partial<StoredPart> = {}): StoredPar
       acceptedMimetypes: ["audio/webm", "audio/mp4"]
     },
     streamed: false,
+    // The signed-in person in `renderInApp`.
+    userId: "user-1",
     ...overrides
   };
 }
@@ -222,11 +224,13 @@ function Harness({ onStarted }: { onStarted: (run: RunPublic) => void }) {
   );
 }
 
-async function openDialog(contract: RunContract) {
+async function openDialog(contract: RunContract, userId = "user-1") {
   api.routes[CONTRACT] = () => ({ body: contract });
   api.routes[START] = () => ({ status: 201, body: { id: "run-1", status: "queued" } });
   const onStarted = vi.fn();
-  renderInApp(<Harness onStarted={onStarted} />);
+  renderInApp(<Harness onStarted={onStarted} />, {
+    appContext: testAppContext({ user: { id: userId } })
+  });
   fireEvent.click(screen.getByRole("button", { name: "Kör" }));
   const dialog = await screen.findByRole("dialog", { name: "Kör Medborgarbrev" });
   await within(dialog).findByText(/^Mötet/);
@@ -1005,6 +1009,35 @@ describe("Keeping a recording on the device", () => {
       await within(dialog).findByRole("button", { name: messages.flow_transcript_rec_stop })
     ).toBeTruthy();
     expect(within(dialog).queryByText(messages.flow_transcript_rec_backlog_full)).toBeNull();
+  });
+
+  it("offers a kept recording only to the person who recorded it", async () => {
+    installBrowser();
+    grantMicrophone();
+    await device.db.putPart(keptPart(0, { userId: "user-2" }));
+    await device.db.putPart(keptPart(1, { userId: "user-2" }));
+    // Someone else signs in on the same browser: nothing to continue or throw away.
+    const { dialog } = await openDialog(audioContract());
+    await recordAndStop(dialog);
+    expect(within(dialog).queryByText(messages.flow_transcript_resume_title)).toBeNull();
+    // Their own recording, thrown away, leaves the other person's as it was.
+    fireEvent.click(button(dialog, messages.flow_transcript_discard));
+    const confirm = await screen.findByRole("alertdialog", {
+      name: messages.flow_transcript_discard_title
+    });
+    fireEvent.click(
+      within(confirm).getByRole("button", { name: messages.flow_transcript_discard })
+    );
+    await waitFor(() => expect(within(dialog).queryByText(/^Inspelning, del/)).toBeNull());
+    expect([...device.db.parts.values()].map((part) => part.userId)).toEqual(["user-2", "user-2"]);
+    expect(FakeUpload.sent.map((file) => file.name)).not.toContain(keptName(0));
+    cleanup();
+
+    // The person who recorded it signs in again and gets it back.
+    const again = await openDialog(audioContract(), "user-2");
+    expect(
+      await within(again.dialog).findByText(messages.flow_transcript_resume_title)
+    ).toBeTruthy();
   });
 
   it("does not continue a kept recording the step no longer takes", async () => {

@@ -11,6 +11,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
 import { Fragment, useId, useImperativeHandle, useRef, useState, type Ref } from "react";
 import { flushSync } from "react-dom";
+import { useAppContext } from "@/components/providers/app-context";
 import { blockingError, ListError, RefreshError } from "@/components/composites/query-state";
 import { LoadingState } from "@/components/composites/loading-state";
 import { PHONE_QUERY, usePhoneScreen } from "@/lib/hooks/use-media-match";
@@ -200,7 +201,9 @@ function StartRunForm({
   const [stopFirst, setStopFirst] = useState<string | null>(null);
 
   // The form's recordings, kept on the device until the run takes them or they are thrown away.
-  const [keeper] = useState(() => new RecordingKeeper(flow.id));
+  // Only the signed-in person's recordings are kept and offered: others may use this browser.
+  const { user } = useAppContext();
+  const [keeper] = useState(() => new RecordingKeeper(flow.id, user.id));
 
   function recorderRef(stepId: string) {
     return (handle: RecorderHandle | null) => {
