@@ -9,6 +9,7 @@ reported.
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import urlsplit
@@ -57,6 +58,7 @@ from eneo.database.tables.object_content_table import (
 from eneo.database.tables.spaces_table import Spaces
 from eneo.files.file_models import FileContentVariant, FileType
 from eneo.files.file_usage import FileUsageRepository
+from eneo.flows.application import flow_run_history_retention_task
 from eneo.flows.application.flow_run_history_retention_task import (
     FLOW_RUN_HISTORY_TASK,
 )
@@ -262,6 +264,26 @@ class _Database(Exception):
         self.sqlstate = sqlstate
 
 
+def _capture_task_log(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Send what the task logs at warning or above to ``caplog``."""
+    logger = flow_run_history_retention_task.logger
+    monkeypatch.setattr(logger, "disabled", False)
+    monkeypatch.setattr(logger, "propagate", False)
+    monkeypatch.setattr(logger, "handlers", [caplog.handler])
+    caplog.set_level(logging.WARNING, logger=logger.name)
+
+
+def _task_warnings(caplog: pytest.LogCaptureFixture) -> list[str]:
+    return [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == flow_run_history_retention_task.logger.name
+        and record.levelno >= logging.WARNING
+    ]
+
+
 async def test_the_space_time_removes_marked_due_runs_whole(
     retention_session: AsyncSession,
     test_tenant,
@@ -446,18 +468,21 @@ async def test_an_oversized_run_is_blocked_before_its_locks_and_a_smaller_one_go
     admin_user,
     shared_space: Spaces,
     space_assistant: Assistants,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
     chunk: int,
     rows: int | None,
     same_pass: bool,
 ):
     """A run with more rows than one removal can take is blocked by a bounded
     count before anything else of it is read or locked, so a transcript edit
-    on it does not hide it as locked. When the pass has fewer rows than the
-    chunk, the pass is the run's whole room: blocked, not deferred, and the
-    next pass goes on after it. Mutants: an oversized run deferred like one
-    that does not fit the rest of the pass, which would end every pass at it;
-    the run's rows counted after its locks."""
+    on it does not hide it as locked, and the log names it. When the pass has
+    fewer rows than the chunk, the pass is the run's whole room: blocked, not
+    deferred, and the next pass goes on after it. Mutants: an oversized run
+    deferred like one that does not fit the rest of the pass, which would end
+    every pass at it; the run's rows counted after its locks."""
     session = retention_session
+    _capture_task_log(monkeypatch, caplog)
     oversized = await _aged_run(
         session,
         tenant=test_tenant,
@@ -504,6 +529,8 @@ async def test_an_oversized_run_is_blocked_before_its_locks_and_a_smaller_one_go
         report = await _run(session, settings=settings)
 
     assert _blocked(report) == {"runs.unit_exceeds_budget": 1}, report
+    [warning] = _task_warnings(caplog)
+    assert str(oversized_id) in warning
     assert await _exists(session, oversized_id)
     with pytest.raises(RetentionReadbackFailed, match="unit_exceeds_budget"):
         RetentionReadback([FLOW_RUN_HISTORY_TASK]).add_round([report])
@@ -669,14 +696,18 @@ async def test_a_run_another_transaction_holds_stays_as_run_locked(
     admin_user,
     shared_space: Spaces,
     space_assistant: Assistants,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
     held: str,
 ):
     """A writer on the run, a transcript edit (it locks the step result first,
     then reaches the run through its foreign key) and the administrator's
     purge each keep the run from this pass, without a wait, and the pass is not
-    clean. Mutants: removing a run whose step result is locked; waiting on
-    the lock; counting a locked run as removed."""
+    clean. A locked run is retried every pass and logs nothing. Mutants:
+    removing a run whose step result is locked; waiting on the lock; counting
+    a locked run as removed."""
     session = retention_session
+    _capture_task_log(monkeypatch, caplog)
     run = await _aged_run(
         session,
         tenant=test_tenant,
@@ -715,6 +746,7 @@ async def test_a_run_another_transaction_holds_stays_as_run_locked(
 
     assert _blocked(report) == {"runs.run_locked": 1}, report
     assert not _counts(report), report
+    assert not _task_warnings(caplog)
     with pytest.raises(RetentionReadbackFailed, match="run_locked"):
         RetentionReadback([FLOW_RUN_HISTORY_TASK]).add_round([report])
     if held == "explicit_purge":

@@ -214,6 +214,11 @@ class FlowRunHistoryRetentionTask:
                 )
             case FlowRunRemovalOutcome.SHORT | FlowRunRemovalOutcome.TOO_LARGE:
                 out.blocked[UNIT_EXCEEDS_BUDGET] += 1
+                # The id only: a run that stays until the limits are raised.
+                logger.warning(
+                    "Flow run %s is larger than one removal can take; it stays.",
+                    run_id,
+                )
             case FlowRunRemovalOutcome.REFUSED:
                 self._failed(run_id, None, out)
             case FlowRunRemovalOutcome.FAILED if removal.error is not None:
