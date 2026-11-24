@@ -42,7 +42,7 @@ import {
   updateProvider,
   outboundHeaderOptionsQueryOptions
 } from "./model-providers";
-import { MODELS_KEY } from "./models";
+import { invalidateSpaceLiveText, MODELS_KEY } from "./models";
 import { ProviderField, providerFieldProblem, useFieldFocus } from "./provider-form-fields";
 
 /** A new key replaces the stored one, so it is required once asked for. */
@@ -368,6 +368,10 @@ export function ProviderEditDialog({
     onSuccess: (saved) => {
       void queryClient.invalidateQueries({ queryKey: PROVIDERS_KEY });
       void queryClient.invalidateQueries({ queryKey: MODELS_KEY });
+      // The provider's models may stream live text now, or no longer.
+      if (saved.realtime_eligibility !== provider.realtime_eligibility) {
+        void invalidateSpaceLiveText(queryClient);
+      }
       // The server's answers before and after the save: the marked models now
       // do nothing, or do again, which the plain confirmation would hide.
       const count = markedLiveTextModels.length;

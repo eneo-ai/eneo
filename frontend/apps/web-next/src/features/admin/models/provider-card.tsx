@@ -37,7 +37,7 @@ import { deleteProvider, PROVIDERS_KEY, type RealtimeEligibility } from "./model
 import { ModelDialogs, type ModelSelection } from "./model-dialogs";
 import { cn } from "@/lib/utils";
 import { COMPACT_HIDDEN, ModelRow } from "./model-row";
-import { MODELS_KEY } from "./models";
+import { invalidateSpaceLiveText, MODELS_KEY } from "./models";
 import { ProviderConnectionStatus } from "./provider-connection-status";
 import { ProviderEditDialog } from "./provider-management";
 import { useProviderNotices } from "./provider-notices";
@@ -214,6 +214,8 @@ export function ProviderCard({
         queryClient.invalidateQueries({ queryKey: MODELS_KEY })
       ]),
     onRemoved: () => {
+      // The spaces' copies are not on this page: focus does not wait for them.
+      void invalidateSpaceLiveText(queryClient);
       setShowDelete(false);
       toast.success(t("admin_models_provider_deleted", { name: section.name }));
     }

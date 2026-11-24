@@ -47,7 +47,13 @@ import {
   isHostingRegion
 } from "./model-metadata-options";
 import { modelProvidersQueryOptions, realtimeRefusalKey } from "./model-providers";
-import { type AdminModel, MODELS_KEY, type ModelKind, updateTenantModel } from "./models";
+import {
+  type AdminModel,
+  invalidateSpaceLiveText,
+  MODELS_KEY,
+  type ModelKind,
+  updateTenantModel
+} from "./models";
 import {
   isCandidateSetting,
   RERANK_CANDIDATE_FACTOR,
@@ -305,6 +311,7 @@ function EditModelForm({
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: MODELS_KEY });
+      if (realtime !== savedRealtime) void invalidateSpaceLiveText(queryClient);
       toast.success(t("model_updated_success"));
       onOpenChange(false);
     },
