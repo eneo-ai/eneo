@@ -1,4 +1,4 @@
-import { type QueryClient, queryOptions } from "@tanstack/react-query";
+import { type QueryClient, type QueryFilters, queryOptions } from "@tanstack/react-query";
 import type { EneoClient } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
@@ -44,16 +44,17 @@ export const MODEL_MIGRATION_HISTORY_KEY = ["model-migration-history"];
  * of it are marked stale, so their next read asks the server. They are each
  * space's details (`spaceQueryOptions`, read by the flow editor) and each
  * space's model list (`["ai-models", space.id]`, the space settings' picker).
- * The space list and a space's other resources do not carry it.
+ * The space list and a space's other resources do not carry it. A read of
+ * them from before the save is cancelled first: answering after the save, it
+ * would make the old answer fresh again.
  */
-export function invalidateSpaceLiveText(queryClient: QueryClient) {
-  return Promise.all([
-    queryClient.invalidateQueries({
-      queryKey: ["spaces"],
-      predicate: ({ queryKey }) => queryKey.length === 2
-    }),
-    queryClient.invalidateQueries({ queryKey: ["ai-models"] })
-  ]);
+export async function invalidateSpaceLiveText(queryClient: QueryClient) {
+  const copies: QueryFilters[] = [
+    { queryKey: ["spaces"], predicate: ({ queryKey }) => queryKey.length === 2 },
+    { queryKey: ["ai-models"] }
+  ];
+  await Promise.all(copies.map((filters) => queryClient.cancelQueries(filters)));
+  await Promise.all(copies.map((filters) => queryClient.invalidateQueries(filters)));
 }
 
 /** Merged completion + transcription migration history, newest first. */

@@ -1014,6 +1014,39 @@ describe("the spaces' copies of whether a model streams live text", () => {
     expect(await refetched(client)).toBe(reads);
   });
 
+  it("stay stale when a read from before the save answers after it", async () => {
+    const client = renderPage(withTranscription(transcription(true)), providersWith("eligible"));
+    warm(client);
+    // Each copy is being read again, and the server's old answer arrives only after the save.
+    const held = Promise.withResolvers<unknown>();
+    const inFlight = Promise.allSettled(
+      copies.map((queryKey) =>
+        client.query({ queryKey, queryFn: () => held.promise, staleTime: 0 })
+      )
+    );
+    for (const queryKey of copies) {
+      expect(client.getQueryState(queryKey)?.fetchStatus).toBe("fetching");
+    }
+    api.PUT.mockImplementation(() =>
+      ok(providersWith("provider_inactive").find((item) => item.id === "p-vllm"))
+    );
+    serverHolds(withTranscription(transcription(true, false)), providersWith("provider_inactive"));
+    const menu = openRowMenu("vLLM", "Fler alternativ för");
+    fireEvent.click(within(menu).getByRole("menuitem", { name: /^Redigera/ }));
+    const dialog = await screen.findByRole("dialog", { name: "Redigera leverantör" });
+    fireEvent.change(within(dialog).getByLabelText(/^Leverantörsnamn/), {
+      target: { value: "vLLM prod" }
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Spara" }));
+    await waitFor(() =>
+      expect(toast.success.mock.calls.length + toast.warning.mock.calls.length).toBe(1)
+    );
+
+    held.resolve(withTranscription(transcription(true)));
+    await inFlight;
+    expect(await refetched(client)).toBe(2);
+  });
+
   it("are read again after a provider is deleted", async () => {
     const client = renderPage();
     warm(client);
