@@ -766,6 +766,58 @@ async def test_a_run_that_raises_is_blocked_and_the_others_go(
         assert await _exists(session, other)
 
 
+async def test_a_statement_the_database_refuses_blocks_only_that_run(
+    retention_session: AsyncSession,
+    test_tenant,
+    admin_user,
+    shared_space: Spaces,
+    space_assistant: Assistants,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A run removed earlier in the chunk stays removed when the database
+    refuses a statement of the next run inside its savepoint (a duplicate
+    key, integrity class 23): that run is blocked as run_failed and the one
+    after it goes in the same pass. Mutants: the refused statement rolling
+    back the chunk; the transaction left unusable for the next run."""
+    session = retention_session
+    first = await _aged_run(
+        session,
+        tenant=test_tenant,
+        user=admin_user,
+        space=shared_space,
+        assistant=space_assistant,
+        days_old=SPACE_DAYS + 15,
+    )
+    refused = await _small_run(session, first, days_old=SPACE_DAYS + 10)
+    after = await _small_run(session, first, days_old=SPACE_DAYS + 5)
+    first_id = first.run.id
+    await session.commit()
+    delete_review_checkpoints = FlowRunHistoryPurgeRepository._delete_review_checkpoints
+
+    async def duplicate_the_refused_run(self, run_ids: set[UUID]):
+        if refused in run_ids:
+            await self.session.execute(
+                text("INSERT INTO flow_runs SELECT * FROM flow_runs WHERE id = :id"),
+                {"id": refused},
+            )
+        return await delete_review_checkpoints(self, run_ids)
+
+    monkeypatch.setattr(
+        FlowRunHistoryPurgeRepository,
+        "_delete_review_checkpoints",
+        duplicate_the_refused_run,
+    )
+
+    report = await _run(session)
+
+    assert report.outcome is RetentionJobOutcome.SUCCEEDED, report
+    assert _blocked(report) == {"runs.run_failed": 1}, report
+    assert _counts(report)["runs.runs_deleted"] == 2, report
+    assert not await _exists(session, first_id)
+    assert await _exists(session, refused)
+    assert not await _exists(session, after)
+
+
 @pytest.mark.parametrize("held", ["run", "step_result", "explicit_purge"])
 async def test_a_run_another_transaction_holds_stays_as_run_locked(
     retention_session: AsyncSession,
