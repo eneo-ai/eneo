@@ -67,7 +67,12 @@ import {
   ToolApprovalCard
 } from "./message-parts";
 import { approvalForPart } from "./tool-approvals";
-import { MessageFiles, PendingMessageFiles, type PendingUpload } from "./message-files";
+import {
+  MessageFiles,
+  PendingMessageFiles,
+  PictureThumbnails,
+  type PendingUpload
+} from "./message-files";
 
 /** Who answers: the chat partner's name and tile. */
 export type AssistantIdentity = { id: string; name: string; iconId?: string | null };
@@ -230,7 +235,8 @@ export function PendingQuestion({
 }
 
 /**
- * What an answer produced, under its text: images inline, and one line per
+ * What an answer produced, under its text: the pictures it took out of a
+ * file as a row of thumbnails, generated images inline, and one line per
  * document that names it and opens it in the side panel. A chart exported
  * only as part of a report is left out. A version a reader saved belongs to
  * the document it revises: it gets no line of its own, and the document's
@@ -259,9 +265,19 @@ function GeneratedFiles({
     if (call?.purpose !== "file_creation") return "exported";
     return revisedFileId(call.input) ? "updated" : "created";
   };
+  const extractedIds = new Set(
+    calls
+      .filter((call) => call.purpose === "file_analysis")
+      .flatMap((call) => call.generatedFileIds)
+  );
+  const extracted = files.filter(
+    (file) => extractedIds.has(file.id) && file.mimetype?.startsWith("image/")
+  );
+  const others = files.filter((file) => !extracted.includes(file));
   return (
     <div className="flex flex-col gap-2">
-      {files.map((file) =>
+      <PictureThumbnails pictures={extracted} />
+      {others.map((file) =>
         // An empty mimetype is the placeholder of an image still being generated.
         !file.mimetype || file.mimetype.startsWith("image/") ? (
           <InlineImage key={file.id} file={file} />

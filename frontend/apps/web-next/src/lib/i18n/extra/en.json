@@ -1886,5 +1886,6 @@
   "shell_palette_catalog": "All assistants and apps",
   "federation_admin_saving_leave_title": "Still saving",
   "federation_admin_saving_leave_description": "The save continues if you leave, but you will not see whether it succeeds.",
-  "federation_admin_saving_leave_confirm": "Leave page"
+  "federation_admin_saving_leave_confirm": "Leave page",
+  "chat_extracted_pictures": "Pictures from the file"
 }
