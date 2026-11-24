@@ -332,7 +332,8 @@ it("adds a step before the send from the sender with unsaved edits, and lists it
   });
 });
 
-it("asks for a save before adding a step before the send while an edit names a step at or after it by number", async () => {
+/** The sender with one header, opened, and its header value field and add button. */
+async function renderSenderWithHeader() {
   const [first, sender] = senderFlow().steps;
   flow = makeFlow({
     steps: [
@@ -351,6 +352,11 @@ it("asks for a save before adding a step before the send while an edit names a s
   const add = await screen.findByRole("button", {
     name: messages.flow_step_editor_run_result_add_before
   });
+  return { value, add };
+}
+
+it("asks for a save before adding a step before the send while an edit holds a reference", async () => {
+  const { value, add } = await renderSenderWithHeader();
   expect(add.getAttribute("aria-disabled")).toBeNull();
 
   // The sender is step 2: an add before it would make step_2 name the new step.
@@ -365,11 +371,31 @@ it("asks for a save before adding a step before the send while an edit names a s
   fireEvent.change(value, { target: { value: "{{step_3.output.text}}" } });
   await waitFor(() => expect(add.getAttribute("aria-disabled")).toBe("true"));
 
-  // An earlier step keeps its number: the add is offered again.
+  // Any reference waits, an earlier step's too: the lock reads no reference grammar.
   fireEvent.change(value, { target: { value: "{{step_1.output.text}}" } });
+  await waitFor(() => expect(add.getAttribute("aria-disabled")).toBe("true"));
+
+  // With the edit back to what is saved, the add is offered again.
+  fireEvent.change(value, { target: { value: "fast" } });
   await waitFor(() => expect(add.getAttribute("aria-disabled")).toBeNull());
   expect(screen.queryByText(messages.flow_step_editor_run_result_add_before_save_first)).toBeNull();
 });
+
+// The core reads both as step_2: a space before the dot, a tab after the braces.
+it.each(["{{step_2 .output.text}}", "{{\tstep_2.output.text}}"])(
+  "asks for a save before adding a step before the send while an edit holds %j",
+  async (reference) => {
+    const { value, add } = await renderSenderWithHeader();
+    expect(add.getAttribute("aria-disabled")).toBeNull();
+    fireEvent.change(value, { target: { value: reference } });
+    expect((value as HTMLInputElement).value).toBe(reference);
+    await waitFor(() => expect(add.getAttribute("aria-disabled")).toBe("true"));
+    const reason = screen.getByText(messages.flow_step_editor_run_result_add_before_save_first);
+    expect(add.getAttribute("aria-describedby")).toBe(reason.id);
+    fireEvent.click(add);
+    expect(screen.queryByRole("dialog", { name: "Lägg till steg" })).toBeNull();
+  }
+);
 
 const STALE = {
   status: 400,

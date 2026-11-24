@@ -61,9 +61,9 @@ export function StepRunResultSections({
   /** Adds a step right before the step that sends; absent, it is not offered. */
   onAddStepBefore?: () => void;
   /**
-   * An unsaved edit names this step or a later one by number. An add before
-   * it moves those numbers, and the core renumbers only what is saved, so the
-   * add waits for a save and says so.
+   * An unsaved edit holds a reference. An add before this step moves its
+   * number and every later one, and the core renumbers only what is saved,
+   * so the add waits for a save and says so.
    */
   addBlocked?: boolean;
   /** The form holds unsaved edits on an older version of the flow than the newest. */
