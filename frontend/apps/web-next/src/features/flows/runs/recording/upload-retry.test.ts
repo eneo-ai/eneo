@@ -41,6 +41,25 @@ describe("UploadRetries", () => {
     expect(retries.failed("part-1")).toBe(Date.now() + UPLOAD_RETRY_DELAYS_MS[1]);
   });
 
+  it("sends a part whose automatic attempts are spent once the browser is back online", () => {
+    const send = vi.fn<(key: string) => void>();
+    const retries = new UploadRetries(send);
+    for (const delay of UPLOAD_RETRY_DELAYS_MS) {
+      retries.failed("part-1");
+      vi.advanceTimersByTime(delay);
+    }
+    expect(retries.failed("part-1")).toBeNull();
+    send.mockClear();
+
+    retries.online();
+    expect(send.mock.calls).toEqual([["part-1"]]);
+    // Its waits start over, as after "Försök igen": a flapping connection does not strand it.
+    expect(retries.failed("part-1")).toBe(Date.now() + UPLOAD_RETRY_DELAYS_MS[0]);
+    // Sent once: the next online goes with the new wait, not twice.
+    retries.online();
+    expect(send).toHaveBeenCalledTimes(2);
+  });
+
   it("starts the waits over after a manual retry and forgets a part that left", () => {
     const send = vi.fn<(key: string) => void>();
     const retries = new UploadRetries(send);
@@ -56,5 +75,16 @@ describe("UploadRetries", () => {
     retries.dispose();
     vi.advanceTimersByTime(60_000);
     expect(send).toHaveBeenCalledTimes(1);
+
+    // A part that left after its attempts were spent is not sent when the browser is back online.
+    for (const delay of UPLOAD_RETRY_DELAYS_MS) {
+      retries.failed("part-3");
+      vi.advanceTimersByTime(delay);
+    }
+    send.mockClear();
+    expect(retries.failed("part-3")).toBeNull();
+    retries.reset("part-3");
+    retries.online();
+    expect(send).not.toHaveBeenCalled();
   });
 });

@@ -413,7 +413,8 @@ export function useRuntimeUploads(flowId: string, policy: UploadPolicy | undefin
     return files.current.get(key)?.file ?? null;
   }
 
-  // Back online: a recording's parts waiting for their next attempt go now.
+  // Back online: a recording's parts waiting for their next attempt go now, and so do those whose
+  // timed attempts were spent.
   useEffect(() => {
     const resend = () => retries.online();
     window.addEventListener("online", resend);

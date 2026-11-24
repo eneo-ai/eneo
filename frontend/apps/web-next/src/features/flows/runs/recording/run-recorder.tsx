@@ -37,6 +37,7 @@ import {
   contractSnapshot,
   resumeRefusal,
   storedPartFile,
+  type PartKeeping,
   type RecordingKeeper,
   type SavedRecording
 } from "./recording-keeper";
@@ -145,11 +146,20 @@ function restartingText(ended: RecordingEnd | null, t: Translator): string {
   }
 }
 
-/** The step's recorded parts not uploaded yet, a failed part that will be sent again included. */
-function awaitingUpload(entries: readonly UploadEntry[]): number {
+/**
+ * The step's recorded parts not uploaded yet that only this tab holds, a
+ * failed part that will be sent again included. A part kept on the device
+ * is safe if the tab goes, so it does not hold the recording back; one still
+ * being stored counts until it is.
+ */
+function awaitingUpload(
+  entries: readonly UploadEntry[],
+  keptWhere: (part: RecordingPartInfo) => PartKeeping | undefined
+): number {
   return entries.filter(
     (entry) =>
       entry.recording &&
+      keptWhere(entry.recording) !== "device" &&
       (entry.state === "uploading" || (entry.state === "failed" && entry.retryable))
   ).length;
 }
@@ -403,6 +413,7 @@ export function RunRecorder({
   );
 
   const stepId = input.step_id;
+  const keptWhere = (part: RecordingPartInfo) => keeper.keeping(stepId, part.sessionId, part.index);
   const snapshotOfContract = () => contractSnapshot(input, publishedFlowVersion);
   const partLabel = (index: number, durationMs: number) =>
     t("flow_transcript_rec_part_name", { part: index + 1, length: clockText(durationMs) });
@@ -659,8 +670,9 @@ export function RunRecorder({
 
   /**
    * Starts recording, continuing the recording whose parts are on the form;
-   * null when the step refuses another part now (no file slot, parts
-   * waiting for their upload, or, for an automatic start, no time left).
+   * null when the step refuses another part now (no file slot, parts only
+   * this tab holds waiting for their upload, or, for an automatic start, no
+   * time left).
    */
   function start({ automatic: byItself = false } = {}): Promise<void> | null {
     if (recorder.getSnapshot().phase !== "idle") return null;
@@ -671,7 +683,7 @@ export function RunRecorder({
       return null;
     }
     setFilesFull(false);
-    if (awaitingUpload(now) >= MAX_PARTS_AWAITING_UPLOAD) {
+    if (awaitingUpload(now, keptWhere) >= MAX_PARTS_AWAITING_UPLOAD) {
       setBacklogFull(true);
       return null;
     }
@@ -700,7 +712,7 @@ export function RunRecorder({
         recordedBeforeMs,
         partsBefore: before.length,
         filesLeft: filesLeft(input, latestEntries.current),
-        awaitingUpload: awaitingUpload(latestEntries.current)
+        awaitingUpload: awaitingUpload(latestEntries.current, keptWhere)
       })
     });
   }

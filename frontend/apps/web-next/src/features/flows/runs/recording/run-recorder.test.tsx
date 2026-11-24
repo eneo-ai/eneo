@@ -177,7 +177,7 @@ function keptPart(index: number, overrides: Partial<StoredPart> = {}): StoredPar
   };
 }
 
-const audioContract = (live = false, partSeconds = 1_800): RunContract =>
+const audioContract = (live = false, partSeconds = 1_800, maxFiles = 4): RunContract =>
   makeContract({
     published_flow_version: 4,
     steps_requiring_input: [
@@ -186,7 +186,7 @@ const audioContract = (live = false, partSeconds = 1_800): RunContract =>
         label: "Mötet",
         input_format: "audio",
         accepted_mimetypes: ["audio/webm", "audio/mp4"],
-        max_files: 4,
+        max_files: maxFiles,
         max_duration_seconds: 7_200,
         max_recording_seconds: 7_200,
         recording_part_seconds: partSeconds
@@ -857,10 +857,57 @@ describe("The recording's health", () => {
     ).toBeTruthy();
   });
 
-  it("does not record more while earlier parts wait for their upload", async () => {
+  it("keeps recording through outages at the parts' changes while the parts are kept on the device", async () => {
     installBrowser();
     grantMicrophone();
     FakeUpload.failAll = true;
+    const { dialog } = await openDialog(audioContract(false, 1, 10));
+    fireEvent.click(button(dialog, messages.flow_transcript_rec_start));
+    // Two parts' uploads fail at two changes of part, and a third part follows.
+    expect(
+      await within(dialog).findByText(/^Inspelning, del 3/, {}, { timeout: 6_000 })
+    ).toBeTruthy();
+    expect(within(dialog).getAllByText(/^Nytt försök kl\./).length).toBeGreaterThanOrEqual(2);
+    expect(button(dialog, messages.flow_transcript_rec_stop)).toBeTruthy();
+    expect(within(dialog).queryByText(messages.flow_transcript_rec_ended_backlog)).toBeNull();
+    fireEvent.click(button(dialog, messages.flow_transcript_rec_stop));
+    await within(dialog).findByRole("button", { name: messages.flow_transcript_rec_continue });
+  }, 10_000);
+
+  it("records more after several parts failed to upload, while they are kept on the device", async () => {
+    installBrowser();
+    grantMicrophone();
+    FakeUpload.failAll = true;
+    const { dialog } = await openDialog(audioContract());
+    for (let part = 1; part <= 3; part += 1) {
+      fireEvent.click(
+        button(
+          dialog,
+          part === 1 ? messages.flow_transcript_rec_start : messages.flow_transcript_rec_continue
+        )
+      );
+      await within(dialog).findByRole("button", { name: messages.flow_transcript_rec_stop });
+      fireEvent.click(button(dialog, messages.flow_transcript_rec_stop));
+      await within(dialog).findByText(new RegExp(`^Inspelning, del ${part}`));
+      await waitFor(() =>
+        expect(within(dialog).getAllByText(/^Nytt försök kl\./)).toHaveLength(part)
+      );
+    }
+    await waitFor(() => expect(device.db.parts.size).toBe(3));
+    fireEvent.click(button(dialog, messages.flow_transcript_rec_continue));
+    expect(
+      await within(dialog).findByRole("button", { name: messages.flow_transcript_rec_stop })
+    ).toBeTruthy();
+    expect(within(dialog).queryByText(messages.flow_transcript_rec_backlog_full)).toBeNull();
+    expect(microphone).toHaveBeenCalledTimes(4);
+  });
+
+  it("does not record more while earlier parts kept only in this tab wait for their upload", async () => {
+    installBrowser();
+    grantMicrophone();
+    FakeUpload.failAll = true;
+    // The device's storage is full: each part lives only in this tab.
+    device.db.putPart = () => Promise.reject(new DOMException("full", "QuotaExceededError"));
     const { dialog } = await openDialog(audioContract());
     for (let part = 1; part <= 3; part += 1) {
       fireEvent.click(
@@ -939,6 +986,25 @@ describe("Keeping a recording on the device", () => {
     });
     // The run took the recording: nothing of it stays on the device.
     await waitFor(() => expect(device.db.parts.size).toBe(0));
+  });
+
+  it("records more after continuing a kept recording whose parts have not uploaded yet", async () => {
+    installBrowser();
+    grantMicrophone();
+    FakeUpload.failAll = true;
+    for (const index of [0, 1, 2]) await device.db.putPart(keptPart(index));
+    const { dialog } = await openDialog(audioContract());
+    fireEvent.click(
+      await within(dialog).findByRole("button", { name: messages.flow_transcript_resume_continue })
+    );
+    await within(dialog).findByText(/^Inspelning, del 3/);
+    await waitFor(() => expect(within(dialog).getAllByText(/^Nytt försök kl\./)).toHaveLength(3));
+
+    fireEvent.click(button(dialog, messages.flow_transcript_rec_continue));
+    expect(
+      await within(dialog).findByRole("button", { name: messages.flow_transcript_rec_stop })
+    ).toBeTruthy();
+    expect(within(dialog).queryByText(messages.flow_transcript_rec_backlog_full)).toBeNull();
   });
 
   it("does not continue a kept recording the step no longer takes", async () => {
