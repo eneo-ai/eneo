@@ -46,13 +46,18 @@ async function sendFile(
   abort: AbortController
 ): Promise<UploadedFile> {
   const url = `${API_BASE}/api/v1/flows/${encodeURIComponent(flowId)}/steps/${encodeURIComponent(stepId)}/runtime-files/`;
-  const request = await onBrowserApiRequest({
-    request: new Request(new URL(url, window.location.href), {
-      method: "POST",
-      headers: { accept: "application/json" },
-      signal: abort.signal
-    })
+  const prepared = new Request(new URL(url, window.location.href), {
+    method: "POST",
+    headers: { accept: "application/json" },
+    signal: abort.signal
   });
+  let request: Request;
+  try {
+    request = await onBrowserApiRequest({ request: prepared });
+  } catch (error) {
+    // Fetch's network error from the session check: it is checked again once back online.
+    throw error instanceof TypeError ? new UploadNetworkError() : error;
+  }
   request.signal.throwIfAborted();
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -151,14 +156,9 @@ class UploadNetworkError extends Error {
   }
 }
 
-/**
- * A failure that may pass: the same file can be sent again (the network, a timeout, a busy server).
- * A `TypeError` is fetch's network error: the session check before the upload could not reach the
- * server, and it is checked again when the browser is back online.
- */
+/** A failure that may pass: the same file can be sent again (the network, a timeout, a busy server). */
 function passes(error: unknown): boolean {
   if (error instanceof UploadTimeoutError || error instanceof UploadNetworkError) return true;
-  if (error instanceof TypeError) return true;
   return (
     error instanceof EneoApiError &&
     (error.status === 408 || error.status === 429 || error.status >= 500)

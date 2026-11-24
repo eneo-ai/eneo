@@ -132,7 +132,33 @@ it("sends a recorded part again when the session check could not reach the serve
   // It may pass: the part keeps its Try again and is sent again by itself.
   expect(part.retryable).toBe(true);
   expect(part.nextRetryAt).toEqual(expect.any(Number));
+  // The row says the network failed, not that something went wrong.
+  expect(part.problem).toBe("Filen kom inte fram. Försök igen med knappen, eller ta bort filen.");
   expect(UploadRequest.sent).toHaveLength(0);
+});
+
+it("does not send a part again by itself when the server answered its upload without a file", async () => {
+  const hook = renderHookInApp(() => useRuntimeUploads("flow-1", undefined));
+  const input = makeInput({ step_id: "step-1", accepted_mimetypes: ["audio/webm"] });
+  act(() =>
+    hook.result.current.add(input, [new File(["audio"], "del-1.webm", { type: "audio/webm" })], {
+      recording: { sessionId: "rec-1", index: 0, durationMs: 1000, streamed: false },
+      label: "Inspelning"
+    })
+  );
+  await waitFor(() => expect(UploadRequest.sent).toHaveLength(1));
+  // The server took the request, but its answer is empty: the file may well be stored.
+  const xhr = UploadRequest.sent[0]!;
+  xhr.status = 201;
+  act(() => xhr.onload?.());
+  await waitFor(() => expect(hook.result.current.uploads["step-1"]?.[0]?.state).toBe("failed"));
+  const part = hook.result.current.uploads["step-1"]![0]!;
+  expect(part.retryable).toBe(false);
+  expect(part.nextRetryAt).toBeUndefined();
+  act(() => {
+    window.dispatchEvent(new Event("online"));
+  });
+  expect(UploadRequest.sent).toHaveLength(1);
 });
 
 it("keeps a recorded part's slot while it waits to be sent again", async () => {
