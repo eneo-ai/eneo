@@ -546,7 +546,7 @@ export function ModelCatalogStep({
             isDisabled={!realtimeAvailable}
           />
           {realtimeRefusal && (
-            <p id={realtimeReasonId} className="flex items-start gap-1.5 pl-6">
+            <p id={realtimeReasonId} className="flex items-start gap-1.5 pl-8">
               <Lock
                 aria-hidden="true"
                 className="text-ax-text-secondary mt-0.5 size-3.5 shrink-0"
