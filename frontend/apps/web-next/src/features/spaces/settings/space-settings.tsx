@@ -462,6 +462,7 @@ function RetentionSection() {
   const [note, setNote] = useState<string | null>(null);
   // The space's time is being read again; the field waits for it.
   const [checking, setChecking] = useState(false);
+  const fieldRef = useRef<HTMLInputElement>(null);
   useDirtySaveStatus("retention-days", days !== saved);
 
   const daysProblem = daysVisited && days === undefined ? t("space_retention_invalid") : null;
@@ -522,6 +523,7 @@ function RetentionSection() {
       <div className="flex flex-wrap items-center gap-2">
         <Input
           id="retention-days"
+          ref={fieldRef}
           type="text"
           inputMode="numeric"
           className="w-32"
@@ -567,6 +569,8 @@ function RetentionSection() {
         description={t("space_retention_shorten_description", { days: shorter ?? 0 })}
         confirmLabel={t("space_retention_shorten_confirm")}
         pending={update.isPending}
+        // Its blur asked: after a click elsewhere nothing focused opened it.
+        returnFocusRef={fieldRef}
         onConfirm={() => {
           if (shorter === null) return;
           // A failed save keeps the dialog, so the same time can be tried again.

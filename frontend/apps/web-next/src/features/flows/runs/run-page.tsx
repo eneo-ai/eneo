@@ -19,7 +19,7 @@ import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
 import { EneoApiError } from "@/lib/api/errors";
 import { hasAnswered, pollEvery } from "@/lib/api/query";
-import { useFocusRescue } from "@/lib/focus-rescue";
+import { isFocusLost, useFocusRescue } from "@/lib/focus-rescue";
 import { usePhoneScreen } from "@/lib/hooks/use-media-match";
 import { useSpaceSections } from "@/features/spaces/frame/use-space-sections";
 import { useSpaceDisplayName } from "@/features/spaces/space-display-name";
@@ -776,10 +776,19 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
   const gone = [progress, detail, steps].some(
     (read) => read.error instanceof EneoApiError && read.error.status === 404
   );
+  // Gone under an open page, the focused control went with it: the message takes the focus.
+  const goneRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (gone && isFocusLost()) goneRef.current?.focus();
+  }, [gone]);
   if (gone) {
     return (
       <div className="flex min-w-0 flex-1 flex-col">
-        <div className="flex w-full max-w-5xl flex-col py-4 md:py-5">
+        <div
+          ref={goneRef}
+          tabIndex={-1}
+          className="flex w-full max-w-5xl flex-col py-4 outline-none md:py-5"
+        >
           <EmptyState
             headingLevel={1}
             title={t("flow_run_gone_title")}

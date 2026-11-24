@@ -171,7 +171,8 @@ function ConfirmSurface({
  * confirmation a caller opens itself. While `pending`, neither Cancel, Escape
  * nor an outside click closes it, and the confirm button stays enabled (so it
  * keeps focus) but ignores a press. `children` renders under the description
- * (an impact or risk list, a hint).
+ * (an impact or risk list, a hint). `returnFocusRef` names where focus goes back
+ * when nothing focused opened it (a field whose blur asked, after a click elsewhere).
  */
 export function ConfirmDialogControlled({
   open,
@@ -183,7 +184,8 @@ export function ConfirmDialogControlled({
   variant = "destructive",
   pending,
   onConfirm,
-  children
+  children,
+  returnFocusRef
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -195,6 +197,7 @@ export function ConfirmDialogControlled({
   pending?: boolean;
   onConfirm: () => void;
   children?: ReactNode;
+  returnFocusRef?: RefObject<HTMLElement | null>;
 }) {
   const dialogId = useId();
   const noTrigger = useRef<HTMLElement | null>(null);
@@ -212,7 +215,7 @@ export function ConfirmDialogControlled({
       busy={pending ?? false}
       onConfirm={onConfirm}
       dialogId={dialogId}
-      triggerRef={noTrigger}
+      triggerRef={returnFocusRef ?? noTrigger}
     >
       {children}
     </ConfirmSurface>

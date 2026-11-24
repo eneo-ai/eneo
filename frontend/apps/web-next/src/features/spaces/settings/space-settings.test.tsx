@@ -477,6 +477,21 @@ it("keeps the field read-only while a time is saved, so a clear made after it is
   expect(api.PATCH.mock.calls[1]![1].body).toEqual({ data_retention_days: null });
 });
 
+it("puts the focus back on the field when a shorter time is not confirmed, also after a click elsewhere", async () => {
+  showSettings();
+  const field = retentionField();
+  field.focus();
+  fireEvent.change(field, { target: { value: "7" } });
+  // A click on nothing focusable: the focus leaves the field for the page.
+  field.blur();
+  expect(document.activeElement).toBe(document.body);
+  fireEvent.blur(field);
+  const dialog = await screen.findByRole("alertdialog");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Avbryt" }));
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  await waitFor(() => expect(document.activeElement).toBe(field));
+});
+
 it("never sends an unconfirmed shorter time when the page is left", async () => {
   const { unmount } = showSettings();
   fireEvent.change(retentionField(), { target: { value: "7" } });
