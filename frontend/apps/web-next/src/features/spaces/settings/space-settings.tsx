@@ -475,8 +475,12 @@ function RetentionSection() {
     );
     // The flows' effective times follow the new cap.
     void queryClient.invalidateQueries({ queryKey: ["flows"] });
-    const said =
-      next === null
+    // Runs in a personal space are not removed automatically: it says nothing of flows.
+    const said = space.personal
+      ? next === null
+        ? t("space_retention_saved_personal_off")
+        : t("space_retention_saved_personal_on", { days: next })
+      : next === null
         ? t("space_retention_saved_off")
         : t("space_retention_saved_on", { days: next });
     setNote(said);
@@ -510,7 +514,9 @@ function RetentionSection() {
   return (
     <SettingsRow
       title={t("space_retention_title")}
-      description={t("space_retention_description")}
+      description={t(
+        space.personal ? "space_retention_description_personal" : "space_retention_description"
+      )}
       htmlFor="retention-days"
     >
       <div className="flex flex-wrap items-center gap-2">

@@ -347,6 +347,37 @@ it.each([
   await expectNoAxeViolations(container);
 });
 
+it("promises nothing about flow runs in a personal space", async () => {
+  showSettings(
+    undefined,
+    [],
+    [],
+    "personal",
+    makeSpace({
+      permissions: ["read", "edit"],
+      overrides: {
+        personal: true,
+        data_retention_days: 30,
+        completion_models: [],
+        embedding_models: []
+      }
+    })
+  );
+  const section = document.getElementById("security")!;
+  expect(
+    within(section).getByText(
+      "Gäller assistenter och appar i ytan som inte har en egen tid. Det som har passerat tiden räknas som förfallet och tas bort vid en kommande kontroll. Det går inte att återställa."
+    )
+  ).toBeTruthy();
+  enterRetention("45");
+  expect(
+    await within(section).findByText(
+      "Sparat. Assistenter och appar i ytan utan egen tid följer nu 45 dagar."
+    )
+  ).toBeTruthy();
+  expect(within(section).queryByText(/flöden/)).toBeNull();
+});
+
 it("asks before a shorter time is saved and saves it once confirmed", async () => {
   showSettings();
   enterRetention("7");
