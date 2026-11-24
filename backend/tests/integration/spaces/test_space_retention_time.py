@@ -17,6 +17,7 @@ from sqlalchemy.exc import DBAPIError
 
 from eneo.audit.application.audit_service import AuditService
 from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+from eneo.data_retention.domain.rules import RetentionTimeChangedError
 from eneo.database.tables.audit_log_table import AuditLog
 from eneo.database.tables.roles_table import Roles
 from eneo.database.tables.spaces_table import Spaces, SpacesUsers
@@ -28,9 +29,9 @@ from tests.fixtures import mint_v2_api_key
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
 
-async def _space_admin(db_container, admin_user, user_factory, permissions):
+async def _space_admin(db_container, admin_user, user_factory, permissions, days=30):
     """A user whose role has `permissions`, admin of a new shared space that
-    keeps 30 days."""
+    keeps `days` days."""
     async with db_container() as container:
         session = container.session()
         user = await user_factory(session, tenant_id=admin_user.tenant_id)
@@ -56,7 +57,7 @@ async def _space_admin(db_container, admin_user, user_factory, permissions):
             tenant_id=admin_user.tenant_id,
             user_id=None,
             tenant_space_id=hub_id,
-            data_retention_days=30,
+            data_retention_days=days,
         )
         session.add(space)
         await session.flush()
@@ -425,3 +426,122 @@ async def test_a_personal_space_owner_still_cannot_change_its_time(
     )
     assert refused.status_code == 403, refused.text
     assert (await _stored(db_container, UUID(space_id)))[1] is None
+
+
+_MANAGE = ["assistants", "retention_manage"]
+
+
+@pytest.mark.parametrize(
+    "stored,seen", [(30, 30), (None, None)], ids=["a-time", "no-time"]
+)
+async def test_a_change_that_names_the_time_it_replaces_is_saved(
+    client, db_container, admin_user, user_factory, patch_auth_service_jwt, stored, seen
+):
+    """`null` means "I saw no time set". Mutant: a seen null is read as absent,
+    or as a mismatch against a space without a time."""
+    _, token, space_id = await _space_admin(
+        db_container, admin_user, user_factory, _MANAGE, days=stored
+    )
+    response = await client.patch(
+        f"/api/v1/spaces/{space_id}/",
+        json={"data_retention_days": 7, "expected_data_retention_days": seen},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200, response.text
+    assert (await _stored(db_container, space_id))[1] == 7
+
+
+@pytest.mark.parametrize("seen", [60, None], ids=["another-time", "no-time"])
+async def test_a_change_against_a_time_no_longer_stored_saves_nothing(
+    client, db_container, admin_user, user_factory, patch_auth_service_jwt, seen
+):
+    """The rename beside the time is refused with it. Mutants: the check is
+    skipped; the rename is saved; the refusal names the time that was sent."""
+    _, token, space_id = await _space_admin(
+        db_container, admin_user, user_factory, _MANAGE
+    )
+    before = await _stored(db_container, space_id)
+    response = await client.patch(
+        f"/api/v1/spaces/{space_id}/",
+        json={
+            "name": "Renamed space",
+            "data_retention_days": 7,
+            "expected_data_retention_days": seen,
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 409, response.text
+    body = response.json()
+    assert (body["code"], body["eneo_error_code"], body["context"]) == (
+        "retention_time_changed",
+        9087,
+        {"current_days": 30},
+    )
+    assert await _stored(db_container, space_id) == before
+    assert await _retention_audits(db_container, space_id) == []
+
+
+@pytest.mark.parametrize(
+    "sent",
+    [
+        {"name": "Renamed space", "expected_data_retention_days": 60},
+        {
+            "name": "Renamed space",
+            "data_retention_days": 30,
+            "expected_data_retention_days": 60,
+        },
+    ],
+    ids=["no-new-time", "the-stored-time"],
+)
+async def test_a_seen_time_is_checked_only_when_the_time_changes(
+    client, db_container, admin_user, user_factory, patch_auth_service_jwt, sent
+):
+    """Mutant: a seen time beside no new time, or beside the stored one,
+    refuses the rest of the request."""
+    _, token, space_id = await _space_admin(
+        db_container, admin_user, user_factory, _MANAGE
+    )
+    response = await client.patch(
+        f"/api/v1/spaces/{space_id}/",
+        json=sent,
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200, response.text
+    assert await _stored(db_container, space_id) == ("Renamed space", 30)
+    assert await _retention_audits(db_container, space_id) == []
+
+
+@pytest.mark.parametrize("sent", [5, 3], ids=["another-time", "the-new-time"])
+async def test_a_change_waiting_on_another_is_refused_when_its_time_was_replaced(
+    db_container, admin_user, user_factory, sent
+):
+    """B saw 30 and waits while A changes it to 3. Mutants: B compares with its
+    read before the lock, so 30 passes and 5 replaces 3; B's resend of 3 is
+    refused although it changes nothing."""
+    user, _, space_id = await _space_admin(
+        db_container, admin_user, user_factory, _MANAGE
+    )
+
+    async def change_again():
+        async with db_container(user=user) as second:
+            await second.space_service().update_space(
+                space_id, data_retention_days=sent, expected_data_retention_days=30
+            )
+
+    async with db_container(user=user) as first:
+        await first.space_service().update_space(space_id, data_retention_days=3)
+        waiting = asyncio.create_task(change_again())
+        try:
+            await _wait_for_a_lock_waiter(db_container)
+        except BaseException:
+            waiting.cancel()
+            raise
+    if sent == 3:
+        await waiting
+    else:
+        with pytest.raises(RetentionTimeChangedError) as refused:
+            await waiting
+        assert refused.value.context == {"current_days": 3}
+    assert (await _stored(db_container, space_id))[1] == 3
+    audits = await _retention_audits(db_container, space_id)
+    assert [(a["previous_value"], a["new_value"]) for a in audits] == [(30, 3)]

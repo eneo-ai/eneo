@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
@@ -1146,3 +1147,109 @@ async def test_a_longer_flow_time_stored_before_the_cap_is_refused_on_a_resend(
     )
     assert response.status_code == 400, response.text
     assert response.json()["context"] == {"cap_days": 7, "cap_origin": "space"}
+
+
+async def _flow_audits(db_container, flow_id) -> int:
+    async with db_container() as container:
+        return len(
+            (
+                await container.session().scalars(
+                    sa.select(AuditLog.id)
+                    .where(AuditLog.action == "flow_run_retention_policy_changed")
+                    .where(AuditLog.entity_id == flow_id)
+                )
+            ).all()
+        )
+
+
+async def _flow_days(db_container, flow_id) -> int | None:
+    async with db_container() as container:
+        return await container.session().scalar(
+            sa.select(Flows.flow_run_history_retention_days).where(Flows.id == flow_id)
+        )
+
+
+@pytest.mark.parametrize(
+    "body,status,stored",
+    [
+        ({"policy": {"days": 3}, "expected_effective_days": 7}, 200, 3),
+        ({"policy": {"days": 3}, "expected_effective_days": 60}, 409, None),
+        ({"policy": {"days": 3}, "expected_effective_days": None}, 409, None),
+        ({"policy": None, "expected_effective_days": 60}, 200, None),
+        ({"policy": {"days": 30}, "expected_effective_days": 60}, 400, None),
+    ],
+    ids=["the-time-that-applies", "another-time", "no-time", "no-change", "over-cap"],
+)
+async def test_a_flow_time_names_the_time_that_applied_when_it_was_chosen(
+    client,
+    admin_token,
+    published_flow_ids,
+    admin_is_space_admin,
+    db_container,
+    body,
+    status,
+    stored,
+) -> None:
+    """The Space keeps 7 days and the Flow has none, so 7 applies. Mutants: the
+    check compares with the Flow's own time; it refuses a request that changes
+    nothing; it comes before the Space's cap, which names the limit."""
+    _, flow_id = published_flow_ids
+    response = await client.put(
+        f"/api/v1/settings/flow-run-retention-policy/flows/{flow_id}",
+        json=body,
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == status, response.text
+    if status == 409:
+        refused = response.json()
+        assert (refused["code"], refused["eneo_error_code"], refused["context"]) == (
+            "retention_time_changed",
+            9087,
+            {"current_days": 7},
+        )
+    if status == 400:
+        assert response.json()["code"] == "retention_exceeds_space"
+    assert await _flow_days(db_container, flow_id) == stored
+    assert await _flow_audits(db_container, flow_id) == (1 if stored else 0)
+
+
+async def test_a_flow_time_chosen_before_the_space_changed_is_refused(
+    client,
+    admin_token,
+    admin_user,
+    published_flow_ids,
+    admin_is_space_admin,
+    db_container,
+) -> None:
+    """Another admin raises the Space from 7 to 60 while the dialog that saw 7
+    saves 30. Mutant: the PUT compares before the retention lock, or not at
+    all, so 30 is saved without the warning a cut from 60 needs."""
+    space_id, flow_id = published_flow_ids
+
+    async with db_container(user=admin_user) as raising:
+        await raising.space_service().update_space(space_id, data_retention_days=60)
+        waiting = asyncio.create_task(
+            client.put(
+                f"/api/v1/settings/flow-run-retention-policy/flows/{flow_id}",
+                json={"policy": {"days": 30}, "expected_effective_days": 7},
+                headers={"Authorization": f"Bearer {admin_token}"},
+            )
+        )
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + 4.0
+        try:
+            while True:
+                async with db_container() as probe:
+                    if await probe.session().scalar(
+                        sa.text("SELECT count(*) FROM pg_locks WHERE NOT granted")
+                    ):
+                        break
+                assert loop.time() < deadline, "the PUT never waited for the lock"
+                await asyncio.sleep(0.05)
+        except BaseException:
+            waiting.cancel()
+            raise
+    response = await waiting
+    assert response.status_code == 409, response.text
+    assert response.json()["context"] == {"current_days": 60}
+    assert await _flow_days(db_container, flow_id) is None

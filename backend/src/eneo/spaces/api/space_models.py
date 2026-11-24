@@ -220,6 +220,18 @@ class UpdateSpaceRequest(BaseModel):
             "Valid range: 1-2555 days (1 day to 7 years)."
         ),
     )
+    expected_data_retention_days: Union[int, None, NotProvided] = Field(
+        default=NOT_PROVIDED,
+        description=(
+            "The space's time the caller saw when it chose `data_retention_days`, "
+            "or null when it saw none set. When the request changes the time, it "
+            "is compared with the stored time under the lock the change takes; "
+            "if they differ, nothing in the request is saved and the answer is "
+            "409 `retention_time_changed`, with the stored time in "
+            "`context.current_days`. Omit to save without the comparison. "
+            "Ignored when the request does not change the time."
+        ),
+    )
 
 
 class SpaceTranscriptionServiceLink(BaseModel):
