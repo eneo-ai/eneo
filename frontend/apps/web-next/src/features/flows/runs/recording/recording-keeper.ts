@@ -376,7 +376,8 @@ export class RecordingKeeper {
   /**
    * The signed-in person's recordings kept for a step, newest first, after
    * parts they left mid-recording are rebuilt from their journals.
-   * Recordings with no activity for a day are deleted, whoever made them.
+   * Recordings with no activity for a day (their latest part or journal
+   * chunk) are deleted, whoever made them; none while journals cannot be read.
    */
   async scan(stepId: string): Promise<ScanResult> {
     const db = this.#db;
@@ -393,6 +394,13 @@ export class RecordingKeeper {
     } catch {
       return { saved: [], incomplete: true };
     }
+    // A journal is activity too: a recording continued just before its day ran out goes on.
+    let journals: JournalMeta[] | null = null;
+    try {
+      journals = await db.listJournals(this.#flowId, stepId);
+    } catch {
+      incomplete = true;
+    }
     const bySession = new Map<string, StoredPart[]>();
     for (const part of parts) {
       const list = bySession.get(part.sessionId);
@@ -402,9 +410,17 @@ export class RecordingKeeper {
     const saved: SavedRecording[] = [];
     const cutoff = this.#now() - RECORDING_TTL_MS;
     for (const [sessionId, list] of bySession) {
-      const lastActivity = Math.max(...list.map((part) => part.capturedAt + part.durationMs));
+      const lastActivity = Math.max(
+        ...list.map((part) => part.capturedAt + part.durationMs),
+        ...(journals ?? [])
+          .filter((meta) => meta.sessionId === sessionId)
+          .map((meta) => meta.lastChunkAt)
+      );
       if (lastActivity < cutoff) {
-        await db.deleteSession(this.#flowId, stepId, sessionId).catch(() => undefined);
+        // Unread journals are not "no journal": nothing is deleted until they can be read.
+        if (journals) {
+          await db.deleteSession(this.#flowId, stepId, sessionId).catch(() => undefined);
+        }
         continue;
       }
       const own = list.filter(this.#mine);

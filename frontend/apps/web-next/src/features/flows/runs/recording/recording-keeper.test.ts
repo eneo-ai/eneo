@@ -348,6 +348,85 @@ describe("RecordingKeeper", () => {
     expect(db.parts.size).toBe(0);
   });
 
+  it("keeps a recording continued just before its day ran out: its new journal counts", async () => {
+    const { keeper, db, later } = setup();
+    await keeper.keepPart("step-1", {
+      sessionId: "rec-1",
+      index: 0,
+      blob: new Blob(["audio"]),
+      mimeType: "audio/webm",
+      durationMs: 1_000,
+      capturedAt: START,
+      contract: CONTRACT,
+      streamed: false
+    });
+    later(RECORDING_TTL_MS + 2_000);
+    // The recording goes on: its next part is being recorded and journaled now.
+    const journal = keeper.journalFor(
+      "step-1",
+      () => CONTRACT,
+      () => false
+    );
+    journal.begin(part(1));
+    journal.append(part(1), new Blob(["a"], { type: "audio/webm" }), 1_000);
+    await settle();
+
+    await keeper.scan("step-1");
+    expect(db.parts.size).toBe(1);
+    expect(db.journals.size).toBe(1);
+    expect(db.chunks.size).toBe(1);
+  });
+
+  it("deletes a recording whose parts and journal are all older than a day", async () => {
+    const { keeper, as, db, later, lockManager } = setup();
+    await keeper.keepPart("step-1", {
+      sessionId: "rec-1",
+      index: 0,
+      blob: new Blob(["audio"]),
+      mimeType: "audio/webm",
+      durationMs: 1_000,
+      capturedAt: START,
+      contract: CONTRACT,
+      streamed: false
+    });
+    const journal = keeper.journalFor(
+      "step-1",
+      () => CONTRACT,
+      () => false
+    );
+    journal.begin(part(1));
+    journal.append(part(1), new Blob(["a"], { type: "audio/webm" }), 1_000);
+    journal.leave(part(1));
+    await settle();
+    // A tab left it without letting go: the journal is not rebuilt, only aged.
+    lockManager.holdElsewhere("eneo-flow-recording:flow-1::step-1::rec-1::0001");
+    later(RECORDING_TTL_MS + 120_000);
+
+    await as("user-a").scan("step-1");
+    expect(db.parts.size).toBe(0);
+    expect(db.journals.size).toBe(0);
+    expect(db.chunks.size).toBe(0);
+  });
+
+  it("deletes nothing when the journals could not be read", async () => {
+    const { keeper, db, later } = setup();
+    await keeper.keepPart("step-1", {
+      sessionId: "rec-1",
+      index: 0,
+      blob: new Blob(["audio"]),
+      mimeType: "audio/webm",
+      durationMs: 1_000,
+      capturedAt: START,
+      contract: CONTRACT,
+      streamed: false
+    });
+    later(RECORDING_TTL_MS + 2_000);
+    vi.spyOn(db, "listJournals").mockRejectedValue(new Error("blocked"));
+
+    expect(await keeper.scan("step-1")).toEqual({ saved: [], incomplete: true });
+    expect(db.parts.size).toBe(1);
+  });
+
   it("offers a kept recording only to the person who recorded it", async () => {
     const { keeper, as, db } = setup();
     await keeper.keepPart("step-1", {
