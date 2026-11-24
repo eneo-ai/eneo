@@ -55,6 +55,14 @@ def started_under_space_retention(
     )
 
 
+def flow_run_automatic_retention_predicates() -> tuple[sa.ColumnElement[bool], ...]:
+    """What the automatic removal adds to the explicit purge's selection, on a
+    run joined to its Space: the run started while the time was on, and the
+    time is on now. Removing the space's time stops the removal; setting it
+    again resumes it for the runs marked before."""
+    return (FlowRuns.started_under_space_retention.is_(True), space_retention_is_on())
+
+
 def flow_run_retention_anchor() -> sa.ColumnElement[datetime]:
     """When a terminal run's retention age starts: its end, or its creation.
 

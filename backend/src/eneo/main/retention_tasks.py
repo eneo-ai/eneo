@@ -46,6 +46,7 @@ from eneo.files.unused_file_retention_task import (
 )
 from eneo.flows.application.flow_run_history_retention_task import (
     FLOW_RUN_HISTORY_TASK,
+    UNIT_EXCEEDS_BUDGET,
     FlowRunHistoryRetentionTask,
 )
 from eneo.main.config import Settings
@@ -88,6 +89,19 @@ def _unit_budget(settings: Settings) -> Mapping[str, tuple[str, ...]]:
     ):
         limits += ("retention_max_files_per_run",)
     return MappingProxyType({ConversationBlockReason.UNIT_EXCEEDS_BUDGET.key: limits})
+
+
+def _run_room(settings: Settings) -> Mapping[str, tuple[str, ...]]:
+    """A Flow run's removal, its file families included, must fit one call of
+    its step: the larger of the chunk and one family plus discovery, within
+    the execution's rows, and the execution's files."""
+    family = settings.retention_max_family_rows + 1
+    limits = ("retention_max_family_rows", "retention_max_files_per_run")
+    if settings.retention_chunk_rows > family:
+        limits += ("retention_chunk_rows",)
+    if settings.retention_max_rows_per_run < max(settings.retention_chunk_rows, family):
+        limits += ("retention_max_rows_per_run",)
+    return MappingProxyType({UNIT_EXCEEDS_BUDGET: limits})
 
 
 # Records kept outside the engine, each with how it ends today, until the owner
@@ -224,7 +238,16 @@ def retention_task_registrations(
             name=FLOW_RUN_HISTORY_TASK,
             enabled=settings.retention_flow_run_history_enabled,
             budget=budget,
-            build=lambda session: FlowRunHistoryRetentionTask(session, now=observed_at),
+            limited_by=_run_room(settings),
+            build=lambda session: FlowRunHistoryRetentionTask(
+                session,
+                now=observed_at,
+                family_rows=settings.retention_max_family_rows,
+                chunk_rows=settings.retention_chunk_rows,
+                execution_rows=budget.rows,
+                execution_files=budget.files,
+                gather_seconds=settings.retention_chunk_gather_seconds,
+            ),
             every="frequent",
         ),
     )
