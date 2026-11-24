@@ -708,6 +708,7 @@ export function RunRecorder({
     automatic.current = byItself;
     // What the person chose as the recording begins: a later toggle or outage does not change it.
     streamed.current = liveWanted;
+    keeper.askToKeepStorage();
     return recorder.start({
       sessionId,
       firstIndex,

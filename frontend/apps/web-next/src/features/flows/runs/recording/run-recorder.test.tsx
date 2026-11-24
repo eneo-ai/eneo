@@ -1063,6 +1063,43 @@ describe("Keeping a recording on the device", () => {
     ).toBeTruthy();
   });
 
+  it("asks the browser to keep the device's storage as a recording starts", async () => {
+    installBrowser();
+    grantMicrophone();
+    // Never answered: the recording does not wait for it.
+    const persist = vi.fn(() => new Promise<boolean>(() => undefined));
+    Object.defineProperty(navigator, "storage", { configurable: true, value: { persist } });
+    onTestFinished(() => {
+      Reflect.deleteProperty(navigator, "storage");
+    });
+    const { dialog } = await openDialog(audioContract());
+    expect(persist).not.toHaveBeenCalled();
+    await recordAndStop(dialog);
+    expect(persist).toHaveBeenCalledTimes(1);
+    // Once for the form, not at every start.
+    fireEvent.click(button(dialog, messages.flow_transcript_rec_continue));
+    await within(dialog).findByRole("button", { name: messages.flow_transcript_rec_stop });
+    expect(persist).toHaveBeenCalledTimes(1);
+  });
+
+  it("records as usual where the browser cannot keep its storage, or refuses to", async () => {
+    installBrowser();
+    grantMicrophone();
+    Object.defineProperty(navigator, "storage", { configurable: true, value: undefined });
+    onTestFinished(() => {
+      Reflect.deleteProperty(navigator, "storage");
+    });
+    const first = await openDialog(audioContract());
+    expect(await recordAndStop(first.dialog)).toBeTruthy();
+    cleanup();
+
+    const persist = vi.fn(() => Promise.reject(new DOMException("denied", "NotAllowedError")));
+    Object.defineProperty(navigator, "storage", { configurable: true, value: { persist } });
+    const second = await openDialog(audioContract());
+    expect(await recordAndStop(second.dialog)).toBeTruthy();
+    expect(persist).toHaveBeenCalledTimes(1);
+  });
+
   it("does not continue a kept recording the step no longer takes", async () => {
     installBrowser();
     await device.db.putPart(keptPart(0, { mimeType: "audio/ogg" }));

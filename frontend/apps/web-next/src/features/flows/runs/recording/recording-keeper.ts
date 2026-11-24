@@ -159,6 +159,7 @@ export class RecordingKeeper {
   #listeners = new Set<() => void>();
   #degraded = new Map<string, JournalDegradation>();
   #version = 0;
+  #storageAsked = false;
 
   /** `userId`: the signed-in person, whose recordings are kept and offered; null while not known. */
   constructor(
@@ -176,6 +177,24 @@ export class RecordingKeeper {
     this.#journal = db
       ? new RecordingJournal(db, (reason, address) => this.#degrade(address, reason), locks, now)
       : null;
+  }
+
+  /**
+   * Asks the browser, once per form, to keep this site's storage: otherwise
+   * it may clear it after days without a visit or when space runs short,
+   * and a kept recording with it. The answer is not waited for nor told;
+   * without the API, or refused, recordings are kept as before.
+   */
+  askToKeepStorage(): void {
+    if (this.#storageAsked || !this.#db) return;
+    this.#storageAsked = true;
+    try {
+      const storage = (typeof navigator === "undefined" ? undefined : navigator.storage) as
+        Partial<StorageManager> | undefined;
+      void storage?.persist?.().catch(() => undefined);
+    } catch {
+      // No storage manager here: recordings are kept as before.
+    }
   }
 
   /** Whether this browser keeps recordings on the device at all. */
