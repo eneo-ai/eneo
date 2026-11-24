@@ -502,8 +502,29 @@ class FlowRunHistoryPurgeRepository:
                 else FlowRunRemovalOutcome.NOT_PURGEABLE
             )
         work.rows = 1
-        # Counted up to the call's rows before anything else of the run is
-        # read or locked: a run too large for them is refused at that cost.
+        # The rows under an attempt, a correction set or a review checkpoint
+        # reference those, not the run, so the count waits for the step
+        # results' lock. Who writes them, and what keeps the writer out:
+        # - correction revisions: the transcript editor, which holds the step
+        #   result's lock while it adds one;
+        # - resolved inputs: activation of an open attempt, or an import into
+        #   a new run; a finished run has no open attempt;
+        # - provider calls: a started attempt only, so none for a finished run;
+        # - review checkpoint edits: the review editor and approval, which lock
+        #   the run first.
+        cap = max_rows - work.rows
+        step_results = await self._lock_all(
+            sa.select(FlowStepResults.id).where(FlowStepResults.flow_run_id == run_id),
+            cap=cap,
+        )
+        if step_results is None:
+            return stopped(FlowRunRemovalOutcome.LOCKED)
+        if step_results > cap:
+            work.rows += step_results
+            return stopped(FlowRunRemovalOutcome.SHORT)
+        # Counted up to the call's rows before the run's files are read and
+        # its bindings and live texts locked: a run too large for them is
+        # refused at that cost.
         run_rows = cast(
             int,
             await self.session.scalar(
@@ -513,12 +534,6 @@ class FlowRunHistoryPurgeRepository:
         work.rows += run_rows
         if work.rows > max_rows:
             return stopped(FlowRunRemovalOutcome.SHORT)
-        step_results = await self._lock_all(
-            sa.select(FlowStepResults.id).where(FlowStepResults.flow_run_id == run_id),
-            cap=run_rows,
-        )
-        if step_results is None:
-            return stopped(FlowRunRemovalOutcome.LOCKED)
         if not await self._purgeable_locked_runs({run_id}):
             return stopped(FlowRunRemovalOutcome.NOT_PURGEABLE)
 

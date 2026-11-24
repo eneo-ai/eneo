@@ -50,6 +50,8 @@ from eneo.database.tables.flow_tables import (
     FlowRuntimeUploadedFiles,
     FlowStepAttempts,
     FlowStepResults,
+    FlowTranscriptCorrectionRevisions,
+    FlowTranscriptCorrections,
 )
 from eneo.database.tables.object_content_table import (
     FileContentReferences,
@@ -462,7 +464,7 @@ async def test_a_held_or_undelivered_run_stays_and_the_probe_says_no(
     [(20, None, True), (2000, 20, False)],
     ids=["chunk-is-the-room", "execution-is-the-room"],
 )
-async def test_an_oversized_run_is_blocked_before_its_locks_and_a_smaller_one_goes(
+async def test_an_oversized_run_is_blocked_at_a_bounded_cost_and_a_smaller_one_goes(
     retention_session: AsyncSession,
     test_tenant,
     admin_user,
@@ -475,12 +477,11 @@ async def test_an_oversized_run_is_blocked_before_its_locks_and_a_smaller_one_go
     same_pass: bool,
 ):
     """A run with more rows than one removal can take is blocked by a bounded
-    count before anything else of it is read or locked, so a transcript edit
-    on it does not hide it as locked, and the log names it. When the pass has
-    fewer rows than the chunk, the pass is the run's whole room: blocked, not
-    deferred, and the next pass goes on after it. Mutants: an oversized run
-    deferred like one that does not fit the rest of the pass, which would end
-    every pass at it; the run's rows counted after its locks."""
+    count before its files are read and its bindings and live texts locked,
+    and the log names it. When the pass has fewer rows than the chunk, the
+    pass is the run's whole room: blocked, not deferred, and the next pass
+    goes on after it. Mutant: an oversized run deferred like one that does
+    not fit the rest of the pass, which would end every pass at it."""
     session = retention_session
     _capture_task_log(monkeypatch, caplog)
     oversized = await _aged_run(
@@ -510,7 +511,6 @@ async def test_an_oversized_run_is_blocked_before_its_locks_and_a_smaller_one_go
     )
     small = await _small_run(session, oversized, days_old=SPACE_DAYS + 5)
     oversized_id = oversized.run.id
-    step_result_id = oversized.step_result.id
     await session.commit()
     limits: dict[str, object] = {
         "retention_chunk_rows": chunk,
@@ -520,13 +520,7 @@ async def test_an_oversized_run_is_blocked_before_its_locks_and_a_smaller_one_go
         limits["retention_max_rows_per_run"] = rows
     settings = get_settings().model_copy(update=limits)
 
-    async with sessionmanager.session() as holder, holder.begin():
-        await holder.execute(
-            select(FlowStepResults.id)
-            .where(FlowStepResults.id == step_result_id)
-            .with_for_update()
-        )
-        report = await _run(session, settings=settings)
+    report = await _run(session, settings=settings)
 
     assert _blocked(report) == {"runs.unit_exceeds_budget": 1}, report
     [warning] = _task_warnings(caplog)
@@ -540,6 +534,81 @@ async def test_an_oversized_run_is_blocked_before_its_locks_and_a_smaller_one_go
     assert _counts(report)["runs.runs_deleted"] == 1, report
     assert not await _exists(session, small)
     assert await _exists(session, oversized_id)
+
+
+async def test_a_revision_committed_before_the_step_results_are_locked_is_counted(
+    retention_session: AsyncSession,
+    test_tenant,
+    admin_user,
+    shared_space: Spaces,
+    space_assistant: Assistants,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A transcript edit holds the step result's lock while it adds a revision
+    under the run's correction set, a row the run's own lock does not fence.
+    A revision another session commits just before the removal locks the step
+    results is counted: the run it takes past its room stays as too large and
+    the next run goes. Mutant: the rows counted before the step results are
+    locked, which removes a row the count never saw."""
+    session = retention_session
+    base = await _aged_run(
+        session,
+        tenant=test_tenant,
+        user=admin_user,
+        space=shared_space,
+        assistant=space_assistant,
+        days_old=SPACE_DAYS - 10,
+    )
+    edited = await _small_run(session, base, days_old=SPACE_DAYS + 10, with_step=True)
+    following = await _small_run(session, base, days_old=SPACE_DAYS + 5)
+    editor_fields: dict[str, Any] = {
+        "tenant_id": test_tenant.id,
+        "flow_id": base.flow.id,
+        "flow_run_id": edited,
+        "step_id": base.step_id,
+        "occurrences_json": [],
+        "speaker_edits_json": [],
+        "segments_hash": "0" * 64,
+        "edited_by_user_id": admin_user.id,
+        "edited_by_principal_type": "user",
+    }
+    correction_set = FlowTranscriptCorrections(**editor_fields)
+    session.add(correction_set)
+    await session.flush()
+    correction_set_id = correction_set.id
+    await session.commit()
+    # The run's lock, then the run, its step result, attempt and correction
+    # set: exactly the room of five rows.
+    settings = get_settings().model_copy(
+        update={"retention_chunk_rows": 5, "retention_max_family_rows": 3}
+    )
+    lock_all = FlowRunHistoryPurgeRepository._lock_all
+    committed = False
+
+    async def commit_a_revision_first(self, rows, *, cap: int):
+        nonlocal committed
+        if not committed:
+            committed = True
+            async with sessionmanager.session() as editor, editor.begin():
+                editor.add(
+                    FlowTranscriptCorrectionRevisions(
+                        **editor_fields,
+                        correction_set_id=correction_set_id,
+                        revision=1,
+                    )
+                )
+        return await lock_all(self, rows, cap=cap)
+
+    monkeypatch.setattr(
+        FlowRunHistoryPurgeRepository, "_lock_all", commit_a_revision_first
+    )
+
+    report = await _run(session, settings=settings)
+
+    assert committed
+    assert _blocked(report) == {"runs.unit_exceeds_budget": 1}, report
+    assert await _exists(session, edited)
+    assert not await _exists(session, following)
 
 
 @pytest.mark.parametrize(
