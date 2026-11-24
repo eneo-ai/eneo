@@ -390,8 +390,9 @@ export function useRuntimeUploads(flowId: string, policy: UploadPolicy | undefin
     const kept = files.current.get(key);
     if (!entry || entry.state !== "failed" || !kept) return;
     const { input, file } = kept;
+    // The same rule as adding: the other rows' slots; this row may use its own.
     const taken = (current.current[stepId] ?? []).filter(
-      (candidate) => candidate.state !== "failed"
+      (candidate) => candidate.key !== key && stays(candidate)
     ).length;
     if (input.max_files != null && taken >= input.max_files) {
       retries.reset(key);

@@ -200,6 +200,46 @@ it("keeps a recorded part's slot while it waits to be sent again", async () => {
   expect(UploadRequest.sent).toHaveLength(2);
 });
 
+it("sends a picked file again only when a recorded part waiting to be sent leaves room", async () => {
+  const hook = renderHookInApp(() => useRuntimeUploads("flow-1", undefined));
+  const input = makeInput({ step_id: "step-1", max_files: 1, accepted_mimetypes: ["audio/webm"] });
+  act(() =>
+    hook.result.current.add(input, [new File(["audio"], "fil.webm", { type: "audio/webm" })])
+  );
+  await waitFor(() => expect(UploadRequest.sent).toHaveLength(1));
+  act(() => UploadRequest.sent[0]!.onerror?.());
+  await waitFor(() => expect(hook.result.current.uploads["step-1"]?.[0]?.state).toBe("failed"));
+  act(() =>
+    hook.result.current.add(input, [new File(["audio"], "del-1.webm", { type: "audio/webm" })], {
+      recording: { sessionId: "rec-1", index: 0, durationMs: 1000, streamed: false },
+      label: "Inspelning"
+    })
+  );
+  await waitFor(() => expect(UploadRequest.sent).toHaveLength(2));
+  act(() => UploadRequest.sent[1]!.onerror?.());
+  await waitFor(() =>
+    expect(hook.result.current.uploads["step-1"]?.[1]).toMatchObject({
+      state: "failed",
+      retryable: true
+    })
+  );
+  const [picked, part] = hook.result.current.uploads["step-1"]!;
+
+  // The waiting part holds the only slot: the picked file is refused for room.
+  act(() => hook.result.current.retry("step-1", picked!.key));
+  expect(hook.result.current.uploads["step-1"]?.[0]).toMatchObject({
+    state: "failed",
+    retryable: false,
+    refused: true
+  });
+  expect(UploadRequest.sent).toHaveLength(2);
+
+  // The part may use its own slot.
+  act(() => hook.result.current.retry("step-1", part!.key));
+  await waitFor(() => expect(UploadRequest.sent).toHaveLength(3));
+  expect(hook.result.current.uploads["step-1"]?.[1]?.state).toBe("uploading");
+});
+
 it("aborts outstanding uploads on session change and releases settled request listeners", async () => {
   const hook = await uploadFiles(2);
   act(() => UploadRequest.sent[0]!.answer(201, { id: "file-1" }));
