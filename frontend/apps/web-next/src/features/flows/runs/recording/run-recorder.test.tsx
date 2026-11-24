@@ -1102,9 +1102,17 @@ describe("Keeping a recording on the device", () => {
     ).toBeTruthy();
   });
 
-  it("asks the browser to keep the device's storage as a recording starts", async () => {
+  it("asks the browser to keep the device's storage once the microphone is given, once per page", async () => {
     installBrowser();
     grantMicrophone();
+    const stream = await microphone();
+    let give = () => {};
+    microphone.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          give = () => resolve(stream);
+        })
+    );
     // Never answered: the recording does not wait for it.
     const persist = vi.fn(() => new Promise<boolean>(() => undefined));
     Object.defineProperty(navigator, "storage", { configurable: true, value: { persist } });
@@ -1112,12 +1120,23 @@ describe("Keeping a recording on the device", () => {
       Reflect.deleteProperty(navigator, "storage");
     });
     const { dialog } = await openDialog(audioContract());
+    fireEvent.click(button(dialog, messages.flow_transcript_rec_start));
+    await waitFor(() => expect(microphone).toHaveBeenCalledTimes(2));
+    // Not while the browser asks for the microphone: one question at a time.
     expect(persist).not.toHaveBeenCalled();
-    await recordAndStop(dialog);
+    act(() => give());
+    fireEvent.click(
+      await within(dialog).findByRole("button", { name: messages.flow_transcript_rec_stop })
+    );
+    await within(dialog).findByText(/^Inspelning, del 1/);
     expect(persist).toHaveBeenCalledTimes(1);
-    // Once for the form, not at every start.
+
+    // Once for the page, not at every start or in every form.
     fireEvent.click(button(dialog, messages.flow_transcript_rec_continue));
     await within(dialog).findByRole("button", { name: messages.flow_transcript_rec_stop });
+    cleanup();
+    const again = await openDialog(audioContract());
+    await recordAndStop(again.dialog);
     expect(persist).toHaveBeenCalledTimes(1);
   });
 

@@ -141,6 +141,9 @@ export type ScanResult = {
   incomplete: boolean;
 };
 
+/** The page's storage managers already asked to keep their storage: one per page. */
+const storageAsked = new WeakSet<object>();
+
 export class RecordingKeeper {
   #flowId: string;
   #userId: string | null;
@@ -158,7 +161,6 @@ export class RecordingKeeper {
   #listeners = new Set<() => void>();
   #degraded = new Map<string, JournalDegradation>();
   #version = 0;
-  #storageAsked = false;
 
   /** `userId`: the signed-in person, whose recordings are kept and offered; null while not known. */
   constructor(
@@ -179,18 +181,19 @@ export class RecordingKeeper {
   }
 
   /**
-   * Asks the browser, once per form, to keep this site's storage: otherwise
+   * Asks the browser, once per page, to keep this site's storage: otherwise
    * it may clear it after days without a visit or when space runs short,
    * and a kept recording with it. The answer is not waited for nor told;
    * without the API, or refused, recordings are kept as before.
    */
   askToKeepStorage(): void {
-    if (this.#storageAsked || !this.#db) return;
-    this.#storageAsked = true;
+    if (!this.#db) return;
     try {
       const storage = (typeof navigator === "undefined" ? undefined : navigator.storage) as
         Partial<StorageManager> | undefined;
-      void storage?.persist?.().catch(() => undefined);
+      if (!storage || storageAsked.has(storage)) return;
+      storageAsked.add(storage);
+      void storage.persist?.().catch(() => undefined);
     } catch {
       // No storage manager here: recordings are kept as before.
     }

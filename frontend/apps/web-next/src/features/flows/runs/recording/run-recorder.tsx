@@ -472,6 +472,11 @@ export function RunRecorder({
   // The warning before the sign-in ends says what happens to a recording that runs or is paused.
   const holding = snapshot.phase === "recording" || snapshot.phase === "paused";
   useEffect(() => (holding ? holdRecording() : undefined), [holding]);
+  // Once the microphone is given, not while the browser asks for it: one question at a time.
+  const capturing = snapshot.phase === "recording";
+  useEffect(() => {
+    if (capturing) keeper.askToKeepStorage();
+  }, [capturing, keeper]);
 
   useEffect(
     () => () => {
@@ -706,7 +711,6 @@ export function RunRecorder({
     automatic.current = byItself;
     // What the person chose as the recording begins: a later toggle or outage does not change it.
     streamed.current = liveWanted;
-    keeper.askToKeepStorage();
     return recorder.start({
       sessionId,
       firstIndex,
