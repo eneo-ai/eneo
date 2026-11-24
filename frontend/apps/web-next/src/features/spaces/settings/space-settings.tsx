@@ -53,7 +53,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { browserApi } from "@/lib/api/browser";
-import { unwrap } from "@/lib/api/errors";
+import { EneoApiError, unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import { toastApiError } from "@/lib/api/toast";
 import { formatBytes } from "@/lib/format";
@@ -74,13 +74,7 @@ import {
   type SecurityClassification
 } from "@/features/admin/security-classifications/security-classifications";
 import { parseRetentionDays } from "@/features/spaces/retention-days";
-import {
-  invalidateDeletedSpace,
-  invalidateSpacesList,
-  readSpace,
-  spaceQueryOptions,
-  type Space
-} from "@/features/spaces/space";
+import { invalidateDeletedSpace, invalidateSpacesList, type Space } from "@/features/spaces/space";
 import { editorSummaries } from "@/features/spaces/editor-summaries";
 import { useSpace } from "@/features/spaces/use-space";
 import { PageHeader } from "@/components/composites/page-header";
@@ -437,8 +431,11 @@ function SecuritySection() {
  * It saves on blur like the other fields, but a time set where there was none, or a
  * shorter one, removes content for good, so it waits for a confirmation instead, and
  * a draft is never sent when the page is left (no unmount flush, unlike
- * `useAutosaveField`). That is decided on the time the server has now, read again on
- * blur: another administrator may have changed it since this page read it.
+ * `useAutosaveField`). That is decided on the time the page has, and each save sends
+ * that time as `expected_data_retention_days`: the server refuses the save (409
+ * `retention_time_changed`) when another administrator has changed the time since.
+ * The page then reads the space again its usual way and keeps the draft, so the next
+ * try is decided on the new time.
  */
 function RetentionSection() {
   const t = useTranslations();
@@ -457,19 +454,30 @@ function RetentionSection() {
   const value = draft ?? saved?.toString() ?? "";
   const days = parseRetentionDays(value);
   const [daysVisited, setDaysVisited] = useState(false);
-  // A time that removes content, waiting for its confirmation.
-  const [asked, setAsked] = useState<number | null>(null);
+  // A time that removes content, waiting for its confirmation, and the time it was compared with.
+  const [asked, setAsked] = useState<{ days: number; expected: number | null } | null>(null);
   // What applies from now, after this page saved a time.
   const [note, setNote] = useState<string | null>(null);
-  // The space's time is being read again; the field waits for it.
-  const [checking, setChecking] = useState(false);
   const fieldRef = useRef<HTMLInputElement>(null);
   useDirtySaveStatus("retention-days", days !== saved);
 
   const daysProblem = daysVisited && days === undefined ? t("space_retention_invalid") : null;
 
-  async function save(next: number | null) {
-    const result = await autosave(() => update.mutateAsync({ data_retention_days: next }));
+  /** Saves `next` in place of `expected`, the time it was compared with. */
+  async function save(next: number | null, expected: number | null) {
+    const result = await autosave(() =>
+      update
+        .mutateAsync({ data_retention_days: next, expected_data_retention_days: expected })
+        .catch((error: unknown) => {
+          // Changed by someone else: nothing was saved. The space is read again its usual way
+          // and the draft stays, so the next try is decided on the time read.
+          if (error instanceof EneoApiError && error.reason === "retention_time_changed") {
+            setAsked(null);
+            void queryClient.invalidateQueries({ queryKey: ["spaces", routeId], exact: true });
+          }
+          throw error;
+        })
+    );
     if (result === undefined) return false;
     // A value typed while the save ran stays the draft.
     setDraft((current) =>
@@ -490,34 +498,13 @@ function RetentionSection() {
     return true;
   }
 
-  async function commit() {
-    if (draft === null || days === undefined || checking || update.isPending) return;
-    setChecking(true);
-    let current: number | null;
-    try {
-      // A request of its own, outside the query cache: a time saved elsewhere since may
-      // make this one shorter. Through the cache the read could join a fetch begun before
-      // that change, or, cancelled by another save on the page, answer with the cached time.
-      const { queryKey } = spaceQueryOptions(browserApi, routeId);
-      await queryClient.cancelQueries({ queryKey, exact: true });
-      const fresh = await readSpace(browserApi, routeId);
-      // The page shows the time the decision read. Only the time: the rest of this read
-      // may be older than a save on the page that answered meanwhile, and a whole-space
-      // write here would put back what that save replaced.
-      queryClient.setQueryData<Space>(queryKey, (old) =>
-        old ? { ...old, data_retention_days: fresh.data_retention_days } : old
-      );
-      current = fresh.data_retention_days ?? null;
-    } catch (error) {
-      // Without the current time nothing is saved: the typed time stays, to try again.
-      toastApiError(error, t);
-      return;
-    } finally {
-      setChecking(false);
-    }
-    if (days === current) setDraft(null);
-    else if (days !== null && (current === null || days < current)) setAsked(days);
-    else void save(days);
+  function commit() {
+    if (draft === null || days === undefined || update.isPending) return;
+    // Decided on the time the server last gave the page; the save carries it, and the
+    // server refuses the save if it has changed since.
+    if (days === saved) setDraft(null);
+    else if (days !== null && (saved === null || days < saved)) setAsked({ days, expected: saved });
+    else void save(days, saved);
   }
 
   return (
@@ -540,11 +527,11 @@ function RetentionSection() {
           onChange={(event) => setDraft(event.target.value)}
           onBlur={() => {
             setDaysVisited(true);
-            void commit();
+            commit();
           }}
           // Read-only, not disabled: it keeps focus, and a change typed while the time is
-          // read or saved would otherwise be left unsaved.
-          readOnly={checking || update.isPending}
+          // saved would otherwise be left unsaved.
+          readOnly={update.isPending}
           disabled={!canEditRetention}
           {...fieldProblemProps(
             "retention-days",
@@ -574,15 +561,16 @@ function RetentionSection() {
           setDraft(null);
         }}
         title={t("space_retention_shorten_title")}
-        description={t("space_retention_shorten_description", { days: asked ?? 0 })}
+        description={t("space_retention_shorten_description", { days: asked?.days ?? 0 })}
         confirmLabel={t("space_retention_shorten_confirm")}
         pending={update.isPending}
         // Its blur asked: after a click elsewhere nothing focused opened it.
         returnFocusRef={fieldRef}
         onConfirm={() => {
           if (asked === null) return;
-          // A failed save keeps the dialog, so the same time can be tried again.
-          void save(asked).then((done) => done && setAsked(null));
+          // A failed save keeps the dialog, so the same time can be tried again; one refused
+          // because the time changed closes it (`save`).
+          void save(asked.days, asked.expected).then((done) => done && setAsked(null));
         }}
       />
     </SettingsRow>

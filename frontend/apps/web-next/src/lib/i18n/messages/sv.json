@@ -9259,6 +9259,7 @@
   "flow_run_http_status": "Tjänsten {host} svarade med ett fel (status {status}). Be en flödesredigerare kontrollera tjänsten.",
   "flow_run_tool_refused_ask_space_admin": "Be en administratör för ytan att slå på det igen.",
   "eneo_error_9027": "Filen går inte att läsa. Öppna den och spara den igen, eller välj en annan fil.",
+  "eneo_error_9087": "Gallringstiden har ändrats av någon annan sedan du läste den. Ingenting sparades. Kontrollera tiden och spara igen.",
   "flow_run_template_fill_runtime_unavailable": "Tjänsten som fyller i Word-mallar svarar inte just nu. Försök igen om en stund.",
   "flow_runs_speakers_not_chosen": "Flödet behöver en tjänst som identifierar talare, men ingen är vald. Den som redigerar flödet väljer en i flödets inställningar och publicerar igen.",
   "flow_runs_speakers_picked_unavailable": "Flödets tjänst för att identifiera talare går inte längre att använda i ytan. Den som redigerar flödet väljer en annan och publicerar igen, eller ber en administratör om tillgång.",

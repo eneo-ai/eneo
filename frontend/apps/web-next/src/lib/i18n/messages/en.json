@@ -9259,6 +9259,7 @@
   "flow_run_http_status": "The service {host} answered with an error (status {status}). Ask a flow editor to check the service.",
   "flow_run_tool_refused_ask_space_admin": "Ask an administrator of the space to switch it on again.",
   "eneo_error_9027": "The file cannot be read. Open it and save it again, or choose another file.",
+  "eneo_error_9087": "Someone else changed the retention time since you read it. Nothing was saved. Check the time and save again.",
   "flow_run_template_fill_runtime_unavailable": "The service that fills Word templates is not answering right now. Try again in a while.",
   "flow_runs_speakers_not_chosen": "The flow needs a service that identifies speakers, but none is chosen. Whoever edits the flow chooses one in the flow's settings and publishes again.",
   "flow_runs_speakers_picked_unavailable": "The flow's speaker identification service can no longer be used in this space. Whoever edits the flow chooses another one and publishes again, or asks an administrator for access.",
