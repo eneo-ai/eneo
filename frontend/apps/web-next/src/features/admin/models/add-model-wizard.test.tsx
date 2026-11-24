@@ -903,25 +903,28 @@ describe("the add-model wizard's catalog", () => {
       "Livetext kan inte skicka utgående headers. Lägg modellen på en leverantör utan sådana, eller ta bort dem på leverantören om inget annat behöver dem."
     ],
     ["provider_inactive", "Leverantören är avstängd, så den kan inte bära livetext."]
-  ] as const)("says why live text is locked when the provider says %s", async (eligibility, reason) => {
-    const { dialog, onOpenChange } = renderTranscriptionStep(eligibility);
-    fireEvent.click(await within(dialog).findByRole("checkbox", { name: /pianissimo-sv/ }));
-    const live = within(dialog).getByRole("checkbox", { name: /^Livetext$/ });
-    // Locked but reachable: Astryx keeps it out of native disabled, so Tab stops
-    // on it and the reason is read; a press changes nothing.
-    expect(live.getAttribute("aria-disabled")).toBe("true");
-    expect(live.hasAttribute("disabled")).toBe(false);
-    live.focus();
-    expect(document.activeElement).toBe(live);
-    expect(describedBy(live)).toContain(reason);
-    fireEvent.click(live);
-    fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till 1 modell" }));
+  ] as const)(
+    "says why live text is locked when the provider says %s",
+    async (eligibility, reason) => {
+      const { dialog, onOpenChange } = renderTranscriptionStep(eligibility);
+      fireEvent.click(await within(dialog).findByRole("checkbox", { name: /pianissimo-sv/ }));
+      const live = within(dialog).getByRole("checkbox", { name: /^Livetext$/ });
+      // Locked but reachable: Astryx keeps it out of native disabled, so Tab stops
+      // on it and the reason is read; a press changes nothing.
+      expect(live.getAttribute("aria-disabled")).toBe("true");
+      expect(live.hasAttribute("disabled")).toBe(false);
+      live.focus();
+      expect(document.activeElement).toBe(live);
+      expect(describedBy(live)).toContain(reason);
+      fireEvent.click(live);
+      fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till 1 modell" }));
 
-    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
-    expect(api.POST).toHaveBeenCalledWith("/api/v1/admin/tenant-models/transcription/", {
-      body: expect.objectContaining({ name: "pianissimo-sv", supports_realtime: false })
-    });
-  });
+      await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+      expect(api.POST).toHaveBeenCalledWith("/api/v1/admin/tenant-models/transcription/", {
+        body: expect.objectContaining({ name: "pianissimo-sv", supports_realtime: false })
+      });
+    }
+  );
 
   it("names live text for each selected model when several are picked", async () => {
     const { dialog } = renderTranscriptionStep("eligible");
