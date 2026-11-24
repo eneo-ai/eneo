@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from types import SimpleNamespace
+from typing import get_args
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -17,9 +18,12 @@ from eneo.completion_models.presentation.tenant_completion_models_router import 
     TenantCompletionModelUpdate,
 )
 from eneo.tenant_models.application.tenant_model_service import (
+    _REALTIME_REFUSALS,
     TenantCompletionModelService,
+    _require_realtime_provider,
     _snapshot_completion_capabilities,
 )
+from eneo.transcription_models.domain.realtime import RealtimeEligibility
 
 
 @pytest.mark.asyncio
@@ -482,3 +486,19 @@ def test_probe_installed_litellm_does_not_know_the_measured_route() -> None:
     assert gemma is not None and gpt_4o is not None
     assert SupportedModelKwargs.model_validate(gemma).reasoning_effort.unknown
     assert not SupportedModelKwargs.model_validate(gpt_4o).reasoning_effort.unknown
+
+
+def test_the_live_text_save_guard_has_a_text_for_every_refusal() -> None:
+    refusals = set(get_args(RealtimeEligibility)) - {"eligible"}
+
+    assert set(_REALTIME_REFUSALS) == refusals
+
+
+def test_the_live_text_save_guard_refuses_a_reason_without_a_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A reason the rule gains before the texts do must still refuse the mark.
+    monkeypatch.delitem(_REALTIME_REFUSALS, "provider_inactive")
+
+    with pytest.raises(KeyError):
+        _require_realtime_provider("provider_inactive")

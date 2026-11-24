@@ -154,10 +154,10 @@ def _require_realtime_provider(eligibility: RealtimeEligibility) -> None:
 
     Only the change from off to on is checked: a mark that is already saved
     stays (callers resend it with every edit), and turning it off always works.
+    Only ``eligible`` passes; a reason without a text fails rather than passes.
     """
-    refusal = _REALTIME_REFUSALS.get(eligibility)
-    if refusal is not None:
-        raise BadRequestException(refusal)
+    if eligibility != "eligible":
+        raise BadRequestException(_REALTIME_REFUSALS[eligibility])
 
 
 async def _unset_other_defaults(
