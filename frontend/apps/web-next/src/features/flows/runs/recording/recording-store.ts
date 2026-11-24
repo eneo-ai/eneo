@@ -89,6 +89,8 @@ export type RecordingDatabase = {
    */
   readChunks(address: PartAddress): Promise<JournalChunk[] | null>;
   dropJournal(address: PartAddress): Promise<void>;
+  /** Every part and journal on the device, of every flow, step and person. */
+  listAll(): Promise<{ parts: StoredPart[]; journals: JournalMeta[] }>;
 };
 
 /** How long a recording stays on the device after its last activity. */
@@ -96,6 +98,58 @@ export const RECORDING_TTL_MS = 24 * 60 * 60 * 1000;
 const READ_BACK_TIMEOUT_MS = 2_000;
 
 const pad = (value: number, width: number) => String(value).padStart(width, "0");
+
+/**
+ * The recordings with no activity since `cutoff`: a recording's activity is
+ * the end of its latest part or the last chunk of a journal, so one that
+ * goes on in a part being recorded is not expired by its older parts.
+ */
+export function expiredRecordings(
+  parts: readonly StoredPart[],
+  journals: readonly JournalMeta[],
+  cutoff: number
+): Omit<PartAddress, "index">[] {
+  const latest = new Map<string, { address: Omit<PartAddress, "index">; at: number }>();
+  const seen = (row: PartAddress, at: number) => {
+    const key = sessionPrefix(row.flowId, row.stepId, row.sessionId);
+    const current = latest.get(key);
+    if (!current || at > current.at) {
+      latest.set(key, {
+        address: { flowId: row.flowId, stepId: row.stepId, sessionId: row.sessionId },
+        at
+      });
+    }
+  };
+  for (const part of parts) seen(part, part.capturedAt + part.durationMs);
+  for (const meta of journals) seen(meta, meta.lastChunkAt);
+  return [...latest.values()].filter(({ at }) => at < cutoff).map(({ address }) => address);
+}
+
+/**
+ * Deletes every recording on the device with no activity for a day, of any
+ * flow, step or person: a recording is otherwise only deleted when its form
+ * opens again. Run once as the signed-in app starts; a failure leaves the
+ * rest for the next time.
+ */
+export async function sweepExpiredRecordings(
+  db: RecordingDatabase | null,
+  now: number = Date.now()
+): Promise<void> {
+  if (!db) return;
+  let all: { parts: StoredPart[]; journals: JournalMeta[] };
+  try {
+    all = await db.listAll();
+  } catch {
+    return;
+  }
+  for (const { flowId, stepId, sessionId } of expiredRecordings(
+    all.parts,
+    all.journals,
+    now - RECORDING_TTL_MS
+  )) {
+    await db.deleteSession(flowId, stepId, sessionId).catch(() => undefined);
+  }
+}
 
 export function sessionPrefix(flowId: string, stepId: string, sessionId: string): string {
   return `${flowId}::${stepId}::${sessionId}::`;
@@ -217,6 +271,9 @@ export function memoryRecordings(): RecordingDatabase & {
       const key = partKey(address);
       journals.delete(key);
       for (const chunk of [...chunks.keys()]) if (inRange(chunk, `${key}::`)) chunks.delete(chunk);
+    },
+    async listAll() {
+      return { parts: [...parts.values()], journals: [...journals.values()] };
     }
   };
 }
@@ -449,6 +506,16 @@ export function indexedDbRecordings(): RecordingDatabase | null {
       await transaction(db, [JOURNALS, CHUNKS], "readwrite", (tx) => {
         tx.objectStore(JOURNALS).delete(key);
         tx.objectStore(CHUNKS).delete(range(`${key}::`));
+      });
+    },
+    async listAll() {
+      const db = await open();
+      return transaction(db, [PARTS, JOURNALS], "readonly", async (tx) => {
+        const [parts, journals] = await Promise.all([
+          request(tx.objectStore(PARTS).getAll() as IDBRequest<StoredPart[]>),
+          request(tx.objectStore(JOURNALS).getAll() as IDBRequest<JournalMeta[]>)
+        ]);
+        return { parts, journals };
       });
     }
   };

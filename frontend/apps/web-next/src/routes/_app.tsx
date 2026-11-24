@@ -1,5 +1,5 @@
 import { createFileRoute, Outlet } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AppFrame } from "@/components/shell/app-frame";
 import { readSideNavCollapsedCookie } from "@/components/shell/side-nav-preference";
 import { browserApi } from "@/lib/api/browser";
@@ -32,6 +32,15 @@ export const Route = createFileRoute("/_app")({
 
 function AppLayout() {
   const [sideNavCollapsed] = useState(readSideNavCollapsedCookie);
+  // Recordings kept on this device past their time go, whichever form or person they belong to.
+  // Loaded apart, so the app's first chunk does not carry the recording store.
+  useEffect(() => {
+    void import("@/features/flows/runs/recording/recording-store")
+      .then(({ indexedDbRecordings, sweepExpiredRecordings }) =>
+        sweepExpiredRecordings(indexedDbRecordings())
+      )
+      .catch(() => undefined);
+  }, []);
   const config = runtimeConfig();
   const env = useMemo(
     () => ({

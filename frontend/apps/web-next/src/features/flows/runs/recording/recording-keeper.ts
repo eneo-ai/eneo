@@ -9,6 +9,7 @@ import {
   type JournalLocks
 } from "./recording-journal";
 import {
+  expiredRecordings,
   indexedDbRecordings,
   partKey,
   RECORDING_TTL_MS,
@@ -371,20 +372,24 @@ export class RecordingKeeper {
     } catch {
       return { saved: [], incomplete: true };
     }
+    // Another person's journal goes on in their recording too: it keeps it from expiring.
+    const journals = await db.listJournals(this.#flowId, stepId).catch(() => []);
+    const cutoff = this.#now() - RECORDING_TTL_MS;
+    const expired = new Set(
+      expiredRecordings(parts, journals, cutoff).map(({ sessionId }) => sessionId)
+    );
+    for (const sessionId of expired) {
+      await db.deleteSession(this.#flowId, stepId, sessionId).catch(() => undefined);
+    }
     const bySession = new Map<string, StoredPart[]>();
     for (const part of parts) {
+      if (expired.has(part.sessionId)) continue;
       const list = bySession.get(part.sessionId);
       if (list) list.push(part);
       else bySession.set(part.sessionId, [part]);
     }
     const saved: SavedRecording[] = [];
-    const cutoff = this.#now() - RECORDING_TTL_MS;
     for (const [sessionId, list] of bySession) {
-      const lastActivity = Math.max(...list.map((part) => part.capturedAt + part.durationMs));
-      if (lastActivity < cutoff) {
-        await db.deleteSession(this.#flowId, stepId, sessionId).catch(() => undefined);
-        continue;
-      }
       const own = list.filter(this.#mine);
       if (own.length === 0) continue;
       const interrupted = own.filter((part) => part.interrupted);
