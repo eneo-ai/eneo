@@ -146,9 +146,14 @@ class UploadNetworkError extends Error {
   }
 }
 
-/** A failure that may pass: the same file can be sent again (the network, a timeout, a busy server). */
+/**
+ * A failure that may pass: the same file can be sent again (the network, a timeout, a busy server).
+ * A `TypeError` is fetch's network error: the session check before the upload could not reach the
+ * server, and it is checked again when the browser is back online.
+ */
 function passes(error: unknown): boolean {
   if (error instanceof UploadTimeoutError || error instanceof UploadNetworkError) return true;
+  if (error instanceof TypeError) return true;
   return (
     error instanceof EneoApiError &&
     (error.status === 408 || error.status === 429 || error.status >= 500)

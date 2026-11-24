@@ -394,6 +394,12 @@ export function listenForSessionResume(): () => void {
   const restored = (event: PageTransitionEvent) => {
     if (event.persisted) check();
   };
+  // Back online after a check failed: until a check succeeds every request
+  // fails with that error, so the same check runs again before the work the
+  // browser's return sets off (uploads sent again) is prepared.
+  const reconnected = () => {
+    if (snapshot.status === "bound" && snapshot.checkError !== undefined) check();
+  };
   // Capture precedes query/feature listeners on document, so their requests
   // join the pending check even when those listeners were registered first.
   // Another tab renewed the cookie: follow it only for this document's session.
@@ -410,10 +416,12 @@ export function listenForSessionResume(): () => void {
   };
   window.addEventListener("visibilitychange", visible, true);
   window.addEventListener("pageshow", restored, true);
+  window.addEventListener("online", reconnected, true);
   sessionChannel()?.addEventListener("message", renewed);
   return () => {
     window.removeEventListener("visibilitychange", visible, true);
     window.removeEventListener("pageshow", restored, true);
+    window.removeEventListener("online", reconnected, true);
     sessionChannel()?.removeEventListener("message", renewed);
   };
 }

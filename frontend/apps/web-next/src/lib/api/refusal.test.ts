@@ -278,6 +278,51 @@ describe("immutable document session", () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
+  it("checks the session again when the browser is back online after a check failed offline", async () => {
+    await bound();
+    // Work the browser's return sets off, listening before the session does.
+    let work: Promise<Request> | undefined;
+    const resend = () => {
+      work = owner.prepareBrowserRequest(new Request("https://eneo.test/api", { method: "POST" }));
+    };
+    window.addEventListener("online", resend);
+    const stop = owner.listenForSessionResume();
+    try {
+      // Online without a failed check: nothing to check.
+      window.dispatchEvent(new Event("online"));
+      await work;
+      expect(fetcher).not.toHaveBeenCalled();
+
+      fetcher.mockRejectedValueOnce(new TypeError("Offline"));
+      await expect(owner.checkBrowserSession()).rejects.toThrow("Offline");
+      window.dispatchEvent(new Event("online"));
+      await expect(work).resolves.toBeInstanceOf(Request);
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      expect(owner.getSessionSnapshot()).not.toHaveProperty("checkError");
+    } finally {
+      stop();
+      window.removeEventListener("online", resend);
+    }
+  });
+
+  it("still ends the page when the check back online finds another person's session", async () => {
+    await bound();
+    const stop = owner.listenForSessionResume();
+    try {
+      fetcher.mockRejectedValueOnce(new TypeError("Offline"));
+      await expect(owner.checkBrowserSession()).rejects.toThrow("Offline");
+      fetcher.mockResolvedValueOnce(probe("another-person"));
+      window.dispatchEvent(new Event("online"));
+      await expect(
+        owner.prepareBrowserRequest(new Request("https://eneo.test/api"))
+      ).rejects.toBeDefined();
+      expect(owner.getSessionSnapshot().status).toBe("stale");
+      expect(navigate).toHaveBeenCalled();
+    } finally {
+      stop();
+    }
+  });
+
   it("keeps an unchanged anonymous document usable but never adopts a new cookie", async () => {
     window.history.replaceState({}, "", "/login");
     fetcher.mockResolvedValue(refusal(9005));

@@ -115,6 +115,26 @@ it("settles a refused upload and sends its body to the same refusal handler", as
   expect(await hooks.response.mock.calls[0]![0].json()).toEqual(body);
 });
 
+it("sends a recorded part again when the session check could not reach the server", async () => {
+  // Offline, the session check fails with fetch's network error, and every
+  // request is prepared against that failure until a check succeeds.
+  hooks.prepare.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+  const hook = renderHookInApp(() => useRuntimeUploads("flow-1", undefined));
+  const input = makeInput({ step_id: "step-1", accepted_mimetypes: ["audio/webm"] });
+  act(() =>
+    hook.result.current.add(input, [new File(["audio"], "del-1.webm", { type: "audio/webm" })], {
+      recording: { sessionId: "rec-1", index: 0, durationMs: 1000, streamed: false },
+      label: "Inspelning"
+    })
+  );
+  await waitFor(() => expect(hook.result.current.uploads["step-1"]?.[0]?.state).toBe("failed"));
+  const part = hook.result.current.uploads["step-1"]![0]!;
+  // It may pass: the part keeps its Try again and is sent again by itself.
+  expect(part.retryable).toBe(true);
+  expect(part.nextRetryAt).toEqual(expect.any(Number));
+  expect(UploadRequest.sent).toHaveLength(0);
+});
+
 it("aborts outstanding uploads on session change and releases settled request listeners", async () => {
   const hook = await uploadFiles(2);
   act(() => UploadRequest.sent[0]!.answer(201, { id: "file-1" }));
