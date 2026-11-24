@@ -160,16 +160,23 @@ export function taskStepName(task: StepTask): string {
   return task.prompt ? `flow_add_step_${task.id}` : `flow_step_editor_kind_${task.kind}_name`;
 }
 
-/** The tasks recommended after a step that gives `previous` (null: the new step comes first). */
-const RECOMMENDED: Record<"first" | "text" | "json", readonly string[]> = {
+/**
+ * The tasks recommended after a step that gives `previous` (null: the new
+ * step comes first). Sending the run's result is offered after text or a
+ * document; the core allows it only last, and a refused kind is never shown
+ * as recommended.
+ */
+const RECOMMENDED: Record<"first" | "text" | "json" | "document", readonly string[]> = {
   first: ["summarize", "extract", "transcribe"],
-  text: ["summarize", "improve", "extract", "classify", "document", "template"],
-  json: ["render_text", "template", "send_http"]
+  text: ["summarize", "improve", "extract", "classify", "document", "template", "send_run_result"],
+  json: ["render_text", "template", "send_http"],
+  document: ["send_run_result", "template", "document"]
 };
 
 export function recommendedTaskIds(previous: OutputType | null): readonly string[] {
   if (previous === null) return RECOMMENDED.first;
   if (previous === "text" || previous === "json") return RECOMMENDED[previous];
+  if (previous === "docx" || previous === "pdf") return RECOMMENDED.document;
   return [];
 }
 

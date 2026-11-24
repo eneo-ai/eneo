@@ -25,7 +25,7 @@ import {
 } from "./editor-api";
 import { problemStatus } from "./editor-fields";
 import { describeSaveError, isStaleRevision } from "./field-problems";
-import { httpUrlProblemKey } from "./step-configs";
+import { httpUrlProblemKey, sendsRunResult } from "./step-configs";
 import {
   kindOption,
   kindRefusalText,
@@ -47,7 +47,7 @@ import {
   taskStepName,
   type StepTask
 } from "./step-tasks";
-import type { FlowPublic, ToolOption } from "./step-types";
+import type { FlowPublic, FlowStep, ToolOption } from "./step-types";
 
 type Field = "url" | "tool";
 type Problems = Partial<Record<Field, string>>;
@@ -136,7 +136,7 @@ const GROUP = "[&_.astryx-radio-list>div]:gap-1.5";
 function AddStepPicker({
   open,
   flow,
-  position,
+  position: place,
   kinds,
   personal,
   pending,
@@ -148,14 +148,15 @@ function AddStepPicker({
 }: {
   open: boolean;
   flow: FlowPublic;
-  position: number;
+  /** Null: the step it was to go before is no longer in `flow`. */
+  position: number | null;
   kinds: QueryLike<StepKindPlace>;
   /** A personal space has no tools for a flow: the tool step folds with that reason. */
   personal: boolean;
   pending: boolean;
   onCancel: () => void;
   onClose: () => void;
-  onSaved: (flow: FlowPublic) => void;
+  onSaved: (flow: FlowPublic, sentRevision: number, addedStepId: string | null) => void;
   onPendingChange: (pending: boolean) => void;
   onReloaded: (flow: FlowPublic) => void;
 }) {
@@ -190,6 +191,8 @@ function AddStepPicker({
     }
   }
 
+  const gone = place === null;
+  const position = place ?? flow.steps.length + 1;
   const ordered = [...flow.steps].sort((left, right) => left.step_order - right.step_order);
   const before = position > 1 ? (ordered[position - 2] ?? null) : null;
   const rows: Row[] = STEP_TASKS.flatMap((task) => {
@@ -261,24 +264,28 @@ function AddStepPicker({
   }, [chosenId]);
 
   const add = useMutation({
-    mutationFn: ({ task, option }: Row) =>
-      updateFlowEditor(
-        flow.id,
-        newStepUpdate(flow, position, option, {
-          name: stepName(task),
-          format,
-          url,
-          tool: tool
-            ? { mcp_server_id: tool.mcp_server_id, tool_id: tool.tool_id, arguments: {} }
-            : null,
-          prompt: task.prompt ? t(task.prompt) : undefined
-        })
-      ),
+    mutationFn: async ({ task, option }: Row) => {
+      const update = newStepUpdate(flow, position, option, {
+        name: stepName(task),
+        format,
+        url,
+        tool: tool
+          ? { mcp_server_id: tool.mcp_server_id, tool_id: tool.tool_id, arguments: {} }
+          : null,
+        prompt: task.prompt ? t(task.prompt) : undefined
+      });
+      const updated = await updateFlowEditor(flow.id, update);
+      // The core answered the revision the add was fenced on: the one step not
+      // in the flow it was fenced on is the added one. Worked out here, on that
+      // flow: a newer one can be on screen by the time the answer arrives.
+      const added = updated.steps.find((step) => !flow.steps.some((seen) => seen.id === step.id));
+      return { updated, sent: update.expected_revision, added: added?.id ?? null };
+    },
     onMutate: () => onPendingChange(true),
     onSettled: () => onPendingChange(false),
-    onSuccess: (updated, { task }) => {
+    onSuccess: ({ updated, sent, added }, { task }) => {
       announce(t("flow_step_editor_added", { name: stepName(task) }));
-      onSaved(updated);
+      onSaved(updated, sent, added);
       onClose();
     },
     onError: (error, { option }) => {
@@ -354,7 +361,7 @@ function AddStepPicker({
 
   /** Adds `row`, or says at its field what it still needs. */
   function confirm(row: Row | null) {
-    if (!row || add.isPending) return;
+    if (!row || gone || add.isPending) return;
     const found: Problems = {};
     if (asksForUrl(row.option.kind)) {
       // The step's own rule: run data may not choose where the run's result goes.
@@ -453,11 +460,16 @@ function AddStepPicker({
     );
   }
 
-  const lands = before
-    ? t("flow_add_step_lands_after", {
-        step: stepLabel(before.step_order, before.user_description, t)
-      })
-    : t("flow_add_step_lands_first");
+  const after = ordered[position - 1] ?? null;
+  const label = (step: FlowStep) => stepLabel(step.step_order, step.user_description, t);
+  const lands =
+    before && after
+      ? t("flow_add_step_lands_between", { before: label(before), after: label(after) })
+      : after
+        ? t("flow_add_step_lands_before", { step: label(after) })
+        : before
+          ? t("flow_add_step_lands_after", { step: label(before) })
+          : t("flow_add_step_lands_first");
 
   return (
     <Layout
@@ -530,67 +542,76 @@ function AddStepPicker({
                   />
                 )}
               </div>
-              <QueryStateBoundary
-                query={kinds}
-                rows={6}
-                loadingLabel={t("flow_step_editor_kinds_loading")}
-              >
-                {() => (
-                  <div ref={listRef} className="flex flex-col gap-5">
-                    {group(t("flow_add_step_recommended"), recommended)}
-                    {group(
-                      recommended.length > 0 ? t("flow_add_step_more") : t("flow_add_step_all"),
-                      more
-                    )}
-                    {allowed.length === 0 && (
-                      <Text
-                        type="supporting"
-                        as="p"
-                        display="block"
-                        className="m-0 py-6 text-center"
-                      >
-                        {nothingFound}
-                      </Text>
-                    )}
-                    {refused.length > 0 && (
-                      <Collapsible
-                        // Open when nothing can be added: the reasons are the answer.
-                        defaultIsOpen={allowed.length === 0}
-                        trigger={
-                          <Text type="supporting" size="sm">
-                            {t("flow_add_step_refused", { count: refused.length })}
-                          </Text>
-                        }
-                      >
-                        <List density="compact">
-                          {refused.map(({ task, option }) => (
-                            <ListItem
-                              key={task.id}
-                              startContent={
-                                <task.icon
-                                  className="text-ax-text-secondary size-4 shrink-0"
-                                  aria-hidden="true"
-                                />
-                              }
-                              label={rowName(task)}
-                              description={
-                                <Text type="supporting" size="sm">
-                                  {personal && option.kind === "tool"
-                                    ? t("flow_step_editor_tools_personal")
-                                    : option.refusals[0]
-                                      ? kindRefusalText(option.refusals[0], position, flow, t)
-                                      : t("flow_step_editor_kind_block_refused")}
-                                </Text>
-                              }
-                              align="first-line"
-                            />
-                          ))}
-                        </List>
-                      </Collapsible>
-                    )}
-                  </div>
-                )}
-              </QueryStateBoundary>
+              {gone ? (
+                <Banner
+                  role="alert"
+                  status="warning"
+                  title={t("flow_step_editor_add_before_sender_gone")}
+                  collapsible={false}
+                />
+              ) : (
+                <QueryStateBoundary
+                  query={kinds}
+                  rows={6}
+                  loadingLabel={t("flow_step_editor_kinds_loading")}
+                >
+                  {() => (
+                    <div ref={listRef} className="flex flex-col gap-5">
+                      {group(t("flow_add_step_recommended"), recommended)}
+                      {group(
+                        recommended.length > 0 ? t("flow_add_step_more") : t("flow_add_step_all"),
+                        more
+                      )}
+                      {allowed.length === 0 && (
+                        <Text
+                          type="supporting"
+                          as="p"
+                          display="block"
+                          className="m-0 py-6 text-center"
+                        >
+                          {nothingFound}
+                        </Text>
+                      )}
+                      {refused.length > 0 && (
+                        <Collapsible
+                          // Open when nothing can be added: the reasons are the answer.
+                          defaultIsOpen={allowed.length === 0}
+                          trigger={
+                            <Text type="supporting" size="sm">
+                              {t("flow_add_step_refused", { count: refused.length })}
+                            </Text>
+                          }
+                        >
+                          <List density="compact">
+                            {refused.map(({ task, option }) => (
+                              <ListItem
+                                key={task.id}
+                                startContent={
+                                  <task.icon
+                                    className="text-ax-text-secondary size-4 shrink-0"
+                                    aria-hidden="true"
+                                  />
+                                }
+                                label={rowName(task)}
+                                description={
+                                  <Text type="supporting" size="sm">
+                                    {personal && option.kind === "tool"
+                                      ? t("flow_step_editor_tools_personal")
+                                      : option.refusals[0]
+                                        ? kindRefusalText(option.refusals[0], position, flow, t)
+                                        : t("flow_step_editor_kind_block_refused")}
+                                  </Text>
+                                }
+                                align="first-line"
+                              />
+                            ))}
+                          </List>
+                        </Collapsible>
+                      )}
+                    </div>
+                  )}
+                </QueryStateBoundary>
+              )}
             </div>
           </LayoutContent>
         ) : null
@@ -633,6 +654,8 @@ function AddStepPicker({
                       ? t("flow_step_editor_http_url_run_result_description")
                       : t("flow_step_editor_http_url_description")
                   }
+                  // A phone's keyboard for addresses; the form checks the address itself (noValidate).
+                  type="url"
                   value={url}
                   onChange={(value) => {
                     setUrl(value);
@@ -658,7 +681,7 @@ function AddStepPicker({
               )}
               <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-2">
                 <Text type="supporting" size="sm" className="phone:basis-full me-auto">
-                  {lands}
+                  {gone ? null : lands}
                 </Text>
                 {/* The two wrap together, so Avbryt never sits alone above a long "Lägg till …". */}
                 <HStack gap={3} wrap="wrap" justify="end">
@@ -686,9 +709,14 @@ function AddStepPicker({
 }
 
 /**
- * Adds a step at `position` (1-based): the author picks what the step does,
- * a task or a kind of step, and the step is named after it (renamed in the
- * editor). The kinds the place allows, why the others are refused and the
+ * Adds a step at `position`: a place (1-based), the end, or before the step
+ * that sends the run's result, named by its id. The end and that step are
+ * placed on the flow the add is fenced on (a draft read again after a stale
+ * refusal included); the end is before a last step that sends, which stays
+ * last. When the step it was to go before is gone there, or no longer sends
+ * the run's result, there is no place. The
+ * author picks what the step does, a task or a kind of step, and the step is
+ * named after it (renamed in the editor). The kinds the place allows, why the others are refused and the
  * configuration each starts with are the core's answer for the place; the
  * step is saved as one editor change (`new_steps` + `step_order`).
  */
@@ -700,20 +728,33 @@ export function AddStepDialog({
   onSaved
 }: {
   flow: FlowPublic;
-  position: number;
+  position: number | "end" | { before: string };
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSaved: (flow: FlowPublic) => void;
+  /** The flow the core answered, the revision the add was fenced on, and the step it added. */
+  onSaved: (flow: FlowPublic, sentRevision: number, addedStepId: string | null) => void;
 }): React.JSX.Element {
   const [pending, setPending] = useState(false);
   const { space } = useSpace();
   // A draft read again after a stale save, while the dialog stays open.
   const [reloaded, setReloaded] = useState<FlowPublic | null>(null);
   const flow = reloaded && reloaded.draft_revision >= propFlow.draft_revision ? reloaded : propFlow;
-  const position = Math.min(Math.max(1, Math.round(requestedPosition)), flow.steps.length + 1);
+  const last = flow.steps.reduce<FlowStep | null>(
+    (found, step) => (found && found.step_order > step.step_order ? found : step),
+    null
+  );
+  const position =
+    requestedPosition === "end"
+      ? last?.output_mode === "http_post"
+        ? flow.steps.length
+        : flow.steps.length + 1
+      : typeof requestedPosition === "number"
+        ? Math.min(Math.max(1, Math.round(requestedPosition)), flow.steps.length + 1)
+        : (flow.steps.find((step) => step.id === requestedPosition.before && sendsRunResult(step))
+            ?.step_order ?? null);
   const kinds = useQuery({
-    ...insertionKindsQueryOptions(flow.id, flow.draft_revision, position),
-    enabled: open
+    ...insertionKindsQueryOptions(flow.id, flow.draft_revision, position ?? 0),
+    enabled: open && position !== null
   });
 
   function close() {

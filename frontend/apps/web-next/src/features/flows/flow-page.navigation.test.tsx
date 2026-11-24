@@ -6,12 +6,15 @@ import {
   type RouterHistory
 } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { SpaceProvider } from "@/features/spaces/use-space";
 import { makeSpace } from "@/features/spaces/testing/space-fixture";
 import { renderWithRouter } from "@/test/router";
 import { testAppContext, testQueryClient } from "@/test/render";
 import messages from "@/lib/i18n/messages/sv.json";
+import { toast } from "@/lib/toast";
+import type { QueryClient } from "@tanstack/react-query";
+import { flowEditorKeys } from "./editor/editor-api";
 import { makeAssistant, makeKindOption, makeKindPlace } from "./editor/testing/fixtures";
 import { makeFlow, makeStep } from "./flow-fixtures";
 import { FlowPage } from "./flow-page";
@@ -19,6 +22,21 @@ import { flowKeys, type FlowPublic } from "./flows-api";
 import { parseFlowSearch } from "./flow-search";
 
 vi.unmock("@/lib/link");
+// The conversation is the chat feature's; the page only follows what it reports.
+vi.mock("@/features/chat/chat-view", () => ({
+  ChatView: ({
+    onToolCallFinished
+  }: {
+    onToolCallFinished: (call: { serverName: string; isInternal: boolean }) => void;
+  }) => (
+    <button
+      type="button"
+      onClick={() => onToolCallFinished({ serverName: "flows", isInternal: true })}
+    >
+      Verktyg klart
+    </button>
+  )
+}));
 
 const api = vi.hoisted(() => ({
   routes: {} as Record<string, (init: never) => { status?: number; body: unknown }>,
@@ -64,7 +82,7 @@ async function renderPage(search = "") {
   const queryClient = testQueryClient();
   queryClient.setQueryData(["spaces", "space-1"], makeSpace());
   queryClient.setQueryData(flowKeys.flow(flow.id), flow);
-  return renderWithRouter(null, {
+  const view = await renderWithRouter(null, {
     queryClient,
     history,
     appContext: testAppContext({
@@ -89,6 +107,7 @@ async function renderPage(search = "") {
       })
     ]
   });
+  return { ...view, queryClient };
 }
 const click = (name: string) =>
   act(async () => {
@@ -217,12 +236,688 @@ it("adds the first step from the empty list and puts focus on it", async () => {
   await waitFor(() => expect(document.activeElement).toBe(open));
 });
 
+/** A JSON step, then the step that sends the run's result: nothing to send yet. */
+function senderFlow() {
+  return makeFlow({
+    steps: [
+      makeStep(1, { id: "step-json", user_description: "Plocka ut", output_type: "json" }),
+      makeStep(2, {
+        id: "step-send",
+        assistant_id: "assistant-send",
+        user_description: "Skicka till webbplatsen",
+        output_mode: "http_post",
+        output_config: {
+          url: "https://mottagare.example.org/in",
+          auth: { mode: "none" },
+          timeout_seconds: 30,
+          body: { mode: "run_result" },
+          custom_headers: [],
+          response_format: null
+        }
+      })
+    ]
+  });
+}
+
+/** `start` with a step put before the step that sends, as the core answers the add. */
+function withStepBeforeSend(start: FlowPublic, step: Partial<FlowPublic["steps"][number]>) {
+  const [first, sender] = start.steps;
+  return makeFlow({
+    draft_revision: start.draft_revision + 1,
+    steps: [
+      first!,
+      makeStep(2, { id: "step-new", assistant_id: "assistant-new", ...step }),
+      { ...sender!, step_order: 3 }
+    ]
+  });
+}
+
+/** Routes the add dialog's kinds at any place, and answers each editor PATCH in turn. */
+function routeAddBeforeSend(answers: FlowPublic[]) {
+  api.routes["GET /api/v1/flows/{id}/step-kinds/"] = (init) => {
+    const position = (init as { params: { query: { position: number } } }).params.query.position;
+    return {
+      body: {
+        flow_id: "flow-1",
+        draft_revision: 4,
+        insertions: [makeKindPlace(position, [makeKindOption("ai")])],
+        steps: []
+      }
+    };
+  };
+  const queue = [...answers];
+  api.routes["PATCH /api/v1/flows/{id}/editor/"] = () => ({ body: queue.shift() });
+}
+
+const editorPatches = () =>
+  api.stub.calls
+    .filter((call) => call.method === "PATCH" && call.path === "/api/v1/flows/{id}/editor/")
+    .map((call) => call.init.body);
+
+async function addSummaryBeforeSend() {
+  await click(messages.flow_step_editor_run_result_add_before);
+  const dialog = await screen.findByRole("dialog", { name: "Lägg till steg" });
+  fireEvent.click(await within(dialog).findByRole("radio", { name: "Sammanfatta" }));
+  fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till Sammanfatta" }));
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "Lägg till steg" })).toBeNull());
+}
+
+it("adds a step before the send from the sender with unsaved edits, and lists it there", async () => {
+  flow = senderFlow();
+  const added = withStepBeforeSend(flow, { user_description: "Sammanfatta" });
+  routeAddBeforeSend([added, { ...added, draft_revision: 6 }]);
+  const { queryClient } = await renderPage("?step=step-send");
+  fireEvent.change(await nameField(), { target: { value: "Skicka till intranätet" } });
+  await addSummaryBeforeSend();
+  // The page holds the flow the add returned.
+  expect(queryClient.getQueryData<FlowPublic>(flowKeys.flow(flow.id))?.draft_revision).toBe(5);
+
+  const sends = await screen.findByRole("region", {
+    name: messages.flow_step_editor_run_result_sends_title
+  });
+  // The step added lists where it is sent, focus goes to it, and the edits stay.
+  const open = await within(sends).findByRole("button", { name: "Öppna steg 2 – Sammanfatta" });
+  await waitFor(() => expect(document.activeElement).toBe(open));
+  expect(within(sends).queryByText(messages.flow_step_editor_run_result_empty_title)).toBeNull();
+  expect(screen.queryByText(messages.flow_step_editor_newer_title)).toBeNull();
+  expect(((await nameField()) as HTMLInputElement).value).toBe("Skicka till intranätet");
+
+  // The save is the edit alone, fenced on the revision the add returned: no order, no new step.
+  await click(messages.flow_step_editor_save);
+  await waitFor(() => expect(editorPatches()).toHaveLength(2));
+  expect(editorPatches()[1]).toEqual({
+    expected_revision: 5,
+    definition: {},
+    step_edits: [{ step_id: "step-send", changes: { user_description: "Skicka till intranätet" } }]
+  });
+});
+
+/** The sender with one header, opened, and its header value field and add button. */
+async function renderSenderWithHeader() {
+  const [first, sender] = senderFlow().steps;
+  flow = makeFlow({
+    steps: [
+      first!,
+      {
+        ...sender!,
+        output_config: {
+          ...sender!.output_config,
+          custom_headers: [{ name: "X-Ref", value: "fast", secret: false }]
+        }
+      }
+    ]
+  });
+  await renderPage("?step=step-send");
+  const value = await screen.findByRole("textbox", { name: "Värde för header 1" });
+  const add = await screen.findByRole("button", {
+    name: messages.flow_step_editor_run_result_add_before
+  });
+  return { value, add };
+}
+
+it("asks for a save before adding a step before the send while an edit holds a reference", async () => {
+  const { value, add } = await renderSenderWithHeader();
+  expect(add.getAttribute("aria-disabled")).toBeNull();
+
+  // The sender is step 2: an add before it would make step_2 name the new step.
+  fireEvent.change(value, { target: { value: "{{step_2.output.text}}" } });
+  await waitFor(() => expect(add.getAttribute("aria-disabled")).toBe("true"));
+  const reason = screen.getByText(messages.flow_step_editor_run_result_add_before_save_first);
+  expect(add.getAttribute("aria-describedby")).toBe(reason.id);
+  fireEvent.click(add);
+  expect(screen.queryByRole("dialog", { name: "Lägg till steg" })).toBeNull();
+
+  // A number past the last step names the sender once a step is added before it.
+  fireEvent.change(value, { target: { value: "{{step_3.output.text}}" } });
+  await waitFor(() => expect(add.getAttribute("aria-disabled")).toBe("true"));
+
+  // Any reference waits, an earlier step's too: the lock reads no reference grammar.
+  fireEvent.change(value, { target: { value: "{{step_1.output.text}}" } });
+  await waitFor(() => expect(add.getAttribute("aria-disabled")).toBe("true"));
+
+  // With the edit back to what is saved, the add is offered again.
+  fireEvent.change(value, { target: { value: "fast" } });
+  await waitFor(() => expect(add.getAttribute("aria-disabled")).toBeNull());
+  expect(screen.queryByText(messages.flow_step_editor_run_result_add_before_save_first)).toBeNull();
+});
+
+// The core reads both as step_2: a space before the dot, a tab after the braces.
+it.each(["{{step_2 .output.text}}", "{{\tstep_2.output.text}}"])(
+  "asks for a save before adding a step before the send while an edit holds %j",
+  async (reference) => {
+    const { value, add } = await renderSenderWithHeader();
+    expect(add.getAttribute("aria-disabled")).toBeNull();
+    fireEvent.change(value, { target: { value: reference } });
+    expect((value as HTMLInputElement).value).toBe(reference);
+    await waitFor(() => expect(add.getAttribute("aria-disabled")).toBe("true"));
+    const reason = screen.getByText(messages.flow_step_editor_run_result_add_before_save_first);
+    expect(add.getAttribute("aria-describedby")).toBe(reason.id);
+    fireEvent.click(add);
+    expect(screen.queryByRole("dialog", { name: "Lägg till steg" })).toBeNull();
+  }
+);
+
+const STALE = {
+  status: 400,
+  body: { message: "Stale", code: "stale_revision", eneo_error_code: 9000 }
+};
+const sendsRegion = () =>
+  screen.findByRole("region", { name: messages.flow_step_editor_run_result_sends_title });
+const sendsHeading = async () =>
+  within(await sendsRegion()).getByRole("heading", {
+    name: messages.flow_step_editor_run_result_sends_title
+  });
+
+it("keeps the banner and the edits' revision when the flow changed elsewhere, even with this step unchanged", async () => {
+  flow = senderFlow();
+  const { queryClient } = await renderPage("?step=step-send");
+  fireEvent.change(await nameField(), { target: { value: "Skicka till intranätet" } });
+  const newer = { ...flow, draft_revision: 5 };
+  act(() => queryClient.setQueryData(flowKeys.flow(flow.id), newer));
+  expect(await screen.findByText(messages.flow_step_editor_newer_title)).toBeTruthy();
+  api.routes["PATCH /api/v1/flows/{id}/editor/"] = () => STALE;
+  await click(messages.flow_step_editor_save);
+  await waitFor(() => expect(editorPatches()).toHaveLength(1));
+  expect(editorPatches()[0]).toMatchObject({ expected_revision: 4 });
+});
+
+it("keeps the banner when the add went through on a newer revision than the edits", async () => {
+  flow = senderFlow();
+  const { queryClient } = await renderPage("?step=step-send");
+  fireEvent.change(await nameField(), { target: { value: "Skicka till intranätet" } });
+  routeAddBeforeSend([]);
+  // The dialog is open when the newer version comes in: under the banner the
+  // view no longer offers the add, but the dialog asked for stays.
+  await click(messages.flow_step_editor_run_result_add_before);
+  const dialog = await screen.findByRole("dialog", { name: "Lägg till steg" });
+  const newer = { ...flow, draft_revision: 5 };
+  flow = newer;
+  act(() => queryClient.setQueryData(flowKeys.flow(newer.id), newer));
+  expect(await screen.findByText(messages.flow_step_editor_newer_title)).toBeTruthy();
+  const answers = [STALE, { body: withStepBeforeSend(newer, { user_description: "Sammanfatta" }) }];
+  api.routes["PATCH /api/v1/flows/{id}/editor/"] = () => answers.shift()!;
+
+  // The add is fenced on the edits' revision, refused, read again and added on the newer one.
+  fireEvent.click(await within(dialog).findByRole("radio", { name: "Sammanfatta" }));
+  fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till Sammanfatta" }));
+  fireEvent.click(
+    await within(dialog).findByRole("button", { name: messages.flow_step_editor_reload })
+  );
+  // The kinds are read again for the newer revision before a row can be chosen.
+  await waitFor(() =>
+    expect(
+      within(dialog).queryByRole("button", { name: messages.flow_step_editor_reload })
+    ).toBeNull()
+  );
+  await waitFor(() => {
+    fireEvent.click(within(dialog).getByRole("radio", { name: "Sammanfatta" }));
+    expect(within(dialog).getByRole("button", { name: "Lägg till Sammanfatta" })).toBeTruthy();
+  });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till Sammanfatta" }));
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "Lägg till steg" })).toBeNull());
+  expect(
+    editorPatches().map((body) => (body as { expected_revision: number }).expected_revision)
+  ).toEqual([4, 5]);
+
+  // Not this editor's own add on its revision: the edits stay under the banner.
+  expect(screen.getByText(messages.flow_step_editor_newer_title)).toBeTruthy();
+  expect(((await nameField()) as HTMLInputElement).value).toBe("Skicka till intranätet");
+  const heading = await sendsHeading();
+  await waitFor(() => expect(document.activeElement).toBe(heading));
+  // The form's older version is not offered as the place to add a step.
+  expect(
+    screen.queryByRole("button", { name: messages.flow_step_editor_run_result_add_before })
+  ).toBeNull();
+});
+
+it("shows nothing of the other steps in what is sent while the form holds edits on an older version, and the current list after a reload", async () => {
+  const address = () =>
+    screen.findByRole("textbox", {
+      name: new RegExp(`^${messages.flow_step_editor_http_url_run_result}`)
+    }) as Promise<HTMLInputElement>;
+  const [, start] = senderFlow().steps;
+  const send = { ...start!, step_order: 3 };
+  const notes = makeStep(1, { id: "step-notes", user_description: "Anteckningar" });
+  flow = makeFlow({
+    steps: [notes, makeStep(2, { id: "step-sum", user_description: "Sammanfatta" }), send]
+  });
+  const { queryClient } = await renderPage("?step=step-send");
+  const sends = await sendsRegion();
+  expect(await within(sends).findByText("Sammanfatta")).toBeTruthy();
+  const openSum = { name: "Öppna steg 2 – Sammanfatta" };
+  const openNotes = { name: "Öppna steg 1 – Anteckningar" };
+  expect(within(sends).getByRole("button", openSum)).toBeTruthy();
+  expect(within(sends).getByRole("button", openNotes)).toBeTruthy();
+  fireEvent.change(await address(), { target: { value: "https://mottagare.example.org/ny" } });
+
+  // Changed elsewhere: the step the run delivered is replaced by another.
+  flow = makeFlow({
+    draft_revision: 5,
+    steps: [notes, makeStep(2, { id: "step-doc", user_description: "Protokoll" }), send]
+  });
+  act(() => queryClient.setQueryData(flowKeys.flow(flow.id), flow));
+  expect(await screen.findByText(messages.flow_step_editor_newer_title)).toBeTruthy();
+  const pinned = await sendsRegion();
+  expect(within(pinned).queryByText("Sammanfatta")).toBeNull();
+  expect(within(pinned).queryByRole("button", openSum)).toBeNull();
+  expect(within(pinned).queryByRole("button", openNotes)).toBeNull();
+  expect(within(pinned).getByText(messages.flow_step_editor_run_result_older_version)).toBeTruthy();
+  expect((await address()).value).toBe("https://mottagare.example.org/ny");
+
+  await click(messages.flow_step_editor_reload);
+  const current = await sendsRegion();
+  expect(await within(current).findByText("Protokoll")).toBeTruthy();
+  expect(within(current).getByRole("button", { name: "Öppna steg 2 – Protokoll" })).toBeTruthy();
+  expect(
+    within(current).queryByText(messages.flow_step_editor_run_result_older_version)
+  ).toBeNull();
+  expect((await address()).value).toBe("https://mottagare.example.org/ny");
+});
+
+describe("focus when a newer version hides what the sending step showed", () => {
+  const address = () =>
+    screen.findByRole("textbox", {
+      name: new RegExp(`^${messages.flow_step_editor_http_url_run_result}`)
+    }) as Promise<HTMLInputElement>;
+  /** Text, then the step that sends: one result, with its button. */
+  async function openSender() {
+    const [, start] = senderFlow().steps;
+    flow = makeFlow({
+      steps: [makeStep(1, { id: "step-sum", user_description: "Sammanfatta" }), start!]
+    });
+    const view = await renderPage("?step=step-send");
+    fireEvent.change(await address(), { target: { value: "https://mottagare.example.org/ny" } });
+    return view;
+  }
+  /** A newer version arrives with nothing clicked: the chat or another tab saved. */
+  const newerArrives = async (queryClient: QueryClient) => {
+    flow = { ...flow, draft_revision: 5 };
+    act(() => queryClient.setQueryData(flowKeys.flow(flow.id), flow));
+    await screen.findByText(messages.flow_step_editor_newer_title);
+  };
+
+  it("hands focus from a step's button that goes to the heading", async () => {
+    const { queryClient } = await openSender();
+    const open = await within(await sendsRegion()).findByRole("button", {
+      name: "Öppna steg 1 – Sammanfatta"
+    });
+    act(() => open.focus());
+    await newerArrives(queryClient);
+    const heading = await sendsHeading();
+    await waitFor(() => expect(document.activeElement).toBe(heading));
+  });
+
+  it("leaves focus alone when the author had left the section before the button went", async () => {
+    const { queryClient } = await openSender();
+    const open = await within(await sendsRegion()).findByRole("button", {
+      name: "Öppna steg 1 – Sammanfatta"
+    });
+    act(() => open.focus());
+    // A click on empty space: the blur names no element.
+    act(() => open.blur());
+    expect(document.activeElement).toBe(document.body);
+    await newerArrives(queryClient);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it("leaves focus and the caret in the receiver's address, which stays", async () => {
+    const { queryClient } = await openSender();
+    const field = await address();
+    act(() => {
+      field.focus();
+      field.setSelectionRange(8, 8);
+    });
+    await newerArrives(queryClient);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(document.activeElement).toBe(await address());
+    expect((await address()).selectionStart).toBe(8);
+  });
+});
+
+/**
+ * "Lägg till steg före utskicket" refused as stale while `reread` is what the core holds; the
+ * dialog reads it again and the author asks for the same row once more.
+ */
+async function addBeforeSendAfterReload(reread: FlowPublic, answer: FlowPublic | null) {
+  routeAddBeforeSend([]);
+  const answers = [STALE, ...(answer ? [{ body: answer }] : [])];
+  api.routes["PATCH /api/v1/flows/{id}/editor/"] = () => answers.shift()!;
+  await click(messages.flow_step_editor_run_result_add_before);
+  const dialog = await screen.findByRole("dialog", { name: "Lägg till steg" });
+  fireEvent.click(await within(dialog).findByRole("radio", { name: "Sammanfatta" }));
+  fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till Sammanfatta" }));
+  flow = reread;
+  fireEvent.click(
+    await within(dialog).findByRole("button", { name: messages.flow_step_editor_reload })
+  );
+  await waitFor(() =>
+    expect(
+      within(dialog).queryByRole("button", { name: messages.flow_step_editor_reload })
+    ).toBeNull()
+  );
+  return dialog;
+}
+
+it("puts a step added again after a reload directly before the step that sends, where it is now", async () => {
+  flow = senderFlow();
+  await renderPage("?step=step-send");
+  await nameField();
+  // Another author put a step before the step that sends: it is third now.
+  const reread = withStepBeforeSend(flow, { id: "step-other", user_description: "Annat" });
+  const added = makeFlow({
+    draft_revision: 6,
+    steps: [
+      reread.steps[0]!,
+      reread.steps[1]!,
+      makeStep(3, {
+        id: "step-new",
+        assistant_id: "assistant-new",
+        user_description: "Sammanfatta"
+      }),
+      { ...reread.steps[2]!, step_order: 4 }
+    ]
+  });
+  const dialog = await addBeforeSendAfterReload(reread, added);
+  await waitFor(() => {
+    fireEvent.click(within(dialog).getByRole("radio", { name: "Sammanfatta" }));
+    expect(within(dialog).getByRole("button", { name: "Lägg till Sammanfatta" })).toBeTruthy();
+  });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till Sammanfatta" }));
+  await waitFor(() => expect(editorPatches()).toHaveLength(2));
+  expect(editorPatches()[1]).toMatchObject({
+    expected_revision: 5,
+    step_order: [
+      { step_id: "step-json" },
+      { step_id: "step-other" },
+      { new_step: 0 },
+      { step_id: "step-send" }
+    ]
+  });
+  // Focus goes to the step added, directly before the step that sends where it is now.
+  await waitFor(async () =>
+    expect(document.activeElement).toBe(
+      within(await sendsRegion()).getByRole("button", { name: "Öppna steg 3 – Sammanfatta" })
+    )
+  );
+});
+
+it("adds nothing after a reload in which the step that sends is gone, and says so", async () => {
+  flow = senderFlow();
+  await renderPage("?step=step-send");
+  await nameField();
+  const reread = makeFlow({ draft_revision: 5, steps: [flow.steps[0]!] });
+  const dialog = await addBeforeSendAfterReload(reread, null);
+  expect(
+    await within(dialog).findByText(messages.flow_step_editor_add_before_sender_gone)
+  ).toBeTruthy();
+  expect(within(dialog).queryByRole("radio")).toBeNull();
+  const submit = within(dialog).getByRole("button", {
+    name: "Lägg till steg"
+  }) as HTMLButtonElement;
+  expect(submit.disabled || submit.getAttribute("aria-disabled") === "true").toBe(true);
+  expect(editorPatches()).toHaveLength(1);
+});
+
+it("adds nothing after a reload in which the step that sends became a plain call, and says so", async () => {
+  flow = senderFlow();
+  await renderPage("?step=step-send");
+  await nameField();
+  // Another author made the same step a call with its own body: it no longer sends the result.
+  const [first, sender] = flow.steps;
+  const config = sender!.output_config as Record<string, unknown>;
+  const reread = makeFlow({
+    draft_revision: 5,
+    steps: [first!, { ...sender!, output_config: { ...config, body: { mode: "auto" } } }]
+  });
+  const dialog = await addBeforeSendAfterReload(reread, null);
+  expect(
+    await within(dialog).findByText(messages.flow_step_editor_add_before_sender_gone)
+  ).toBeTruthy();
+  expect(within(dialog).queryByRole("radio")).toBeNull();
+  expect(editorPatches()).toHaveLength(1);
+});
+
+it("keeps a newer version the page holds when the answer to its own add comes late", async () => {
+  flow = senderFlow();
+  const { queryClient } = await renderPage("?step=step-send");
+  fireEvent.change(await nameField(), { target: { value: "Skicka till intranätet" } });
+  const added = withStepBeforeSend(flow, { user_description: "Sammanfatta" });
+  const [first, ...rest] = added.steps;
+  const newer = makeFlow({
+    draft_revision: 6,
+    steps: [{ ...first!, user_description: "Plocka ut allt" }, ...rest]
+  });
+  routeAddBeforeSend([]);
+  const answers = [{ body: added }, STALE];
+  api.routes["PATCH /api/v1/flows/{id}/editor/"] = () => {
+    // Revision 6 reaches the page before the add's own answer, revision 5.
+    if (answers.length === 2) queryClient.setQueryData(flowKeys.flow(flow.id), newer);
+    return answers.shift()!;
+  };
+  await addSummaryBeforeSend();
+
+  expect(queryClient.getQueryData<FlowPublic>(flowKeys.flow(flow.id))?.draft_revision).toBe(6);
+  expect(await screen.findByText(messages.flow_step_editor_newer_title)).toBeTruthy();
+  expect(((await nameField()) as HTMLInputElement).value).toBe("Skicka till intranätet");
+  // The save stays fenced on the revision the edits sit on, the add's answer.
+  await click(messages.flow_step_editor_save);
+  await waitFor(() => expect(editorPatches()).toHaveLength(2));
+  expect(editorPatches()[1]).toMatchObject({ expected_revision: 5 });
+});
+
+it("keeps the banner when the add changed the step that sends", async () => {
+  flow = senderFlow();
+  await renderPage("?step=step-send");
+  fireEvent.change(await nameField(), { target: { value: "Skicka till intranätet" } });
+  const added = withStepBeforeSend(flow, { user_description: "Sammanfatta" });
+  const sender = added.steps[2]!;
+  added.steps[2] = { ...sender, timeout_seconds: 60 };
+  routeAddBeforeSend([added]);
+  await addSummaryBeforeSend();
+  expect(await screen.findByText(messages.flow_step_editor_newer_title)).toBeTruthy();
+  expect(((await nameField()) as HTMLInputElement).value).toBe("Skicka till intranätet");
+});
+
+it("keeps a credential being replaced across the add, and starts over after the save", async () => {
+  const stored = senderFlow();
+  const sender = stored.steps[1]!;
+  stored.steps[1] = {
+    ...sender,
+    output_config: {
+      ...(sender.output_config as Record<string, unknown>),
+      auth: { mode: "bearer_token", token: { $secret: "stored" } }
+    }
+  };
+  flow = stored;
+  // JSON steps send nothing, so "Lägg till steg före utskicket" stays after each add.
+  const added = withStepBeforeSend(stored, {
+    user_description: "Sammanfatta",
+    output_type: "json"
+  });
+  const [first, second, send] = added.steps;
+  const addedAgain = makeFlow({
+    draft_revision: 6,
+    steps: [
+      first!,
+      second!,
+      makeStep(3, {
+        id: "step-new-2",
+        assistant_id: "assistant-new-2",
+        user_description: "Sammanfatta 2",
+        output_type: "json"
+      }),
+      { ...send!, step_order: 4 }
+    ]
+  });
+  routeAddBeforeSend([added, addedAgain, { ...addedAgain, draft_revision: 7 }]);
+  await renderPage("?step=step-send");
+  await click("Ersätt: Token");
+  // Two adds in a row: the form stays through both, and the way back to the stored token with it.
+  await addSummaryBeforeSend();
+  await addSummaryBeforeSend();
+  expect(
+    await screen.findByRole("button", { name: messages.flow_step_editor_secret_keep })
+  ).toBeTruthy();
+  expect(screen.queryByText(messages.flow_step_editor_newer_title)).toBeNull();
+
+  fireEvent.change(document.querySelector("input[type=password]")!, {
+    target: { value: "ny-hemlighet" }
+  });
+  await click(messages.flow_step_editor_save);
+  await waitFor(() => expect(editorPatches()).toHaveLength(3));
+  expect(editorPatches()[2]).toMatchObject({ expected_revision: 6 });
+  // After the save the form starts over on what is stored.
+  expect(await screen.findByRole("button", { name: "Ersätt: Token" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: messages.flow_step_editor_secret_keep })).toBeNull();
+});
+
+it("puts focus on what is sent when the step added cannot be sent", async () => {
+  flow = senderFlow();
+  const added = withStepBeforeSend(flow, { user_description: "Sammanfatta", output_type: "json" });
+  routeAddBeforeSend([added]);
+  await renderPage("?step=step-send");
+  await nameField();
+  await addSummaryBeforeSend();
+  const heading = await sendsHeading();
+  await waitFor(() => expect(document.activeElement).toBe(heading));
+  expect(screen.queryByText(messages.flow_step_editor_newer_title)).toBeNull();
+});
+
+it("agrees on the cards and in what the step that sends lists after the first of two Word documents is switched on and saved", async () => {
+  const word = (order: number, name: string) =>
+    makeStep(order, {
+      user_description: name,
+      output_type: "docx",
+      output_mode: "render_verbatim"
+    });
+  const send = makeStep(3, {
+    user_description: "Skicka",
+    output_mode: "http_post",
+    output_config: {
+      url: "https://mottagare.example.org/in",
+      auth: { mode: "none" },
+      body: { mode: "run_result" }
+    }
+  });
+  flow = makeFlow({ steps: [word(1, "Protokoll"), word(2, "Bilaga"), send] });
+  const marked = makeFlow({
+    draft_revision: 5,
+    steps: [
+      { ...flow.steps[0]!, output_config: { deliverable: { label: "Protokoll" } } },
+      flow.steps[1]!,
+      send
+    ]
+  });
+  api.routes["PATCH /api/v1/flows/{id}/editor/"] = () => ({ body: marked });
+  await renderPage();
+  await click("Redigera Steg 1: Protokoll");
+  const delivery = await screen.findByRole("region", {
+    name: messages.flow_step_editor_delivery_title
+  });
+  fireEvent.click(
+    within(delivery).getByRole("switch", {
+      name: new RegExp(`^${messages.flow_step_editor_deliverable_switch}`)
+    })
+  );
+  await click(messages.flow_step_editor_save);
+  await waitFor(() => expect(editorPatches()).toHaveLength(1));
+  // Read again from the saved flow: the destination line says the document is sent.
+  expect(
+    await within(
+      await screen.findByRole("region", { name: messages.flow_step_editor_delivery_title })
+    ).findByText("Skickas till mottagare.example.org när körningen är klar.")
+  ).toBeTruthy();
+
+  await click("Alla steg");
+  const card = (name: string) => screen.findByRole("article", { name });
+  expect(within(await card("Steg 1 Protokoll")).getByText("Leverans")).toBeTruthy();
+  expect(within(await card("Steg 2 Bilaga")).getByText("Leverans")).toBeTruthy();
+
+  await click("Redigera Steg 3: Skicka");
+  const sends = await sendsRegion();
+  expect(
+    await within(sends).findByRole("button", { name: "Öppna steg 1 – Protokoll" })
+  ).toBeTruthy();
+  expect(within(sends).getByRole("button", { name: "Öppna steg 2 – Bilaga" })).toBeTruthy();
+});
+
+it("agrees in Leverans, on the card that sends and in the removal dialog that a step its API key's header name names is read", async () => {
+  flow = makeFlow({
+    steps: [
+      makeStep(1, { user_description: "Sammanfatta" }),
+      makeStep(2, { user_description: "Granska", input_source: "flow_input" }),
+      makeStep(3, {
+        user_description: "Skicka",
+        output_mode: "http_post",
+        output_config: {
+          url: "https://mottagare.example.org/in",
+          auth: { mode: "api_key", header_name: "X-{{Sammanfatta}}", key: "hemlig" },
+          body: { mode: "run_result" }
+        }
+      })
+    ]
+  });
+  await renderPage("?step=step-1");
+  const delivery = await screen.findByRole("region", {
+    name: messages.flow_step_editor_delivery_title
+  });
+  expect(await within(delivery).findByText("Läses av Steg 3: Skicka.")).toBeTruthy();
+  expect(
+    within(delivery).getByText(
+      "Används i en header i steget som skickar körningens resultat till mottagare.example.org."
+    )
+  ).toBeTruthy();
+
+  await click("Alla steg");
+  const sending = await screen.findByRole("article", { name: "Steg 3 Skicka" });
+  expect(within(sending).getByText(messages.flows_step_reads)).toBeTruthy();
+  expect(within(sending).getByText("Steg 1: Sammanfatta")).toBeTruthy();
+  const trigger = screen.getByRole("button", { name: "Fler åtgärder för Steg 1: Sammanfatta" });
+  fireEvent.click(trigger);
+  const menu = document.getElementById(trigger.getAttribute("aria-controls") ?? "")!;
+  fireEvent.click(within(menu).getByRole("menuitem", { name: "Ta bort steg" }));
+  const dialog = await screen.findByRole("alertdialog", { name: "Ta bort steget?" });
+  expect(within(dialog).getByText(/^Steg 3: Skicka läser Steg 1: Sammanfatta\./)).toBeTruthy();
+});
+
 it("closes a direct step link in the same flow without traversing earlier history", async () => {
   const { router } = await renderPage("?step=step-2");
   await nameField();
   await click("Alla steg");
   await screen.findByRole("button", { name: "Redigera Steg 2: Skriv svar" });
   expect(router.state.location.href).toBe(BASE);
+});
+
+it("says whether one change or several are lost on leaving the step", async () => {
+  await renderPage();
+  await openFirst();
+  await changeName();
+  await click("Alla steg");
+  let dialog = await screen.findByRole("alertdialog", {
+    name: messages.flow_step_editor_discard_title
+  });
+  expect(
+    within(dialog).getByText("Ändringen i steget är inte sparad och försvinner om du lämnar det.")
+  ).toBeTruthy();
+  fireEvent.click(
+    within(dialog).getByRole("button", { name: messages.flow_step_editor_keep_editing })
+  );
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  fireEvent.click(
+    screen.getByRole("switch", {
+      name: new RegExp(`^${messages.flow_step_editor_deliverable_switch}`)
+    })
+  );
+  await click("Alla steg");
+  dialog = await screen.findByRole("alertdialog", {
+    name: messages.flow_step_editor_discard_title
+  });
+  expect(
+    within(dialog).getByText(
+      "Ändringarna i steget är inte sparade och försvinner om du lämnar det."
+    )
+  ).toBeTruthy();
 });
 
 it.each(["Back", "Alla steg", "Nästa steg: Skriv svar"])(
@@ -349,4 +1044,298 @@ it("keeps an unsaved upload on Stay and releases it only when leaving the editor
       init: { params: { path: { id: "file-new" } } }
     })
   ]);
+});
+
+describe("the open step while the flow changes", () => {
+  const ASSISTANT = "/api/v1/flows/{id}/assistants/{assistant_id}/";
+  const first = makeStep(1, { user_description: "Sammanfatta" });
+  const second = makeStep(2, { user_description: "Granska", input_source: "flow_input" });
+  const third = (order: number) =>
+    makeStep(order, {
+      id: "step-3",
+      assistant_id: "assistant-3",
+      user_description: "Skriv svar",
+      input_source: "flow_input"
+    });
+
+  /** Step 3's prompt is `text()` when read; the others are plain. */
+  function laterPrompt(text: () => string) {
+    api.routes[`GET ${ASSISTANT}`] = (init: { params: { path: { assistant_id: string } } }) => {
+      const id = init.params.path.assistant_id;
+      const assistant = makeAssistant();
+      return {
+        body: makeAssistant({
+          id,
+          prompt: { ...assistant.prompt!, text: id === "assistant-3" ? text() : "Gör ditt jobb." }
+        })
+      };
+    };
+  }
+  beforeEach(() => {
+    flow = makeFlow({ steps: [first, second, third(3)] });
+  });
+  /** The chat panel, whose tools finishing make the page read the flow again. */
+  function withChat() {
+    api.routes["POST /api/v1/flows/{id}/authoring-chat/"] = () => ({
+      body: {
+        flow_id: "flow-1",
+        assistant_id: "assistant-chat",
+        session_id: "session-1",
+        editing: true
+      }
+    });
+    api.routes["GET /api/v1/assistants/{id}/"] = () => ({
+      body: { id: "assistant-chat", name: "Flödesassistent", mcp_servers: [] }
+    });
+    api.routes["GET /api/v1/conversations/{session_id}/"] = () => ({
+      body: { id: "session-1", name: "", messages: [] }
+    });
+  }
+
+  /**
+   * Holds each read of step 3's prompt until it is let go, answered with the
+   * prompt as it was when the read was made.
+   */
+  function holdLaterReads() {
+    const get = api.stub.client.GET;
+    const held: (() => void)[] = [];
+    api.stub.client.GET = ((
+      path: string,
+      init?: { params?: { path?: { assistant_id?: string } } }
+    ) => {
+      if (path !== ASSISTANT || init?.params?.path?.assistant_id !== "assistant-3") {
+        return get(path, init);
+      }
+      const answer = get(path, init);
+      return new Promise<Awaited<typeof answer>>((resolve) => held.push(() => resolve(answer)));
+    }) as typeof get;
+    return {
+      held,
+      restore: () => {
+        api.stub.client.GET = get;
+        for (const release of held) release();
+      }
+    };
+  }
+
+  it("hands the version a reload reads to the page", async () => {
+    const { queryClient } = await renderPage("?step=step-1");
+    await changeName();
+    api.routes["PATCH /api/v1/flows/{id}/editor/"] = () => ({
+      status: 400,
+      body: { message: "Stale.", code: "stale_revision", eneo_error_code: 9000 }
+    });
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_step_editor_save }));
+    await screen.findByText(messages.flow_step_editor_stale_title);
+    // Changed elsewhere: a step put first. With no chat event and no focus, the
+    // page holds the version the reload read, as it does after a save.
+    flow = makeFlow({
+      draft_revision: 5,
+      steps: [
+        makeStep(1, { id: "step-0", assistant_id: "assistant-0", user_description: "Hämta" }),
+        { ...first, step_order: 2 },
+        { ...second, step_order: 3 },
+        third(4)
+      ]
+    });
+    await click(messages.flow_step_editor_reload);
+    await waitFor(() =>
+      expect(screen.queryByText(messages.flow_step_editor_stale_title)).toBeNull()
+    );
+    expect(queryClient.getQueryData<FlowPublic>(flowKeys.flow("flow-1"))?.draft_revision).toBe(5);
+  });
+
+  /** "Skriv svar" at `order`, reading step 1 through a saved binding. */
+  const reading = (order: number) => ({
+    ...third(order),
+    input_bindings: { question: "{{Sammanfatta}}" }
+  });
+  const reader = "Läses av Steg 3: Skriv svar.";
+  const delivery = () =>
+    screen.findByRole("region", { name: messages.flow_step_editor_delivery_title });
+  /** No reader line: neither a reader nor the next step. */
+  async function noReaderLine() {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const section = await delivery();
+    expect(within(section).queryByText(/^Läses av /)).toBeNull();
+    expect(within(section).queryByText(/^Går vidare till nästa steg/)).toBeNull();
+  }
+
+  it("names no reader while the form holds edits on an older version, and the right one after a reload", async () => {
+    withChat();
+    flow = makeFlow({ steps: [first, second, reading(3)] });
+    await renderPage("?step=step-1");
+    expect(await within(await delivery()).findByText(reader)).toBeTruthy();
+    await changeName();
+    // Changed in the chat: a step put first, so the reader now stands at place 4.
+    flow = makeFlow({
+      draft_revision: 5,
+      steps: [
+        makeStep(1, { id: "step-0", assistant_id: "assistant-0", user_description: "Hämta" }),
+        { ...first, step_order: 2 },
+        { ...second, step_order: 3 },
+        reading(4)
+      ]
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Verktyg klart" }));
+    await screen.findByText(messages.flow_step_editor_newer_title);
+    // The heading follows the page's version, the form's steps the older one.
+    await noReaderLine();
+    await click(messages.flow_step_editor_reload);
+    expect(await within(await delivery()).findByText("Läses av Steg 4: Skriv svar.")).toBeTruthy();
+  });
+
+  it("keeps the reader on screen through the editor's own save", async () => {
+    flow = makeFlow({ steps: [first, second, reading(3)] });
+    await renderPage("?step=step-1");
+    expect(await within(await delivery()).findByText(reader)).toBeTruthy();
+    api.routes["PATCH /api/v1/flows/{id}/editor/"] = () => ({
+      body: makeFlow({ draft_revision: 5, steps: [first, second, reading(3)] })
+    });
+    // The save's answer reaches the form a moment before the page: the line is
+    // there each time the page has changed, from the save to its settling.
+    let gone = false;
+    const observer = new MutationObserver(() => {
+      if (!document.body.textContent?.includes(reader)) gone = true;
+    });
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    try {
+      fireEvent.click(
+        within(await delivery()).getByRole("switch", {
+          name: new RegExp(`^${messages.flow_step_editor_deliverable_switch}`)
+        })
+      );
+      fireEvent.click(screen.getByRole("button", { name: messages.flow_step_editor_save }));
+      await screen.findByText(messages.flow_step_editor_saved);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    } finally {
+      observer.disconnect();
+    }
+    expect(gone).toBe(false);
+    expect(within(await delivery()).getByText(reader)).toBeTruthy();
+  });
+
+  /**
+   * Step 1 right before the step that sends, with an unsaved name; `focus`
+   * puts focus on a control of its place, then a newer version arrives with
+   * nothing clicked: focus goes to the switch that takes the place's controls.
+   */
+  async function focusMovesToSwitch(
+    focus: (section: HTMLElement) => Promise<void>,
+    steps = [first, senderFlow().steps[1]!]
+  ) {
+    flow = makeFlow({ steps });
+    const { queryClient } = await renderPage("?step=step-1");
+    await changeName();
+    await focus(await delivery());
+    flow = { ...flow, draft_revision: 5 };
+    act(() => queryClient.setQueryData(flowKeys.flow(flow.id), flow));
+    await screen.findByText(messages.flow_step_editor_newer_title);
+    const toggle = await within(await delivery()).findByRole("switch", {
+      name: new RegExp(`^${messages.flow_step_editor_deliverable_switch}`)
+    });
+    await waitFor(() => expect(document.activeElement).toBe(toggle));
+  }
+
+  it("hands focus from Behåll to the switch when a newer version hides the step's place", () =>
+    focusMovesToSwitch(async (section) => {
+      const keep = within(section).getByRole("button", {
+        name: messages.flow_step_editor_deliverable_keep
+      });
+      act(() => keep.focus());
+    }));
+
+  it("hands focus from the button to the step that sends to the switch", () =>
+    // Step 1 is not delivered by its place here: the switch stood there all along.
+    focusMovesToSwitch(
+      async (section) => {
+        const open = within(section).getByRole("button", {
+          name: messages.flow_step_editor_delivery_open_sender
+        });
+        act(() => open.focus());
+      },
+      [first, second, { ...senderFlow().steps[1]!, step_order: 3 }]
+    ));
+
+  it("hands focus from a name field opened but not typed in to the switch", () =>
+    focusMovesToSwitch(async (section) => {
+      fireEvent.click(
+        within(section).getByRole("button", {
+          name: messages.flow_step_editor_deliverable_customise_text
+        })
+      );
+      const label = await within(section).findByRole("textbox", {
+        name: new RegExp(`^${messages.flow_step_editor_deliverable_label}`)
+      });
+      expect(document.activeElement).toBe(label);
+    }));
+
+  it("shows nothing of the step that sends while the form holds edits on an older version, and that none is left after a reload", async () => {
+    withChat();
+    const send = senderFlow().steps[1]!;
+    const host = new URL((send.output_config as { url: string }).url).hostname;
+    const sentTo = messages.flow_step_editor_delivery_sent_to.replace("{host}", host);
+    const openSender = { name: messages.flow_step_editor_delivery_open_sender };
+    flow = makeFlow({ steps: [first, send] });
+    await renderPage("?step=step-1");
+    const before = await delivery();
+    expect(await within(before).findByText(sentTo)).toBeTruthy();
+    expect(within(before).getByRole("button", openSender)).toBeTruthy();
+    expect(
+      within(before).getByText(messages.flow_step_editor_deliverable_place_before_send)
+    ).toBeTruthy();
+    await changeName();
+    // Changed in the chat: the step that sends is gone, so step 1 now stands last.
+    flow = makeFlow({ draft_revision: 5, steps: [first] });
+    fireEvent.click(await screen.findByRole("button", { name: "Verktyg klart" }));
+    await screen.findByText(messages.flow_step_editor_newer_title);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const pinned = await delivery();
+    expect(within(pinned).queryByText(new RegExp(host.replaceAll(".", "\\.")))).toBeNull();
+    expect(within(pinned).queryByRole("button", openSender)).toBeNull();
+    expect(
+      within(pinned).queryByText(messages.flow_step_editor_deliverable_place_before_send)
+    ).toBeNull();
+    await click(messages.flow_step_editor_reload);
+    expect(
+      await within(await delivery()).findByText(messages.flow_step_editor_delivery_no_sender)
+    ).toBeTruthy();
+  });
+
+  /** The page has taken a new revision and marked step 3's prompt to be read again. */
+  const laterInvalidated = (queryClient: QueryClient) =>
+    waitFor(() =>
+      expect(
+        queryClient.getQueryState(flowEditorKeys.assistant("flow-1", "assistant-3"))?.isInvalidated
+      ).toBe(true)
+    );
+
+  it("shows the open step's own prompt as saved when the flow changes during its first read", async () => {
+    withChat();
+    let prompt = "Skriv ett svar.";
+    laterPrompt(() => prompt);
+    const failed = vi.spyOn(toast, "error");
+    onTestFinished(() => failed.mockRestore());
+    const reads = holdLaterReads();
+    try {
+      const { queryClient } = await renderPage("?step=step-3");
+      await waitFor(() => expect(reads.held).toHaveLength(1));
+      prompt = "Skriv ett kort svar.";
+      flow = makeFlow({ draft_revision: 5, steps: [first, second, third(3)] });
+      fireEvent.click(await screen.findByRole("button", { name: "Verktyg klart" }));
+      await laterInvalidated(queryClient);
+      expect(screen.queryByText(messages.flow_step_editor_assistant_failed)).toBeNull();
+      // The read made after the change answers first, the one from before it last.
+      reads.held[1]?.();
+      reads.held[0]!();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    } finally {
+      reads.restore();
+    }
+    expect(((await screen.findByLabelText(/^Instruktion/)) as HTMLTextAreaElement).value).toBe(
+      "Skriv ett kort svar."
+    );
+    expect(screen.queryByText(messages.flow_step_editor_assistant_failed)).toBeNull();
+    expect(failed).not.toHaveBeenCalled();
+  });
 });

@@ -12,6 +12,7 @@ import {
   readRuntimeInput,
   readDeliverable,
   readTemplateFill,
+  runResultHost,
   runResultUrlFixed,
   stepCanBeDeliverable,
   stepDeliversArtifact,
@@ -151,6 +152,16 @@ describe("HTTP", () => {
     expect(
       withHttpConfig(stored, { ...config, body: { ...config.body, mode: "run_result" } }).body
     ).toEqual({ mode: "run_result" });
+  });
+
+  it("names the host the run's result goes to, only for an address it can be sent to", () => {
+    const sender = (url: string) => ({ output_config: { url, body: { mode: "run_result" } } });
+    expect(runResultHost(sender(" https://Mottagare.example.org/in?x=1 "))).toBe(
+      "mottagare.example.org"
+    );
+    for (const url of ["", "http://mottagare.example.org/in", "https://{{ flow_input.host }}/in"]) {
+      expect(runResultHost(sender(url))).toBeNull();
+    }
   });
 
   it("holds a body that sends the run's result to the core's address and header rules", () => {
@@ -374,15 +385,15 @@ describe("deliverable", () => {
 
   it("is set and cleared without touching the step's other output settings", () => {
     const on = withDeliverable(stored, {
-      label: "Till Startsidan",
+      label: "Till webbplatsen",
       file_name: "Standup {{flow_input.team}}"
     });
     expect(on).toEqual({
       ...stored,
-      deliverable: { label: "Till Startsidan", file_name: "Standup {{flow_input.team}}" }
+      deliverable: { label: "Till webbplatsen", file_name: "Standup {{flow_input.team}}" }
     });
     expect(readDeliverable(on)).toEqual({
-      label: "Till Startsidan",
+      label: "Till webbplatsen",
       file_name: "Standup {{flow_input.team}}"
     });
     expect(withDeliverable(on, null)).toEqual(stored);

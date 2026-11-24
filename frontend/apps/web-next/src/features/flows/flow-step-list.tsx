@@ -14,13 +14,25 @@ import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog"
 import { EmptyState } from "@/components/composites/empty-state";
 import { ListError } from "@/components/composites/query-state";
 import { flowAssistantQueryOptions } from "./editor/editor-api";
-import { FILE_INPUT_TYPES, readRuntimeInput } from "./editor/step-configs";
+import {
+  FILE_INPUT_TYPES,
+  readDeliverable,
+  readRuntimeInput,
+  runResultHost
+} from "./editor/step-configs";
 import { stepUsesModel } from "./editor/step-rules";
+import { flowDeliverables, type RunDeliverables } from "./flow-deliverables";
 import type { FlowStep } from "./flows-api";
 import type { StepChange } from "./flow-changes";
-import { inputTypeLabel, producesLabel, readLabel, stepLabel } from "./flow-labels";
+import {
+  inputTypeLabel,
+  outputTypeLabel,
+  producesLabel,
+  readLabel,
+  stepLabel
+} from "./flow-labels";
 import { useFlowReadLabel } from "./flow-read-layout";
-import { stepName, stepReaders, stepReads, type StepPrompts } from "./flow-steps";
+import { senderReads, stepName, stepReaders, stepReads, type StepPrompts } from "./flow-steps";
 import {
   useSuggestionDismissal,
   useSuggestionFix,
@@ -72,8 +84,8 @@ type StepActions = {
   onMove: (step: FlowStep, delta: -1 | 1) => void;
   /** Resolves once the removal is saved or refused. */
   onRemove: (step: FlowStep) => Promise<unknown>;
-  /** Opens the add dialog for a 1-based position. */
-  onAdd: (position: number) => void;
+  /** Opens the add dialog for a place (1-based), or for the end of the draft the add is made on. */
+  onAdd: (position: number | "end") => void;
 };
 
 /** The shortcut that adds a step naming the speakers after the step that transcribes. */
@@ -82,6 +94,7 @@ export type SpeakerStepOffer = { stepId: string; pending: boolean; onAccept: () 
 function StepCard({
   step,
   steps,
+  run,
   prompts,
   index,
   canEdit,
@@ -93,6 +106,8 @@ function StepCard({
 }: {
   step: FlowStep;
   steps: readonly FlowStep[];
+  /** The run's deliverables and the step that sends them, as publishing will choose. */
+  run: RunDeliverables<FlowStep>;
   prompts: StepPrompts;
   index: number;
   canEdit: boolean;
@@ -119,11 +134,31 @@ function StepCard({
   const titleId = useId();
   const id = step.id ?? "";
   const label = stepLabel(step, t);
-  const reads = stepReads(step, steps, prompts);
+  const sends = run.sender === step;
+  // The step that sends reads only what its headers name: what it sends is its own row.
+  const reads = sends ? senderReads(step, steps) : stepReads(step, steps, prompts);
   const review = step.review_policy?.mode;
   // Files the run asks for, which "Tar emot" says beside the type (they may be required).
   // A file type already names them, so there it adds only whether they are required.
   const uploads = readRuntimeInput(step.input_config);
+  const delivered = run.deliverables.includes(step);
+  const host = sends ? runResultHost(step) : null;
+  // Plain text like the rows below it; a read of a step that is gone says so
+  // in words, and in the error colour.
+  const readsRow = (
+    <MetadataListItem label={t("flows_step_reads")}>
+      {reads.map((read, position) => (
+        <Fragment key={read.kind === "step" ? `step-${read.order}` : read.kind}>
+          {position > 0 ? ", " : null}
+          <span
+            className={read.kind === "step" && read.step === null ? "text-ax-error" : undefined}
+          >
+            {readLabel(read, t)}
+          </span>
+        </Fragment>
+      ))}
+    </MetadataListItem>
+  );
 
   return (
     <article
@@ -143,8 +178,11 @@ function StepCard({
             </span>
             <span className="text-base">{stepName(step) ?? t("flows_step_unnamed")}</span>
           </Heading>
-          {review || change ? (
+          {review || change || delivered ? (
             <span className="flex flex-wrap gap-1.5">
+              {delivered ? (
+                <Token size="sm" color="green" label={t("flows_step_deliverable")} />
+              ) : null}
               {review ? (
                 <Badge
                   variant="warning"
@@ -211,12 +249,17 @@ function StepCard({
                     label: t("flows_step_add_before"),
                     onClick: () => actions.onAdd(step.step_order)
                   },
-                  {
-                    id: "after",
-                    label: t("flows_step_add_after"),
-                    onClick: () => actions.onAdd(step.step_order + 1)
-                  },
-                  { type: "divider" },
+                  // A step that sends must stay last: the core refuses any step after it.
+                  ...(step.output_mode === "http_post"
+                    ? []
+                    : [
+                        {
+                          id: "after",
+                          label: t("flows_step_add_after"),
+                          onClick: () => actions.onAdd(step.step_order + 1)
+                        }
+                      ]),
+                  { type: "divider" as const },
                   {
                     id: "remove",
                     label: t("flows_step_remove"),
@@ -229,38 +272,53 @@ function StepCard({
           ) : null}
         </div>
       </div>
-      <MetadataList label={labelColumn}>
-        {/* Plain text like the rows below it; a read of a step that is gone
-            says so in words, and in the error colour. */}
-        <MetadataListItem label={t("flows_step_reads")}>
-          {reads.map((read, position) => (
-            <Fragment key={read.kind === "step" ? `step-${read.order}` : read.kind}>
-              {position > 0 ? ", " : null}
-              <span
-                className={read.kind === "step" && read.step === null ? "text-ax-error" : undefined}
-              >
-                {readLabel(read, t)}
-              </span>
-            </Fragment>
-          ))}
-        </MetadataListItem>
-        <MetadataListItem label={t("flows_step_takes")}>
-          {!uploads.enabled
-            ? inputTypeLabel(step.input_type, t)
-            : FILE_INPUT_TYPES.has(step.input_type)
-              ? uploads.required
-                ? t("flows_step_takes_required", { type: inputTypeLabel(step.input_type, t) })
-                : inputTypeLabel(step.input_type, t)
-              : t("flows_step_takes_uploads", {
-                  type: inputTypeLabel(step.input_type, t),
-                  format: uploads.inputFormat,
-                  required: uploads.required ? "yes" : "no"
-                })}
-        </MetadataListItem>
-        <MetadataListItem label={t("flows_step_produces")}>
-          {producesLabel(step, t)}
-        </MetadataListItem>
-      </MetadataList>
+      {sends ? (
+        // What it sends and to whom are its own rows; what its headers read
+        // comes first when there is any.
+        <MetadataList label={labelColumn}>
+          {reads.length > 0 ? readsRow : null}
+          <MetadataListItem label={t("flows_step_sends")}>
+            {run.deliverables.length > 0 ? (
+              run.deliverables
+                .map((sent) =>
+                  t("flows_step_sends_item", {
+                    name:
+                      readDeliverable(sent.output_config)?.label ||
+                      stepName(sent) ||
+                      t("flows_step_unnamed"),
+                    type: outputTypeLabel(sent.output_type, t)
+                  })
+                )
+                .join(", ")
+            ) : (
+              <span className="text-ax-error">{t("flows_step_sends_nothing")}</span>
+            )}
+          </MetadataListItem>
+          <MetadataListItem label={t("flow_step_editor_run_result_receiver_title")}>
+            {host ?? <span className="text-ax-error">{t("flows_step_receiver_missing")}</span>}
+          </MetadataListItem>
+        </MetadataList>
+      ) : (
+        <MetadataList label={labelColumn}>
+          {readsRow}
+          <MetadataListItem label={t("flows_step_takes")}>
+            {!uploads.enabled
+              ? inputTypeLabel(step.input_type, t)
+              : FILE_INPUT_TYPES.has(step.input_type)
+                ? uploads.required
+                  ? t("flows_step_takes_required", { type: inputTypeLabel(step.input_type, t) })
+                  : inputTypeLabel(step.input_type, t)
+                : t("flows_step_takes_uploads", {
+                    type: inputTypeLabel(step.input_type, t),
+                    format: uploads.inputFormat,
+                    required: uploads.required ? "yes" : "no"
+                  })}
+          </MetadataListItem>
+          <MetadataListItem label={t("flows_step_produces")}>
+            {producesLabel(step, t)}
+          </MetadataListItem>
+        </MetadataList>
+      )}
       <StepCardSuggestions
         stepId={id}
         items={suggestions.items}
@@ -371,6 +429,7 @@ export function FlowStepList({
   const [removing, setRemoving] = useState<FlowStep | null>(null);
   const [removePending, setRemovePending] = useState(false);
   const prompts = useStepPrompts(flowId, steps, mayEdit);
+  const run = flowDeliverables(steps);
   const suggestions = useQuery({
     ...flowSuggestionsQueryOptions(flowId, draftRevision, measure?.runs ?? 0),
     enabled: canEdit
@@ -401,7 +460,9 @@ export function FlowStepList({
       label={t("flows_add_step")}
       icon={<Plus aria-hidden="true" />}
       size="sm"
-      onClick={() => actions.onAdd(steps.length + 1)}
+      // The end of the draft the add is made on, which may be read again before
+      // it saves: a last step that sends stays last there.
+      onClick={() => actions.onAdd("end")}
     />
   );
 
@@ -471,6 +532,7 @@ export function FlowStepList({
               <StepCard
                 step={step}
                 steps={steps}
+                run={run}
                 prompts={prompts}
                 index={index}
                 canEdit={canEdit}

@@ -6,6 +6,7 @@ import {
   orderWithout,
   readTarget,
   stepReaders,
+  stepReadersByNameOrPlace,
   stepReads,
   stepsInOrder,
   templateParts,
@@ -80,7 +81,7 @@ describe("stepReaders", () => {
     expect(stepReaders(steps[1]!, steps)).toEqual([]);
   });
 
-  it("counts a Word step whose field reads the step", () => {
+  it("counts a Word step whose field reads the step, and nothing else of it", () => {
     const steps = [
       makeStep(1),
       makeStep(2),
@@ -94,9 +95,17 @@ describe("stepReaders", () => {
       })
     ];
     expect(stepReaders(steps[0]!, steps).map((step) => step.step_order)).toEqual([3]);
+    // The core fills a Word step from its fields alone: its input source and
+    // bindings are never resolved, so the step before it is not read.
     expect(stepReads(steps[2]!, steps).map((read) => read.kind === "step" && read.order)).toEqual([
-      1, 2
+      1
     ]);
+    expect(stepReadersByNameOrPlace(steps[1]!, steps)).toEqual([]);
+    expect(stepReadersByNameOrPlace(steps[0]!, steps).map((step) => step.step_order)).toEqual([
+      2, 3
+    ]);
+    const bound = { ...steps[2]!, input_bindings: { question: "{{step_2.output.text}}" } };
+    expect(stepReadersByNameOrPlace(steps[1]!, [steps[0]!, steps[1]!, bound])).toEqual([]);
   });
 
   it("counts an HTTP call or webhook whose address, body or header value reads the step", () => {
@@ -152,6 +161,136 @@ describe("stepReaders", () => {
       )
     ).toEqual([]);
   });
+
+  it("reads a webhook as the core fills it in, once its step has answered", () => {
+    const post = (body: string, overrides: Parameters<typeof makeStep>[1] = {}) =>
+      makeStep(2, {
+        user_description: "Skicka",
+        input_source: "flow_input",
+        output_mode: "http_post",
+        output_config: {
+          url: "https://hooks.example.se",
+          auth: { mode: "none" },
+          body: { mode: "text_template", template: body }
+        },
+        ...overrides
+      });
+    // There the step before is the step's own answer, and so are its alias and its name.
+    for (const body of ["{{föregående_steg}}", "{{step_2.output.text}}", "{{Skicka}}"]) {
+      const steps = [makeStep(1), post(body)];
+      expect(stepReadersByNameOrPlace(steps[0]!, steps)).toEqual([]);
+      expect(stepReads(steps[1]!, steps)).toEqual([{ kind: "flow_input" }]);
+    }
+    // An address the step fetches is read before it answers: the step before is step 1.
+    const steps = [
+      makeStep(1),
+      post("{{föregående_steg}}", {
+        input_source: "http_get",
+        input_config: { url: "https://api.example.se/{{föregående_steg}}", auth: { mode: "none" } }
+      })
+    ];
+    expect(stepReadersByNameOrPlace(steps[0]!, steps)).toEqual([steps[1]]);
+  });
+  it("reads the names a call's credentials go under, and its body only as a template", () => {
+    const post = (overrides: Record<string, unknown>) => [
+      makeStep(1),
+      makeStep(2, {
+        input_source: "flow_input",
+        output_mode: "http_post",
+        output_config: { url: "https://hooks.example.se", auth: { mode: "none" }, ...overrides }
+      })
+    ];
+    const readers = (steps: ReturnType<typeof post>) =>
+      stepReaders(steps[0]!, steps).map((step) => step.step_order);
+
+    expect(
+      readers(post({ auth: { mode: "api_key", header_name: "X-{{step_1}}", key: "hemlig" } }))
+    ).toEqual([2]);
+    expect(
+      readers(post({ auth: { mode: "basic_auth", username: "{{step_1}}", password: "hemlig" } }))
+    ).toEqual([2]);
+    // A template left from another body mode is not sent.
+    expect(readers(post({ body: { mode: "auto", template: "{{step_1}}" } }))).toEqual([]);
+  });
+});
+
+describe("stepReadersByNameOrPlace", () => {
+  const sender = (order: number) =>
+    makeStep(order, {
+      output_mode: "http_post",
+      output_config: {
+        url: "https://mottagare.example.org/in",
+        auth: { mode: "none" },
+        body: { mode: "run_result" }
+      }
+    });
+  const orders = (steps: ReturnType<typeof makeStep>[], at: number) =>
+    stepReadersByNameOrPlace(steps[at]!, steps).map((step) => step.step_order);
+
+  it("counts the step after it, every step that reads all earlier ones, and a step that names it", () => {
+    const steps = [
+      makeStep(1),
+      makeStep(2),
+      makeStep(3, { input_source: "all_previous_steps" }),
+      makeStep(4, { input_bindings: { question: "{{step_1}}" } })
+    ];
+    expect(orders(steps, 0)).toEqual([2, 3, 4]);
+    expect(orders(steps, 1)).toEqual([3]);
+    expect(orders(steps, 3)).toEqual([]);
+  });
+
+  it("leaves out the step that sends the run's result, which sends what the run delivers", () => {
+    const steps = [makeStep(1), sender(2)];
+    expect(orders(steps, 0)).toEqual([]);
+    // An ordinary request that sends its own answer reads the step before it.
+    const post = makeStep(2, {
+      output_mode: "http_post",
+      output_config: { url: "https://hooks.example.se", auth: { mode: "none" } }
+    });
+    expect(orders([makeStep(1), post], 0)).toEqual([2]);
+  });
+
+  it("counts the step that sends the run's result when one of its headers names the step", () => {
+    const config = sender(3).output_config as Record<string, unknown>;
+    const withHeader = (value: string, secret = false) =>
+      makeStep(3, {
+        output_mode: "http_post",
+        output_config: { ...config, custom_headers: [{ name: "X-Fall", value, secret }] }
+      });
+    const steps = (last: ReturnType<typeof makeStep>) => [
+      makeStep(1, { user_description: "Sammanfatta" }),
+      makeStep(2, { input_source: "flow_input" }),
+      last
+    ];
+    expect(orders(steps(withHeader("{{Sammanfatta}}")), 0)).toEqual([3]);
+    expect(orders(steps(withHeader("{{step_1.output.text}}")), 0)).toEqual([3]);
+    // The result it sends is not a read: the step before it is not counted.
+    expect(orders(steps(withHeader("{{Sammanfatta}}")), 1)).toEqual([]);
+    // In its headers the previous step is its own result, as the core resolves it.
+    expect(orders(steps(withHeader("{{föregående_steg}}")), 1)).toEqual([]);
+    // A secret header's value is never read.
+    expect(orders(steps(withHeader("{{Sammanfatta}}", true)), 0)).toEqual([]);
+    // The removal check finds the same reader.
+    const named = steps(withHeader("{{Sammanfatta}}"));
+    expect(stepReaders(named[0]!, named).map((step) => step.step_order)).toEqual([3]);
+  });
+
+  it("does not count a header row without a name, which the core does not send", () => {
+    const config = sender(2).output_config as Record<string, unknown>;
+    for (const name of ["", "  "]) {
+      const last = makeStep(2, {
+        output_mode: "http_post",
+        output_config: { ...config, custom_headers: [{ name, value: "{{Sammanfatta}}" }] }
+      });
+      expect(orders([makeStep(1, { user_description: "Sammanfatta" }), last], 0)).toEqual([]);
+    }
+  });
+
+  it("leaves the removal check to named reads", () => {
+    const steps = [makeStep(1), makeStep(2)];
+    expect(orders(steps, 0)).toEqual([2]);
+    expect(stepReaders(steps[0]!, steps)).toEqual([]);
+  });
 });
 
 describe("step orders", () => {
@@ -201,6 +340,31 @@ describe("prompt reads", () => {
     ]);
     expect(stepReaders(steps[1]!, steps, prompts)).toEqual([steps[2]]);
     expect(stepReaders(steps[1]!, steps)).toEqual([]);
+  });
+
+  it("leaves out the prompt of a Word step that shares an assistant with a model step", () => {
+    // Prompts are keyed by assistant: the Word step would find the model step's prompt.
+    const shared = [
+      makeStep(1),
+      makeStep(2, { assistant_id: "assistant-shared" }),
+      makeStep(3, {
+        assistant_id: "assistant-shared",
+        output_mode: "template_fill",
+        output_type: "docx",
+        output_config: {
+          placeholders: ["granskning"],
+          bindings: { granskning: "{{step_2.output.text}}" }
+        }
+      })
+    ];
+    const sharedPrompts = new Map([["assistant-shared", "Granska {{step_1.output.text}}."]]);
+    // The core never calls a Word step's assistant: only its field is read.
+    expect(stepReads(shared[2]!, shared, sharedPrompts)).toEqual([
+      { kind: "step", order: 2, step: shared[1] }
+    ]);
+    expect(stepReaders(shared[0]!, shared, sharedPrompts)).toEqual([shared[1]]);
+    // Leverans counts no prompt, so it never named the Word step.
+    expect(stepReadersByNameOrPlace(shared[0]!, shared)).toEqual([shared[1]]);
   });
 });
 

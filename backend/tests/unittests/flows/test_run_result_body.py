@@ -49,7 +49,7 @@ def _file(content: bytes = CONTENT, **overrides: object) -> FlowRunStepResultFil
         "file_id": uuid4(),
         "ordinal": 0,
         "source": "declared_artifact",
-        "name": "Startsidan.docx",
+        "name": "Webbplatsen.docx",
         "checksum": hashlib.sha256(content).hexdigest(),
         "size": len(content),
         "mimetype": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -65,7 +65,7 @@ def _deliverable(*files: FlowRunStepResultFile) -> FlowRunDeliverablePublic:
         kind="artifact",
         step_id=files[0].step_id if files else uuid4(),
         step_order=1,
-        label="Startsidan",
+        label="Webbplatsen",
         output_type=FlowOutputType.DOCX,
         files=list(files),
     )
@@ -104,12 +104,12 @@ def test_each_deliverable_file_is_sent_with_its_bytes_and_checksum() -> None:
                 "kind": "artifact",
                 "step_id": str(deliverable.step_id),
                 "step_order": 1,
-                "label": "Startsidan",
+                "label": "Webbplatsen",
                 "output_type": "docx",
                 "files": [
                     {
                         "file_id": str(file.file_id),
-                        "name": "Startsidan.docx",
+                        "name": "Webbplatsen.docx",
                         "mimetype": file.mimetype,
                         "size": len(CONTENT),
                         "checksum": hashlib.sha256(CONTENT).hexdigest(),

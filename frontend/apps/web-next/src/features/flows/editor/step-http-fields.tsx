@@ -515,6 +515,8 @@ export function HttpFields({
               ? t("flow_step_editor_http_url_run_result_description")
               : t("flow_step_editor_http_url_description")
           }
+          // A phone's keyboard for addresses; the form checks the address itself (noValidate).
+          type="url"
           value={config.url}
           onChange={(next) => onChange({ ...config, url: next })}
           onBlur={() => setShowUrlProblem(true)}

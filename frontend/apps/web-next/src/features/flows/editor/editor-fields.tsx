@@ -2,7 +2,7 @@ import { DropdownMenu, type DropdownMenuOption } from "@astryxdesign/core/Dropdo
 import { Heading, Text } from "@astryxdesign/core/Text";
 import { Braces } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { createContext, useContext } from "react";
+import { createContext, useContext, useLayoutEffect, useRef, type FocusEvent } from "react";
 import type { FieldAnchor } from "./field-problems";
 import { variableEntryLabel, variableGroupTitle } from "./step-labels";
 import type { FlowPublic } from "./step-types";
@@ -19,6 +19,43 @@ export const TemplateScope = createContext<{
   flow: Pick<FlowPublic, "steps" | "metadata_json">;
   stepOrder: number;
 } | null>(null);
+
+/**
+ * Hands focus to `target` when the controls these handlers are on go away
+ * (`gone` turns true) while one of them has focus: a newer version of the
+ * flow can take them away with nothing clicked, and focus would be left on
+ * the page. Focus that has moved on, or a control that stays, is left alone.
+ */
+export function useFocusHandoff(gone: boolean, target: () => HTMLElement | null | undefined) {
+  // Whether focus was last inside: a control taken away sends no blur that names where focus went.
+  const inside = useRef(false);
+  useLayoutEffect(() => {
+    if (!gone || !inside.current) return;
+    inside.current = false;
+    const active = document.activeElement;
+    if (!active || active === document.body || !active.isConnected) target()?.focus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only the change of `gone` counts; `target` is read then
+  }, [gone]);
+  return {
+    onFocus: () => {
+      inside.current = true;
+    },
+    onBlur: (event: FocusEvent<HTMLElement>) => {
+      const next = event.relatedTarget;
+      if (next) {
+        if (!event.currentTarget.contains(next)) inside.current = false;
+        return;
+      }
+      // Focus went nowhere: the author clicked empty space, or the control was
+      // taken away (some browsers blur it then). Only a control still there
+      // was left; a removed one is the handoff's, which has run by then.
+      const left = event.target;
+      queueMicrotask(() => {
+        if (left.isConnected) inside.current = false;
+      });
+    }
+  };
+}
 
 /** The status an Astryx field takes for a problem, or none. */
 export function problemStatus(message: string | null | undefined) {
@@ -75,17 +112,29 @@ export function EditorSection({
   id,
   title,
   description,
+  isFocusTarget = false,
   children
 }: {
   id: string;
   title: string;
   description?: string;
+  /** The heading can take focus (`id`), for a change that leaves nothing else to focus. */
+  isFocusTarget?: boolean;
   children: React.ReactNode;
 }) {
   return (
     <section aria-labelledby={id} className="border-ax-border flex flex-col gap-4 border-t pt-5">
       <div className="flex flex-col gap-1">
-        <Heading level={3} id={id}>
+        <Heading
+          level={3}
+          id={id}
+          tabIndex={isFocusTarget ? -1 : undefined}
+          className={
+            isFocusTarget
+              ? "focus-visible:outline-ring rounded-ax-inner focus-visible:outline-2 focus-visible:outline-offset-2"
+              : undefined
+          }
+        >
           {title}
         </Heading>
         {description && (

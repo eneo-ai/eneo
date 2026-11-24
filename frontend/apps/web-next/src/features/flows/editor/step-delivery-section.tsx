@@ -1,0 +1,403 @@
+import { Button } from "@astryxdesign/core/Button";
+import { HStack } from "@astryxdesign/core/HStack";
+import { Switch } from "@astryxdesign/core/Switch";
+import { Text } from "@astryxdesign/core/Text";
+import { VStack } from "@astryxdesign/core/VStack";
+import { ArrowRight, Send } from "lucide-react";
+import { useFormatter, useTranslations } from "use-intl";
+import { useId, useRef, useState, type RefObject } from "react";
+import { flushSync } from "react-dom";
+import { TextInput } from "@/components/astryx/text-input";
+import { StatusLabel } from "@/components/composites/status-label";
+import { flowDeliverables, type DeliverablePlace } from "../flow-deliverables";
+import { formFieldsOf as formFieldDrafts } from "../flow-form-fields";
+import { senderReads, stepReadersByNameOrPlace } from "../flow-steps";
+import {
+  Anchor,
+  EditorSection,
+  focusAnchor,
+  problemStatus,
+  useFocusHandoff,
+  VariablePicker
+} from "./editor-fields";
+import type { FieldProblems } from "./field-problems";
+import {
+  oneLineStart,
+  readDeliverable,
+  runResultHost,
+  stepDeliversArtifact,
+  withDeliverable,
+  withTidyDeliverable
+} from "./step-configs";
+import { stepLabel } from "./step-labels";
+import type { FlowPublic, FlowStep, StepConfig, StepDeliverable } from "./step-types";
+import { insertToken, type VariableGroup } from "./step-variables";
+
+/**
+ * The form fields a file name can read: not the run's day, which every
+ * generated name carries already. The core decides the rest (a sensitive
+ * field name is refused on publishing).
+ */
+function fileNameGroups(flow: FlowPublic, groups: VariableGroup[]): VariableGroup[] {
+  const runDate = new Set(
+    formFieldDrafts(flow.metadata_json)
+      .filter((field) => field.role === "run_date")
+      .map((field) => `flow_input.${field.name}`)
+  );
+  return groups.flatMap((group) => {
+    if (group.type !== "fields") return [];
+    const entries = group.entries.filter((entry) => !runDate.has(entry.token));
+    return entries.length > 0 ? [{ ...group, entries }] : [];
+  });
+}
+
+/**
+ * Whether the step's text or document is one of the run's results, under
+ * which name and, for a document, which file name. The step the run delivers
+ * by its place (last, or right before the step that sends the run's result)
+ * is included unmarked and named after the step; "Behåll" marks it so it
+ * stays when the order changes. Any other step is included when its switch
+ * is on.
+ */
+function DeliverableFields({
+  formId,
+  flow,
+  place,
+  draft,
+  groups,
+  onChange,
+  problems,
+  root,
+  handoff
+}: {
+  formId: string;
+  flow: FlowPublic;
+  /** Where the step is delivered by its place; null shows the switch, its own mark alone. */
+  place: DeliverablePlace | null;
+  draft: StepConfig;
+  groups: VariableGroup[];
+  onChange: (next: StepConfig) => void;
+  problems: FieldProblems;
+  /** The fields' root, where the switch is found. */
+  root: RefObject<HTMLElement | null>;
+  /** Hands focus on, should a newer version take the focused control away. */
+  handoff: ReturnType<typeof useFocusHandoff>;
+}) {
+  const t = useTranslations();
+  // The fields of a step included by its place, opened without a change yet: nothing is marked.
+  const [customising, setCustomising] = useState(false);
+  const keepId = useId();
+  const resetId = useId();
+  const deliverable = readDeliverable(draft.output_config);
+  const isDocument = stepDeliversArtifact(draft);
+  // What the step is named in the result until the author names it.
+  const stepName = oneLineStart(draft.user_description ?? "");
+  const shown = deliverable ?? (place && customising ? { label: stepName } : null);
+  const set = (next: StepDeliverable | null) =>
+    onChange({ ...draft, output_config: withDeliverable(draft.output_config, next) });
+  /** Names typed with stray spaces are made one line when the field is left. */
+  const tidy = () => {
+    const output_config = withTidyDeliverable(draft.output_config) as StepConfig["output_config"];
+    if (output_config !== draft.output_config) onChange({ ...draft, output_config });
+  };
+  /**
+   * Marks the step, under a name typed already or else the step's; focus goes
+   * to the button that takes the mark away.
+   */
+  const keep = () => {
+    flushSync(() => {
+      setCustomising(false);
+      set(deliverable ?? { label: stepName });
+    });
+    document.getElementById(resetId)?.focus();
+  };
+
+  const fields = shown && (
+    <>
+      <Anchor formId={formId} anchor="output_config.deliverable.label">
+        <TextInput
+          label={t("flow_step_editor_deliverable_label")}
+          description={t("flow_step_editor_deliverable_label_description")}
+          value={shown.label}
+          onChange={(label) => set({ ...shown, label })}
+          onBlur={tidy}
+          isRequired
+          autoComplete="off"
+          width="100%"
+          status={problemStatus(problems["output_config.deliverable.label"])}
+        />
+      </Anchor>
+      {isDocument && (
+        <Anchor formId={formId} anchor="output_config.deliverable.file_name">
+          <VStack gap={2} align="start">
+            <TextInput
+              label={t("flow_step_editor_deliverable_file_name")}
+              description={t("flow_step_editor_deliverable_file_name_description")}
+              value={shown.file_name ?? ""}
+              onChange={(file_name) => set({ ...shown, file_name })}
+              onBlur={tidy}
+              isOptional
+              autoComplete="off"
+              width="100%"
+              status={problemStatus(problems["output_config.deliverable.file_name"])}
+            />
+            <VariablePicker
+              groups={fileNameGroups(flow, groups)}
+              label={t("flow_step_editor_deliverable_insert_field")}
+              onInsert={(token) =>
+                set({ ...shown, file_name: insertToken(shown.file_name ?? "", token, null).text })
+              }
+            />
+          </VStack>
+        </Anchor>
+      )}
+    </>
+  );
+
+  if (!place) {
+    return (
+      <VStack gap={4} ref={root} {...handoff}>
+        <Switch
+          label={t("flow_step_editor_deliverable_switch")}
+          description={t("flow_step_editor_deliverable_switch_description")}
+          value={deliverable !== null}
+          onChange={(on) => set(on ? { label: stepName } : null)}
+        />
+        {fields}
+      </VStack>
+    );
+  }
+
+  // A marked step whose own names differ from the step's: taking the mark away resets them.
+  const named = deliverable !== null && (deliverable.label !== stepName || !!deliverable.file_name);
+  return (
+    <VStack gap={4} ref={root} {...handoff}>
+      <VStack gap={1}>
+        <StatusLabel status="success" label={t("flow_step_editor_deliverable_included")} />
+        <Text type="supporting" size="sm" as="p" display="block" className="m-0 max-w-prose">
+          {deliverable
+            ? t("flow_step_editor_deliverable_kept")
+            : t(`flow_step_editor_deliverable_place_${place}`)}
+        </Text>
+      </VStack>
+      {/* Below the field: the first letter typed marks the step, and the row
+          goes then without moving the field under the cursor. */}
+      {fields}
+      {!deliverable && (
+        <HStack gap={2} wrap="wrap">
+          <Button
+            id={keepId}
+            label={t("flow_step_editor_deliverable_keep")}
+            size="sm"
+            variant="secondary"
+            onClick={keep}
+          />
+          {!customising && (
+            <Button
+              label={t(
+                isDocument
+                  ? "flow_step_editor_deliverable_customise"
+                  : "flow_step_editor_deliverable_customise_text"
+              )}
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                // The button goes; focus moves to the field it opened.
+                flushSync(() => setCustomising(true));
+                focusAnchor(formId, "output_config.deliverable.label");
+              }}
+            />
+          )}
+        </HStack>
+      )}
+      {deliverable && (
+        <VStack gap={2} align="start">
+          <Text type="supporting" size="sm" as="p" display="block" className="m-0 max-w-prose">
+            {named
+              ? t(
+                  `flow_step_editor_deliverable_reset_named_${isDocument ? "document" : "text"}_${place}`
+                )
+              : t(`flow_step_editor_deliverable_reset_${place}`)}
+          </Text>
+          <Button
+            id={resetId}
+            label={t("flow_step_editor_deliverable_reset")}
+            size="sm"
+            variant="secondary"
+            onClick={() => {
+              flushSync(() => {
+                setCustomising(false);
+                set(null);
+              });
+              document.getElementById(keepId)?.focus();
+            }}
+          />
+        </VStack>
+      )}
+    </VStack>
+  );
+}
+
+/** A line's icon, on the first line of its text however the text wraps. */
+const ICON = "text-ax-text-secondary mt-0.5 size-4 shrink-0";
+
+/**
+ * Where a text or document step's result goes: which later steps read it,
+ * whether it is one of the run's results (and under which names), and
+ * whether the step that sends the run's result sends it. Readers come from
+ * the saved flow the form shows; whether it is included is read with the
+ * step's draft in place. While the form holds edits on an older version than
+ * the newest (`olderVersion`), the section shows only the step's own fields:
+ * the readers, the step's place and the step that sends come from the form's
+ * version, which the newest may have moved or removed.
+ */
+export function StepDeliverySection({
+  formId,
+  sectionId,
+  flow,
+  stepId,
+  draft,
+  groups,
+  onChange,
+  problems,
+  dirty,
+  olderVersion,
+  onGoStep
+}: {
+  formId: string;
+  sectionId: string;
+  flow: FlowPublic;
+  stepId: string;
+  draft: StepConfig;
+  groups: VariableGroup[];
+  onChange: (next: StepConfig) => void;
+  problems: FieldProblems;
+  /** The step has unsaved changes, which the step that sends does not show yet. */
+  dirty: boolean;
+  /**
+   * The form holds unsaved edits on an older version of the flow than the
+   * newest, as the banner about a newer version says. What the section would
+   * take from the other steps (a reader, the step's place, the step that
+   * sends and its receiver) can be gone or moved in the newest, so none of it
+   * is shown until a reload or a save.
+   */
+  olderVersion: boolean;
+  /** Opens another step of the flow; absent, the step that sends is not offered. */
+  onGoStep?: (stepId: string) => void;
+}) {
+  const t = useTranslations();
+  const format = useFormatter();
+  const run = flowDeliverables(
+    flow.steps.map((step) => (step.id === stepId ? { ...step, ...draft } : step))
+  );
+  const included = run.deliverables.some((step) => step.id === stepId);
+  // A newer version takes the place's controls and the button to the step
+  // that sends with it: focus on one of them goes to the switch, which stays.
+  const fieldsRoot = useRef<HTMLElement>(null);
+  const handoff = useFocusHandoff(olderVersion, () =>
+    fieldsRoot.current?.querySelector<HTMLElement>('[role="switch"]')
+  );
+  // On an older version, the step shows its own mark, not a place it may no longer hold.
+  const place = !olderVersion && run.byPlace?.step.id === stepId ? run.byPlace.place : null;
+  // Readers come from the flow's saved fields, as the form shows it: a later
+  // step names this step as saved, and the core rewrites it when a new name is
+  // saved. A later prompt is not read here: it lives on the step's assistant,
+  // read apart from the flow, and can be from another version of it. With no
+  // reader in a saved field, no reader line is shown, so none can be wrong.
+  const self = flow.steps.find((step) => step.id === stepId);
+  const order = self?.step_order ?? 0;
+  const readers = self ? stepReadersByNameOrPlace(self, flow.steps) : [];
+  const name = (step: FlowStep) => stepLabel(step.step_order, step.user_description, t);
+  // The step that sends reads it only where its headers name it.
+  const readLine = olderVersion
+    ? null
+    : readers.length === 1 && readers[0]!.step_order === order + 1
+      ? t("flow_step_editor_delivery_read_next", { step: name(readers[0]!) })
+      : readers.length > 0
+        ? t("flow_step_editor_delivery_read_by", { steps: format.list(readers.map(name)) })
+        : null;
+
+  const sender = olderVersion ? null : run.sender;
+  const host = sender ? runResultHost(sender) : null;
+  const sendLine = olderVersion
+    ? null
+    : !sender
+      ? t("flow_step_editor_delivery_no_sender")
+      : !host
+        ? t("flow_step_editor_delivery_no_address")
+        : included
+          ? t("flow_step_editor_delivery_sent_to", { host })
+          : t("flow_step_editor_delivery_not_sent_to", { host });
+  // Left out of the result, the step can still be named in a header of the
+  // step that sends: the core fills headers in as it sends. With two headers
+  // of one name only the last is sent, so the line says the step is named there.
+  const headerLine =
+    sender &&
+    host &&
+    !included &&
+    senderReads(sender, flow.steps).some((read) => read.kind === "step" && read.step?.id === stepId)
+      ? t("flow_step_editor_delivery_sent_in_header", { host })
+      : null;
+  const senderId = sender?.id;
+
+  return (
+    <EditorSection
+      id={sectionId}
+      title={t("flow_step_editor_delivery_title")}
+      description={t("flow_step_editor_delivery_description")}
+    >
+      {readLine && (
+        <HStack gap={2} align="start">
+          <ArrowRight className={ICON} aria-hidden="true" />
+          <Text type="supporting" size="sm" as="p" display="block" className="m-0 max-w-prose">
+            {readLine}
+          </Text>
+        </HStack>
+      )}
+      <DeliverableFields
+        formId={formId}
+        flow={flow}
+        place={place}
+        draft={draft}
+        groups={groups}
+        onChange={onChange}
+        problems={problems}
+        root={fieldsRoot}
+        handoff={handoff}
+      />
+      {/* Whether it leaves for the receiver, and how: the header line belongs
+          to the line about the result, and the button to both. */}
+      {sendLine && (
+        <HStack gap={2} align="start">
+          <Send className={ICON} aria-hidden="true" />
+          <VStack gap={1}>
+            <Text type="supporting" size="sm" as="p" display="block" className="m-0 max-w-prose">
+              {sendLine}
+            </Text>
+            {headerLine && (
+              <Text type="supporting" size="sm" as="p" display="block" className="m-0 max-w-prose">
+                {headerLine}
+              </Text>
+            )}
+          </VStack>
+        </HStack>
+      )}
+      {senderId && onGoStep && (
+        <HStack {...handoff}>
+          <Button
+            label={t("flow_step_editor_delivery_open_sender")}
+            size="sm"
+            variant="secondary"
+            onClick={() => onGoStep(senderId)}
+          />
+        </HStack>
+      )}
+      {senderId && onGoStep && dirty && (
+        // It opens the saved flow; leaving asks first, as every other way out does.
+        <Text type="supporting" size="sm" as="p" display="block" className="m-0 max-w-prose">
+          {t("flow_step_editor_delivery_save_first")}
+        </Text>
+      )}
+    </EditorSection>
+  );
+}

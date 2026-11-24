@@ -113,7 +113,8 @@ function renderList(
   canEdit = true,
   speakerOffer: SpeakerStepOffer | null = null,
   suggestionActions: { suggestionFix?: SuggestionFix; onAskChat?: (text: string) => void } = {},
-  mayEdit = canEdit
+  mayEdit = canEdit,
+  list = steps
 ) {
   const actions = {
     onOpen: vi.fn(),
@@ -123,11 +124,11 @@ function renderList(
   };
   // The page's one FlowReferences, so references show as the chat's pills.
   const ui = (draftRevision: number) => (
-    <FlowReferences flow={makeFlow({ steps })} onShowStep={() => true}>
+    <FlowReferences flow={makeFlow({ steps: list })} onShowStep={() => true}>
       <FlowStepList
         flowId="flow-1"
         draftRevision={draftRevision}
-        steps={steps}
+        steps={list}
         canEdit={canEdit}
         mayEdit={mayEdit}
         headingRef={createRef()}
@@ -366,7 +367,105 @@ describe("FlowStepList", () => {
     fireEvent.click(screen.getByRole("button", { name: "Redigera Steg 2: Skriv svar" }));
     expect(actions.onOpen).toHaveBeenCalledWith(steps[1]);
     fireEvent.click(screen.getByRole("button", { name: "Lägg till steg" }));
-    expect(actions.onAdd).toHaveBeenCalledWith(4);
+    expect(actions.onAdd).toHaveBeenCalledWith("end");
+  });
+
+  it("adds a step before a last step that sends, and offers no step after any that sends", () => {
+    const post = (order: number, body: string) =>
+      makeStep(order, {
+        user_description: "Skicka",
+        output_mode: "http_post",
+        output_config: {
+          url: "https://mottagare.example.org/in",
+          auth: { mode: "none" },
+          body: { mode: body }
+        }
+      });
+    for (const body of ["run_result", "auto"]) {
+      const { actions } = renderList(true, null, {}, true, [steps[0]!, steps[1]!, post(3, body)]);
+      // The dialog places the end before the step that sends, on the draft it adds on.
+      fireEvent.click(screen.getByRole("button", { name: messages.flows_add_step }));
+      expect(actions.onAdd).toHaveBeenLastCalledWith("end");
+      const trigger = screen.getByRole("button", { name: "Fler åtgärder för Steg 3: Skicka" });
+      fireEvent.click(trigger);
+      const menu = document.getElementById(trigger.getAttribute("aria-controls") ?? "")!;
+      expect(
+        within(menu).queryByRole("menuitem", { name: messages.flows_step_add_after })
+      ).toBeNull();
+      fireEvent.click(within(menu).getByRole("menuitem", { name: messages.flows_step_add_before }));
+      expect(actions.onAdd).toHaveBeenLastCalledWith(3);
+      cleanup();
+    }
+  });
+
+  it("marks the run's deliverables, and says on the sending card what it sends and to whom", async () => {
+    const sender = (url: string) =>
+      makeStep(4, {
+        user_description: "Skicka",
+        input_type: "text",
+        output_mode: "http_post",
+        output_config: { url, auth: { mode: "none" }, body: { mode: "run_result" } }
+      });
+    const marked = makeStep(1, {
+      user_description: "Mötesanteckningar",
+      output_type: "text",
+      output_config: { deliverable: { label: "Mötesanteckningar" } }
+    });
+    const middle = makeStep(2, { user_description: "Sammanfatta", output_type: "text" });
+    const word = makeStep(3, {
+      user_description: "Protokoll",
+      output_type: "docx",
+      output_mode: "render_verbatim"
+    });
+    const { container } = renderList(true, null, {}, true, [
+      marked,
+      middle,
+      word,
+      sender("https://mottagare.example.org/in")
+    ]);
+    const card = (name: string) => screen.getByRole("article", { name });
+    expect(within(card("Steg 1 Mötesanteckningar")).getByText("Leverans")).toBeTruthy();
+    expect(within(card("Steg 2 Sammanfatta")).queryByText("Leverans")).toBeNull();
+    expect(within(card("Steg 3 Protokoll")).getByText("Leverans")).toBeTruthy();
+    const sending = card("Steg 4 Skicka");
+    expect(within(sending).queryByText("Leverans")).toBeNull();
+    expect(
+      within(sending).getByText("Mötesanteckningar (Text), Protokoll (Word-dokument)")
+    ).toBeTruthy();
+    expect(within(sending).getByText("mottagare.example.org")).toBeTruthy();
+    for (const row of [
+      messages.flows_step_reads,
+      messages.flows_step_takes,
+      messages.flows_step_produces
+    ]) {
+      expect(within(sending).queryByText(row)).toBeNull();
+    }
+    expect(within(sending).getByText(messages.flows_step_sends)).toBeTruthy();
+    expect(
+      within(sending).getByText(messages.flow_step_editor_run_result_receiver_title)
+    ).toBeTruthy();
+    await expectNoAxeViolations(container);
+    cleanup();
+
+    // Nothing to send and no address yet: both rows say so.
+    renderList(true, null, {}, true, [makeStep(1, { output_type: "json" }), sender("")]);
+    const empty = screen.getByRole("article", { name: "Steg 4 Skicka" });
+    expect(within(empty).getByText(messages.flows_step_sends_nothing)).toBeTruthy();
+    expect(within(empty).getByText(messages.flows_step_receiver_missing)).toBeTruthy();
+    cleanup();
+
+    // A plain request sends what it reads: its card keeps the three rows.
+    renderList(true, null, {}, true, [
+      marked,
+      makeStep(2, {
+        user_description: "Skicka",
+        output_mode: "http_post",
+        output_config: { url: "https://mottagare.example.org/in", auth: { mode: "none" } }
+      })
+    ]);
+    const plain = screen.getByRole("article", { name: "Steg 2 Skicka" });
+    expect(within(plain).getByText(messages.flows_step_reads)).toBeTruthy();
+    expect(within(plain).queryByText(messages.flows_step_sends)).toBeNull();
   });
 
   it("names the steps that read a step before it is removed", async () => {
@@ -388,6 +487,95 @@ describe("FlowStepList", () => {
     expect(actions.onOpen).toHaveBeenCalledWith(steps[2]);
     expect(actions.onRemove).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  });
+
+  it("says on the sending card which step its headers read, apart from what it sends, as the removal check does", async () => {
+    const list = [
+      makeStep(1, { user_description: "Sammanfatta", output_type: "text" }),
+      makeStep(2, { user_description: "Granska", input_source: "flow_input" }),
+      makeStep(3, {
+        user_description: "Skicka",
+        output_mode: "http_post",
+        output_config: {
+          url: "https://mottagare.example.org/in",
+          auth: { mode: "none" },
+          body: { mode: "run_result" },
+          custom_headers: [{ name: "X-Fall", value: "{{Sammanfatta}}", secret: false }]
+        }
+      })
+    ];
+    renderList(true, null, {}, true, list);
+    const sending = screen.getByRole("article", { name: "Steg 3 Skicka" });
+    expect(within(sending).getByText(messages.flows_step_reads)).toBeTruthy();
+    expect(within(sending).getByText("Steg 1: Sammanfatta")).toBeTruthy();
+    // What it sends is its own row: the last working step, not the step it reads.
+    expect(within(sending).getByText(messages.flows_step_sends)).toBeTruthy();
+    expect(within(sending).getByText("Granska (Text)")).toBeTruthy();
+
+    const trigger = screen.getByRole("button", { name: "Fler åtgärder för Steg 1: Sammanfatta" });
+    fireEvent.click(trigger);
+    const menu = document.getElementById(trigger.getAttribute("aria-controls") ?? "")!;
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Ta bort steg" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "Ta bort steget?" });
+    expect(
+      within(dialog).getByText(
+        "Steg 3: Skicka läser Steg 1: Sammanfatta. Ändra först vad som läses där, sedan går steget att ta bort."
+      )
+    ).toBeTruthy();
+    cleanup();
+
+    // In its headers the previous step is its own result: no read of Steg 2.
+    const config = list[2]!.output_config as Record<string, unknown>;
+    renderList(true, null, {}, true, [
+      list[0]!,
+      list[1]!,
+      makeStep(3, {
+        user_description: "Skicka",
+        output_mode: "http_post",
+        output_config: {
+          ...config,
+          custom_headers: [{ name: "X-Fall", value: "{{föregående_steg}}", secret: false }]
+        }
+      })
+    ]);
+    const previous = screen.getByRole("article", { name: "Steg 3 Skicka" });
+    expect(within(previous).queryByText(messages.flows_step_reads)).toBeNull();
+  });
+
+  it("says on the sending card that its headers read run input, once however many do", () => {
+    const sending = (headers: string[]) =>
+      makeStep(2, {
+        user_description: "Skicka",
+        output_mode: "http_post",
+        output_config: {
+          url: "https://mottagare.example.org/in",
+          auth: { mode: "none" },
+          body: { mode: "run_result" },
+          custom_headers: headers.map((value, index) => ({
+            name: `X-Fall-${index}`,
+            value,
+            secret: false
+          }))
+        }
+      });
+    const first = makeStep(1, { user_description: "Sammanfatta", output_type: "text" });
+    const card = () => screen.getByRole("article", { name: "Steg 2 Skicka" });
+
+    for (const headers of [
+      ["{{ flow_input.case_id }}"],
+      ["{{ flow_input.case_id }}", "{{flow_input.team}}"]
+    ]) {
+      renderList(true, null, {}, true, [first, sending(headers)]);
+      expect(within(card()).getByText(messages.flows_step_reads)).toBeTruthy();
+      expect(within(card()).getAllByText(messages.flows_read_flow_input)).toHaveLength(1);
+      // What it sends stays its own row.
+      expect(within(card()).getByText(messages.flows_step_sends)).toBeTruthy();
+      cleanup();
+    }
+
+    // The result it sends on its own is no read.
+    renderList(true, null, {}, true, [first, sending([])]);
+    expect(within(card()).queryByText(messages.flows_step_reads)).toBeNull();
   });
 
   it("folds each step's suggestions into one quiet row with their count", async () => {

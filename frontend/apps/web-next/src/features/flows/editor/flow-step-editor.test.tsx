@@ -86,7 +86,7 @@ function renderEditor(
     suggestionDismissal?: SuggestionDismissal;
     suggestionRuns?: number;
     navigation?: StepNavigation;
-    onAddStep?: (position: number) => void;
+    onStepAdded?: (flow: FlowPublic) => void;
     /** The step assistant as the step list already read it. */
     cachedAssistant?: ReturnType<typeof makeAssistant>;
     stepId?: string;
@@ -114,11 +114,11 @@ function renderEditor(
       suggestionDismissal={overrides.suggestionDismissal}
       suggestionRuns={overrides.suggestionRuns}
       navigation={overrides.navigation}
-      onAddStep={overrides.onAddStep}
+      onStepAdded={overrides.onStepAdded}
     />,
     { queryClient }
   );
-  return { ...view, onSaved, onCancel };
+  return { ...view, onSaved, onCancel, queryClient };
 }
 
 function httpFlow(auth: Record<string, unknown> = { mode: "none" }) {
@@ -350,7 +350,7 @@ describe("FlowStepEditor", () => {
     await expectNoAxeViolations(container);
   }, 20_000);
 
-  it("keeps the classification of the step that sends the run's result, without a review", async () => {
+  it("keeps the classification of the step that sends the run's result, headed without review", async () => {
     const space = makeSpace({
       overrides: {
         security_classification: {
@@ -379,25 +379,30 @@ describe("FlowStepEditor", () => {
     expect(
       await screen.findByRole("heading", {
         level: 3,
-        name: messages.flow_step_editor_control_title
+        name: messages.flows_classification_heading
       })
     ).toBeTruthy();
+    expect(
+      screen.queryByRole("heading", { level: 3, name: messages.flow_step_editor_control_title })
+    ).toBeNull();
     expect(
       screen.queryByRole("radiogroup", { name: new RegExp(messages.flow_step_review_policy) })
     ).toBeNull();
   }, 20_000);
 
-  it("shows an AI step's task, input, result and control as labelled sections", async () => {
+  it("shows an AI step's task, input, result, delivery and control as labelled sections", async () => {
     const { container } = renderEditor(makeFlow());
     await nameField();
-    for (const heading of [
+    // In this order: where the result goes comes right after what it is.
+    expect(
+      screen.getAllByRole("heading", { level: 3 }).map((heading) => heading.textContent)
+    ).toEqual([
       messages.flow_step_editor_ai_title,
       messages.flow_step_editor_input_title,
       messages.flow_step_editor_output_title,
+      messages.flow_step_editor_delivery_title,
       messages.flow_step_editor_control_title
-    ]) {
-      expect(screen.getByRole("heading", { level: 3, name: heading })).toBeTruthy();
-    }
+    ]);
     expect(
       screen.getByRole("region", { name: messages.flow_step_editor_advanced_title })
     ).toBeTruthy();
@@ -799,6 +804,30 @@ describe("FlowStepEditor", () => {
     fireEvent.click(within(bar).getByRole("button", { name: "Alla steg" }));
     expect(onCancel).toHaveBeenCalledTimes(1);
     await expectNoAxeViolations(container);
+  });
+
+  it("keeps the arrows together, and the save beside the way out, when a narrow bar wraps", async () => {
+    renderEditor(makeFlow(), {
+      navigation: {
+        position: 1,
+        count: 2,
+        previous: null,
+        next: { id: "step-2", name: "Skriv svar" },
+        steps: [],
+        onGo: vi.fn()
+      }
+    });
+    await nameField();
+    // A wrapping row moves groups, not their buttons: each pair is one group.
+    const bar = screen.getByRole("navigation", { name: "Stegen" });
+    const previous = within(bar).getByRole("button", { name: "Föregående steg" });
+    const next = within(bar).getByRole("button", { name: "Nästa steg: Skriv svar" });
+    expect(previous.parentElement).toBe(next.parentElement);
+    expect(previous.parentElement).not.toBe(bar);
+    const close = screen.getByRole("button", { name: messages.close });
+    const save = screen.getByRole("button", { name: messages.flow_step_editor_save });
+    expect(close.parentElement).toBe(save.parentElement);
+    expect(close.parentElement?.textContent).not.toContain(messages.flow_step_editor_no_changes);
   });
 
   it("docks a save bar that says what is unsaved, then that the save landed", async () => {
@@ -1706,6 +1735,181 @@ describe("FlowStepEditor", () => {
     await expectNoAxeViolations(container);
   }, 20_000);
 
+  it("reads the step that sends the run's result as what it sends and to whom", async () => {
+    renderEditor(
+      makeFlow({
+        steps: [
+          makeStep({ output_mode: "compose_text" }),
+          makeStep({
+            id: "step-2",
+            step_order: 2,
+            user_description: "Skicka körningens resultat",
+            input_source: "previous_step",
+            output_mode: "http_post",
+            output_config: {
+              url: "https://hook.example.org/",
+              auth: { mode: "none" },
+              timeout_seconds: 30,
+              body: { mode: "run_result" },
+              custom_headers: [],
+              response_format: null
+            }
+          })
+        ]
+      }),
+      { readOnly: true, stepId: "step-2" }
+    );
+    expect(await screen.findByText("https://hook.example.org/")).toBeTruthy();
+    // The same sections as the editor: what is sent, and to whom.
+    expect(screen.getByText(messages.flow_step_editor_run_result_sends_title)).toBeTruthy();
+    expect(screen.getByText(messages.flow_step_editor_run_result_receiver_title)).toBeTruthy();
+    expect((await rowValue("Sammanfatta")).textContent).toBe(messages.flow_output_type_text);
+    expect(screen.queryByText(messages.flow_step_editor_run_result_empty_title)).toBeNull();
+    // Nothing the step does not use: no input, no mode or body, no review.
+    expect(screen.queryByText(messages.flow_step_editor_input_title)).toBeNull();
+    expect(screen.queryByText(messages.flow_step_output_mode)).toBeNull();
+    expect(screen.queryByText(messages.flow_step_editor_http_body)).toBeNull();
+    expect(screen.queryByText(messages.flow_step_review_policy)).toBeNull();
+    // Its classification is headed as what it is: there is no review to name.
+    expect(screen.getByText(messages.flows_classification_heading)).toBeTruthy();
+    expect(screen.queryByText(messages.flow_step_editor_control_title)).toBeNull();
+  }, 20_000);
+
+  it("shows the step that sends its timeout in the read view", async () => {
+    renderEditor(
+      makeFlow({
+        steps: [
+          makeStep({ output_mode: "compose_text" }),
+          makeStep({
+            id: "step-2",
+            step_order: 2,
+            output_mode: "http_post",
+            timeout_seconds: 120,
+            output_config: {
+              url: "https://hook.example.org/",
+              auth: { mode: "none" },
+              timeout_seconds: 30,
+              body: { mode: "run_result" },
+              custom_headers: [],
+              response_format: null
+            }
+          })
+        ]
+      }),
+      { readOnly: true, stepId: "step-2" }
+    );
+    expect((await rowValue(messages.flow_step_editor_timeout)).textContent).toBe("120 sekunder");
+  }, 20_000);
+
+  it("reads what is published, not the form's unsaved edits, once a published version arrives", async () => {
+    const sender = makeStep({
+      id: "step-send",
+      step_order: 2,
+      user_description: "Skicka körningens resultat",
+      output_mode: "http_post",
+      output_config: {
+        url: "https://hook.example.org/",
+        auth: { mode: "none" },
+        timeout_seconds: 30,
+        body: { mode: "run_result" },
+        custom_headers: [],
+        response_format: null
+      }
+    });
+    const start = makeFlow({
+      steps: [
+        makeStep({ id: "step-a", user_description: "Rapport A", output_mode: "compose_text" }),
+        sender
+      ]
+    });
+    const editor = (flow: FlowPublic) => (
+      <FlowStepEditor
+        flow={flow}
+        stepId="step-send"
+        readOnly={false}
+        onSaved={() => {}}
+        onCancel={() => {}}
+      />
+    );
+    const { rerender } = renderEditor(start, { stepId: "step-send" });
+    fireEvent.change(await screen.findByLabelText(/^Mottagarens adress/), {
+      target: { value: "https://osparad.example.org/" }
+    });
+    rerender(
+      editor(
+        makeFlow({
+          draft_revision: start.draft_revision + 1,
+          published_version: 1,
+          steps: [
+            makeStep({ id: "step-b", user_description: "Rapport B", output_mode: "compose_text" }),
+            sender
+          ]
+        })
+      )
+    );
+    await screen.findByText(messages.flow_step_editor_published);
+    expect(await screen.findByText("Rapport B")).toBeTruthy();
+    expect(screen.getByText("https://hook.example.org/")).toBeTruthy();
+    expect(screen.queryByText("Rapport A")).toBeNull();
+    expect(screen.queryByText("https://osparad.example.org/")).toBeNull();
+  }, 20_000);
+
+  it("heads the read view with the saved name, and gives the unsaved one back when unpublished", async () => {
+    const start = makeFlow();
+    const editor = (flow: FlowPublic) => (
+      <FlowStepEditor
+        flow={flow}
+        stepId="step-1"
+        readOnly={false}
+        onSaved={() => {}}
+        onCancel={() => {}}
+      />
+    );
+    const { rerender } = renderEditor(start);
+    fireEvent.change(await nameField(), { target: { value: "Osparat namn" } });
+    rerender(editor({ ...start, draft_revision: start.draft_revision + 1, published_version: 1 }));
+    await screen.findByText(messages.flow_step_editor_published);
+    expect(screen.getByRole("heading", { level: 2, name: "Sammanfatta" })).toBeTruthy();
+    expect(screen.queryByText("Osparat namn")).toBeNull();
+
+    rerender(
+      editor({ ...start, draft_revision: start.draft_revision + 2, published_version: null })
+    );
+    expect((await nameField()).value).toBe("Osparat namn");
+  }, 20_000);
+
+  it("says in the read view of a draft step that sends the run's result that it has nothing to send yet", async () => {
+    const { container } = renderEditor(
+      makeFlow({
+        steps: [
+          makeStep({ output_type: "json" }),
+          makeStep({
+            id: "step-2",
+            step_order: 2,
+            user_description: "Skicka körningens resultat",
+            input_source: "previous_step",
+            output_mode: "http_post",
+            output_config: {
+              url: "https://hook.example.org/",
+              auth: { mode: "none" },
+              timeout_seconds: 30,
+              body: { mode: "run_result" },
+              custom_headers: [],
+              response_format: null
+            }
+          })
+        ]
+      }),
+      { readOnly: true, stepId: "step-2" }
+    );
+    expect(await screen.findByText("https://hook.example.org/")).toBeTruthy();
+    expect(screen.getByText(messages.flow_step_editor_run_result_empty_title)).toBeTruthy();
+    // The text stands under the heading instead of an empty list.
+    expect(screen.getByText(messages.flow_step_editor_run_result_sends_title)).toBeTruthy();
+    const lists = [...container.querySelectorAll("dl")];
+    expect(lists.filter((list) => list.children.length === 0)).toEqual([]);
+  }, 20_000);
+
   it("folds a long instruction under Visa hela and wraps a long address anywhere", async () => {
     const prompt = "Läs ärendet noga. ".repeat(170);
     const url = `https://api.example.org/${"a".repeat(180)}`;
@@ -2135,7 +2339,7 @@ describe("FlowStepEditor deliverables", () => {
         makeStep({
           id: "step-2",
           step_order: 2,
-          user_description: "Standup för Startsidan",
+          user_description: "Standup för webbplatsen",
           input_source: "previous_step",
           output_mode: "template_fill",
           output_type: "docx",
@@ -2257,7 +2461,7 @@ describe("FlowStepEditor deliverables", () => {
 
     view = renderEditor(current(), { stepId: "step-2" });
     fireEvent.click(await deliverySwitch());
-    fireEvent.change(await labelField(), { target: { value: "Till Startsidan" } });
+    fireEvent.change(await labelField(), { target: { value: "Till webbplatsen" } });
     await saveStep();
     expect(patchBodies()[1]).toMatchObject({
       expected_revision: 5,
@@ -2265,7 +2469,7 @@ describe("FlowStepEditor deliverables", () => {
         {
           step_id: "step-2",
           changes: {
-            output_config: { ...TEMPLATE_CONFIG, deliverable: { label: "Till Startsidan" } }
+            output_config: { ...TEMPLATE_CONFIG, deliverable: { label: "Till webbplatsen" } }
           }
         }
       ]
@@ -2287,7 +2491,7 @@ describe("FlowStepEditor deliverables", () => {
 
     view = renderEditor(current(), { stepId: "step-2" });
     const second = await deliverySwitch();
-    expect((await labelField()).value).toBe("Till Startsidan");
+    expect((await labelField()).value).toBe("Till webbplatsen");
     fireEvent.click(second);
     await waitFor(() =>
       expect(
@@ -2368,6 +2572,80 @@ describe("FlowStepEditor deliverables", () => {
       deliverable: { label: "Protokoll till nämnden" }
     });
   }, 30_000);
+
+  it("undoes the choice with a button that says so", async () => {
+    renderEditor(
+      makeFlow({
+        steps: [
+          makeStep({
+            user_description: "Protokoll",
+            output_mode: "render_verbatim",
+            output_type: "pdf",
+            output_config: { deliverable: { label: "Protokoll" } }
+          })
+        ]
+      })
+    );
+    expect(await screen.findByRole("button", { name: "Ångra valet" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Ta bort valet" })).toBeNull();
+  }, 20_000);
+
+  it("keeps the name field where it is on the first keystroke after opening it", async () => {
+    renderEditor(
+      makeFlow({
+        steps: [
+          makeStep({
+            user_description: "Protokoll",
+            output_mode: "render_verbatim",
+            output_type: "pdf"
+          })
+        ]
+      })
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: messages.flow_step_editor_deliverable_customise })
+    );
+    const label = await labelField();
+    // Every button above the field: none may come or go while the name is typed.
+    const above = () =>
+      screen
+        .getAllByRole("button")
+        .filter(
+          (button) => button.compareDocumentPosition(label) & Node.DOCUMENT_POSITION_FOLLOWING
+        );
+    const before = above();
+    fireEvent.change(label, { target: { value: "Protokoll till nämnden" } });
+    expect(document.activeElement).toBe(label);
+    const after = above();
+    expect(after).toHaveLength(before.length);
+    after.forEach((button, index) => expect(button).toBe(before[index]));
+  }, 20_000);
+
+  it("offers no Behåll once a name is typed: the name marks the step, and Ångra valet takes it back", async () => {
+    renderEditor(
+      makeFlow({
+        steps: [
+          makeStep({
+            user_description: "Protokoll",
+            output_mode: "render_verbatim",
+            output_type: "pdf"
+          })
+        ]
+      })
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: messages.flow_step_editor_deliverable_customise })
+    );
+    const label = await labelField();
+    fireEvent.change(label, { target: { value: "P" } });
+    expect(
+      screen.queryByRole("button", { name: messages.flow_step_editor_deliverable_keep })
+    ).toBeNull();
+    expect(
+      screen.getByRole("button", { name: messages.flow_step_editor_deliverable_reset })
+    ).toBeTruthy();
+    expect(document.activeElement).toBe(label);
+  }, 20_000);
 
   it("names a text step by its place right before the step that sends, without a file name", async () => {
     renderEditor(
@@ -2461,6 +2739,35 @@ describe("FlowStepEditor deliverables", () => {
     expect(patchBodies()).toHaveLength(1);
   }, 20_000);
 
+  // The same labels as the core's own test (test_flow_validators.py, a deliverable
+  // label with braces), so the editor refuses what the core would refuse on save.
+  it.each<[string, boolean]>([
+    ["Report {{ flow_input.text }}", false],
+    ["Report {{", false],
+    ["Report }}", false],
+    ["Rapport: vecka 47 (utkast) – 50 %", true]
+  ])(
+    "holds the label %j to the core's rule on braces (saved: %s)",
+    async (value, saved) => {
+      const error =
+        "Namnet visas som det står och kan inte innehålla {{ eller }}. Skriv det som vanlig text.";
+      api.routes[EDITOR] = () => ({ body: makeFlow({ draft_revision: 5 }) });
+      renderEditor(deliveryFlow());
+      fireEvent.click(await deliverySwitch());
+      fireEvent.change(await labelField(), { target: { value } });
+      fireEvent.click(screen.getByRole("button", { name: messages.flow_step_editor_save }));
+      if (saved) {
+        await waitFor(() => expect(patchBodies()).toHaveLength(1));
+        expect(screen.queryByText(error)).toBeNull();
+        return;
+      }
+      expect(await screen.findByText(error)).toBeTruthy();
+      expect(document.activeElement).toBe(await labelField());
+      expect(patchBodies()).toHaveLength(0);
+    },
+    20_000
+  );
+
   it.each([
     {
       form: "the field the refusal names",
@@ -2507,7 +2814,7 @@ describe("FlowStepEditor deliverables", () => {
       api.routes[EDITOR] = () => answer;
       renderEditor(deliveryFlow(), { stepId: "step-2" });
       fireEvent.click(await deliverySwitch());
-      fireEvent.change(await labelField(), { target: { value: "Till Startsidan" } });
+      fireEvent.change(await labelField(), { target: { value: "Till webbplatsen" } });
       fireEvent.change(fileNameField(), { target: { value: "Standup {{flow_input.saknas}}" } });
       fireEvent.click(screen.getByRole("button", { name: messages.flow_step_editor_save }));
       await waitFor(() => expect(document.activeElement).toBe(fileNameField()));
@@ -2719,7 +3026,7 @@ describe("FlowStepEditor deliverables", () => {
   /** A marked document, then a step that sends its call last. */
   function resultFlow(
     http: Record<string, unknown>,
-    deliverable: unknown = { label: "Till Startsidan" }
+    deliverable: unknown = { label: "Till webbplatsen" }
   ) {
     return makeFlow({
       steps: [
@@ -2732,7 +3039,7 @@ describe("FlowStepEditor deliverables", () => {
         makeStep({
           id: "step-2",
           step_order: 2,
-          user_description: "Skicka till Startsidan",
+          user_description: "Skicka till webbplatsen",
           input_source: "previous_step",
           output_mode: "http_post",
           output_config: {
@@ -2782,7 +3089,32 @@ describe("FlowStepEditor deliverables", () => {
       name: messages.flow_step_editor_run_result_sends_title
     });
     expect(within(sends).getByText("Protokoll")).toBeTruthy();
-    expect(within(sends).getByText(messages.flow_output_type_docx)).toBeTruthy();
+    expect(within(sends).getByText("Steg 1 · Word-dokument")).toBeTruthy();
+  }, 20_000);
+
+  it("opens a step it sends from the row, with a short button whose name starts the same", async () => {
+    const onGo = vi.fn();
+    renderEditor(resultFlow({ body: { mode: "run_result" } }), {
+      stepId: "step-2",
+      navigation: { position: 2, count: 2, previous: null, next: null, steps: [], onGo }
+    });
+    const sends = await screen.findByRole("region", {
+      name: messages.flow_step_editor_run_result_sends_title
+    });
+    const row = within(sends).getByRole("listitem");
+    expect(within(row).getByText("Till webbplatsen")).toBeTruthy();
+    expect(within(row).getByText("Steg 1 · Word-dokument")).toBeTruthy();
+    // The visible word begins the name a voice user says (WCAG 2.5.3).
+    const open = within(row).getByRole("button", { name: "Öppna steg 1 – Protokoll" });
+    expect(open.textContent).toBe("Öppna");
+    // No tooltip to cover the row above it.
+    expect(
+      screen
+        .queryAllByRole("tooltip", { hidden: true })
+        .filter((tooltip) => tooltip.textContent?.includes("Protokoll"))
+    ).toEqual([]);
+    fireEvent.click(open);
+    expect(onGo).toHaveBeenCalledWith("step-1");
   }, 20_000);
 
   /** Text, then JSON (or only JSON), then the step that sends: nothing is sent. */
@@ -2840,13 +3172,15 @@ describe("FlowStepEditor deliverables", () => {
   }, 20_000);
 
   it("offers to add a step before the send when no step before it can be included", async () => {
-    const onAddStep = vi.fn();
-    renderEditor(nothingFlow(false), { stepId: "step-send", onAddStep });
+    renderEditor(nothingFlow(false), { stepId: "step-send", onStepAdded: vi.fn() });
     expect(await screen.findByText(messages.flow_step_editor_run_result_empty_none)).toBeTruthy();
     fireEvent.click(
       screen.getByRole("button", { name: messages.flow_step_editor_run_result_add_before })
     );
-    expect(onAddStep).toHaveBeenCalledWith(2);
+    const dialog = await screen.findByRole("dialog", { name: messages.flow_step_editor_add_title });
+    expect(
+      within(dialog).getByText("Hamnar efter Steg 1: Plocka ut, före Steg 2: Skicka")
+    ).toBeTruthy();
   }, 20_000);
 
   it("names the steps that could be included too, under what is sent", async () => {
@@ -2877,14 +3211,18 @@ describe("FlowStepEditor deliverables", () => {
     );
     fireEvent.change(await nameField(), { target: { value: "Skicka resultatet" } });
     fireEvent.click(screen.getByRole("button", { name: messages.flow_step_editor_save }));
+    // What is wrong first: the scheme, then the variables.
     expect(
-      await screen.findByText(messages.flow_step_editor_http_run_result_url_fixed)
+      await screen.findByText(
+        "Adressen ska börja med https:// och får inte innehålla variabler. Körningens data får inte välja vart resultatet skickas."
+      )
     ).toBeTruthy();
-    expect(document.activeElement).toBe(
-      screen.getByRole("textbox", {
-        name: new RegExp(`^${messages.flow_step_editor_http_url_run_result}`)
-      })
-    );
+    const address = screen.getByRole("textbox", {
+      name: new RegExp(`^${messages.flow_step_editor_http_url_run_result}`)
+    }) as HTMLInputElement;
+    expect(document.activeElement).toBe(address);
+    // A phone shows the keyboard for addresses; the form checks the address itself.
+    expect(address.type).toBe("url");
     view.unmount();
 
     view = renderEditor(
@@ -2917,6 +3255,37 @@ describe("FlowStepEditor deliverables", () => {
     ).toBeTruthy();
     expect(screen.queryByText(messages.flow_step_editor_http_url_invalid)).toBeNull();
     expect(patchBodies()).toHaveLength(0);
+  }, 20_000);
+
+  it("puts the core's refusal of a host at the address, without the https rule", async () => {
+    // What the core answers a save of the step that sends the run's result whose
+    // host it refuses (`https://a..b.example/in`, `draft_step_refusals`): no `http_error`.
+    api.routes[EDITOR] = () => ({
+      status: 400,
+      body: {
+        message:
+          "Step 2: output_config.url is not an absolute http or https URL without userinfo (HTTP_INVALID_URL).",
+        code: "typed_io_http_invalid_config",
+        context: { field: "output_config.url", issue_code: "flow_step_invalid", step_order: 2 },
+        eneo_error_code: 9000
+      }
+    });
+    renderEditor(resultFlow({ url: "https://a..b.example/in", body: { mode: "run_result" } }), {
+      stepId: "step-2"
+    });
+    fireEvent.change(await nameField(), { target: { value: "Skicka resultatet" } });
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_step_editor_save }));
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole("textbox", {
+          name: new RegExp(`^${messages.flow_step_editor_http_url_run_result}`)
+        })
+      )
+    );
+    expect(
+      screen.getAllByText(messages.flow_validation_msg_flow_step_invalid).length
+    ).toBeGreaterThan(0);
+    expect(screen.queryByText(messages.flow_step_editor_http_run_result_url_fixed)).toBeNull();
   }, 20_000);
 
   it.each([
@@ -2975,7 +3344,7 @@ describe("FlowStepEditor deliverables", () => {
             output_mode: "render_verbatim",
             output_type: "docx",
             output_config: {
-              deliverable: { label: "Till Startsidan", file_name: "Standup {{flow_input.team}}" }
+              deliverable: { label: "Till webbplatsen", file_name: "Standup {{flow_input.team}}" }
             }
           })
         ]
@@ -2983,10 +3352,369 @@ describe("FlowStepEditor deliverables", () => {
       { readOnly: true }
     );
     expect((await rowValue(messages.flow_step_editor_deliverable_label)).textContent).toBe(
-      "Till Startsidan"
+      "Till webbplatsen"
     );
     expect((await rowValue(messages.flow_step_editor_deliverable_file_name)).textContent).toBe(
       "Standup {{flow_input.team}}"
     );
   });
+});
+
+describe("FlowStepEditor Leverans", () => {
+  const RECEIVER = "https://mottagare.example.org/in";
+
+  /** Each step's assistant answered by its id, with the prompt given for it (else a plain one). */
+  function routeAssistants(prompts: Record<string, string> = {}) {
+    api.routes[ASSISTANT] = (init) => {
+      const id = (init as { params: { path: { assistant_id: string } } }).params.path.assistant_id;
+      const assistant = makeAssistant();
+      return {
+        body: makeAssistant({
+          id,
+          prompt: { ...assistant.prompt!, text: prompts[id] ?? "Gör ditt jobb." }
+        })
+      };
+    };
+  }
+
+  const sender = (order: number, url = RECEIVER) =>
+    makeStep({
+      id: `step-${order}`,
+      step_order: order,
+      assistant_id: `assistant-${order}`,
+      user_description: "Skicka",
+      input_source: "previous_step",
+      output_mode: "http_post",
+      output_config: { url, auth: { mode: "none" }, body: { mode: "run_result" } }
+    });
+  const text = (order: number, name: string, overrides: Parameters<typeof makeStep>[0] = {}) =>
+    makeStep({
+      id: `step-${order}`,
+      step_order: order,
+      assistant_id: `assistant-${order}`,
+      user_description: name,
+      input_source: order === 1 ? "flow_input" : "previous_step",
+      ...overrides
+    });
+  const word = (order: number, name: string) =>
+    text(order, name, { output_mode: "render_verbatim", output_type: "docx" });
+
+  const section = () =>
+    screen.findByRole("region", { name: messages.flow_step_editor_delivery_title });
+
+  it("names the next step that reads the result", async () => {
+    routeAssistants();
+    renderEditor(makeFlow({ steps: [text(1, "Sammanfatta"), text(2, "Skriv svar")] }));
+    expect(
+      await within(await section()).findByText("Går vidare till nästa steg: Steg 2: Skriv svar.")
+    ).toBeTruthy();
+  }, 20_000);
+
+  it("says nothing about readers when only a later prompt names the step, by alias or by name", async () => {
+    for (const prompt of ["Jämför med {{step_1}}.", "Jämför med {{Sammanfatta}}."]) {
+      routeAssistants({ "assistant-3": prompt });
+      const flow = makeFlow({
+        steps: [
+          text(1, "Sammanfatta"),
+          text(2, "Granska", { input_source: "flow_input" }),
+          text(3, "Skriv svar", { input_source: "flow_input" })
+        ]
+      });
+      const view = renderEditor(flow);
+      // The prompt is at hand, as the step list would have read it.
+      view.queryClient.setQueryData(
+        flowEditorKeys.assistant(flow.id, "assistant-3"),
+        makeAssistant({ id: "assistant-3", prompt: { ...makeAssistant().prompt!, text: prompt } })
+      );
+      const delivery = await section();
+      await within(delivery).findByRole("switch", {
+        name: new RegExp(`^${messages.flow_step_editor_deliverable_switch}`)
+      });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(within(delivery).queryByText(/^Läses av /)).toBeNull();
+      expect(within(delivery).queryByText(/^Går vidare till nästa steg/)).toBeNull();
+      expect(within(delivery).queryByText(/^Läses inte av senare steg/)).toBeNull();
+      view.unmount();
+    }
+  }, 20_000);
+
+  it("names a Word step only as a reader of the steps its fields name", async () => {
+    routeAssistants();
+    const flow = makeFlow({
+      steps: [
+        text(1, "Sammanfatta"),
+        text(2, "Granska"),
+        text(3, "Mall", {
+          output_mode: "template_fill",
+          output_type: "docx",
+          output_config: {
+            placeholders: ["sammanfattning"],
+            bindings: { sammanfattning: "{{step_1.output.text}}" }
+          }
+        })
+      ]
+    });
+    renderEditor(flow);
+    expect(await within(await section()).findByText(/Steg 3: Mall/)).toBeTruthy();
+    cleanup();
+
+    // The core never reads a Word step's input: the step before it is not read.
+    renderEditor(flow, { stepId: "step-2" });
+    const delivery = await section();
+    expect(within(delivery).queryByText(/^Läses av /)).toBeNull();
+    expect(within(delivery).queryByText(/^Går vidare till nästa steg/)).toBeNull();
+  }, 20_000);
+
+  it("names a tool step with bindings that sends the result to its tool in an argument", async () => {
+    routeAssistants();
+    renderEditor(
+      makeFlow({
+        steps: [
+          text(1, "Sammanfatta"),
+          text(2, "Granska", { input_source: "flow_input" }),
+          text(3, "Slå upp", {
+            input_source: "tool",
+            input_bindings: { question: "{{Granska}}" },
+            input_config: { tool: { arguments: { fråga: "{{step_1.output.text}}" } } }
+          })
+        ]
+      })
+    );
+    expect(await within(await section()).findByText("Läses av Steg 3: Slå upp.")).toBeTruthy();
+  }, 20_000);
+
+  it("says whether a result no saved field reads is included, by its switch and on the line about the receiver", async () => {
+    routeAssistants();
+    renderEditor(
+      makeFlow({
+        steps: [
+          text(1, "Sammanfatta"),
+          text(2, "Granska", { input_source: "flow_input" }),
+          sender(3)
+        ]
+      })
+    );
+    const delivery = await section();
+    const toggle = within(delivery).getByRole("switch", {
+      name: new RegExp(`^${messages.flow_step_editor_deliverable_switch}`)
+    }) as HTMLInputElement;
+    const noReaderLine = () => {
+      expect(within(delivery).queryByText(/^Läses av /)).toBeNull();
+      expect(within(delivery).queryByText(/^Går vidare till nästa steg/)).toBeNull();
+    };
+    expect(toggle.checked).toBe(false);
+    expect(
+      await within(delivery).findByText(
+        "Ingår inte i körningens resultat som skickas till mottagare.example.org. Slå på Ta med i körningens resultat ovan om det ska följa med."
+      )
+    ).toBeTruthy();
+    // How to send it is said once, on the line about the receiver.
+    expect(within(delivery).getAllByText(/Slå på Ta med i körningens resultat/)).toHaveLength(1);
+    noReaderLine();
+    fireEvent.click(toggle);
+    expect(toggle.checked).toBe(true);
+    expect(
+      within(delivery).getByText("Skickas till mottagare.example.org när körningen är klar.")
+    ).toBeTruthy();
+    noReaderLine();
+  }, 20_000);
+
+  it("names the step that sends the run's result as a reader when one of its headers names the step", async () => {
+    routeAssistants();
+    const inHeader =
+      "Används i en header i steget som skickar körningens resultat till mottagare.example.org.";
+    const reading = (order: number, value = "{{Sammanfatta}}") =>
+      makeStep({
+        ...sender(order),
+        output_config: {
+          url: RECEIVER,
+          auth: { mode: "none" },
+          body: { mode: "run_result" },
+          custom_headers: [{ name: "X-Fall", value, secret: false }]
+        }
+      });
+    const view = renderEditor(
+      makeFlow({
+        steps: [
+          text(1, "Sammanfatta"),
+          text(2, "Granska", { input_source: "flow_input" }),
+          reading(3)
+        ]
+      }),
+      {
+        navigation: { position: 1, count: 3, previous: null, next: null, steps: [], onGo: vi.fn() }
+      }
+    );
+    let delivery = await section();
+    expect(await within(delivery).findByText("Läses av Steg 3: Skicka.")).toBeTruthy();
+    // What it sends is said apart from what it reads.
+    expect(
+      within(delivery).getByText(
+        "Ingår inte i körningens resultat som skickas till mottagare.example.org. Slå på Ta med i körningens resultat ovan om det ska följa med."
+      )
+    ).toBeTruthy();
+    // A header of the step that sends names it: said right under the
+    // line about the result, before the button that opens the step that sends.
+    const headerLine = within(delivery).getByText(inHeader);
+    const follows = (a: Node, b: Node) =>
+      (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+    expect(
+      follows(
+        within(delivery).getByText(/^Ingår inte i körningens resultat som skickas till/),
+        headerLine
+      )
+    ).toBe(true);
+    expect(
+      follows(
+        headerLine,
+        within(delivery).getByRole("button", {
+          name: messages.flow_step_editor_delivery_open_sender
+        })
+      )
+    ).toBe(true);
+    view.unmount();
+
+    // A header that names another step sends nothing of this one.
+    const other = renderEditor(
+      makeFlow({
+        steps: [
+          text(1, "Sammanfatta"),
+          text(2, "Granska", { input_source: "flow_input" }),
+          reading(3, "{{Granska}}")
+        ]
+      })
+    );
+    delivery = await section();
+    expect(
+      await within(delivery).findByText(
+        "Ingår inte i körningens resultat som skickas till mottagare.example.org. Slå på Ta med i körningens resultat ovan om det ska följa med."
+      )
+    ).toBeTruthy();
+    expect(within(delivery).queryByText(inHeader)).toBeNull();
+    other.unmount();
+
+    // The last working step: the step that sends is its only later step, and reads it.
+    renderEditor(makeFlow({ steps: [text(1, "Sammanfatta"), reading(2)] }));
+    delivery = await section();
+    expect(
+      await within(delivery).findByText("Går vidare till nästa steg: Steg 2: Skicka.")
+    ).toBeTruthy();
+    expect(
+      within(delivery).getByText("Skickas till mottagare.example.org när körningen är klar.")
+    ).toBeTruthy();
+    // Part of the result, it is said once: no header line beside it.
+    expect(within(delivery).queryByText(inHeader)).toBeNull();
+  }, 20_000);
+
+  it("names a later step that reads the result through a saved binding, also while the step is renamed unsaved", async () => {
+    routeAssistants();
+    renderEditor(
+      makeFlow({
+        steps: [
+          text(1, "Sammanfatta"),
+          text(2, "Granska", { input_source: "flow_input" }),
+          text(3, "Skriv svar", { input_bindings: { question: "{{Sammanfatta}}" } })
+        ]
+      })
+    );
+    const delivery = await section();
+    await within(delivery).findByText("Läses av Steg 3: Skriv svar.");
+    fireEvent.change(await nameField(), { target: { value: "Kort sammanfattning" } });
+    expect(within(delivery).getByText("Läses av Steg 3: Skriv svar.")).toBeTruthy();
+  }, 20_000);
+
+  it("says nothing about readers on the last working step, which is included by its place", async () => {
+    routeAssistants();
+    renderEditor(makeFlow({ steps: [text(1, "Sammanfatta"), sender(2)] }));
+    const delivery = await section();
+    // Only the step that sends comes after it, and that step reads no result.
+    expect(
+      await within(delivery).findByText("Skickas till mottagare.example.org när körningen är klar.")
+    ).toBeTruthy();
+    expect(within(delivery).queryByText(/^Läses /)).toBeNull();
+  }, 20_000);
+
+  it("says no step sends the run's result in a flow without one", async () => {
+    routeAssistants();
+    renderEditor(makeFlow({ steps: [text(1, "Sammanfatta")] }));
+    const delivery = await section();
+    expect(
+      await within(delivery).findByText(messages.flow_step_editor_delivery_no_sender)
+    ).toBeTruthy();
+    expect(
+      within(delivery).queryByRole("button", {
+        name: messages.flow_step_editor_delivery_open_sender
+      })
+    ).toBeNull();
+  }, 20_000);
+
+  it("says where a document is sent, at once as its switch turns, and opens the step that sends", async () => {
+    routeAssistants();
+    const onGo = vi.fn();
+    renderEditor(makeFlow({ steps: [word(1, "Protokoll"), word(2, "Bilaga"), sender(3)] }), {
+      navigation: { position: 1, count: 3, previous: null, next: null, steps: [], onGo }
+    });
+    const delivery = await section();
+    expect(
+      await within(delivery).findByText(
+        "Ingår inte i körningens resultat som skickas till mottagare.example.org. Slå på Ta med i körningens resultat ovan om det ska följa med."
+      )
+    ).toBeTruthy();
+    const saveFirst = "Spara först för att se ändringen i utskicket.";
+    expect(within(delivery).queryByText(saveFirst)).toBeNull();
+    fireEvent.click(
+      within(delivery).getByRole("switch", {
+        name: new RegExp(`^${messages.flow_step_editor_deliverable_switch}`)
+      })
+    );
+    expect(
+      within(delivery).getByText("Skickas till mottagare.example.org när körningen är klar.")
+    ).toBeTruthy();
+    // The step that sends shows the saved flow: an unsaved change is not there yet.
+    expect(within(delivery).getByText(saveFirst)).toBeTruthy();
+    fireEvent.click(
+      within(delivery).getByRole("button", { name: messages.flow_step_editor_delivery_open_sender })
+    );
+    expect(onGo).toHaveBeenCalledWith("step-3");
+  }, 20_000);
+
+  it("says nothing is sent while the step that sends has no address", async () => {
+    routeAssistants();
+    renderEditor(makeFlow({ steps: [text(1, "Sammanfatta"), sender(2, "")] }));
+    expect(
+      await within(await section()).findByText(messages.flow_step_editor_delivery_no_address)
+    ).toBeTruthy();
+  }, 20_000);
+
+  it("gives a JSON step one line instead of the section, and a request it sends neither", async () => {
+    routeAssistants();
+    let view = renderEditor(
+      makeFlow({ steps: [text(1, "Plocka ut", { output_type: "json" }), text(2, "Skriv")] })
+    );
+    expect(await screen.findByText(messages.flow_step_editor_delivery_json)).toBeTruthy();
+    expect(
+      screen.queryByRole("heading", { level: 3, name: messages.flow_step_editor_delivery_title })
+    ).toBeNull();
+    view.unmount();
+
+    for (const output_type of ["text", "json"] as const) {
+      view = renderEditor(
+        makeFlow({
+          steps: [
+            text(1, "Anropa", {
+              output_type,
+              output_mode: "http_post",
+              output_config: { url: RECEIVER, auth: { mode: "none" }, body: { mode: "auto" } }
+            })
+          ]
+        })
+      );
+      await nameField();
+      expect(screen.queryByText(messages.flow_step_editor_delivery_json)).toBeNull();
+      expect(
+        screen.queryByRole("heading", { level: 3, name: messages.flow_step_editor_delivery_title })
+      ).toBeNull();
+      view.unmount();
+    }
+  }, 30_000);
 });

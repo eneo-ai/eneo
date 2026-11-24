@@ -6,6 +6,7 @@ import { useTranslations } from "use-intl";
 import { useId, useRef, useState } from "react";
 import { useSpace } from "@/features/spaces/use-space";
 import { cn } from "@/lib/utils";
+import { flowDeliverables } from "../flow-deliverables";
 import { useFlowReadLabel } from "../flow-read-layout";
 import { knownClassifications, levelName } from "./classification-names";
 import {
@@ -25,6 +26,7 @@ import {
   readTemplateFill,
   readToolConfig,
   reviewChoiceOf,
+  sendsRunResult,
   sourceRefKey,
   stepCanBeDeliverable
 } from "./step-configs";
@@ -177,6 +179,68 @@ export function StepReadOnly({
             .trim();
   const yes = t("flow_step_editor_yes");
   const no = t("flow_step_editor_no");
+  const classification = (
+    <MetadataListItem label={t("flow_step_security_classification")}>
+      {step.output_classification_override === null
+        ? t("flow_step_security_inherit")
+        : levelName(step.output_classification_override, classifications, t)}
+    </MetadataListItem>
+  );
+
+  const timeout = step.timeout_seconds !== null && (
+    <MetadataListItem label={t("flow_step_editor_timeout")}>
+      {t("flow_step_editor_seconds", { count: step.timeout_seconds })}
+    </MetadataListItem>
+  );
+
+  // The step that sends the run's result reads as its editor does: what it sends, and to whom.
+  if (sendsRunResult(step)) {
+    // Empty only on a draft: publishing refuses a step with nothing to send.
+    const sent = flowDeliverables(flow.steps).deliverables;
+    return (
+      <div ref={rootRef} className="flex flex-col gap-6">
+        {sent.length > 0 ? (
+          <MetadataList title={t("flow_step_editor_run_result_sends_title")} label={label}>
+            {sent.map((item) => (
+              <MetadataListItem
+                key={item.id ?? item.step_order}
+                label={
+                  readDeliverable(item.output_config)?.label ||
+                  item.user_description?.trim() ||
+                  t("flow_step_editor_unnamed")
+                }
+              >
+                {outputTypeLabel(item.output_type, t)}
+              </MetadataListItem>
+            ))}
+          </MetadataList>
+        ) : (
+          // The list's title, with the text in place of an empty list.
+          <div className="flex flex-col gap-3">
+            <div>{t("flow_step_editor_run_result_sends_title")}</div>
+            <Text type="supporting" as="p" display="block" className="m-0">
+              {t("flow_step_editor_run_result_empty_title")}
+            </Text>
+          </div>
+        )}
+        {httpOut && (
+          <MetadataList title={t("flow_step_editor_run_result_receiver_title")} label={label}>
+            <MetadataListItem label={t("flow_step_editor_http_url_run_result")}>
+              <span className="[overflow-wrap:anywhere]">{httpOut.url}</span>
+            </MetadataListItem>
+            <MetadataListItem label={t("flow_step_editor_http_auth")}>
+              {httpAuthSummary(httpOut.auth, t)}
+            </MetadataListItem>
+          </MetadataList>
+        )}
+        {/* No review: the step only sends. */}
+        <MetadataList title={t("flows_classification_heading")} label={label}>
+          {classification}
+          {timeout}
+        </MetadataList>
+      </div>
+    );
+  }
 
   return (
     <div ref={rootRef} className="flex flex-col gap-6">
@@ -344,16 +408,8 @@ export function StepReadOnly({
         <MetadataListItem label={t("flow_step_review_policy")}>
           {reviewChoiceLabel(review, t)}
         </MetadataListItem>
-        <MetadataListItem label={t("flow_step_security_classification")}>
-          {step.output_classification_override === null
-            ? t("flow_step_security_inherit")
-            : levelName(step.output_classification_override, classifications, t)}
-        </MetadataListItem>
-        {step.timeout_seconds !== null && (
-          <MetadataListItem label={t("flow_step_editor_timeout")}>
-            {t("flow_step_editor_seconds", { count: step.timeout_seconds })}
-          </MetadataListItem>
-        )}
+        {classification}
+        {timeout}
       </MetadataList>
     </div>
   );

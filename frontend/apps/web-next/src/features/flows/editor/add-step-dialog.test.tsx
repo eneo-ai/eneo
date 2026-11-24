@@ -54,7 +54,7 @@ function Harness({
   onSaved,
   current
 }: {
-  position: number;
+  position: number | "end";
   onSaved: (flow: FlowPublic) => void;
   current: FlowPublic;
 }) {
@@ -75,7 +75,11 @@ function Harness({
   );
 }
 
-async function openDialog(position = 2, current = flow, { rows = true, personal = false } = {}) {
+async function openDialog(
+  position: number | "end" = 2,
+  current = flow,
+  { rows = true, personal = false } = {}
+) {
   const onSaved = vi.fn();
   const queryClient = testQueryClient();
   queryClient.setQueryData(["spaces", "space-1"], makeSpace({ overrides: { personal } }));
@@ -157,7 +161,9 @@ describe("AddStepDialog", () => {
       "Gör text av data",
       "Anropa webbtjänst"
     ]);
-    expect(within(dialog).getByText("Hamnar efter Steg 1: Sammanfatta")).toBeTruthy();
+    expect(
+      within(dialog).getByText("Hamnar efter Steg 1: Sammanfatta, före Steg 2: Skriv svar")
+    ).toBeTruthy();
     // Word cannot stand before a step that reads JSON: one folded line, then the reasons.
     expect(within(dialog).queryByRole("radio", { name: "Skapa dokument" })).toBeNull();
     fireEvent.click(within(dialog).getByText("2 stegtyper går inte att lägga till här"));
@@ -176,8 +182,10 @@ describe("AddStepDialog", () => {
       "Plocka ut uppgifter",
       "Klassificera",
       "Skapa dokument",
-      "Fyll i Word-mall"
+      "Fyll i Word-mall",
+      "Skicka körningens resultat"
     ]);
+    expect(within(after.dialog).getByText("Hamnar efter Steg 1: Sammanfatta")).toBeTruthy();
     expect(within(after.dialog).queryByRole("radio", { name: "Gör text av data" })).toBeNull();
     cleanup();
 
@@ -187,12 +195,62 @@ describe("AddStepDialog", () => {
       "Plocka ut uppgifter",
       "Transkribera ljud"
     ]);
-    expect(within(first.dialog).getByText(messages.flow_add_step_lands_first)).toBeTruthy();
+    expect(within(first.dialog).getByText("Hamnar före Steg 1: Sammanfatta")).toBeTruthy();
     expect(rowsOf(first.dialog, messages.flow_add_step_more).at(-1)).toBe("Tomt steg");
+    cleanup();
+
+    const empty = await openDialog(1, makeFlow({ steps: [] }));
+    expect(within(empty.dialog).getByText(messages.flow_add_step_lands_first)).toBeTruthy();
+  });
+
+  it("recommends sending the run's result after a document, and only where the core allows it", async () => {
+    const wordFlow = makeFlow({
+      steps: [makeStep({ output_type: "docx", output_mode: "render_verbatim" })]
+    });
+    api.routes[KINDS] = textKinds;
+    const last = await openDialog(2, wordFlow);
+    expect(rowsOf(last.dialog, messages.flow_add_step_recommended)).toEqual([
+      "Skapa dokument",
+      "Fyll i Word-mall",
+      "Skicka körningens resultat"
+    ]);
+    cleanup();
+
+    // Mid-flow the core refuses it: it is not recommended there.
+    api.routes[KINDS] = ({ params }: { params: { query: { position: number } } }) => ({
+      body: {
+        flow_id: "flow-1",
+        draft_revision: 4,
+        insertions: [
+          makeKindPlace(params.query.position, [
+            makeKindOption("send_run_result", {
+              refusals: [makeKindRefusal({ step_order: params.query.position })]
+            })
+          ])
+        ],
+        steps: []
+      }
+    });
+    const middle = await openDialog(
+      2,
+      makeFlow({
+        steps: [
+          makeStep(),
+          makeStep({ id: "step-2", step_order: 2, user_description: "Skriv svar" })
+        ]
+      })
+    );
+    expect(rowsOf(middle.dialog, messages.flow_add_step_recommended)).toContain("Sammanfatta");
+    expect(rowsOf(middle.dialog, messages.flow_add_step_recommended)).not.toContain(
+      "Skicka körningens resultat"
+    );
   });
 
   it("starts on the first recommendation and adds it, named after it, with its instruction", async () => {
-    const updated = makeFlow({ draft_revision: 5 });
+    const updated = makeFlow({
+      draft_revision: 5,
+      steps: [...flow.steps, makeStep({ id: "step-new", step_order: 3 })]
+    });
     api.routes[EDITOR] = () => ({ body: updated });
     const { dialog, onSaved } = await openDialog(2);
     expect(
@@ -200,7 +258,9 @@ describe("AddStepDialog", () => {
     ).toBe(true);
     fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till Gör text av data" }));
 
-    await waitFor(() => expect(onSaved).toHaveBeenCalledWith(updated));
+    // With the revision the add was fenced on, which tells the editor it was its own, and the
+    // step it added: the one not in the flow it was fenced on.
+    await waitFor(() => expect(onSaved).toHaveBeenCalledWith(updated, 4, "step-new"));
     expect(sent()).toEqual({
       expected_revision: 4,
       definition: {},
@@ -364,6 +424,56 @@ describe("AddStepDialog", () => {
     ).toBe("true");
   });
 
+  it("names the step it added even when a newer flow arrives before the core answers", async () => {
+    const updated = makeFlow({
+      draft_revision: 5,
+      steps: [...flow.steps, makeStep({ id: "step-new", step_order: 3 })]
+    });
+    let answer = () => {};
+    let sent = false;
+    const answered = new Promise<void>((resolve) => (answer = resolve));
+    const patch = api.stub.client.PATCH;
+    api.stub.client.PATCH = (() => {
+      sent = true;
+      return answered.then(() => ({
+        data: updated,
+        response: new Response(null, { status: 200 })
+      }));
+    }) as unknown as typeof patch;
+    const onSaved = vi.fn();
+    const at = (current: FlowPublic) => (
+      <SpaceProvider routeId="space-1">
+        <AddStepDialog flow={current} position={2} open onOpenChange={() => {}} onSaved={onSaved} />
+      </SpaceProvider>
+    );
+    const queryClient = testQueryClient();
+    queryClient.setQueryData(["spaces", "space-1"], makeSpace());
+    try {
+      const { rerender } = renderInApp(at(flow), { queryClient });
+      const dialog = await screen.findByRole("dialog", {
+        name: messages.flow_step_editor_add_title
+      });
+      fireEvent.click(
+        await within(dialog).findByRole("button", { name: "Lägg till Gör text av data" })
+      );
+      // A read in the background brings the saved flow, the new step in it, first.
+      await waitFor(() => expect(sent).toBe(true));
+      rerender(at(updated));
+      answer();
+      await waitFor(() => expect(onSaved).toHaveBeenCalledWith(updated, 4, "step-new"));
+    } finally {
+      api.stub.client.PATCH = patch;
+    }
+  });
+
+  it("adds at the end after the last step when it does not send", async () => {
+    api.routes[KINDS] = textKinds;
+    const { dialog } = await openDialog("end", textFlow);
+    const asked = api.stub.calls.find((call) => `${call.method} ${call.path}` === KINDS);
+    expect(asked?.init.params).toEqual({ path: { id: "flow-1" }, query: { position: 2 } });
+    expect(within(dialog).getByText("Hamnar efter Steg 1: Sammanfatta")).toBeTruthy();
+  });
+
   it("puts focus in the search after reloading a draft that moved on", async () => {
     api.routes[KINDS] = textKinds;
     api.routes[EDITOR] = () => ({
@@ -499,6 +609,59 @@ describe("AddStepDialog", () => {
       }
     });
   });
+
+  it.each([
+    ["send_run_result", "Skicka körningens resultat", "run_result"],
+    ["send_http", "Anropa webbtjänst", "auto"]
+  ] as const)(
+    "puts the core's refusal of a host at the address of %s, without the https rule",
+    async (kind, name, mode) => {
+      api.routes[KINDS] = () => ({
+        body: {
+          flow_id: "flow-1",
+          draft_revision: 4,
+          insertions: [
+            makeKindPlace(2, [
+              makeKindOption(kind, {
+                configuration: {
+                  output_mode: "http_post",
+                  output_config: { url: "", auth: { mode: "none" }, body: { mode } }
+                }
+              })
+            ])
+          ],
+          steps: []
+        }
+      });
+      // What the core answers an address whose host it refuses (`draft_step_refusals`).
+      api.routes[EDITOR] = () => ({
+        status: 400,
+        body: {
+          message:
+            "Step 2: output_config.url is not an absolute http or https URL without userinfo (HTTP_INVALID_URL).",
+          code: "typed_io_http_invalid_config",
+          context: { field: "output_config.url", issue_code: "flow_step_invalid", step_order: 2 },
+          eneo_error_code: 9000
+        }
+      });
+      const { dialog } = await openDialog(2, textFlow);
+      fireEvent.click(within(dialog).getByRole("radio", { name }));
+      const address = within(dialog).getByRole("textbox", {
+        name: /^(Mottagarens adress|Adress att skicka till)/
+      }) as HTMLInputElement;
+      // A phone shows the keyboard for addresses; the form checks the address itself.
+      expect(address.type).toBe("url");
+      fireEvent.change(address, { target: { value: "https://a..b.example/in" } });
+      fireEvent.click(within(dialog).getByRole("button", { name: `Lägg till ${name}` }));
+      expect(
+        await within(dialog).findByText(messages.flow_validation_msg_flow_step_invalid)
+      ).toBeTruthy();
+      expect(
+        within(dialog).queryByText(messages.flow_step_editor_http_run_result_url_fixed)
+      ).toBeNull();
+      expect(document.activeElement).toBe(address);
+    }
+  );
 
   it("cannot add while the core has not answered for the place, and offers a retry", async () => {
     api.routes[KINDS] = () => ({ status: 500, body: { message: "Fel", code: "internal" } });

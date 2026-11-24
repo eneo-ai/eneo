@@ -248,7 +248,7 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
     if (headerRef.current) observer.observe(headerRef.current);
     return () => observer.disconnect();
   }, [beside, view]);
-  const [addAt, setAddAt] = useState<number | null>(null);
+  const [addAt, setAddAt] = useState<number | "end" | null>(null);
   // Edits on screen that are not saved: the open step's, or the settings form
   // while it is open (the two are never on screen together).
   const [unsavedEdits, setUnsavedEdits] = useState(false);
@@ -555,6 +555,11 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
   useEffect(() => {
     if (assistantsRevision.current === flow.draft_revision) return;
     assistantsRevision.current = flow.draft_revision;
+    // Invalidation would otherwise reuse a first read under way, and its answer land as current.
+    void queryClient.cancelQueries({
+      queryKey: flowEditorKeys.assistants(flowId),
+      predicate: (query) => query.state.data === undefined
+    });
     void queryClient.invalidateQueries({ queryKey: flowEditorKeys.assistants(flowId) });
   }, [flow.draft_revision, flowId, queryClient]);
 
@@ -1108,7 +1113,14 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
                     }}
                     onCancel={closeStep}
                     onUnsavedChange={onUnsavedChange}
-                    onAddStep={canEdit ? setAddAt : undefined}
+                    onStepAdded={
+                      canEdit
+                        ? (updated) => {
+                            saved(updated);
+                            announce(t("flows_step_added"));
+                          }
+                        : undefined
+                    }
                     navigation={{
                       position: openedIndex + 1,
                       count: steps.length,
@@ -1178,21 +1190,19 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
         {canEdit ? (
           <AddStepDialog
             flow={flow}
-            position={addAt ?? steps.length + 1}
+            position={addAt ?? "end"}
             open={addAt !== null}
             onOpenChange={(open) => {
               if (!open) setAddAt(null);
             }}
-            onSaved={(updated) => {
-              const position = addAt ?? steps.length + 1;
+            onSaved={(updated, _sent, addedId) => {
               saved(updated);
               setAddAt(null);
               announce(t("flows_step_added"));
               // The first step's "Lägg till steg" leaves with the empty list: focus goes to the step.
-              const added = stepsInOrder(updated).find((step) => step.step_order === position);
               rescue(
                 () =>
-                  (added?.id ? document.getElementById(stepControlId(added.id, "open")) : null) ??
+                  (addedId ? document.getElementById(stepControlId(addedId, "open")) : null) ??
                   stepsHeadingRef.current
               );
             }}

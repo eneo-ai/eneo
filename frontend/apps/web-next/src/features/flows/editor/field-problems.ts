@@ -39,10 +39,11 @@ export const FIELD_ANCHORS = [
   // The first of the template's fields that needs a value.
   "output_config.template.fields",
   "output_config.speaker_mapping",
-  "output_config.deliverable.label",
-  "output_config.deliverable.file_name",
   "output_config.citation_mode",
   "output_config.retrieval_policy",
+  // In the Leverans section, after Resultat.
+  "output_config.deliverable.label",
+  "output_config.deliverable.file_name",
   "review_policy",
   "output_classification_override",
   "timeout_seconds",

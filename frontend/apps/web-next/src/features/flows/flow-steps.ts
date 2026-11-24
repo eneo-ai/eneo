@@ -6,6 +6,7 @@
  * (`flowInputBindings.ts`, `flowStepMaterial.ts` in apps/web) for display.
  * The prompt lives on the step assistant, so the caller passes it in.
  */
+import { sendsRunResult } from "./editor/step-configs";
 import type { FlowPublic, FlowStep, FlowStepSlot } from "./flows-api";
 
 /** One source a step reads. */
@@ -161,24 +162,88 @@ function templateFieldTokens(step: FlowStep): string[] {
 }
 
 /**
- * What an HTTP call and a webhook read: the texts publish checks in them (its
- * address, its body and the values of its headers that are not secret).
+ * What an HTTP call reads: the texts the core fills in (`interpolated_template_sites`):
+ * its address, its body when that is a template, and what it sends in headers
+ * (`headerTokens`).
  */
-function httpTokens(step: FlowStep): string[] {
-  const calls = [
-    step.input_source === "http_get" ? step.input_config : null,
-    step.output_mode === "http_post" ? step.output_config : null
-  ];
-  return calls.flatMap((call) => {
-    if (!isRecord(call)) return [];
-    const body = isRecord(call.body) ? call.body : {};
-    const headers = Array.isArray(call.custom_headers) ? call.custom_headers : [];
-    return [
+function callTokens(call: unknown): string[] {
+  if (!isRecord(call)) return [];
+  const body = isRecord(call.body) ? call.body : {};
+  return [
+    ...[
       call.url,
-      body.template,
-      ...headers.map((header) => (isRecord(header) && header.secret !== true ? header.value : null))
-    ].flatMap((text) => (typeof text === "string" ? tokensOf(text) : []));
-  });
+      body.mode === "json_template" || body.mode === "text_template" ? body.template : null
+    ].flatMap((text) => (typeof text === "string" ? tokensOf(text) : [])),
+    ...headerTokens(call)
+  ];
+}
+
+/**
+ * What a call sends in headers reads: the header name or user name its
+ * credential goes under, and the values of its headers that are not secret.
+ * A row without a name is no header: the core does not send it.
+ */
+function headerTokens(call: Record<string, unknown>): string[] {
+  const auth = isRecord(call.auth) ? call.auth : {};
+  const credentialName =
+    auth.mode === "api_key" ? auth.header_name : auth.mode === "basic_auth" ? auth.username : null;
+  const headers = Array.isArray(call.custom_headers) ? call.custom_headers : [];
+  return [
+    ...(typeof credentialName === "string" ? tokensOf(credentialName) : []),
+    ...headers.flatMap((header) =>
+      isRecord(header) &&
+      typeof header.name === "string" &&
+      header.name.trim() !== "" &&
+      header.secret !== true &&
+      typeof header.value === "string"
+        ? tokensOf(header.value)
+        : []
+    )
+  ];
+}
+
+/**
+ * What one reference in a step's webhook reads. The core fills the webhook in
+ * once the step has answered, as for the step after it (`config_channel`):
+ * the step before is then the step's own answer, which is no read of an
+ * earlier step (null), and so are its alias and its name.
+ */
+function webhookTarget(
+  token: string,
+  step: FlowStep,
+  steps: readonly FlowStep[]
+): ReadTarget | null {
+  const target = readTarget(token, { step_order: step.step_order + 1 }, steps);
+  return target.kind === "step" && target.order === step.step_order ? null : target;
+}
+
+/**
+ * What the step that sends the run's result reads in its own right: the
+ * earlier steps what it sends in headers names (`headerTokens`), in run
+ * order, then the run's input once when a header reads it, each read as the
+ * core fills them in (`webhookTarget`). The result it sends is not a read,
+ * and its address takes no reference (`runResultUrlFixed`).
+ */
+export function senderReads(sender: FlowStep, steps: readonly FlowStep[]): StepRead[] {
+  const config = isRecord(sender.output_config) ? sender.output_config : {};
+  const reads = new Map<number, FlowStep | null>();
+  let readsFlowInput = false;
+  for (const token of headerTokens(config)) {
+    const target = webhookTarget(token, sender, steps);
+    if (target?.kind === "step") {
+      reads.set(target.order, steps.find((step) => step.step_order === target.order) ?? null);
+    } else if (target?.kind === "deleted" && !reads.has(target.order)) {
+      reads.set(target.order, null);
+    } else if (target?.kind === "flow_input") {
+      readsFlowInput = true;
+    }
+  }
+  return [
+    ...[...reads]
+      .sort(([a], [b]) => a - b)
+      .map(([order, step]) => ({ kind: "step" as const, order, step })),
+    ...(readsFlowInput ? [{ kind: "flow_input" as const }] : [])
+  ];
 }
 
 type ReadFacts = {
@@ -212,9 +277,8 @@ function readFacts(step: FlowStep, steps: readonly FlowStep[], prompt = ""): Rea
     else facts.readsFlowInput = true;
   };
 
-  const readToken = (token: string) => {
-    const target = readTarget(token, step, steps);
-    switch (target.kind) {
+  const read = (target: ReadTarget | null) => {
+    switch (target?.kind) {
       case "deleted":
         facts.deleted.add(target.order);
         break;
@@ -229,11 +293,24 @@ function readFacts(step: FlowStep, steps: readonly FlowStep[], prompt = ""): Rea
         break;
     }
   };
+  const readToken = (token: string) => read(readTarget(token, step, steps));
 
-  // The prompt, a Word step's fields and an HTTP call's texts are read whatever the step's material is.
+  // The core fills a Word step from its fields alone: it never calls the
+  // step's assistant, so the prompt is not read (an assistant can be shared
+  // with a step whose prompt it is), and never resolves its input source or
+  // bindings (`OUTPUT_MODES_WITHOUT_STEP_INPUT`).
+  if (step.output_mode === "template_fill") {
+    templateFieldTokens(step).forEach(readToken);
+    return facts;
+  }
+  // The prompt, an HTTP call's texts and a tool's arguments are read whatever
+  // the step's material is: the core fills them all in.
   tokensOf(prompt).forEach(readToken);
-  templateFieldTokens(step).forEach(readToken);
-  httpTokens(step).forEach(readToken);
+  if (step.input_source === "tool") toolArgumentTokens(step).forEach(readToken);
+  if (step.input_source === "http_get") callTokens(step.input_config).forEach(readToken);
+  if (step.output_mode === "http_post") {
+    callTokens(step.output_config).forEach((token) => read(webhookTarget(token, step, steps)));
+  }
   const { question, refs } = bindingsOf(step);
   if (question.trim() || refs.length > 0) {
     tokensOf(question).forEach(readToken);
@@ -255,7 +332,6 @@ function readFacts(step: FlowStep, steps: readonly FlowStep[], prompt = ""): Rea
       facts.extra.push({ kind: "http" });
       break;
     case "tool":
-      toolArgumentTokens(step).forEach(readToken);
       facts.extra.push({ kind: "tool" });
       break;
   }
@@ -266,7 +342,10 @@ function readFacts(step: FlowStep, steps: readonly FlowStep[], prompt = ""): Rea
  * What a step reads, each source once: earlier steps in run order first,
  * then the run's input, the web or a tool. Bindings, when the step has
  * any, decide its material alone; otherwise its input source does. What
- * its prompt reads (`prompts`, by assistant id) comes on top.
+ * its prompt (`prompts`, by assistant id), its HTTP calls and its tool's
+ * arguments read comes on top. A Word step reads only what its fields name:
+ * the core resolves neither its material nor its prompt, even when its
+ * assistant is shared with a step whose prompt it is.
  */
 export function stepReads(
   step: FlowStep,
@@ -305,6 +384,28 @@ export function stepReaders(
     .filter((later) =>
       readFacts(later, steps, prompts.get(later.assistant_id)).named.has(step.step_order)
     )
+    .sort((a, b) => a.step_order - b.step_order);
+}
+
+/**
+ * The later steps that read a step, by name or by place (the previous step,
+ * all earlier ones), in run order: where its result goes next in the flow.
+ * Only the steps' saved fields count, not their prompts, which are read apart
+ * from the flow. The step that sends the run's result counts only where its
+ * headers name the step (`senderReads`): the result it sends is not a read.
+ */
+export function stepReadersByNameOrPlace(step: FlowStep, steps: readonly FlowStep[]): FlowStep[] {
+  return steps
+    .filter((later) => later.step_order > step.step_order)
+    .filter((later) => {
+      if (sendsRunResult(later)) {
+        return senderReads(later, steps).some(
+          (read) => read.kind === "step" && read.step !== null && read.order === step.step_order
+        );
+      }
+      const facts = readFacts(later, steps);
+      return facts.named.has(step.step_order) || facts.implicit.has(step.step_order);
+    })
     .sort((a, b) => a.step_order - b.step_order);
 }
 

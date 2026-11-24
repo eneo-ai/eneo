@@ -21,6 +21,7 @@ import { useSecretMutation } from "@/lib/api/use-secret-mutation";
 import { stepName } from "../flow-steps";
 import type { SuggestionDismissal, SuggestionFix } from "../flow-suggestion-item";
 import { StepSuggestions } from "../flow-suggestions-section";
+import { storeFlow } from "../flows-api";
 import {
   classificationPreviewQueryOptions,
   flowAssistantQueryOptions,
@@ -28,6 +29,7 @@ import {
   refreshFlowAssistant,
   updateFlowEditor
 } from "./editor-api";
+import { AddStepDialog } from "./add-step-dialog";
 import { Anchor, focusAnchor, problemStatus, TemplateScope } from "./editor-fields";
 import { RecordUploadProvider, useEditorUploads } from "./editor-uploads";
 import {
@@ -54,6 +56,7 @@ import {
   withTidyDeliverable
 } from "./step-configs";
 import { StepControlSection } from "./step-control-section";
+import { StepDeliverySection } from "./step-delivery-section";
 import {
   assistantChanges,
   buildEditorUpdate,
@@ -72,7 +75,7 @@ import { stepNameTaken } from "./step-kinds";
 import { stepLabel } from "./step-labels";
 import { StepOutputSection } from "./step-output-section";
 import { StepReadOnly } from "./step-read-only";
-import { StepRunResultSections } from "./step-run-result-section";
+import { openStepButtonId, sendsHeadingId, StepRunResultSections } from "./step-run-result-section";
 import { StepRequestPreviewButton } from "./step-request-preview";
 import { stepUsesModel } from "./step-rules";
 import {
@@ -120,8 +123,11 @@ type EditorProps = {
   anchorRequest?: { anchor: FieldAnchor } | null;
   /** Told true while the step has edits that are not saved, and false once it has none. */
   onUnsavedChange?: (unsaved: boolean) => void;
-  /** Opens "Lägg till steg" at a place in the flow; absent, no step is offered to add. */
-  onAddStep?: (position: number) => void;
+  /**
+   * Told the flow the core answered when a step was added from the editor
+   * ("Lägg till steg före utskicket"); absent, no step is offered to add.
+   */
+  onStepAdded?: (flow: FlowPublic) => void;
 };
 
 /** Where the editor's top bar can go besides back to the list. */
@@ -222,37 +228,39 @@ export function FlowStepEditor({ navigation, ...props }: EditorProps): React.JSX
                 }
               }))}
             />
-            <span className="flex-1" />
-            <IconButton
-              label={
-                navigation.previous
-                  ? t("flow_step_editor_previous_named", { step: navigation.previous.name })
-                  : t("flow_step_editor_previous")
-              }
-              icon={<ChevronLeft aria-hidden="true" />}
-              variant="ghost"
-              size="sm"
-              isDisabled={!navigation.previous}
-              onClick={() => {
-                const target = navigation.previous;
-                if (target) navigation.onGo(target.id);
-              }}
-            />
-            <IconButton
-              label={
-                navigation.next
-                  ? t("flow_step_editor_next_named", { step: navigation.next.name })
-                  : t("flow_step_editor_next")
-              }
-              icon={<ChevronRight aria-hidden="true" />}
-              variant="ghost"
-              size="sm"
-              isDisabled={!navigation.next}
-              onClick={() => {
-                const target = navigation.next;
-                if (target) navigation.onGo(target.id);
-              }}
-            />
+            {/* One group: on a narrow bar the arrows wrap together, at the end. */}
+            <span className="ms-auto flex flex-none items-center gap-x-2">
+              <IconButton
+                label={
+                  navigation.previous
+                    ? t("flow_step_editor_previous_named", { step: navigation.previous.name })
+                    : t("flow_step_editor_previous")
+                }
+                icon={<ChevronLeft aria-hidden="true" />}
+                variant="ghost"
+                size="sm"
+                isDisabled={!navigation.previous}
+                onClick={() => {
+                  const target = navigation.previous;
+                  if (target) navigation.onGo(target.id);
+                }}
+              />
+              <IconButton
+                label={
+                  navigation.next
+                    ? t("flow_step_editor_next_named", { step: navigation.next.name })
+                    : t("flow_step_editor_next")
+                }
+                icon={<ChevronRight aria-hidden="true" />}
+                variant="ghost"
+                size="sm"
+                isDisabled={!navigation.next}
+                onClick={() => {
+                  const target = navigation.next;
+                  if (target) navigation.onGo(target.id);
+                }}
+              />
+            </span>
           </>
         ) : null}
       </nav>
@@ -353,7 +361,7 @@ function StepEditorSession({
   suggestionRuns = 0,
   anchorRequest = null,
   onUnsavedChange,
-  onAddStep,
+  onStepAdded,
   onGoStep
 }: Omit<EditorProps, "navigation"> & { onGoStep?: (stepId: string) => void }) {
   const t = useTranslations();
@@ -383,6 +391,23 @@ function StepEditorSession({
   // version (the chat, another tab) changed the same field.
   const [stepBases, setStepBases] = useState<StepEdits>({});
   const [assistantBases, setAssistantBases] = useState<AssistantEdits>({});
+  // "Lägg till steg före utskicket" opened from here.
+  const [adding, setAdding] = useState(false);
+  // The form kept mounted across this editor's own add: the revision it
+  // moved to, and the key the form had before it.
+  const [held, setHeld] = useState<{ revision: number; key: number } | null>(null);
+  // The step added from here. Focus goes to it once the dialog has closed and
+  // given focus back (its effect runs before this one, the parent's).
+  const focusAfterAdd = useRef<string | null>(null);
+  useEffect(() => {
+    const added = focusAfterAdd.current;
+    if (adding || added === null) return;
+    focusAfterAdd.current = null;
+    (
+      document.getElementById(openStepButtonId(formId, added)) ??
+      document.getElementById(sendsHeadingId(formId))
+    )?.focus();
+  }, [adding, formId]);
 
   const latestStep = findStep(latest, stepId);
   // Files uploaded in this edit go again when it ends without saving them.
@@ -506,6 +531,7 @@ function StepEditorSession({
       uploads.keepSaved(updated);
       setReceived(updated);
       setPinned(null);
+      setHeld(null);
       setStepEdits({});
       setAssistantEdits({});
       setContractDrafts({});
@@ -567,8 +593,11 @@ function StepEditorSession({
       return fresh;
     },
     onSuccess: (fresh) => {
+      // The page takes it as it takes a save, so the form and the page are on one version again.
+      storeFlow(queryClient, fresh);
       setReceived(fresh);
       setPinned(fresh);
+      setHeld(null);
       setStale(false);
       setServerProblems({});
       setFormProblems([]);
@@ -578,7 +607,8 @@ function StepEditorSession({
 
   // --- Loading and missing states -------------------------------------------------
 
-  if (!session) {
+  // A published step is read from the newest flow, which may no longer hold it.
+  if (!session || (effectiveReadOnly && !latestStep)) {
     return (
       <div className="flex flex-col gap-4 px-6 py-5">
         <Banner
@@ -617,6 +647,13 @@ function StepEditorSession({
   // The step that sends the run's result reads nothing and calls no model:
   // it shows what is sent and to whom.
   const sendsResult = sendsRunResult(draft);
+  // An add before the step that sends moves it and every later step down one
+  // place. The core renumbers what is saved, not edits waiting here, so any
+  // edit holding a reference waits for a save first. Every reference the core
+  // reads opens with `{{`, and JSON keeps braces as they are, so this needs no
+  // reference grammar; it also holds back references that would not move.
+  // Edits put back to what is saved leave `stepEdits`.
+  const addBlocked = sendsResult && JSON.stringify(stepEdits).includes("{{");
   const isLast = isLastStep(flow, { step_order: stepOrder });
   const groups = variableGroups({ flow, stepOrder, inputConfig: draft.input_config });
   // Only the AI instruction runs once per section, so only it reads the section's number.
@@ -637,6 +674,36 @@ function StepEditorSession({
 
   function pin() {
     if (!pinned || !pinnedSession?.dirty) setPinned(flow);
+  }
+
+  // Remounted per saved revision, so local states (a secret being replaced)
+  // start over after a save or a reload; this editor's own add keeps them.
+  const formKey = held?.revision === flow.draft_revision ? held.key : flow.draft_revision;
+
+  /**
+   * A step added from here, right before this step. The edits move onto the flow the
+   * core answered only when the add was fenced on the revision they sit on
+   * and left this step as saved: the next save is then fenced on the new
+   * revision and sends only the edits. Any other newer revision (another
+   * tab, the chat) keeps the banner and its conflict check.
+   */
+  function stepAdded(updated: FlowPublic, sentRevision: number, addedStepId: string | null) {
+    const before = findStep(flow, stepId);
+    const after = findStep(updated, stepId);
+    const own =
+      sentRevision === flow.draft_revision &&
+      before !== null &&
+      after !== null &&
+      EDITABLE_STEP_FIELDS.every((field) =>
+        sameStepField(field, stepConfigOf(before)[field], stepConfigOf(after)[field])
+      );
+    setReceived(updated);
+    if (own) {
+      setPinned(updated);
+      setHeld({ revision: updated.draft_revision, key: formKey });
+    }
+    focusAfterAdd.current = addedStepId ?? "";
+    onStepAdded?.(updated);
   }
 
   function changeStep(next: StepConfig) {
@@ -793,6 +860,14 @@ function StepEditorSession({
           "flow_step_editor_deliverable_label_too_long",
           { max: DELIVERABLE_LABEL_MAX }
         );
+      } else if (deliverable.label.includes("{{") || deliverable.label.includes("}}")) {
+        // A second copy of the core's rule (flow_validators.py, the label is shown as
+        // written and never filled in), so the field says it before the core refuses it on save.
+        // The test with the core's own labels keeps the two alike.
+        problems["output_config.deliverable.label"] = t(
+          "flow_step_editor_deliverable_label_braces",
+          { open: "{{", close: "}}" }
+        );
       }
       if (Array.from(deliverable.file_name ?? "").length > DELIVERABLE_FILE_NAME_MAX) {
         problems["output_config.deliverable.file_name"] = t(
@@ -851,43 +926,58 @@ function StepEditorSession({
   const changeCount =
     (stepPatch ? Object.keys(stepPatch).length : 0) +
     (assistantUpdate ? Object.keys(assistantUpdate).length : 0);
-  const name = draft.user_description?.trim() || t("flow_step_editor_unnamed");
+  // The read view and the form head the step the same way, each from its own source.
+  function headerOf(view: {
+    flow: FlowPublic;
+    stepOrder: number;
+    step: StepConfig;
+    assistant: AssistantConfig;
+  }) {
+    return (
+      <header className="flex flex-col gap-3">
+        {/* The bar above says "Steg 2 av 5", and Källa and Vad steget gör are rows below. */}
+        <Heading level={2} id={headingId}>
+          {view.step.user_description?.trim() || t("flow_step_editor_unnamed")}
+        </Heading>
+        {sendsRunResult(view.step) ? (
+          <Text type="supporting" size="sm" as="p" display="block" className="m-0 max-w-prose">
+            {t("flow_step_editor_run_result_description")}
+          </Text>
+        ) : (
+          <StepRequestPreviewButton
+            flow={view.flow}
+            stepOrder={view.stepOrder}
+            draft={view.step}
+            assistant={view.assistant}
+          />
+        )}
+      </header>
+    );
+  }
 
-  const header = (
-    <header className="flex flex-col gap-3">
-      {/* The bar above says "Steg 2 av 5", and Källa and Vad steget gör are rows below. */}
-      <Heading level={2} id={headingId}>
-        {name}
-      </Heading>
-      {sendsResult ? (
-        <Text type="supporting" size="sm" as="p" display="block" className="m-0 max-w-prose">
-          {t("flow_step_editor_run_result_description")}
-        </Text>
-      ) : (
-        <StepRequestPreviewButton
-          flow={flow}
-          stepOrder={stepOrder}
-          draft={draft}
-          assistant={assistantDraft}
-        />
-      )}
-    </header>
-  );
-
-  if (effectiveReadOnly) {
+  if (effectiveReadOnly && latestStep && assistantSaved) {
+    // What is published, never the form's edits: they stay pinned and come
+    // back if the flow is unpublished again.
+    const saved = {
+      flow: latest,
+      stepOrder: latestStep.step_order,
+      step: stepConfigOf(latestStep)
+    };
     return (
       <section aria-labelledby={headingId} className="flex flex-col gap-6 px-6 py-5">
-        {header}
+        {headerOf({ ...saved, assistant: assistantSaved })}
         {latest.published_version != null && !readOnly && (
           <Banner status="info" title={t("flow_step_editor_published")} collapsible={false} />
         )}
-        <StepReadOnly flow={flow} step={draft} stepOrder={stepOrder} assistant={assistantDraft} />
+        <StepReadOnly {...saved} assistant={assistantSaved} />
         <div>
           <Button label={t("close")} onClick={onCancel} />
         </div>
       </section>
     );
   }
+
+  const header = headerOf({ flow, stepOrder, step: draft, assistant: assistantDraft });
 
   return (
     <section aria-labelledby={headingId} className="flex min-h-0 flex-1 flex-col">
@@ -1011,10 +1101,9 @@ function StepEditorSession({
           )}
         </div>
 
-        {/* Remounted per saved revision: local states (a secret being replaced) start over. */}
         <RecordUploadProvider value={uploads.record}>
           <TemplateScope value={{ flow, stepOrder }}>
-            <div key={flow.draft_revision} className="flex flex-col gap-6">
+            <div key={formKey} className="flex flex-col gap-6">
               <Anchor formId={formId} anchor="user_description">
                 <TextInput
                   label={t("flow_step_name")}
@@ -1052,7 +1141,9 @@ function StepEditorSession({
                   onChange={changeStep}
                   problems={shownProblems}
                   onGoStep={onGoStep}
-                  onAddStepBefore={onAddStep}
+                  onAddStepBefore={onStepAdded ? () => setAdding(true) : undefined}
+                  addBlocked={addBlocked}
+                  olderVersion={newerElsewhere}
                 />
               ) : (
                 <>
@@ -1091,6 +1182,22 @@ function StepEditorSession({
                       announce(t("flow_editor_tools_contract_example_accepted"));
                     }}
                   />
+
+                  {stepCanBeDeliverable(draft) && (
+                    <StepDeliverySection
+                      formId={formId}
+                      sectionId={`${formId}-delivery`}
+                      flow={flow}
+                      stepId={stepId}
+                      draft={draft}
+                      groups={groups}
+                      onChange={changeStep}
+                      problems={shownProblems}
+                      dirty={dirty}
+                      olderVersion={newerElsewhere}
+                      onGoStep={onGoStep}
+                    />
+                  )}
                 </>
               )}
 
@@ -1155,23 +1262,40 @@ function StepEditorSession({
             </Text>
           )}
         </div>
-        <Button label={dirty ? t("cancel") : t("close")} onClick={onCancel} />
-        <Button
-          type="submit"
-          form={formId}
-          variant={dirty ? "primary" : "secondary"}
-          label={t("flow_step_editor_save")}
-          isLoading={save.isPending}
-          isInterruptible
-        />
+        {/* One group: "Spara steget" stays beside the way out when the bar wraps. */}
+        <div className="ms-auto flex flex-none items-center gap-3">
+          <Button label={dirty ? t("cancel") : t("close")} onClick={onCancel} />
+          <Button
+            type="submit"
+            form={formId}
+            variant={dirty ? "primary" : "secondary"}
+            label={t("flow_step_editor_save")}
+            isLoading={save.isPending}
+            isInterruptible
+          />
+        </div>
       </div>
+
+      {onStepAdded && (
+        // On the flow the edits sit on: its revision fences the add. By this
+        // step's id, so an add tried again on a draft read anew still lands right before it.
+        <AddStepDialog
+          flow={flow}
+          position={{ before: stepId }}
+          open={adding}
+          onOpenChange={setAdding}
+          onSaved={stepAdded}
+        />
+      )}
 
       {/* "Avbryt" on the save bar and every other way out ask the same: leave the step's edits. */}
       <LeaveConfirmation
         active={unsaved}
         onLeave={uploads.release}
         title={t("flow_step_editor_discard_title")}
-        description={t("flow_step_editor_discard_description")}
+        description={t("flow_step_editor_discard_description", {
+          count: Math.max(changeCount, 1)
+        })}
         confirmLabel={t("flow_step_editor_discard")}
         cancelLabel={t("flow_step_editor_keep_editing")}
       />

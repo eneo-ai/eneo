@@ -1461,12 +1461,12 @@ def test_two_marked_documents_are_delivered_in_step_order() -> None:
             2,
             "template_fill",
             "docx",
-            name="Startsidan",
-            deliverable=FlowStepDeliverable(label="Standup Startsidan"),
+            name="Webbplatsen",
+            deliverable=FlowStepDeliverable(label="Standup webbplatsen"),
         ),
     ]
 
-    assert _deliverables(steps) == [(1, "Standup Eneo"), (2, "Standup Startsidan")]
+    assert _deliverables(steps) == [(1, "Standup Eneo"), (2, "Standup webbplatsen")]
 
 
 def test_an_earlier_document_is_delivered_when_the_last_step_is_text() -> None:
