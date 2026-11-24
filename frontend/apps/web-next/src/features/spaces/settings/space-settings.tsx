@@ -494,11 +494,12 @@ function RetentionSection() {
     setChecking(true);
     let current: number | null;
     try {
-      // A real read, not the cache: a time saved elsewhere since may make this one shorter.
-      const fresh = await queryClient.query({
-        ...spaceQueryOptions(browserApi, routeId),
-        staleTime: 0
-      });
+      // A read started now, not the cache: a time saved elsewhere since may make this one
+      // shorter. A read of the space already on its way may predate that change, and a new
+      // query would join it, so it is cancelled first and this one starts its own request.
+      const options = spaceQueryOptions(browserApi, routeId);
+      await queryClient.cancelQueries({ queryKey: options.queryKey, exact: true });
+      const fresh = await queryClient.query({ ...options, staleTime: 0 });
       current = fresh.data_retention_days ?? null;
     } catch (error) {
       // Without the current time nothing is saved: the typed time stays, to try again.

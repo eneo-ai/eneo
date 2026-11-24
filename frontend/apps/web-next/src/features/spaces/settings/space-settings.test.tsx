@@ -7,7 +7,7 @@ import { recordAnnouncements, renderInApp, testAppContext } from "@/test/render"
 import { router } from "@/test/navigation";
 import messages from "@/lib/i18n/messages/sv.json";
 import { setViewport } from "@/test/setup-dom";
-import type { Space } from "../space";
+import { spaceQueryOptions, type Space } from "../space";
 import { makeSpace } from "../testing/space-fixture";
 
 const state = vi.hoisted(() => ({ space: null as unknown as Space, routeId: "space-1" }));
@@ -457,6 +457,59 @@ it("keeps the field read-only while it reads the space's time, and saves nothing
   expect(api.PATCH).not.toHaveBeenCalled();
   // The typed time stays, to be tried again.
   expect(field.value).toBe("60");
+});
+
+/** Space reads from here on, and a hook to hold the next one. */
+function countSpaceReads() {
+  const reads = api.GET.getMockImplementation()!;
+  const counted = { reads: 0, hold: null as null | { answer: Promise<unknown> } };
+  api.GET.mockImplementation((path: string, init: unknown) => {
+    if (path !== "/api/v1/spaces/{id}/") return reads(path, init);
+    counted.reads += 1;
+    const held = counted.hold;
+    counted.hold = null;
+    return held ? held.answer : reads(path, init);
+  });
+  return counted;
+}
+
+it("decides on its own read, not on a read of the space already on its way", async () => {
+  const { queryClient } = showSettings();
+  const counted = countSpaceReads();
+  // A refresh of the page's space is on its way and will answer 30, as read before the change.
+  let answer!: (value: unknown) => void;
+  counted.hold = { answer: new Promise((resolve) => (answer = resolve)) };
+  const stale = { ...state.space };
+  void queryClient
+    .query({ ...spaceQueryOptions(api as never, "space-1"), staleTime: 0 })
+    .catch(() => {});
+  await waitFor(() => expect(counted.reads).toBe(1));
+  // Another administrator lengthened the time meanwhile.
+  state.space = { ...state.space, data_retention_days: 90 };
+  enterRetention("60");
+  expect(await screen.findByRole("alertdialog", { name: "Korta gallringstiden?" })).toBeTruthy();
+  expect(counted.reads).toBe(2);
+  await act(async () => answer({ data: stale, response: new Response("{}") }));
+  expect(api.PATCH).not.toHaveBeenCalled();
+});
+
+it("reads the space again on the next change after a read that failed", async () => {
+  showSettings();
+  const counted = countSpaceReads();
+  counted.hold = {
+    answer: Promise.resolve({
+      error: { message: "Temporary failure" },
+      response: new Response("{}", { status: 503 })
+    })
+  };
+  const field = enterRetention("60");
+  await waitFor(() => expect(counted.reads).toBe(1));
+  await waitFor(() => expect(field.readOnly).toBe(false));
+  expect(api.PATCH).not.toHaveBeenCalled();
+  enterRetention("45");
+  await waitFor(() => expect(api.PATCH).toHaveBeenCalledTimes(1));
+  expect(counted.reads).toBe(2);
+  expect(api.PATCH.mock.calls[0]![1].body).toEqual({ data_retention_days: 45 });
 });
 
 it("keeps the field read-only while a time is saved, so a clear made after it is not lost", async () => {
