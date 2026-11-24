@@ -2,13 +2,13 @@ import { Callout } from "nextra/components";
 
 # Flow run-history retention
 
-This page explains how retention eligibility for Flow runs, steps, and their run-owned history is set, purged and put on legal hold. It covers the one rule, the cap a space sets, legal holds, and who may do what.
+This page explains how the time for Flow runs, steps and their run-owned history is set, how runs are removed when it has passed, and how they are put on legal hold. It covers the one rule, the cap a space sets, automatic removal, legal holds, and who may do what.
 
 <Callout type="warning">
 
-**Setting a time does not delete data.**
+**A space's time removes runs, and they cannot be restored.**
 
-There is no automatic Flow run-history deletion. History is deleted only by the explicit purge (an API call that needs `retention_manage`), and the purge skips every run under a legal hold. No screen offers a purge.
+A Flow run that starts while its space has a time is removed automatically, with its steps, transcripts and files, once it is older than the time. A task checks every five minutes. Runs that started while the space had no time are never removed automatically. A legal hold keeps the runs it covers. See [Automatic removal](#automatic-removal).
 
 </Callout>
 
@@ -16,21 +16,24 @@ There is no automatic Flow run-history deletion. History is deleted only by the 
 
 - A space's time (`data_retention_days`, the same time its conversations use) caps every Flow in the space.
 - A Flow may choose a shorter time of its own, never a longer one. A longer one is refused with code 9086.
-- A Flow without its own time uses the space's. A space without a time sets no cap, and its Flows' runs become eligible only through a time of their own.
-- No time means no age threshold: no run history is eligible for a purge. The same purge still deletes expired live transcripts that no run uses (see [Administrator purge of due run history](/guides/flows-api-guide#administrator-purge-of-due-run-history)).
+- A Flow without its own time uses the space's. A space without a time sets no cap and removes nothing automatically; a Flow's own time there counts only for the explicit purge.
+- No time means no age threshold: no run history becomes due. The explicit purge still deletes expired live transcripts that no run uses (see [Administrator purge of due run history](/guides/flows-api-guide#administrator-purge-of-due-run-history)).
 - The organisation sets no time for Flows.
 - Changing a shared space's time and a Flow's own time, and purging, need `retention_manage`; the two times also need the person's role in the space: its admin, or for a Flow in a personal space its owner if they may edit Flows; placing, reviewing and releasing holds need `retention_holds` (see [Who may change or stop retention](#who-may-change-or-stop-retention)).
 - A Flow's time can be changed after the Flow is published.
 
-On upgrade to this version, every Flow's own time is cleared without an audit row and the space's time applies to its Flows, so an administrator should check the spaces' times before the next purge.
+On upgrade to this version, every Flow's own time is cleared without an audit row and the space's time applies to its Flows. A space that already has a time starts removing the runs that start after the upgrade, so an administrator should check the spaces' times before upgrading. Runs that started before the upgrade are never removed automatically.
 
-### Before upgrading: list the runs whose eligibility changes
+### Before upgrading: list the runs that become due or stop being due
 
-The upgrade clears every Flow's and every organisation's run-history time and every retention mode; from then on the space's `data_retention_days` alone decides. Nothing in the database records the old values afterwards. Run this read-only query on the old version, before upgrading, and keep its output. It lists every finished run that the upgrade makes purgeable (for example one a review mode kept out of the purge) or no longer purgeable (for example one that only the organisation's time made due), with `held` showing a legal hold, which protects the run before and after. It judges at the moment it runs (`now()`), and it pastes into `psql` as it stands. Nothing is deleted until an administrator runs the explicit purge.
+The upgrade clears every Flow's and every organisation's run-history time and every retention mode; from then on the space's `data_retention_days` alone decides. The live settings no longer contain the old values afterwards. Run this read-only query on the old version, before upgrading, and keep its output. It lists every finished run that becomes due under the policy (`becomes purgeable`, for example one a review mode kept out of the purge) or stops being due (`no longer purgeable`, for example one that only the organisation's time made due), with `held` showing a legal hold, which protects the run before and after. It judges at the moment it runs (`now()`), and it pastes into `psql` as it stands. Run it in the same `TimeZone` as the application, and check that with `SHOW TimeZone`: days are added in calendar time, so another zone can move a deadline by an hour around a daylight-saving change.
+
+These runs all started before the upgrade, so automatic removal never takes them. Only an administrator's explicit purge removes them.
 
 ```sql
--- Run on the old version, before upgrading. Read-only: lists the runs whose
--- purge eligibility the upgrade changes, judged at now().
+-- Run on the old version, before upgrading, in the application's TimeZone.
+-- Read-only: lists the runs the upgrade makes due or no longer due for the
+-- explicit purge, judged at now().
 WITH runs AS (
   SELECT r.id AS run_id, r.tenant_id, f.space_id, r.flow_id,
          coalesce(r.finished_at, r.created_at) AS anchor,
@@ -96,7 +99,56 @@ The space's administrator decides how long the space keeps its content, for conv
 
 A time stored before the space's time was lowered stays stored; the shorter space time applies, and the Flow's settings show both. Saving it again is refused until it fits.
 
-Once the time has passed, the history is eligible for a separately requested explicit purge. Nothing else happens. The threshold is measured from `finished_at`. If a terminal run has no finish time, it is measured from `created_at`. A run is eligible when its anchor plus the days in calendar time has passed.
+Once the time has passed, the run is due. A run that started while its space had a time is then removed automatically (see [Automatic removal](#automatic-removal)); any due run can also be removed by the explicit purge. The threshold is measured from `finished_at`. If a terminal run has no finish time, it is measured from `created_at`. A run is due when its anchor plus the days in calendar time, in the database session's `TimeZone`, has passed.
+
+## Automatic removal [#automatic-removal]
+
+### Which runs it removes
+
+- **A shared space's time turns it on.** When a run starts, Eneo records whether its space had a time at that moment. Only those runs are removed automatically, by the space's time or the Flow's shorter one.
+- **Runs that started without a time stay.** A run that started while its space had no time, or before the upgrade to this version, is never removed automatically, also when a time is set later. The explicit purge can still remove it once it is due.
+- **Removing the space's time pauses it.** While the space has no time, nothing in it is removed automatically, also when a Flow keeps a time of its own. When a time is set again, removal resumes, by the new time, for the runs that started while the space had a time.
+- **Personal spaces are not covered** in this version, also when a time is stored on the space.
+- **Only finished runs** (completed, failed or cancelled) are removed. A run that never finishes, for example one waiting for review, stays.
+
+### When
+
+The retention task `flows.run_history` checks every five minutes and removes the runs that are due. Locks, queued work and the storage reconciliation can make it take longer, so a run is not guaranteed to be gone at a given minute. The operator can switch the task off with `RETENTION_FLOW_RUN_HISTORY_ENABLED` (on by default); see [Settings](/docs/audit-logging#settings).
+
+### What is removed and what stays
+
+A removed run cannot be restored. Removal takes:
+
+- the run, its steps and their results, its transcripts and their corrections;
+- its files: uploaded and recorded audio, PDFs and the files derived from them, generated documents, and live text bound to the run. Object content storage then deletes the bytes in the background, and a link to a removed file answers 404.
+
+These stay:
+
+- a run under a legal hold, until the hold ends;
+- a run whose audit row is not yet delivered or whose webhook delivery is still pending, until the delivery is done;
+- a file that another remaining run still uses. A rerun, or a new run from a reviewed transcription, shares its source run's audio file. Each run counts from its own time, and the file goes with the last of them. A run that started while the space had no time is never removed automatically, so it keeps the shared file, and it has its own copy of the transcript.
+
+The space's time does not reach content that never became part of a run. In this version, audio uploaded for a run that was never started, and live text never bound to a run, are not removed automatically, and the upload and debug-evidence windows under **Admin > Flow retention** are not enforced in this version. The explicit purge removes expired live text that no run uses.
+
+Create-run idempotency is tied to the run row. Once a run is removed, a request with the same `Idempotency-Key` creates a new run; if the upload it names has been removed too, that request can be refused when its input is checked.
+
+Eneo records each pass with the retention engine's audit events (`data_retention_batch` and `data_retention_run`), with counts and without run content. No event is written per run.
+
+### A run that cannot be removed
+
+A run that exceeds the task's limits, whose removal fails, or that someone else has locked is kept whole and tried again on every pass; the rest are removed. Health reports it: `GET /api/healthz` shows `flows.run_history` with `blocked_reasons` such as `runs.unit_exceeds_budget`, `runs.run_failed` or `runs.run_locked`, and reads `degraded` once such a run has been due for more than an hour. `limiting_settings` names the settings whose limits kept a run, for example `retention_max_family_rows` and `retention_max_files_per_run`. The health response never names the run; the log carries its ID and the error type. Runs under a legal hold or waiting for a delivery are not due, so they leave health green. See [Health](/docs/audit-logging#health).
+
+### The explicit purge
+
+The administrator's explicit purge stays. It removes due runs whatever their start, also runs due only by a Flow's own time in a space without a time, and it skips the same holds and deliveries.
+
+### After a restore
+
+Whether a run started under a time is restored with the run, so a restored, due run is removed again. The readback after a restore (see [After a restore](/guides/data-retention#after-a-restore)) includes this task. It uses the times and holds in the restored database, and a run kept because it exceeds the limits, fails or is locked fails the readback until it is resolved. The readback can be complete while object content storage is still deleting the bytes.
+
+### Copies outside Eneo's reach
+
+Removal does not reach what a Flow's HTTP POST step or result delivery has sent to another system, text a browser has kept, recordings kept on a device, audio a speaker identification service keeps (Vemsa keeps it for up to 72 hours), or database backups until they expire. See [Copies outside Eneo's reach](/guides/data-retention#copies-outside-eneos-reach).
 
 ## Configure it
 
@@ -106,12 +158,12 @@ The target endpoints use an Organization-wide administrative catalog. They inclu
 
 A deleted Flow that still has run history stays in the Flow targets, marked `retired`. Deleting a Flow retires it: it can no longer run, but its runs, results, reviews and evidence stay readable with each reader's current permissions and follow the Flow's retention rule. Runs that were still queued, running or waiting for review are cancelled by a maintenance sweep that runs every minute by default, so they become finished history too. Its Flow time and purge keep working. A deleted Flow without runs is not listed.
 
-1. Set the space's time, or leave it empty when the space keeps its content.
-2. Set a Flow time only when the Flow needs a shorter one.
+1. Set the space's time, or leave it empty when the space keeps its content. A time removes the runs that start from then on once they are older than it. In the new web app a shorter time asks for a confirmation first.
+2. Set a Flow time only when the Flow needs a shorter one. The Flow's settings warn before a shorter time is saved.
 3. Check `effective` in the response. It shows the resolved number of days and the level it comes from.
 4. The audit event names the scope and the old and new time.
 
-A Flow whose time is cleared (`"policy": null`) stores no time and uses the space's. If the space's time later changes, the Flow follows it.
+A Flow whose time is cleared (`"policy": null`) stores no time and uses the space's. If the space's time later changes, the Flow follows it. A shorter time also applies to runs that started earlier under a time: those already older than it are removed at the next check.
 
 ## API contract
 
@@ -177,8 +229,8 @@ The ordinary Flow response has only `run_history_retention`, with the space's an
 ## Legal holds
 
 A legal hold ("rättslig spärr"), for example while a disclosure request is
-pending, keeps the run history it covers. It overrides every space and Flow time until the hold is released or its end date passes: the explicit
-purge skips held runs, the debug-evidence redaction skips them, and a Space that
+pending, keeps the run history it covers. It overrides every space and Flow time until the hold is released or its end date passes: automatic removal
+and the explicit purge skip held runs, the debug-evidence redaction skips them, and a Space that
 contains an active hold cannot be deleted (`space_contains_legal_hold`, 409).
 Deleting the whole Organization still deletes everything. A time is a policy,
 not a hold. Every stop is a recorded decision: who placed it, why, when,
@@ -242,7 +294,10 @@ rows, and the audit events remain.
 
 Holds, time changes and deletions are serialized: a purge waits for a hold or
 time change that is being saved, and a hold or time change waits for an
-open purge batch. Deleting a space waits the same way. A purge also rechecks holds right before it deletes.
+open purge batch or a removal pass in progress. Automatic removal waits only
+briefly for a hold or time change being saved: its pass then ends early, and
+the next pass continues. Deleting a space waits the same way as a purge. Both
+recheck holds right before they delete.
 
 ## Who may change or stop retention
 
@@ -261,8 +316,9 @@ the predefined Owner role. An administrator grants them to a role in
 or to the Owner role. Until an administrator does, nobody can change a shared
 space's time, for conversations too, a Flow's time or legal holds, so grant them
 right after upgrading. Changing a shared space's time also needs the right to edit
-the space; a personal space's time cannot be changed, so its Flows use only
-their own time. Changing a Flow's own time also needs the admin role in the
+the space; a personal space's time cannot be changed through Eneo, so its Flows
+normally use only their own time. A time stored on a personal space by other
+means still caps its Flows, but removes nothing automatically. Changing a Flow's own time also needs the admin role in the
 Flow's space, or, in a personal space, being its owner with the right to edit Flows; anyone else,
 a space editor too, is refused with `forbidden_action` (403) and the time is
 unchanged. Resetting a role to

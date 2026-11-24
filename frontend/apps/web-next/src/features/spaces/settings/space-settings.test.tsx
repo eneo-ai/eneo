@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-libra
 import { afterEach, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import type { Permission } from "@/lib/auth/permissions";
-import { renderInApp, testAppContext } from "@/test/render";
+import { recordAnnouncements, renderInApp, testAppContext } from "@/test/render";
 import { router } from "@/test/navigation";
 import messages from "@/lib/i18n/messages/sv.json";
 import { setViewport } from "@/test/setup-dom";
@@ -269,10 +269,9 @@ it("keeps an empty space name and explains the error at the field until correcte
 
 it("keeps invalid retention input, explains the allowed format and saves a correction", async () => {
   const { container, queryClient } = showSettings();
-  const retention = screen.getByRole("textbox", { name: "Gallring av konversationshistorik" });
-  // "yta", as the rest of the settings say.
-  expect(screen.getByText(/appar i denna yta som inte har/)).toBeTruthy();
-  expect(screen.getByText(/Tiden är också taket för körhistoriken i ytans flöden/)).toBeTruthy();
+  const retention = screen.getByRole("textbox", { name: "Gallringstid för ytan" });
+  // The time covers flows too, and says that what is older goes for good.
+  expect(screen.getByText(messages.space_retention_description)).toBeTruthy();
   queryClient.setQueryData(["flows", "detail", "flow-1"], { id: "flow-1" });
 
   fireEvent.change(retention, { target: { value: "1.5" } });
@@ -284,12 +283,12 @@ it("keeps invalid retention input, explains the allowed format and saves a corre
   expect(api.PATCH).not.toHaveBeenCalled();
   await expectNoAxeViolations(container);
 
-  fireEvent.change(retention, { target: { value: "14" } });
+  fireEvent.change(retention, { target: { value: "45" } });
   fireEvent.blur(retention);
   await waitFor(() =>
     expect(api.PATCH).toHaveBeenCalledWith("/api/v1/spaces/{id}/", {
       params: { path: { id: "space-1" } },
-      body: { data_retention_days: 14 }
+      body: { data_retention_days: 45 }
     })
   );
   expect(retention.getAttribute("aria-invalid")).toBeNull();
@@ -299,9 +298,109 @@ it("keeps invalid retention input, explains the allowed format and saves a corre
   );
 });
 
+function retentionField() {
+  return screen.getByRole("textbox", { name: "Gallringstid för ytan" }) as HTMLInputElement;
+}
+
+function enterRetention(value: string) {
+  const field = retentionField();
+  fireEvent.change(field, { target: { value } });
+  fireEvent.blur(field);
+  return field;
+}
+
+it.each([
+  ["sets a time on a space without one", null, "7", 7],
+  ["lengthens the time", 30, "60", 60],
+  ["clears the time", 30, "", null]
+])("%s without asking and says what applies from now", async (_, saved, typed, sent) => {
+  const { container } = showSettings(
+    undefined,
+    [],
+    [],
+    "space-1",
+    makeSpace({
+      overrides: { data_retention_days: saved, completion_models: [], embedding_models: [] }
+    })
+  );
+  const said = recordAnnouncements();
+  enterRetention(typed);
+  await waitFor(() =>
+    expect(api.PATCH).toHaveBeenCalledExactlyOnceWith("/api/v1/spaces/{id}/", {
+      params: { path: { id: "space-1" } },
+      body: { data_retention_days: sent }
+    })
+  );
+  expect(screen.queryByRole("alertdialog")).toBeNull();
+  const note =
+    sent === null
+      ? messages.space_retention_saved_off
+      : `Körningar i ytans flöden som startar medan ytan har en tid tas bort när de är äldre än ${sent} dagar, eller flödets kortare tid. Körningar som startade medan ytan saknade tid rörs inte. Kontrollen görs var femte minut.`;
+  // Shown under the field and said once, politely, without moving the focus.
+  const section = document.getElementById("security")!;
+  expect(await within(section).findByText(note)).toBeTruthy();
+  await waitFor(() => expect(said).toContain(note));
+  await expectNoAxeViolations(container);
+});
+
+it("asks before a shorter time is saved and saves it once confirmed", async () => {
+  showSettings();
+  enterRetention("7");
+  const dialog = await screen.findByRole("alertdialog", { name: "Korta gallringstiden?" });
+  expect(api.PATCH).not.toHaveBeenCalled();
+  expect(
+    within(dialog).getByText(
+      "Innehåll som följer ytans tid och redan är äldre än 7 dagar tas bort vid nästa kontroll. Det går inte att återställa."
+    )
+  ).toBeTruthy();
+  // The least destructive choice has the focus.
+  expect(
+    within(dialog).getByRole("button", { name: "Avbryt" }).hasAttribute("data-autofocus")
+  ).toBe(true);
+  await expectNoAxeViolations(dialog);
+
+  fireEvent.click(within(dialog).getByRole("button", { name: "Korta tiden" }));
+  await waitFor(() =>
+    expect(api.PATCH).toHaveBeenCalledExactlyOnceWith("/api/v1/spaces/{id}/", {
+      params: { path: { id: "space-1" } },
+      body: { data_retention_days: 7 }
+    })
+  );
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  expect(retentionField().value).toBe("7");
+  expect(
+    await within(document.getElementById("security")!).findByText(
+      /äldre än 7 dagar, eller flödets kortare tid/
+    )
+  ).toBeTruthy();
+});
+
+it.each([
+  [
+    "Cancel",
+    (dialog: HTMLElement) => fireEvent.click(within(dialog).getByRole("button", { name: "Avbryt" }))
+  ],
+  ["Escape", (dialog: HTMLElement) => fireEvent.keyDown(dialog, { key: "Escape" })]
+])("restores the saved time when a shorter one is not confirmed (%s)", async (_, dismiss) => {
+  showSettings();
+  enterRetention("7");
+  dismiss(await screen.findByRole("alertdialog"));
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  expect(retentionField().value).toBe("30");
+  expect(api.PATCH).not.toHaveBeenCalled();
+});
+
+it("never sends an unconfirmed shorter time when the page is left", async () => {
+  const { unmount } = showSettings();
+  fireEvent.change(retentionField(), { target: { value: "7" } });
+  unmount();
+  await act(async () => {});
+  expect(api.PATCH).not.toHaveBeenCalled();
+});
+
 it("asks a space admin without retention_manage for the permission and keeps the time read-only", async () => {
   const { container } = showSettings(undefined, [], [], "space-1", undefined, []);
-  const retention = screen.getByRole("textbox", { name: "Gallring av konversationshistorik" });
+  const retention = screen.getByRole("textbox", { name: "Gallringstid för ytan" });
   expect(retention.hasAttribute("disabled")).toBe(true);
   const hint = screen.getByText(
     "För att ändra tiden krävs behörigheten Gallring – hantera regler. En administratör ger den till en roll."
@@ -323,7 +422,7 @@ it("shows the retention policy read-only to someone who may not edit the space",
       overrides: { data_retention_days: 30, completion_models: [], embedding_models: [] }
     })
   );
-  const retention = screen.getByRole("textbox", { name: "Gallring av konversationshistorik" });
+  const retention = screen.getByRole("textbox", { name: "Gallringstid för ytan" });
 
   expect((retention as HTMLInputElement).value).toBe("30");
   expect(retention.hasAttribute("disabled")).toBe(true);

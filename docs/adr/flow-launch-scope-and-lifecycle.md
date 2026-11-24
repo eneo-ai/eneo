@@ -558,9 +558,19 @@ WI-MKT-02.
   Flow-policy columns and routes are removed. A Space's `data_retention_days`
   now caps every Flow in it, and a Flow may set only a shorter time; a longer
   one is refused with code 9086. Changing a shared Space's time needs
-  `retention_manage`. The deletion boundary below still holds: no time
-  schedules deletion, and only the explicit purge removes history. The rest of
-  this decision records the launch design.
+  `retention_manage`.
+- **Revised again (automatic removal):** The deletion boundary and the revision
+  rule below are replaced. A run records when it is inserted whether its
+  Space then had a time, and the shared retention engine's task
+  `flows.run_history`, every five minutes, removes those runs once they are past
+  the Space's time or the Flow's shorter one, and only while the Space has a
+  time. Runs that started without a Space time, and runs in personal Spaces, are
+  never removed automatically. Each run is one unit under the retention lock,
+  rolled back whole when any part fails; legal holds and undelivered audit or
+  webhook rows keep it; a file still used elsewhere stays; the engine's audit
+  events record each pass. Operators switch the task off with
+  `RETENTION_FLOW_RUN_HISTORY_ENABLED`. The explicit purge remains for any due
+  run. The rest of this decision records the launch design.
 - **Decision:** An Organization administrator may set a complete `{mode, days}`
   policy at Organization, Space, or individual Flow scope. Resolution checks
   Flow, then Space, then Organization; the first complete policy wins. A child

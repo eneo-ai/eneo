@@ -10,12 +10,14 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal, flushSync } from "react-dom";
 import { Banner } from "@astryxdesign/core/Banner";
 import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
+import { EmptyState } from "@/components/composites/empty-state";
 import { LoadingState } from "@/components/composites/loading-state";
 import { PageHeader } from "@/components/composites/page-header";
 import { blockingError, ListError, RefreshError } from "@/components/composites/query-state";
 import { StatusLabel } from "@/components/composites/status-label";
 import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
+import { EneoApiError } from "@/lib/api/errors";
 import { hasAnswered, pollEvery } from "@/lib/api/query";
 import { useFocusRescue } from "@/lib/focus-rescue";
 import { usePhoneScreen } from "@/lib/hooks/use-media-match";
@@ -768,6 +770,31 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
   const actionsAfterReview = phone && awaitingReview;
   const view = status ? runStatusView(status) : null;
   const duration = summary ? runDurationMs(summary) : null;
+
+  // The run is not there: a wrong id, or removed, also while the page is open. Reading it
+  // again cannot bring it back, so the page says so instead of offering a retry.
+  const gone = [progress, detail, steps].some(
+    (read) => read.error instanceof EneoApiError && read.error.status === 404
+  );
+  if (gone) {
+    return (
+      <div className="flex min-w-0 flex-1 flex-col">
+        <div className="flex w-full max-w-5xl flex-col py-4 md:py-5">
+          <EmptyState
+            headingLevel={1}
+            title={t("flow_run_gone_title")}
+            description={t("flow_run_gone_description")}
+            actions={
+              <Button
+                label={t("flow_run_gone_back")}
+                href={`/spaces/${routeId}/flows/${flowId}?tab=runs`}
+              />
+            }
+          />
+        </div>
+      </div>
+    );
+  }
 
   if (!shown) {
     return (
