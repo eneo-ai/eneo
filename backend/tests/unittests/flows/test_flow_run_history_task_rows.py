@@ -7,7 +7,13 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy.dialects import postgresql
-from sqlalchemy.exc import DBAPIError, InterfaceError, OperationalError
+from sqlalchemy.exc import (
+    CompileError,
+    DBAPIError,
+    InterfaceError,
+    OperationalError,
+    PendingRollbackError,
+)
 
 import eneo.database.tables as tables
 from eneo.data_retention.application.retention_runner import (
@@ -63,6 +69,9 @@ def _busy_lock() -> GallringLockBusy:
         (_database_error("XX000"), False),
         (RetentionContractError("engine"), False),
         (RetentionOwnershipLost("superseded"), False),
+        (CompileError("unconsumed column"), False),
+        (PendingRollbackError("rolled back"), False),
+        (MemoryError(), False),
         (_database_error("22001"), True),
         (_database_error("23505"), True),
         (RuntimeError("defect"), True),
@@ -84,6 +93,9 @@ def _busy_lock() -> GallringLockBusy:
         "internal",
         "contract",
         "ownership",
+        "compile",
+        "pending-rollback",
+        "memory",
         "data",
         "integrity",
         "defect",
@@ -94,8 +106,10 @@ def test_only_the_runs_own_errors_block_it_as_failed(
 ) -> None:
     """A data or integrity error, or the removal's own defect, blocks one run
     and the pass goes on; anything else ends the chunk, retried or failed by
-    the runner. Mutants: a missing privilege or a dropped connection blocking
-    every run as failed; a deadlock or a busy lock counted as the run's."""
+    the runner. Mutants: a missing privilege, a dropped connection, a statement
+    SQLAlchemy cannot compile, a session left unusable or exhausted memory
+    blocking every run as failed; a deadlock or a busy lock counted as the
+    run's."""
     assert is_run_failure(error) is run_failure
 
 

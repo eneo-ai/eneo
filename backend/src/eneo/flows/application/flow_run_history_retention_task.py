@@ -11,7 +11,12 @@ from collections.abc import Sequence
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy.exc import DBAPIError, InterfaceError, OperationalError
+from sqlalchemy.exc import (
+    DBAPIError,
+    InterfaceError,
+    OperationalError,
+    SQLAlchemyError,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.data_retention.application.retention_runner import (
@@ -69,14 +74,16 @@ def is_run_failure(error: BaseException) -> bool:
     """Whether an error that rolled one run back is that run's own, so the run
     is blocked as run_failed and the pass goes on.
 
-    The run's own: an error the removal raises itself, not from the database,
-    and a database error of class 22 or 23. Everything else propagates to the
-    runner, which ends the chunk: its own errors; a statement or lock timeout,
-    a deadlock or a busy gallring lock (retried by the next execution); a
-    connection the driver invalidated, an operational or interface error; and
-    every other SQLSTATE, such as 08 (connection), 28 (sign-in), 42 (syntax or
-    privilege, 42501), 53 (resources), 57 (operator), 58 (system) and XX
-    (internal), which would fail every run alike."""
+    The run's own: a database error of class 22 or 23, and any other error the
+    removal raises itself. Everything else propagates to the runner, which
+    ends the chunk: its own errors; a statement or lock timeout, a deadlock or
+    a busy gallring lock (retried by the next execution); a connection the
+    driver invalidated, an operational or interface error; every other
+    SQLSTATE, such as 08 (connection), 28 (sign-in), 42 (syntax or privilege,
+    42501), 53 (resources), 57 (operator), 58 (system) and XX (internal);
+    every SQLAlchemy error not from the database, such as a statement it
+    cannot compile or a session it left unusable; and exhausted memory. Those
+    would fail every run alike."""
     if isinstance(
         error, (RetentionContractError, RetentionOwnershipLost, GallringLockBusy)
     ) or is_retention_timeout(error):
@@ -90,6 +97,8 @@ def is_run_failure(error: BaseException) -> bool:
                 return False
             sqlstate = getattr(cause.orig, "sqlstate", None)
             return isinstance(sqlstate, str) and sqlstate[:2] in _RUN_DATA_CLASSES
+        if isinstance(cause, (SQLAlchemyError, MemoryError)):
+            return False
         cause = cause.__cause__
     return True
 

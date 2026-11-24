@@ -17,7 +17,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import func, select, text, update
-from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import CompileError, DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.data_retention.application.retention_readback import (
@@ -698,6 +698,11 @@ async def test_a_nearly_spent_pass_defers_a_run_instead_of_blocking_it(
             RetentionJobOutcome.FAILED,
             RetentionErrorCode.CHUNK_FAILED,
         ),
+        (
+            CompileError("unconsumed column"),
+            RetentionJobOutcome.FAILED,
+            RetentionErrorCode.CHUNK_FAILED,
+        ),
     ],
     ids=[
         "defect",
@@ -707,6 +712,7 @@ async def test_a_nearly_spent_pass_defers_a_run_instead_of_blocking_it(
         "integrity",
         "privilege",
         "invalidated-connection",
+        "compile",
     ],
 )
 async def test_a_run_that_raises_is_blocked_and_the_others_go(
@@ -723,10 +729,10 @@ async def test_a_run_that_raises_is_blocked_and_the_others_go(
     """The run's own error (a defect in the removal, or a data or integrity
     error from the database) blocks the run as run_failed; a transient
     database error ends the pass as partial; an error of the whole system (a
-    missing privilege, an invalidated connection) and the engine's own errors
-    fail the pass. Mutants: catching the transient error as a defect;
-    catching the contract error; blocking every run as failed for a system
-    error."""
+    missing privilege, an invalidated connection, a statement SQLAlchemy cannot
+    compile) and the engine's own errors fail the pass. Mutants: catching the
+    transient error as a defect; catching the contract error; blocking every
+    run as failed for a system error."""
     session = retention_session
     failing = await _aged_run(
         session,
