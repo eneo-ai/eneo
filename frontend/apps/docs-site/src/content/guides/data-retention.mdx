@@ -160,7 +160,8 @@ bytes still wait. See
 
 Retention never removes backups and their snapshots (see
 [After a restore](#after-a-restore)), downloaded documents and exports, content
-sent to an AI model provider or another external service, or text added to a
+sent to an AI model provider or another external service, what a Flow's HTTP
+POST step or result delivery has sent to another system, or text added to a
 knowledge base. An Insights answer is stored for 24 hours after its last update,
 also when the conversations behind it are gone. A copy of the database volume
 can still contain deleted rows; a `pg_dump` backup holds only existing rows.

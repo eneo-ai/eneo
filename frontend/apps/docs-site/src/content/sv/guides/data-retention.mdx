@@ -1,6 +1,6 @@
 ---
 title: Gallring
-translationSource: guides/data-retention.mdx@d5f0fbeea50c
+translationSource: guides/data-retention.mdx@41fc18223904
 ---
 
 # Gallring
@@ -170,7 +170,8 @@ väntar. Se
 Gallringen tar aldrig bort backuper och deras ögonblicksbilder (se
 [Efter en återställning](#after-a-restore)), nedladdade dokument och exporter,
 innehåll som skickats till en leverantör av AI-modeller eller en annan extern
-tjänst, eller text som lagts till i en kunskapsbas. Ett svar i Insikter sparas
+tjänst, det som ett Flödes HTTP POST-steg eller resultatutskick har skickat till
+ett annat system, eller text som lagts till i en kunskapsbas. Ett svar i Insikter sparas
 i 24 timmar efter att det senast uppdaterades, även när konversationerna bakom
 det är borta. En kopia av databasvolymen kan fortfarande innehålla raderade
 rader; en backup med `pg_dump` innehåller bara befintliga rader.
