@@ -1769,6 +1769,52 @@ describe("FlowRunPage", () => {
     expect(calls(STEPS)).toHaveLength(2);
   });
 
+  describe("a run that is not there", () => {
+    const goneShown = async () => {
+      expect(
+        await screen.findByRole("heading", { level: 1, name: messages.flow_run_gone_title })
+      ).toBeTruthy();
+      expect(screen.getByText(messages.flow_run_gone_description)).toBeTruthy();
+      expect(
+        screen.getByRole("link", { name: messages.flow_run_gone_back }).getAttribute("href")
+      ).toContain("/flows/flow-1?tab=runs");
+      // Nothing to read again: no retry, no refresh, and no error code.
+      expect(screen.queryByRole("button", { name: /Försök igen/ })).toBeNull();
+      expect(screen.queryByRole("button", { name: messages.flow_run_more_refresh })).toBeNull();
+      expect(screen.queryByText(messages.flow_runs_run_failed_to_load)).toBeNull();
+      expect(screen.queryByText(messages.query_error_refresh_title)).toBeNull();
+    };
+
+    it("says it does not exist or was removed when its read answers 404", async () => {
+      answerRun(makeRunSummary());
+      state.routes[STATUS] = () => ({ status: 404, body: { message: "Not found" } });
+      renderRun();
+      await goneShown();
+    });
+
+    it("says so when the run is removed while the page is open", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const running = makeRunSummary({ status: "running", finished_at: null, revision: 2 });
+      answerRun(running, makeRunDetail({ ...running, result: null }));
+      renderRun();
+      await screen.findByText(messages.flow_runs_result_pending);
+
+      state.routes[STATUS] = () => ({ status: 404, body: { message: "Not found" } });
+      await act(() => vi.advanceTimersByTimeAsync(2_100));
+      await goneShown();
+      expect(screen.queryByText(messages.flow_runs_result_pending)).toBeNull();
+    });
+
+    it("keeps the error and its retry for any other failure", async () => {
+      answerRun(makeRunSummary());
+      state.routes[STATUS] = () => ({ status: 500, body: { message: "Broken" } });
+      renderRun();
+      expect(await screen.findByText(messages.flow_runs_run_failed_to_load)).toBeTruthy();
+      expect(screen.getByRole("button", { name: /Försök igen/ })).toBeTruthy();
+      expect(screen.queryByText(messages.flow_run_gone_title)).toBeNull();
+    });
+  });
+
   it("stops following a moving run once it is gone", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const running = makeRunSummary({ status: "running", finished_at: null, revision: 2 });
