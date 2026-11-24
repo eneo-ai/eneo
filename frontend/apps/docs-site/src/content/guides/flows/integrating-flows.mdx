@@ -2409,9 +2409,9 @@ This table checks workloads against the default limits. It does not establish pr
 
 ### Retention
 
-Run history follows the space's time, which caps every Flow in the space; a Flow may set a shorter time, and a longer one is refused with code 9086. Setting a time or reaching it does not delete anything. The administrator settings API can preview or explicitly purge eligible history with `retention_manage`; held runs remain stored. See [Flow run-history retention](/guides/flows/retention-policy) for the eligibility, delivery blockers, and audit contract.
+Run history follows the space's time, which caps every Flow in the space; a Flow may set a shorter time, and a longer one is refused with code 9086. A run that starts while its space has a time is removed automatically once it is older than the time, checked every five minutes, with its steps, transcripts and run-owned files; a link to a removed file answers 404. Runs that started while the space had no time stay. The administrator settings API can also preview or explicitly purge due history with `retention_manage`; held runs remain stored. See [Flow run-history retention](/guides/flows/retention-policy#automatic-removal) for which runs are removed, delivery blockers, and the audit contract.
 
-Eligibility does not itself erase runs or their run-owned files. Create-run idempotency replay remains tied to the retained run row. Do not infer deletion from an eligibility timestamp.
+Create-run idempotency replay is tied to the run row. Once a run is removed, the same `Idempotency-Key` creates a new run, and if the upload that request names has been removed too, the request can be refused when its input is checked. Read a run you need to keep before its time passes.
 
 Abandoned uploads that were never attached to a run are not swept automatically. Delete them yourself with `DELETE /api/v1/flows/{id}/runtime-files/{file_id}/`; a file already bound to a run returns `409 flow_runtime_file_attached`.
 

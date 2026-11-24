@@ -1,6 +1,6 @@
 ---
 title: Gallring
-translationSource: guides/data-retention.mdx@efcaad856771
+translationSource: guides/data-retention.mdx@d5f0fbeea50c
 ---
 
 # Gallring
@@ -8,11 +8,12 @@ translationSource: guides/data-retention.mdx@efcaad856771
 ```mermaid
 flowchart TB
   accTitle: Så fungerar gallring
-  accDescr: En gallringstid på en assistent eller app, annars på dess yta, annars organisationens äldre period, avgör. Utan tid tas inget bort. Med en tid tar nattkörningen, klockan 03:30 i workerns tid som förval, bort chattar och appkörningar som är äldre än sin tid, och de kopior Eneo har av dem följer med. Städning av rester körs oavsett regler. Säkerhetskopior, nedladdningar, AI-leverantörer och kunskapsbaser ligger utanför Eneos räckvidd.
+  accDescr: En gallringstid på en assistent eller app, annars på dess yta, annars organisationens äldre period, avgör. Utan tid tas inget bort. Med en tid tar nattkörningen, klockan 03:30 i workerns tid som förval, bort chattar och appkörningar som är äldre än sin tid, och de kopior Eneo har av dem följer med. Var femte minut tas körningar i Flöden som startade medan deras yta hade en tid bort när de är äldre än den. Städning av rester körs oavsett regler. Säkerhetskopior, nedladdningar, AI-leverantörer och kunskapsbaser ligger utanför Eneos räckvidd.
   subgraph eneo["Eneo"]
     direction TB
     time["Gallringstid\nassistent eller app, annars dess yta,\nannars organisationens äldre period"] -->|"ingen tid satt"| keep["Sparas: inget tas bort"]
     time -->|"tid satt"| run["Nattkörning, 03:30 som förval\ntar bort chattar och appkörningar äldre än sin tid"]
+    time -->|"ytans tid satt"| flows["Var femte minut\ntar bort körningar i Flöden som startade\nmedan ytan hade en tid"]
     run --> copies["Kopior följer sin källa\nnamn och feedback · kopierade konversationer · temporära filer"]
     cleanup["Städning av rester, oavsett regler\noanvända uppladdningar · konversationer utan fråga · körningsregister"]
   end
@@ -22,8 +23,8 @@ flowchart TB
 ```
 
 Gallring tar bort lagrat innehåll när den tid som valts för det har gått ut.
-Ingen regel, ingen gallring: chattar och appkörningar tas bara bort där någon
-har valt en tid; en ny webbwidget har 30 dagar från början. Gallring enligt en
+Ingen regel, ingen gallring: chattar, appkörningar och körningar i Flöden tas
+bara bort där någon har valt en tid; en ny webbwidget har 30 dagar från början. Gallring enligt en
 regel hålls isär från städning av rester, som körs oavsett vilka regler som
 finns. Kopior följer sin källa: när en tur tas bort försvinner också de kopior
 Eneo har av den.
@@ -89,15 +90,16 @@ En borttagen konversation kommer aldrig tillbaka.
 Varje tid är ett helt antal dagar.
 
 **En yta** (den som får redigera ytan och vars roll har `retention_manage`,
-inloggad: en API-nyckel nekas, eftersom tiden också är taket för ytans Flöden;
-organisationsytan har ingen gallringsinställning):
+inloggad: en API-nyckel nekas, eftersom tiden också är taket för ytans Flöden
+och tar bort deras körningar; organisationsytan har ingen gallringsinställning):
 
 - **Svelte-appen:** **Delat**, ytan, **Inställningar**, **Säkerhet &
   Integritet**, **Gallring av konversationshistorik**. Slå på **Åsidosätt
   policy**, ange dagarna (1 till 2555), **Spara ändringar**.
 - **React-appen (beta):** **Delat**, ytan, **Inställningar**, **Säkerhet och
-  integritet**, **Gallring av konversationshistorik**. Tomt betyder **Ingen
-  gräns**. Värdet sparas när du lämnar fältet.
+  integritet**, **Gallringstid för ytan**. Tomt betyder **Ingen gräns**. Värdet
+  sparas när du lämnar fältet; en kortare tid ber dig bekräfta först. En rad
+  under fältet säger sedan vad som gäller för körningarna i ytans Flöden.
 - **API:** `PATCH /api/v1/spaces/{space_id}/` med
   `{"data_retention_days": 30}`; `null` tar bort tiden, utelämnat behåller den.
 
@@ -175,11 +177,9 @@ rader; en backup med `pg_dump` innehåller bara befintliga rader.
 
 ### Körhistorik för Flöden [#flow-run-history]
 
-Gallringen tar inte bort körhistorik och steghistorik för Flöden i den här
-versionen. En ytas tid ovan är också taket för körhistoriken i varje Flöde på
-ytan, och ett Flöde kan välja en kortare egen tid, aldrig en längre.
-Organisationen sätter ingen tid för Flöden. En personlig ytas tid kan inte
-ändras, så dess Flöden använder bara sin egen tid.
+En ytas tid ovan gäller också körningarna i varje Flöde på ytan. Där är den
+taket: ett Flöde kan välja en kortare egen tid, aldrig en längre.
+Organisationen sätter ingen tid för Flöden.
 
 | Nivå | Tid | Resultat |
 | --- | --- | --- |
@@ -187,19 +187,28 @@ Organisationen sätter ingen tid för Flöden. En personlig ytas tid kan inte
 | Flödet Leverantörsbedömning | 30 dagar | Bara det här Flödet använder 30 dagar |
 | Ett Flöde som ber om 90 dagar | Nekas | Ett Flöde kan inte spara körningar längre än sin yta |
 
-Efter tiden får en administratör med `retention_manage` ta med historiken i en
-rensning som begärs separat. Inget schemalägger eller utför en borttagning.
-Utan tid på ytan eller Flödet har körhistoriken ingen åldersgräns och sparas.
+En körning som startar medan ytan har en tid tas bort, med sina steg,
+transkript och filer, när den är äldre än tiden. Uppgiften kontrollerar var
+femte minut. Körningar som startade medan ytan saknade tid, eller före
+uppgraderingen till den här versionen, tas aldrig bort automatiskt. Tas ytans
+tid bort står gallringen still, också för ett Flöde med egen tid; sätts en tid
+igen fortsätter den för de körningar som startade under en tid. Personliga
+ytor omfattas inte i den här versionen. En körning med rättslig spärr, eller
+vars granskningsrad eller webhook ännu inte är levererad, står kvar, och det
+gör också en fil som en annan kvarvarande körning använder. En administratör
+med `retention_manage` kan också ta bort aktuella körningar med den uttryckliga
+rensningen.
+
 Att ändra ett Flödes tid, eller en delad ytas tid, skriver granskningshändelsen
 `flow_run_retention_policy_changed` med den tidigare och den nya tiden, inte
-körningens innehåll, och tar inte bort eller maskerar något. Uppladdningar till
-Flödeskörningar och felsökningsunderlag för Flöden tas inte heller bort enligt
-schema: städningen av oanvända uppladdningar behåller en fil som en
-uppladdning till en Flödeskörning hänvisar till. En chatt som redigerar ett
-Flöde är en vanlig konversation och följer konversationstiderna ovan.
+körningens innehåll. Uppladdningar till Flödeskörningar och felsökningsunderlag
+för Flöden tas inte bort enligt schema: städningen av oanvända uppladdningar
+behåller en fil som en uppladdning till en Flödeskörning hänvisar till. En
+chatt som redigerar ett Flöde är en vanlig konversation och följer
+konversationstiderna ovan.
 
-[Flow run-history retention](/guides/flows/retention-policy) (på engelska)
-beskriver vyerna och API:t.
+[Flow run-history retention](/guides/flows/retention-policy) (på engelska) har
+detaljerna: delat ljud, vyerna, hälsan, API:t och rensningen.
 
 ### När borttagningen sker [#when-removal-happens]
 
@@ -215,6 +224,7 @@ skapades. Nästa schemalagda körning tar bort det.
 | Filer i en tur eller appkörning | De följer den; en fil som används någon annanstans finns kvar | Sparas | Med turen eller körningen |
 | Namn och feedbacktext | Konversationens period | Sparas | Varje natt, med chattarna |
 | Konversationer i webbwidgetar | Widgeten, inom widgetpolicyn | 30 dagar | Varje natt, 03:30 |
+| Körningar i Flöden som startade medan ytan hade en tid | Ytan, eller Flödets kortare tid | Sparas | Var femte minut (`flows.run_history`) |
 
 #### Städning av rester [#cleanup-of-leftovers]
 
@@ -257,12 +267,15 @@ workerns logg.
 `degraded`, `unknown`, `initializing` eller `disabled`. En uppgift är
 `degraded` när dess senaste avslutade körning misslyckades, när ingen körning
 blivit klar på två dygn, eller när den senaste körningen hittade innehåll som
-varit aktuellt i mer än ett dygn (`RETENTION_OVERDUE_WINDOW_DAYS`). En
+varit aktuellt i mer än ett dygn (`RETENTION_OVERDUE_WINDOW_DAYS`); för
+körningar i Flöden, som kontrolleras var femte minut, när en körning har varit
+aktuell i mer än en timme. En
 misslyckad körning håller uppgiften `degraded` tills en ny körning är avslutad.
 En uppgift som inte är `degraded` visar `unknown` med `overdue_not_measured` när dess senaste avslutade
 körning inte kunde mäta vad som är försenat, tills en senare körning har mätt
 det. `limiting_settings` anger den inställning vars gräns höll kvar aktuellt
-innehåll. Problem med gallringen gör aldrig ett i övrigt redo API
+innehåll, och `blocked_reasons` varför, till exempel `runs.unit_exceeds_budget`
+för en körning i ett Flöde som är för stor för gränserna. Problem med gallringen gör aldrig ett i övrigt redo API
 otillgängligt. Se [Health](/docs/audit-logging#health) och
 [Scheduled execution and limits](/docs/audit-logging#scheduled-execution-and-limits)
 (på engelska).

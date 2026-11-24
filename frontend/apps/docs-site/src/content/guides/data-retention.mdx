@@ -3,11 +3,12 @@
 ```mermaid
 flowchart TB
   accTitle: How retention works
-  accDescr: A retention time on an assistant or app, else on its space, else the organization's legacy period, decides. With no time set, nothing is removed. With a time set, the nightly run, at 03:30 worker time by default, removes chats and app runs older than their time, and the copies Eneo keeps of them follow. Cleanup of leftovers runs whatever the rules. Backups, downloads, AI model providers and knowledge bases are outside Eneo's reach.
+  accDescr: A retention time on an assistant or app, else on its space, else the organization's legacy period, decides. With no time set, nothing is removed. With a time set, the nightly run, at 03:30 worker time by default, removes chats and app runs older than their time, and the copies Eneo keeps of them follow. Every five minutes, Flow runs that started while their space had a time are removed once older than it. Cleanup of leftovers runs whatever the rules. Backups, downloads, AI model providers and knowledge bases are outside Eneo's reach.
   subgraph eneo["Eneo"]
     direction TB
     time["Retention time\nassistant or app, else its space,\nelse the organization's legacy period"] -->|"no time set"| keep["Kept: nothing is removed"]
     time -->|"time set"| run["Nightly run, 03:30 by default\nremoves chats and app runs older than their time"]
+    time -->|"space time set"| flows["Every five minutes\nremoves Flow runs that started\nwhile their space had a time"]
     run --> copies["Copies follow their source\nnames and feedback · copied conversations · temporary files"]
     cleanup["Cleanup of leftovers, whatever the rules\nunused uploads · conversations without a question · run records"]
   end
@@ -17,7 +18,7 @@ flowchart TB
 ```
 
 Retention ("gallring" in Swedish) removes stored content once the time chosen
-for it has passed. No rule, no removal: chats and app runs are removed only
+for it has passed. No rule, no removal: chats, app runs and Flow runs are removed only
 where someone has chosen a time; a new web widget starts with 30 days.
 Retention by a rule is separate from cleanup of leftovers, which runs whatever
 rules are set. Copies follow their source: when a turn is removed, the copies
@@ -84,14 +85,16 @@ Every time is a whole number of days.
 
 **A space** (someone who may edit the space and whose role has
 `retention_manage`, signed in: an API key is refused, because the time also
-caps the space's Flows; the organization space has no retention setting):
+caps the space's Flows and removes their runs; the organization space has no
+retention setting):
 
 - **Svelte app:** **Spaces**, the space, **Settings**, **Security & Privacy**,
   **Conversation History Retention**. Switch on **Override policy**, enter the
   days (1 to 2555), **Save changes**.
 - **React app (beta):** **Spaces**, the space, **Settings**, **Security and
-  privacy**, **Conversation History Retention**. Empty means **No limit**. It
-  saves when you leave the field.
+  privacy**, **Space retention time**. Empty means **No limit**. It saves when
+  you leave the field; a shorter time asks you to confirm first. A line under
+  the field then says what applies to the space's Flow runs.
 - **API:** `PATCH /api/v1/spaces/{space_id}/` with
   `{"data_retention_days": 30}`; `null` removes the time, leaving it out keeps it.
 
@@ -164,11 +167,9 @@ can still contain deleted rows; a `pg_dump` backup holds only existing rows.
 
 ### Flow run history [#flow-run-history]
 
-Retention does not remove Flow run and step history in this version. A space's
-time above also caps the run history of every Flow in the space, and a Flow may
-choose a shorter time of its own, never a longer one. The organization sets no
-time for Flows. A personal space's time cannot be changed, so its Flows use only
-their own time.
+A space's time above also applies to the runs of every Flow in the space. It
+caps them: a Flow may choose a shorter time of its own, never a longer one. The
+organization sets no time for Flows.
 
 | Scope | Time | Result |
 | --- | --- | --- |
@@ -176,18 +177,26 @@ their own time.
 | Supplier assessment Flow | 30 days | This Flow alone uses 30 days |
 | A Flow asking for 90 days | Refused | A Flow cannot keep runs longer than its space |
 
-After the time, an administrator with `retention_manage` may include the
-history in a separately requested purge. Nothing schedules or performs a
-removal. Without a time on the space or the Flow, Flow run history has no age
-threshold and is kept. Changing a Flow's time, or a shared space's time,
-writes the audit event `flow_run_retention_policy_changed` with the old and new
-time, not run content, and removes or redacts nothing. Flow runtime uploads and
-Flow debug evidence have no scheduled removal either: the cleanup of unused
-uploads keeps a file that a Flow runtime upload refers to. A chat that edits a
-Flow is an ordinary conversation and follows the conversation times above.
+A run that starts while its space has a time is removed, with its steps,
+transcripts and files, once it is older than the time. The task checks every
+five minutes. Runs that started while the space had no time, or before the
+upgrade to this version, are never removed automatically. Removing the space's
+time pauses the removal, also for a Flow with a time of its own; setting a time
+again resumes it for the runs that started under a time. Personal spaces are
+not covered in this version. A run under a legal hold, or whose audit row or
+webhook delivery is still pending, stays, and so does a file another remaining
+run uses. An administrator with `retention_manage` can also remove due runs
+with the explicit purge.
 
-[Flow run-history retention](/guides/flows/retention-policy) has the screens
-and the API.
+Changing a Flow's time, or a shared space's time, writes the audit event
+`flow_run_retention_policy_changed` with the old and new time, not run content.
+Flow runtime uploads and Flow debug evidence have no scheduled removal: the
+cleanup of unused uploads keeps a file that a Flow runtime upload refers to. A
+chat that edits a Flow is an ordinary conversation and follows the conversation
+times above.
+
+[Flow run-history retention](/guides/flows/retention-policy) has the details:
+shared audio, the screens, health, the API and the purge.
 
 ### When removal happens [#when-removal-happens]
 
@@ -203,6 +212,7 @@ was created. The next scheduled run removes it.
 | Files of a turn or app run | They follow it; a file still used elsewhere stays | Kept | With the turn or run |
 | Names and feedback text | The conversation's period | Kept | Nightly, with chats |
 | Web widget conversations | The widget, within the widget policy | 30 days | Nightly, 03:30 |
+| Flow runs that started while their space had a time | The space, or the Flow's shorter time | Kept | Every five minutes (`flows.run_history`) |
 
 #### Cleanup of leftovers [#cleanup-of-leftovers]
 
@@ -244,11 +254,14 @@ It only queues the run and returns before it has run, so follow the worker log.
 `GET /api/healthz` reports each retention task as `healthy`, `degraded`,
 `unknown`, `initializing` or `disabled`. A task is `degraded` when its latest
 finished run failed, when no run has completed for two days, or when the latest run
-found content due for more than a day (`RETENTION_OVERDUE_WINDOW_DAYS`). A failed
+found content due for more than a day (`RETENTION_OVERDUE_WINDOW_DAYS`); for
+Flow runs, checked every five minutes, when a run has been due for more than an
+hour. A failed
 run keeps the task `degraded` until a rerun has finished. A task that is not
 `degraded` reads `unknown` with `overdue_not_measured` when its latest finished run could not measure what
 is overdue, until a later run measures it. `limiting_settings`
-names the setting whose limit kept due content. Retention problems never make
+names the setting whose limit kept due content, and `blocked_reasons` why, such
+as `runs.unit_exceeds_budget` for a Flow run too large for the limits. Retention problems never make
 an otherwise ready API unavailable. See [Health](/docs/audit-logging#health)
 and [Scheduled execution and limits](/docs/audit-logging#scheduled-execution-and-limits).
 
