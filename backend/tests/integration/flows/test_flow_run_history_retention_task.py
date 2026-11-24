@@ -585,8 +585,31 @@ async def test_a_nearly_spent_pass_defers_a_run_instead_of_blocking_it(
             RetentionJobOutcome.FAILED,
             RetentionErrorCode.CONTRACT_VIOLATION,
         ),
+        (
+            DBAPIError("DELETE", {}, _Database("23505")),
+            RetentionJobOutcome.SUCCEEDED,
+            None,
+        ),
+        (
+            DBAPIError("DELETE", {}, _Database("42501")),
+            RetentionJobOutcome.FAILED,
+            RetentionErrorCode.CHUNK_FAILED,
+        ),
+        (
+            DBAPIError("DELETE", {}, _Database("23505"), connection_invalidated=True),
+            RetentionJobOutcome.FAILED,
+            RetentionErrorCode.CHUNK_FAILED,
+        ),
     ],
-    ids=["defect", "timeout", "deadlock", "contract"],
+    ids=[
+        "defect",
+        "timeout",
+        "deadlock",
+        "contract",
+        "integrity",
+        "privilege",
+        "invalidated-connection",
+    ],
 )
 async def test_a_run_that_raises_is_blocked_and_the_others_go(
     retention_session: AsyncSession,
@@ -599,9 +622,13 @@ async def test_a_run_that_raises_is_blocked_and_the_others_go(
     outcome: RetentionJobOutcome,
     error_code: RetentionErrorCode | None,
 ):
-    """A defect blocks its run as run_failed; a transient database error ends
-    the pass as partial; the engine's own errors propagate. Mutants: catching
-    the transient error as a defect; catching the contract error."""
+    """The run's own error (a defect in the removal, or a data or integrity
+    error from the database) blocks the run as run_failed; a transient
+    database error ends the pass as partial; an error of the whole system (a
+    missing privilege, an invalidated connection) and the engine's own errors
+    fail the pass. Mutants: catching the transient error as a defect;
+    catching the contract error; blocking every run as failed for a system
+    error."""
     session = retention_session
     failing = await _aged_run(
         session,

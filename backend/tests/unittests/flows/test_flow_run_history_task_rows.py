@@ -7,17 +7,19 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy.dialects import postgresql
-from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import DBAPIError, InterfaceError, OperationalError
 
 import eneo.database.tables as tables
+from eneo.data_retention.application.retention_runner import (
+    RetentionContractError,
+    RetentionOwnershipLost,
+)
 from eneo.data_retention.infrastructure.gallring_lock import (
     GallringLockBusy,
     GallringSubject,
 )
 from eneo.database.tables.base_class import Base
-from eneo.flows.application.flow_run_history_retention_task import (
-    is_transient_database_error,
-)
+from eneo.flows.application.flow_run_history_retention_task import is_run_failure
 from eneo.flows.infrastructure.flow_run_history_purge_repo import (
     flow_run_owned_row_count,
 )
@@ -40,23 +42,61 @@ def _busy_lock() -> GallringLockBusy:
 
 
 @pytest.mark.parametrize(
-    ("error", "transient"),
+    ("error", "run_failure"),
     [
-        (_database_error("57014"), True),
-        (_database_error("55P03"), True),
-        (_database_error("40P01"), True),
-        (_busy_lock(), True),
-        (_database_error("23505"), False),
-        (RuntimeError("defect"), False),
+        (_database_error("57014"), False),
+        (_database_error("55P03"), False),
+        (_database_error("40P01"), False),
+        (_busy_lock(), False),
+        (
+            DBAPIError("SELECT", {}, _Database("23505"), connection_invalidated=True),
+            False,
+        ),
+        (OperationalError("SELECT", {}, _Database("23505")), False),
+        (InterfaceError("SELECT", {}, _Database("23505")), False),
+        (_database_error("08006"), False),
+        (_database_error("28000"), False),
+        (_database_error("42501"), False),
+        (_database_error("53100"), False),
+        (_database_error("57P01"), False),
+        (_database_error("58030"), False),
+        (_database_error("XX000"), False),
+        (RetentionContractError("engine"), False),
+        (RetentionOwnershipLost("superseded"), False),
+        (_database_error("22001"), True),
+        (_database_error("23505"), True),
+        (RuntimeError("defect"), True),
     ],
-    ids=["statement", "lock", "deadlock", "busy-gallring-lock", "unique", "defect"],
+    ids=[
+        "statement",
+        "lock",
+        "deadlock",
+        "busy-gallring-lock",
+        "invalidated-connection",
+        "operational",
+        "interface",
+        "connection",
+        "sign-in",
+        "privilege",
+        "resources",
+        "operator",
+        "system",
+        "internal",
+        "contract",
+        "ownership",
+        "data",
+        "integrity",
+        "defect",
+    ],
 )
-def test_the_runner_retries_exactly_the_transient_database_errors(
-    error: Exception, transient: bool
+def test_only_the_runs_own_errors_block_it_as_failed(
+    error: Exception, run_failure: bool
 ) -> None:
-    """The task lets these end the pass as partial instead of blocking a run
-    as failed. Mutant: the deadlock or the busy lock counted as a defect."""
-    assert is_transient_database_error(error) is transient
+    """A data or integrity error, or the removal's own defect, blocks one run
+    and the pass goes on; anything else ends the chunk, retried or failed by
+    the runner. Mutants: a missing privilege or a dropped connection blocking
+    every run as failed; a deadlock or a busy lock counted as the run's."""
+    assert is_run_failure(error) is run_failure
 
 
 def test_every_table_under_a_run_is_counted_in_its_rows() -> None:

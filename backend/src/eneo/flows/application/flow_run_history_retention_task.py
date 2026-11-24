@@ -11,7 +11,7 @@ from collections.abc import Sequence
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import DBAPIError, InterfaceError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.data_retention.application.retention_runner import (
@@ -31,6 +31,7 @@ from eneo.data_retention.application.retention_units import (
 )
 from eneo.data_retention.domain.retention import RetentionKeyset
 from eneo.data_retention.infrastructure.gallring_lock import (
+    GallringLockBusy,
     GallringSubject,
     acquire_shared,
 )
@@ -60,20 +61,37 @@ _FILES_KEPT = (
     FileRetentionReason.MISSING,
     FileRetentionReason.NOT_ROOT,
 )
-_DEADLOCK_DETECTED = "40P01"
+# SQLSTATE classes of an error in one run's rows: data (22) and integrity (23).
+_RUN_DATA_CLASSES = frozenset({"22", "23"})
 
 
-def is_transient_database_error(exc: BaseException) -> bool:
-    """A database error the runner ends the chunk on and retries: a statement
-    or lock timeout (a busy gallring lock among them) or a deadlock."""
-    if is_retention_timeout(exc):
-        return True
-    cause: BaseException | None = exc
+def is_run_failure(error: BaseException) -> bool:
+    """Whether an error that rolled one run back is that run's own, so the run
+    is blocked as run_failed and the pass goes on.
+
+    The run's own: an error the removal raises itself, not from the database,
+    and a database error of class 22 or 23. Everything else propagates to the
+    runner, which ends the chunk: its own errors; a statement or lock timeout,
+    a deadlock or a busy gallring lock (retried by the next execution); a
+    connection the driver invalidated, an operational or interface error; and
+    every other SQLSTATE, such as 08 (connection), 28 (sign-in), 42 (syntax or
+    privilege, 42501), 53 (resources), 57 (operator), 58 (system) and XX
+    (internal), which would fail every run alike."""
+    if isinstance(
+        error, (RetentionContractError, RetentionOwnershipLost, GallringLockBusy)
+    ) or is_retention_timeout(error):
+        return False
+    cause: BaseException | None = error
     while cause is not None:
         if isinstance(cause, DBAPIError):
-            return getattr(cause.orig, "sqlstate", None) == _DEADLOCK_DETECTED
+            if cause.connection_invalidated or isinstance(
+                cause, (OperationalError, InterfaceError)
+            ):
+                return False
+            sqlstate = getattr(cause.orig, "sqlstate", None)
+            return isinstance(sqlstate, str) and sqlstate[:2] in _RUN_DATA_CLASSES
         cause = cause.__cause__
-    return False
+    return True
 
 
 class FlowRunHistoryRetentionTask:
@@ -199,12 +217,9 @@ class FlowRunHistoryRetentionTask:
             case FlowRunRemovalOutcome.REFUSED:
                 self._failed(run_id, None, out)
             case FlowRunRemovalOutcome.FAILED if removal.error is not None:
-                error = removal.error
-                if isinstance(
-                    error, (RetentionContractError, RetentionOwnershipLost)
-                ) or is_transient_database_error(error):
-                    raise error
-                self._failed(run_id, error, out)
+                if not is_run_failure(removal.error):
+                    raise removal.error
+                self._failed(run_id, removal.error, out)
         return usage
 
     @staticmethod
