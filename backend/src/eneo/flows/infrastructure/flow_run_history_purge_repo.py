@@ -750,6 +750,9 @@ class FlowRunHistoryPurgeRepository:
         return set(await delete_unused_root_files(self.session, file_ids))
 
     async def _primary_file_sizes(self, file_ids: set[UUID]) -> dict[UUID, int]:
+        """The primary size of every requested File, 0 for one without primary
+        content. The size only counts bytes; callers release by these keys, so
+        a File without it is still released."""
         if not file_ids:
             return {}
 
@@ -767,17 +770,9 @@ class FlowRunHistoryPurgeRepository:
                 )
             )
         ).tuples()
-        sizes: dict[UUID, int] = {}
+        sizes = dict.fromkeys(file_ids, 0)
         for file_id, raw_size_bytes in rows:
-            size_bytes = cast(int | None, raw_size_bytes)
-            if size_bytes is not None:
-                sizes[file_id] = size_bytes
-        if len(sizes) != len(file_ids):
-            missing_count = len(file_ids) - len(sizes)
-            raise RuntimeError(
-                "Flow retention found "
-                f"{missing_count} File row(s) without durable primary content"
-            )
+            sizes[file_id] = cast(int | None, raw_size_bytes) or 0
         return sizes
 
 

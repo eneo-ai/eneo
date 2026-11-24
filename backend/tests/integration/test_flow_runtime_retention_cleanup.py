@@ -2460,13 +2460,17 @@ async def test_flow_run_history_purge_rollback_restores_run_binding_and_source(
 
 
 @pytest.mark.asyncio
-async def test_flow_run_history_purge_rejects_missing_primary_without_partial_delete(
+async def test_flow_run_history_purge_removes_an_input_without_primary_content(
     async_session: AsyncSession,
     test_tenant,
     admin_user,
     flow_retention_space: Spaces,
     flow_retention_assistant: Assistants,
 ) -> None:
+    """An input File without primary content counts as zero bytes, and the run
+    and the File go as any other. Mutants: such a File fails the purge, so one
+    run stops every purge behind it; it is left out of the sizes, so its
+    binding and File are never released."""
     fixture = await _create_flow_runtime_fixture(
         async_session,
         tenant=test_tenant,
@@ -2478,47 +2482,73 @@ async def test_flow_run_history_purge_rejects_missing_primary_without_partial_de
     )
     run_id = fixture.run.id
     source_file_id = fixture.runtime_input_file.id
-    source_content_id = await async_session.scalar(
-        select(FileContentReferences.content_id).where(
-            FileContentReferences.file_id == source_file_id
-        )
-    )
-    assert source_content_id is not None
     await async_session.execute(
         delete(FileContentReferences).where(
             FileContentReferences.file_id == source_file_id
         )
     )
-    savepoint = await async_session.begin_nested()
 
-    with pytest.raises(
-        RuntimeError,
-        match=r"File row\(s\) without durable primary content",
-    ):
-        await FlowRunHistoryPurgeRepository(async_session).purge_run_history([run_id])
+    result = await FlowRunHistoryPurgeRepository(async_session).purge_run_history(
+        [run_id]
+    )
+    await _flush_and_clear_identity_map(async_session)
 
-    await savepoint.rollback()
-    async_session.expunge_all()
-    assert await async_session.get(FlowRuns, run_id) is not None
-    assert await async_session.get(Files, source_file_id) is not None
-    assert await _flow_runtime_upload_exists(
+    assert result.counts.flow_runs_purged == 1
+    assert result.counts.flow_runtime_source_candidates == 1
+    assert result.counts.flow_runtime_source_candidate_bytes == 0
+    assert result.counts.flow_runtime_source_bindings_deleted == 1
+    assert result.counts.flow_runtime_source_files_deleted == 1
+    assert result.counts.flow_runtime_source_bytes_deleted == 0
+    assert await async_session.get(FlowRuns, run_id) is None
+    assert await async_session.get(Files, source_file_id) is None
+    assert not await _flow_runtime_upload_exists(
         async_session,
         file_id=source_file_id,
         flow_id=fixture.flow.id,
         tenant_id=test_tenant.id,
     )
-    assert (
-        await _count_for_run(
-            async_session,
-            FlowRunStepInputFiles,
-            run_id=run_id,
-        )
-        == 1
+
+
+@pytest.mark.asyncio
+async def test_abandoned_upload_purge_removes_an_upload_without_primary_content(
+    async_session: AsyncSession,
+    test_tenant,
+    admin_user,
+    flow_retention_space: Spaces,
+    flow_retention_service: FlowRetentionRepository,
+) -> None:
+    """Mutant: an upload without primary content stops the abandoned-upload
+    purge, or is never released."""
+    now = datetime.now(timezone.utc)
+    abandoned = await _create_unbound_runtime_upload_fixture(
+        async_session,
+        tenant=test_tenant,
+        user=admin_user,
+        space=flow_retention_space,
+        uploaded_at=now - timedelta(days=2),
+        size=321,
     )
-    content = await async_session.get(ObjectContents, source_content_id)
-    assert content is not None
-    assert content.state == ContentState.DELETE_PENDING.value
-    assert content.reference_count == 0
+    file_id = abandoned.file.id
+    await async_session.execute(
+        delete(FileContentReferences).where(FileContentReferences.file_id == file_id)
+    )
+    await async_session.execute(
+        update(Tenants)
+        .where(Tenants.id == test_tenant.id)
+        .values(flow_runtime_upload_abandonment_days=1)
+    )
+    await async_session.flush()
+
+    counts = await flow_retention_service.purge_abandoned_flow_runtime_uploads(
+        now=now, limit=10
+    )
+    await _flush_and_clear_identity_map(async_session)
+
+    assert counts.flow_runtime_source_candidates == 1
+    assert counts.flow_runtime_source_candidate_bytes == 0
+    assert counts.flow_runtime_source_bindings_deleted == 1
+    assert counts.flow_runtime_source_files_deleted == 1
+    assert await async_session.get(Files, file_id) is None
 
 
 @pytest.mark.parametrize(

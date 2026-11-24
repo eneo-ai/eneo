@@ -28,6 +28,9 @@ from eneo.data_retention.infrastructure.retention_worker import (
 )
 from eneo.database.database import sessionmanager
 from eneo.database.tables.retention_tables import RetentionJobRuns
+from eneo.flows.application.flow_run_history_retention_task import (
+    FLOW_RUN_HISTORY_TASK,
+)
 from eneo.main.config import Settings, get_settings
 from eneo.main.retention_tasks import (
     EXISTING_WITHOUT_CHOICE,
@@ -35,7 +38,10 @@ from eneo.main.retention_tasks import (
     _read_retention_health,
     retention_task_registrations,
 )
-from tests.integration.data_retention.retention_support import run_nightly_retention
+from tests.integration.data_retention.retention_support import (
+    run_nightly_retention,
+    run_registered_retention,
+)
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.integration]
 
@@ -46,6 +52,7 @@ SWITCHES = {
     CONVERSATION_HISTORY_TASK: "retention_conversations_history_enabled",
     **FOLLOWS_A_REMOVAL,
     **EXISTING_WITHOUT_CHOICE,
+    FLOW_RUN_HISTORY_TASK: "retention_flow_run_history_enabled",
 }
 
 
@@ -121,8 +128,33 @@ async def test_before_any_run_the_api_setting_reads_disabled():
         RetentionHealthStatus.DISABLED,
         True,
     )
-    assert {task.status for task in health.tasks if not task.disabled} == {
-        RetentionHealthStatus.INITIALIZING
+    # A frequent task reads its due probe, which finds nothing yet.
+    assert {task.name: task.status for task in health.tasks if not task.disabled} == {
+        name: HEALTHY
+        if name == FLOW_RUN_HISTORY_TASK
+        else RetentionHealthStatus.INITIALIZING
+        for name in SWITCHES
+        if name != EMPTY_SESSIONS_TASK
+    }
+
+
+async def test_a_frequent_pass_leaves_the_daily_tasks_initializing():
+    """Mutant: any task's row reads as the night having reached every task, so
+    the first five-minute pass turns the daily tasks unknown, and the health
+    check degraded, until the first night has run."""
+    async with sessionmanager.session() as session:
+        await run_registered_retention(session, task_name=FLOW_RUN_HISTORY_TASK)
+
+    health = await _read_retention_health(get_settings())
+
+    assert health.status is RetentionHealthStatus.INITIALIZING
+    assert _tasks(health) == {
+        name: (
+            (HEALTHY, False)
+            if name == FLOW_RUN_HISTORY_TASK
+            else (RetentionHealthStatus.INITIALIZING, False)
+        )
+        for name in SWITCHES
     }
 
 

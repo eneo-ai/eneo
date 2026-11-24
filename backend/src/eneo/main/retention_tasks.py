@@ -44,6 +44,10 @@ from eneo.files.unused_file_retention_task import (
     UNUSED_FILES_TASK,
     UnusedFileRetentionTask,
 )
+from eneo.flows.application.flow_run_history_retention_task import (
+    FLOW_RUN_HISTORY_TASK,
+    FlowRunHistoryRetentionTask,
+)
 from eneo.main.config import Settings
 
 logger = logging.getLogger(__name__)
@@ -215,6 +219,13 @@ def retention_task_registrations(
             enabled=settings.retention_job_history_enabled,
             budget=budget,
             build=lambda session: JobHistoryRetentionTask(session, now=now),
+        ),
+        RetentionTaskRegistration(
+            name=FLOW_RUN_HISTORY_TASK,
+            enabled=settings.retention_flow_run_history_enabled,
+            budget=budget,
+            build=lambda session: FlowRunHistoryRetentionTask(session, now=observed_at),
+            every="frequent",
         ),
     )
     return _paced(registrations)
