@@ -9,6 +9,7 @@ import { API_BASE, onBrowserApiRequest, onRawRefusal } from "@/lib/api/base";
 import { apiErrorFromResponse, EneoApiError } from "@/lib/api/errors";
 import { formatBytes } from "@/lib/format";
 import type { Schema } from "@/lib/api/models";
+import { withinTime } from "./recording/recording-store";
 import { UploadRetries } from "./recording/upload-retry";
 import {
   stays,
@@ -180,8 +181,16 @@ function uploadProblem(error: unknown, input: RuntimeInput, t: Translator, local
   return refusalText(error, t);
 }
 
-/** What else a file added to the form is: a recording's part, with the name the form shows. */
-export type AddedFileInfo = { recording?: RecordingPartInfo; label?: string };
+/**
+ * What else a file added to the form is: a recording's part, with the name the form shows.
+ * `kept` settles once the part is kept on the device (or only in the tab): its upload waits for
+ * it, so a refused session that leaves the page cannot take the only copy.
+ */
+export type AddedFileInfo = {
+  recording?: RecordingPartInfo;
+  label?: string;
+  kept?: Promise<unknown>;
+};
 
 /**
  * The files of a run form, per step, from the moment they are picked until
@@ -361,7 +370,18 @@ export function useRuntimeUploads(flowId: string, policy: UploadPolicy | undefin
       return entry;
     });
     replace({ ...current.current, [input.step_id]: [...existing, ...added] });
-    for (const { entry, file } of started) void upload(input, entry, file);
+    const start = () => {
+      for (const { entry, file } of started) {
+        const row = current.current[input.step_id]?.find(
+          (candidate) => candidate.key === entry.key
+        );
+        // Taken off the form, or the form went, while the part was being kept.
+        if (mounted.current && row?.state === "uploading") void upload(input, entry, file);
+      }
+    };
+    // Bounded by the store's own wait, so a write that never answers does not hold the upload.
+    if (info.kept) void withinTime(info.kept).then(start);
+    else start();
     return added;
   }
 

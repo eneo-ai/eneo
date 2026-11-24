@@ -335,8 +335,16 @@ export function RunRecorder({
   input: RuntimeInput;
   live: NonNullable<RunContract["transcription"]>["live"] | undefined;
   entries: readonly UploadEntry[];
-  /** Adds a finished part to the step's files and answers its entry key. */
-  onPart: (file: File, recording: RecordingPartInfo, label: string) => string | undefined;
+  /**
+   * Adds a finished part to the step's files and answers its entry key; `kept`
+   * settles once the part is kept on the device or only in the tab.
+   */
+  onPart: (
+    file: File,
+    recording: RecordingPartInfo,
+    label: string,
+    kept?: Promise<unknown>
+  ) => string | undefined;
   /** Keeps the form's recordings on the device, and finds those kept before. */
   keeper: RecordingKeeper;
   /** The published version the run contract describes, kept with each part. */
@@ -415,8 +423,9 @@ export function RunRecorder({
     latestEntries.current = entries;
     recorder.setCallbacks({
       onPart: (part: RecordedPart) => {
-        // Kept on the device while it uploads: a reload meanwhile still finds it.
-        void keeper.keepPart(stepId, {
+        // Kept on the device before it uploads: a reload, or a refused session
+        // that leaves the page, still finds it.
+        const kept = keeper.keepPart(stepId, {
           sessionId: part.sessionId,
           index: part.index,
           blob: part.file,
@@ -435,7 +444,8 @@ export function RunRecorder({
             durationMs: part.durationMs,
             streamed: streamed.current
           },
-          label
+          label,
+          kept
         );
         if (key) partsByKey.set(key, { sessionId: part.sessionId, index: part.index });
         live.addPart(key);

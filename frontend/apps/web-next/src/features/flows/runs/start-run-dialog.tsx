@@ -504,10 +504,10 @@ function StartRunForm({
                 input={input}
                 live={contract.transcription?.live}
                 entries={uploads[input.step_id] ?? []}
-                onPart={(file, recording, label) => {
+                onPart={(file, recording, label, kept) => {
                   clearInputProblem(input.step_id);
                   setStopFirst((current) => (current === input.step_id ? null : current));
-                  return add(input, [file], { recording, label })[0]?.key;
+                  return add(input, [file], { recording, label, kept })[0]?.key;
                 }}
                 keeper={keeper}
                 publishedFlowVersion={contract.published_flow_version ?? null}
