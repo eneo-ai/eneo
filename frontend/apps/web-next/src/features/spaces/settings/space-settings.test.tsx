@@ -7,6 +7,7 @@ import { recordAnnouncements, renderInApp, testAppContext } from "@/test/render"
 import { router } from "@/test/navigation";
 import messages from "@/lib/i18n/messages/sv.json";
 import { setViewport } from "@/test/setup-dom";
+import { TRANSCRIPTION_SERVICE_CATALOGUE_KEY } from "@/features/admin/models/transcription-services";
 import { spaceQueryOptions, type Space } from "../space";
 import { makeSpace } from "../testing/space-fixture";
 
@@ -508,6 +509,83 @@ it("decides on its own read when another save cancels the space's reads meanwhil
   expect(api.PATCH).not.toHaveBeenCalled();
   // The read the decision made is what the page shows now.
   expect(queryClient.getQueryData<Space>(["spaces", "space-1"])?.data_retention_days).toBe(90);
+});
+
+it("keeps a grant saved while it reads the space's time, so the next save sends it too", async () => {
+  const grant = (id: string) => ({
+    id,
+    name: id,
+    meets_security_classification: true,
+    available: true,
+    is_default: false
+  });
+  const { queryClient } = showSettings(
+    undefined,
+    [],
+    [],
+    "space-1",
+    makeSpace({
+      overrides: {
+        data_retention_days: 30,
+        completion_models: [],
+        embedding_models: [],
+        transcription_services: [grant("A")]
+      }
+    })
+  );
+  const reads = api.GET.getMockImplementation()!;
+  api.GET.mockImplementation((path: string, init: unknown) =>
+    path === "/api/v1/transcription-services/"
+      ? ok({
+          items: ["A", "B", "C"].map((id) => ({
+            id,
+            name: id,
+            is_enabled: true,
+            is_default: false,
+            security_classification: null
+          }))
+        })
+      : reads(path, init)
+  );
+  await screen.findByText(messages.speaker_service_empty_title);
+  await act(() => queryClient.refetchQueries({ queryKey: TRANSCRIPTION_SERVICE_CATALOGUE_KEY }));
+  const counted = countSpaceReads();
+  api.PATCH.mockImplementation(
+    (_path: string, request: { body: { transcription_services: { id: string }[] } }) => {
+      state.space = {
+        ...state.space,
+        transcription_services: request.body.transcription_services.map(({ id }) => grant(id))
+      };
+      return ok(state.space);
+    }
+  );
+  // The read answers with the space as the server had it before the grant below: 90 days.
+  let answer!: (value: unknown) => void;
+  counted.hold = { answer: new Promise((resolve) => (answer = resolve)) };
+  const before = { ...state.space, data_retention_days: 90 };
+  enterRetention("60");
+  await waitFor(() => expect(counted.reads).toBe(1));
+  // Meanwhile B is granted, and the page's space is what that save returned.
+  fireEvent.click(await screen.findByRole("switch", { name: "B" }));
+  await waitFor(() => expect(api.PATCH).toHaveBeenCalledTimes(1));
+  await waitFor(() =>
+    expect(
+      queryClient
+        .getQueryData<Space>(["spaces", "space-1"])
+        ?.transcription_services?.map(({ id }) => id)
+    ).toEqual(["A", "B"])
+  );
+  await act(async () => answer({ data: before, response: new Response("{}") }));
+  const dialog = await screen.findByRole("alertdialog", { name: "Korta gallringstiden?" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Avbryt" }));
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  // The field shows the time the read found.
+  expect(retentionField().value).toBe("90");
+  fireEvent.click(screen.getByRole("switch", { name: "C" }));
+  await waitFor(() => expect(api.PATCH).toHaveBeenCalledTimes(2));
+  expect(api.PATCH.mock.calls[1]![1].body).toEqual({
+    transcription_services: [{ id: "A" }, { id: "B" }, { id: "C" }]
+  });
 });
 
 it("reads the space again on the next change after a read that failed", async () => {

@@ -501,8 +501,12 @@ function RetentionSection() {
       const { queryKey } = spaceQueryOptions(browserApi, routeId);
       await queryClient.cancelQueries({ queryKey, exact: true });
       const fresh = await readSpace(browserApi, routeId);
-      // The page shows what the decision read; a fetch cancelled above cannot replace it.
-      queryClient.setQueryData(queryKey, fresh);
+      // The page shows the time the decision read. Only the time: the rest of this read
+      // may be older than a save on the page that answered meanwhile, and a whole-space
+      // write here would put back what that save replaced.
+      queryClient.setQueryData<Space>(queryKey, (old) =>
+        old ? { ...old, data_retention_days: fresh.data_retention_days } : old
+      );
       current = fresh.data_retention_days ?? null;
     } catch (error) {
       // Without the current time nothing is saved: the typed time stays, to try again.
