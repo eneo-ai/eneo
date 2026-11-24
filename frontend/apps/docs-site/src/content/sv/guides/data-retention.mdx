@@ -1,6 +1,6 @@
 ---
 title: Gallring
-translationSource: guides/data-retention.mdx@e84a5ad6d0e8
+translationSource: guides/data-retention.mdx@af3737f541ea
 ---
 
 # Gallring
@@ -100,9 +100,14 @@ och tar bort deras körningar; organisationsytan har ingen gallringsinställning
   integritet**, **Gallringstid för ytan**. Tomt betyder **Ingen gräns**. Värdet
   sparas när du lämnar fältet; en tid på en yta som saknar tid, eller en
   kortare tid, ber dig bekräfta först. En rad under fältet säger sedan vad som
-  gäller för körningarna i ytans Flöden.
+  gäller för körningarna i ytans Flöden. Har någon annan ändrat tiden sedan
+  sidan läste den sparas ingenting: sidan läser tiden igen och ber dig
+  kontrollera den och spara igen.
 - **API:** `PATCH /api/v1/spaces/{space_id}/` med
   `{"data_retention_days": 30}`; `null` tar bort tiden, utelämnat behåller den.
+  Skicka med `"expected_data_retention_days"` med tiden du läste (eller `null`),
+  så nekas en tid som har ändrats sedan med 409 `retention_time_changed` och
+  ingenting sparas.
 
 **En assistent eller en app** (i en delad yta eller organisationsytan den som
 får redigera ytan; i en personlig yta dess ägare; behörighet att redigera en

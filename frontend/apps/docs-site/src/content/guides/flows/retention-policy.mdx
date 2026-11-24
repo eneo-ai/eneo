@@ -219,6 +219,18 @@ Clear it and use the space's time:
 }
 ```
 
+A time change can carry the time it replaces: `expected_data_retention_days` on the space's `PATCH` (the space's time as read, or `null`), and `expected_effective_days` on the Flow's `PUT` (`effective.effective_days` as read, or `null` when none applied). When, under the lock the change takes, the space's stored time or the time that applies to the Flow now differs (a change of the space's time counts for its Flows), nothing is saved and the answer is 409, `eneo_error_code` 9087 and `code` `retention_time_changed`, with the time that applies now:
+
+```json
+{
+  "code": "retention_time_changed",
+  "eneo_error_code": 9087,
+  "context": { "current_days": 60 }
+}
+```
+
+Without the field a save works as before. A request that leaves the time unchanged is not refused. The new web app sends the field with every change of either time, so a page read before another administrator's change asks again instead of saving.
+
 The Flow's retention `GET` and `PUT` return `scope`, `scope_id` and these three fields:
 
 - `local_policy`: the time stored on the Flow, or `null`;
