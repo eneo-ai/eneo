@@ -32,9 +32,10 @@ from eneo.authentication.auth_models import (
     ResourcePermissionLevel,
     ResourcePermissions,
 )
+from eneo.authentication.principal_types import PrincipalType
 from eneo.conversations.application.conversation_service import ConversationService
 from eneo.files.file_content_loader import FileAttachmentGroup
-from eneo.files.file_models import File, FileMetadata, FileType
+from eneo.files.file_models import File, FileMetadata, FileOwner, FileType
 from eneo.files.file_service import FileService, require_requested_files
 from eneo.files.upload_access import may_read_user_uploads
 from eneo.main.container.container import Container
@@ -115,7 +116,8 @@ def _file(
         id=uuid4(),
         created_at=now,
         updated_at=now,
-        user_id=user.id,
+        owner_type=PrincipalType.USER,
+        owner_user_id=user.id,
         tenant_id=user.tenant_id,
         name=name,
         checksum="test-checksum",
@@ -131,7 +133,8 @@ def _metadata(file: File) -> FileMetadata:
         id=file.id,
         created_at=file.created_at,
         updated_at=file.updated_at,
-        user_id=file.user_id,
+        owner_type=PrincipalType.USER,
+        owner_user_id=file.owner_user_id,
         tenant_id=file.tenant_id,
         name=file.name,
         mimetype=file.mimetype,
@@ -142,7 +145,7 @@ def _metadata(file: File) -> FileMetadata:
 def _files(user: UserInDB, file: File) -> FileService:
     repo = AsyncMock()
     repo.session = Mock()
-    repo.get_list_by_id_and_user.return_value = [_metadata(file)]
+    repo.get_list_by_id_and_owner.return_value = [_metadata(file)]
     service = FileService(
         user=user,
         repo=repo,
@@ -175,7 +178,7 @@ async def test_files_none_rejects_known_owner_id_before_content_read(key_type):
         "auth_layer": "api_key_resource",
         "action": "resource_permission_check",
     }
-    service.repo.get_list_by_id_and_user.assert_not_awaited()
+    service.repo.get_list_by_id_and_owner.assert_not_awaited()
     service._content_loader.load.assert_not_awaited()
     service._audit_service.log_async.assert_awaited_once()
     logged = service._audit_service.log_async.await_args.kwargs
@@ -201,8 +204,13 @@ async def test_file_read_grants_preserve_owner_file_content(level):
     service = _files(user, file)
 
     assert await service.get_files_by_ids([file.id]) == [file]
-    service.repo.get_list_by_id_and_user.assert_awaited_once_with(
-        ids=[file.id], user_id=user.id
+    service.repo.get_list_by_id_and_owner.assert_awaited_once_with(
+        ids=[file.id],
+        owner=FileOwner(
+            tenant_id=user.tenant_id,
+            owner_type=PrincipalType.USER,
+            owner_user_id=user.id,
+        ),
     )
     service._audit_service.log_async.assert_not_awaited()
 
@@ -223,7 +231,7 @@ async def test_empty_inputs_do_not_require_file_permission():
     user = TEST_USER.model_copy()
     user.active_api_key = _key(user)
     service = _files(user, _file(user))
-    service.repo.get_list_by_id_and_user.return_value = []
+    service.repo.get_list_by_id_and_owner.return_value = []
 
     assert await service.get_files_by_ids([]) == []
 
@@ -233,7 +241,7 @@ async def test_missing_or_foreign_file_keeps_existing_unavailable_error():
     user.active_api_key = _key(user, ResourcePermissionLevel.READ)
     file = _file(user)
     service = _files(user, file)
-    service.repo.get_list_by_id_and_user.return_value = []
+    service.repo.get_list_by_id_and_owner.return_value = []
 
     files = await service.get_files_by_ids([file.id])
     with pytest.raises(BadRequestException, match="Upload it again"):
@@ -539,7 +547,7 @@ async def test_public_chat_keeps_configured_assistant_knowledge(turn: TurnFixtur
     knowledge = _file(turn.user)
     turn.assistant.attachments = [knowledge]
     turn.service.file_service = _files(turn.user, knowledge)
-    turn.service.file_service.repo.get_list_by_id_and_user.return_value = []
+    turn.service.file_service.repo.get_list_by_id_and_owner.return_value = []
 
     result = await turn.service.ask(
         question="Use your knowledge", assistant_id=turn.assistant.id

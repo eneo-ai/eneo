@@ -74,7 +74,7 @@ async def _add_file(
         mimetype="text/plain",
         file_type=FileType.TEXT.value,
         tenant_id=tenant_id,
-        user_id=user_id,
+        owner_user_id=user_id,
         parent_file_id=parent_file_id,
     )
     session.add(file)

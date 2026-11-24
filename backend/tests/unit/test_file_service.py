@@ -4,6 +4,8 @@ from uuid import uuid4
 
 import pytest
 
+from eneo.authentication.principal_types import PrincipalType
+from eneo.files.file_models import FileOwner
 from eneo.files.file_repo import FileRepository
 from eneo.files.file_service import FileService
 from eneo.main.exceptions import NotFoundException
@@ -71,10 +73,14 @@ async def test_delete_rechecks_usage_under_the_family_lock() -> None:
     result = await service.delete_file(file_id)
 
     assert result is public_info
+    owner = FileOwner(
+        tenant_id=user.tenant_id,
+        owner_type=PrincipalType.USER,
+        owner_user_id=user.id,
+    )
     repo.get_by_id_and_owner_for_lifecycle.assert_awaited_once_with(
         file_id=file_id,
-        user_id=user.id,
-        tenant_id=user.tenant_id,
+        owner=owner,
     )
     service._usage.lock_family.assert_awaited_once_with(
         root_file_id=file_id,
@@ -83,8 +89,7 @@ async def test_delete_rechecks_usage_under_the_family_lock() -> None:
     service._usage.count_product_usage.assert_awaited_once_with([file_id])
     repo.delete_by_owner_for_lifecycle.assert_awaited_once_with(
         id=file_id,
-        user_id=user.id,
-        tenant_id=user.tenant_id,
+        owner=owner,
     )
 
 
@@ -109,15 +114,20 @@ async def test_repository_delete_contains_all_owner_predicates() -> None:
 
     await repository.delete_by_owner_for_lifecycle(
         id=uuid4(),
-        user_id=uuid4(),
-        tenant_id=uuid4(),
+        owner=FileOwner(
+            tenant_id=uuid4(),
+            owner_type=PrincipalType.USER,
+            owner_user_id=uuid4(),
+        ),
     )
 
     statement = session.execute.call_args.args[0]
     sql = str(statement.compile(compile_kwargs={"literal_binds": False}))
     assert "DELETE FROM files" in sql
     assert "files.id" in sql
-    assert "files.user_id" in sql
+    assert "files.owner_type" in sql
+    assert "files.owner_user_id" in sql
+    assert "files.owner_service_id" in sql
     assert "files.tenant_id" in sql
     assert "RETURNING" in sql
 

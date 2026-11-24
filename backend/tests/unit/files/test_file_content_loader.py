@@ -7,6 +7,7 @@ from uuid import uuid4
 
 import pytest
 
+from eneo.authentication.principal_types import PrincipalType
 from eneo.files.file_content_loader import FileContentLoader
 from eneo.files.file_models import (
     FileContentNotLoadedError,
@@ -31,7 +32,8 @@ def _metadata(file_type: FileType, *, parent_file_id=None) -> FileMetadata:
         name="file",
         mimetype="image/png" if file_type is FileType.IMAGE else "text/plain",
         file_type=file_type,
-        user_id=uuid4(),
+        owner_type=PrincipalType.USER,
+        owner_user_id=uuid4(),
         tenant_id=uuid4(),
         parent_file_id=parent_file_id,
     )
@@ -232,7 +234,8 @@ def test_reading_the_content_of_a_file_without_content_raises():
         size=5,
         mimetype="text/plain",
         file_type=FileType.TEXT,
-        user_id=uuid4(),
+        owner_type=PrincipalType.USER,
+        owner_user_id=uuid4(),
         tenant_id=uuid4(),
     )
 

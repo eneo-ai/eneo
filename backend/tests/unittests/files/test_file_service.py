@@ -7,6 +7,7 @@ from uuid import uuid4
 
 import pytest
 
+from eneo.authentication.principal_types import PrincipalType
 from eneo.files.file_models import FileContentVariant, FileMetadata, FileType
 from eneo.files.file_repo import (
     FileContentReferenceRecord,
@@ -108,7 +109,8 @@ def _legacy_metadata(*, file_type: FileType = FileType.TEXT) -> FileMetadata:
         name="legacy.pdf" if file_type is FileType.TEXT else "legacy.mp3",
         mimetype=("application/pdf" if file_type is FileType.TEXT else "audio/mpeg"),
         file_type=file_type,
-        user_id=uuid4(),
+        owner_type=PrincipalType.USER,
+        owner_user_id=uuid4(),
         tenant_id=uuid4(),
         parent_file_id=None,
     )
@@ -117,7 +119,7 @@ def _legacy_metadata(*, file_type: FileType = FileType.TEXT) -> FileMetadata:
 @pytest.mark.asyncio
 async def test_file_info_and_original_availability_fall_back_to_legacy() -> None:
     metadata = _legacy_metadata()
-    user = SimpleNamespace(id=metadata.user_id, tenant_id=metadata.tenant_id)
+    user = SimpleNamespace(id=metadata.owner_user_id, tenant_id=metadata.tenant_id)
     extracted = LegacyFileContentRecord(
         file_id=metadata.id,
         variant=FileContentVariant.EXTRACTED_TEXT,
@@ -165,7 +167,7 @@ async def test_file_info_and_original_availability_fall_back_to_legacy() -> None
 @pytest.mark.asyncio
 async def test_file_info_does_not_load_legacy_payload_bytes() -> None:
     metadata = _legacy_metadata()
-    user = SimpleNamespace(id=metadata.user_id, tenant_id=metadata.tenant_id)
+    user = SimpleNamespace(id=metadata.owner_user_id, tenant_id=metadata.tenant_id)
     repository = AsyncMock()
     repository.session = MagicMock()
     repository.get_by_id.return_value = metadata

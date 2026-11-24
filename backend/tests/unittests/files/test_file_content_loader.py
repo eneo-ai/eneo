@@ -5,6 +5,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from eneo.authentication.principal_types import PrincipalType
 from eneo.files.file_content_loader import FileAttachmentGroup, FileContentLoader
 from eneo.files.file_models import FileContentVariant, FileMetadata, FileType
 from eneo.files.file_repo import (
@@ -26,7 +27,8 @@ async def test_loader_falls_back_to_frozen_legacy_variants() -> None:
         name="legacy.pdf",
         mimetype="application/pdf",
         file_type=FileType.TEXT,
-        user_id=uuid4(),
+        owner_type=PrincipalType.USER,
+        owner_user_id=uuid4(),
         tenant_id=tenant_id,
         parent_file_id=None,
     )
@@ -96,7 +98,8 @@ async def test_loader_prefers_object_content_over_legacy_for_same_variant() -> N
         name="image.png",
         mimetype="image/png",
         file_type=FileType.IMAGE,
-        user_id=uuid4(),
+        owner_type=PrincipalType.USER,
+        owner_user_id=uuid4(),
         tenant_id=tenant_id,
         parent_file_id=None,
     )
@@ -144,7 +147,8 @@ async def test_loader_resolves_each_variant_independently_during_backfill() -> N
         name="mixed.pdf",
         mimetype="application/pdf",
         file_type=FileType.TEXT,
-        user_id=uuid4(),
+        owner_type=PrincipalType.USER,
+        owner_user_id=uuid4(),
         tenant_id=tenant_id,
         parent_file_id=None,
     )
@@ -226,7 +230,8 @@ async def test_legacy_payload_batches_bound_distinct_legacy_files(
             name=f"legacy-{index}.png",
             mimetype="image/png",
             file_type=FileType.IMAGE,
-            user_id=uuid4(),
+            owner_type=PrincipalType.USER,
+            owner_user_id=uuid4(),
             tenant_id=tenant_id,
             parent_file_id=None,
         )
@@ -312,7 +317,8 @@ async def test_legacy_payload_batches_fetch_one_shared_file_once() -> None:
         name="shared-legacy.png",
         mimetype="image/png",
         file_type=FileType.IMAGE,
-        user_id=uuid4(),
+        owner_type=PrincipalType.USER,
+        owner_user_id=uuid4(),
         tenant_id=tenant_id,
         parent_file_id=None,
     )

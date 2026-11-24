@@ -375,7 +375,7 @@ async def test_legacy_image_is_not_exposed_as_an_exact_original(
                 """
                 INSERT INTO files (
                     id, name, text, blob, checksum, size, mimetype, file_type,
-                    transcription, user_id, tenant_id, parent_file_id
+                    transcription, owner_user_id, tenant_id, parent_file_id
                 ) VALUES (
                     :id, 'legacy.png', NULL, :payload, :checksum, :size,
                     'image/png', 'image', NULL, :user_id, :tenant_id, NULL
@@ -441,7 +441,7 @@ async def test_legacy_original_mint_does_not_read_payload(
                 """
                 INSERT INTO files (
                     id, name, text, blob, checksum, size, mimetype, file_type,
-                    transcription, user_id, tenant_id, parent_file_id
+                    transcription, owner_user_id, tenant_id, parent_file_id
                 ) VALUES (
                     :id, 'legacy.pdf', 'legacy text', :payload, :checksum,
                     :size, 'application/pdf', 'text', NULL,
@@ -661,7 +661,7 @@ async def test_original_audio_range_reads_only_verified_chunks_from_real_store(
                     mimetype="audio/mpeg",
                     file_type=FileType.AUDIO.value,
                     tenant_id=tenant_id,
-                    user_id=user_id,
+                    owner_user_id=user_id,
                     parent_file_id=None,
                 )
                 session.add(owner)

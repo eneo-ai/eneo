@@ -8,7 +8,7 @@ import { Callout } from 'nextra/components'
 
 - There are two key types. `sk_` keys are for servers: up to `admin` permission, with an optional IP allowlist. `pk_` keys are for browsers: up to `read`, and they need at least one allowed origin.
 - A user key stops working when its owner is deactivated or loses access. A service key (`ownership: "service"`) does not depend on any user; only tenant administrators create them, and write or admin service keys need an IP allowlist or an expiry date.
-- Service keys cannot create user-owned resources or upload and delete files, and no API key can manage API keys; that needs a session login.
+- Service keys cannot create user-owned resources, and no API key can manage API keys; that needs a session login. A service key can upload files, and read and delete the files it uploaded.
 - The secret is shown once. If it is lost, rotate the key; the old key keeps working for `rotation_grace_hours` (24 by default).
 - Tenant administrators set limits with `require_expiration`, `max_expiration_days`, `max_rate_limit_override` and `auto_expire_unused_days`.
 
@@ -62,9 +62,9 @@ Only tenant administrators can create service keys. Service keys with write or a
 
 #### What service keys cannot do
 
-Service keys are automation principals, not service accounts. They can read, update, and delete supported existing resources within their scope, but they **cannot create new user-owned resources**. Endpoints that would insert a row keyed on `user_id` (assistants, apps, spaces, group chats, prompts, collections, websites, files, info blobs, roles, MCP servers, and the like) return `403` with `code: "service_key_cannot_create_resources"` when called by a service key. Resource creation belongs to humans; the service key can operate on supported endpoints once the resource exists.
+Service keys are automation principals, not service accounts. They can read, update, and delete supported existing resources within their scope, but they **cannot create new user-owned resources**. Endpoints that would insert a row keyed on `user_id` (assistants, apps, spaces, group chats, prompts, collections, websites, info blobs, roles, MCP servers, and the like) return `403` with `code: "service_key_cannot_create_resources"` when called by a service key. Resource creation belongs to humans; the service key can operate on supported endpoints once the resource exists.
 
-Files are the important exception to "delete existing resources": files are user-owned today. Service keys cannot upload files and cannot delete files. File upload returns `403` with `code: "service_key_cannot_create_resources"`, and file delete returns `403` with `code: "service_key_cannot_delete_files"`. Use a user key for workflows that upload runtime files and clean them up after a run.
+Files are the exception: a file is owned by a person or by a service principal. A service key can upload files, use them in the requests it makes, and read and delete them. The owner is the key's [service principal](#the-service-principal-behind-a-service-key), so a rotated key keeps the files the key before it uploaded. A service key cannot reach a person's files or another service key's files, and a person cannot reach a service key's files.
 
 Three related guardrails come from the same principle:
 
@@ -201,7 +201,7 @@ Scopes define the boundary of what a key can access, from broadest to narrowest:
 | `assistant` | Single assistant and its conversations | Assistant UUID |
 | `app` | Single app and its runs | App UUID |
 
-Files are user-owned rather than space-owned. A scoped user key can access the file API when its `files` resource permission allows it, but file reads and deletes are still constrained to files owned by that key's user.
+Files are owned by a person or a service principal rather than by a space. A scoped key can access the file API when its `files` resource permission allows it, but file reads and deletes are still constrained to files owned by that key's user, or for a service key by its service principal.
 
 ### Permission Levels
 
@@ -213,7 +213,7 @@ Permissions define what operations a key can perform within its scope:
 | `write` | EDITOR | Create and update resources | Update supported existing resources (creation is gated) |
 | `admin` | ADMIN | Delete resources, manage space settings | Delete supported existing resources, manage settings (creation is gated) |
 
-For files, `write` allows a user key to upload files owned by that user. `admin` is required to delete files, and deletion is still limited to files owned by the key's user. Service keys cannot upload or delete files.
+For files, `write` allows a key to upload files: a user key's files are owned by that user, a service key's by its service principal. `admin` is required to delete files, and deletion is still limited to files with that same owner.
 
 ### How Service Keys Derive Space Roles
 
@@ -421,7 +421,7 @@ No. API-key management endpoints require a session login. API-key callers, inclu
 
 No. This is the main caveat with service keys: they are automation principals, not resource owners. Service keys can operate on supported existing resources within their scope, but endpoints that create new rows owned by `user_id` reject service-key callers with `code: "service_key_cannot_create_resources"`.
 
-Create assistants, apps, spaces, group chats, prompts, collections, websites, files, info blobs, roles, and MCP servers with a user account first. Then use the service key for supported automation around those resources. Files are more restricted than most existing resources: service keys cannot upload files and cannot delete files because files are user-owned today.
+Create assistants, apps, spaces, group chats, prompts, collections, websites, info blobs, roles, and MCP servers with a user account first. Then use the service key for supported automation around those resources. Files are different: a service key uploads its own files and can read and delete them.
 
 ### What happens to our old keys?
 

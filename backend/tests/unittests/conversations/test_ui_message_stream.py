@@ -21,6 +21,7 @@ from eneo.ai_models.completion_models.completion_model import (
     ToolCallMetadata,
 )
 from eneo.assistants.api.assistant_models import AssistantResponse
+from eneo.authentication.principal_types import PrincipalType
 from eneo.conversations import ui_message_stream
 from eneo.conversations.ui_message_stream import (
     UI_MESSAGE_STREAM_HEADERS,
@@ -109,7 +110,8 @@ def _generated_file() -> File:
         mimetype="image/png",
         file_type=FileType.IMAGE,
         blob=b"\x89PNG",
-        user_id=uuid4(),
+        owner_type=PrincipalType.USER,
+        owner_user_id=uuid4(),
         tenant_id=uuid4(),
     )
 

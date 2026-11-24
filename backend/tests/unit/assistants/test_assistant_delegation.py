@@ -31,6 +31,7 @@ from eneo.assistants.delegation import (
     ConsultationRequest,
     current_assistant_delegation,
 )
+from eneo.authentication.principal_types import PrincipalType
 from eneo.completion_models.domain.execution_budget import (
     ExecutionBudget,
     ExecutionLimitReached,
@@ -893,7 +894,8 @@ async def test_specialist_keeps_skill_and_knowledge_in_existing_execution_path(
 
     upload = File(
         id=uuid4(),
-        user_id=turn.user.id,
+        owner_type=PrincipalType.USER,
+        owner_user_id=turn.user.id,
         tenant_id=turn.user.tenant_id,
         name="request.txt",
         mimetype="text/plain",

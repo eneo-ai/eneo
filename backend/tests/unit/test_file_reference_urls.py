@@ -17,6 +17,7 @@ import pytest
 import eneo.files.file_reference as file_reference_mod
 from eneo.assistants.assistant_service import AssistantService
 from eneo.audit.domain.action_types import ActionType
+from eneo.authentication.principal_types import PrincipalType
 from eneo.authentication.signed_urls import (
     build_signed_original_download_url,
     generate_file_original_download_token,
@@ -691,7 +692,8 @@ def _content_file(
         file_type=file_type,
         text=text if file_type == FileType.TEXT else None,
         blob=None if file_type == FileType.TEXT else b"",
-        user_id=uuid4(),
+        owner_type=PrincipalType.USER,
+        owner_user_id=uuid4(),
         tenant_id=uuid4(),
         parent_file_id=parent_file_id,
         original_available=original_available,

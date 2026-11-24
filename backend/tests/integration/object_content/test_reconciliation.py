@@ -219,7 +219,7 @@ async def _create_pending(
             mimetype="application/octet-stream",
             file_type="text",
             tenant_id=tenant_id,
-            user_id=user_id,
+            owner_user_id=user_id,
             parent_file_id=None,
         )
         object_key = new_object_key(real_store.settings)
@@ -1417,7 +1417,7 @@ async def test_publication_reservation_stays_live_until_adoption(
                         mimetype="application/octet-stream",
                         file_type="text",
                         tenant_id=tenant_id,
-                        user_id=user_id,
+                        owner_user_id=user_id,
                         parent_file_id=None,
                     )
                     session.add(owner)

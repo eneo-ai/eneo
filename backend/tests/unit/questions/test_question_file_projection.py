@@ -6,6 +6,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from eneo.authentication.principal_types import PrincipalType
 from eneo.files.file_content_loader import FileAttachmentGroup
 from eneo.files.file_models import File, FileMetadata, FileType
 from eneo.files.model_file_references import file_handle
@@ -25,7 +26,8 @@ def _file(name: str, text: str) -> File:
         id=uuid4(),
         created_at=now,
         updated_at=now,
-        user_id=uuid4(),
+        owner_type=PrincipalType.USER,
+        owner_user_id=uuid4(),
         tenant_id=uuid4(),
         name=name,
         checksum="test-checksum",
@@ -41,7 +43,8 @@ def _metadata(file: File) -> FileMetadata:
         id=file.id,
         created_at=file.created_at,
         updated_at=file.updated_at,
-        user_id=file.user_id,
+        owner_type=PrincipalType.USER,
+        owner_user_id=file.owner_user_id,
         tenant_id=file.tenant_id,
         name=file.name,
         mimetype=file.mimetype,

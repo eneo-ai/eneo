@@ -349,26 +349,6 @@ def require_resource_permission(
     return _resource_check_dep
 
 
-def require_file_delete_scope_guard() -> Callable[..., Awaitable[None]]:
-    """Mark file DELETE requests for post-auth scope/ownership handling.
-
-    Files are user-scoped (no space_id column). User-owned scoped keys may
-    delete through the FileService owner-bound SQL predicate, but service keys
-    do not have a real ``users.id`` owner and cannot delete user-owned files.
-
-    Uses the deferred-enforcement pattern: stashes a marker on ``request.state``
-    so the actual check runs inside ``_resolve_api_key`` (after auth has populated
-    ``api_key_scope_type``).  Router-level dependencies execute *before* endpoint
-    dependencies, so we cannot inspect auth state here.
-    """
-
-    async def _stash(request: Request) -> None:
-        if request.method == "DELETE":
-            request.state._require_file_delete_scope_guard = True
-
-    return _stash
-
-
 @dataclass(frozen=True, slots=True)
 class ScopeFilter:
     """Immutable scope filter extracted from API key state at the router boundary.

@@ -97,7 +97,7 @@ async def _seed_legacy_text(
                 """
                 INSERT INTO files (
                     id, name, text, blob, checksum, size, mimetype, file_type,
-                    transcription, user_id, tenant_id, parent_file_id
+                    transcription, owner_user_id, tenant_id, parent_file_id
                 ) VALUES (
                     :file_id, 'legacy.txt', :text, NULL, :checksum, :size,
                     'text/plain', 'text', NULL, :user_id, :tenant_id,
@@ -417,7 +417,7 @@ async def _seed_legacy_variants(
                 """
                 INSERT INTO files (
                     id, name, text, blob, checksum, size, mimetype, file_type,
-                    transcription, user_id, tenant_id, parent_file_id
+                    transcription, owner_user_id, tenant_id, parent_file_id
                 ) VALUES (
                     :text_id, 'legacy.pdf', 'extract', :original, 'frozen', 7,
                     'application/pdf', 'text', 'spoken', :user_id, :tenant_id,

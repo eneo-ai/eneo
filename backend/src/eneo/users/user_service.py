@@ -1455,43 +1455,6 @@ class UserService:
         request.state.api_key_scope_id = resolved.key.scope_id
         request.state.api_key_resource_permissions = resolved.key.resource_permissions
 
-        # File DELETE scope guard (stashed by router-level dep). User-owned
-        # scoped keys continue to FileService, where delete_by_owner enforces
-        # tenant and file ownership in SQL. Service keys have no real users.id
-        # owner, so they cannot delete user-owned files until files support
-        # service-principal ownership.
-        if getattr(request.state, "_require_file_delete_scope_guard", False):
-            if ownership == ApiKeyOwnership.SERVICE:
-                scope_type_str = (
-                    resolved.key.scope_type.value
-                    if hasattr(resolved.key.scope_type, "value")
-                    else str(resolved.key.scope_type)
-                )
-                exc = ApiKeyValidationError(
-                    status_code=403,
-                    code="service_key_cannot_delete_files",
-                    message=(
-                        "Service API keys cannot delete files because files are owned "
-                        "by users. Use a user-owned API key with files admin permission "
-                        "to upload and clean up runtime files."
-                    ),
-                    context={
-                        "resource_type": "file",
-                        "action": "delete",
-                        "auth_layer": "api_key_scope",
-                        "required_capability": "user_owned_api_key",
-                        "scope_type": scope_type_str,
-                        "ownership": "service",
-                    },
-                )
-                await self._log_api_key_auth_failed(
-                    user,
-                    resolved.key,
-                    exc,
-                    request=request,
-                )
-                raise exc
-
         # Method-level permission: ALWAYS enforced (not gated by flag).
         # Routes with resource guards use read-overrides; others use basic check.
         # Fine-grained resource permission check inside _check_method_resource_permission

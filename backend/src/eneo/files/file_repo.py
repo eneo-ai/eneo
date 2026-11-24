@@ -20,6 +20,7 @@ from eneo.files.file_models import (
     FileInfo,
     FileMetadata,
     FileMetadataCreate,
+    FileOwner,
     FileType,
 )
 from eneo.main.exceptions import NotFoundException
@@ -38,7 +39,9 @@ _FILE_METADATA_COLUMNS = (
     Files.name,
     Files.file_type,
     Files.mimetype,
-    Files.user_id,
+    Files.owner_type,
+    Files.owner_user_id,
+    Files.owner_service_id,
     Files.tenant_id,
     Files.parent_file_id,
     Files.revises_file_id,
@@ -312,7 +315,9 @@ def project_file_info(
         original_size=original.size_bytes if original is not None else None,
         mimetype=project_file_media_type(file, primary),
         file_type=file.file_type,
-        user_id=file.user_id,
+        owner_type=file.owner_type,
+        owner_user_id=file.owner_user_id,
+        owner_service_id=file.owner_service_id,
         tenant_id=file.tenant_id,
         revises_file_id=file.revises_file_id,
     )
@@ -422,11 +427,31 @@ class FileRepository:
             ~FileRepository._family_has_unavailable_content(file),
         )
 
+    @staticmethod
+    def _owned_by(file: type[Files], owner: FileOwner) -> sa.ColumnElement[bool]:
+        """Files of exactly this owner. The two id columns are compared so that
+        an empty one only ever matches an empty one of the same owner type."""
+        return sa.and_(
+            file.tenant_id == owner.tenant_id,
+            file.owner_type == owner.owner_type.value,
+            file.owner_user_id.is_not_distinct_from(owner.owner_user_id),
+            file.owner_service_id.is_not_distinct_from(owner.owner_service_id),
+        )
+
+    @staticmethod
+    def _same_owner(child: type[Files], parent: type[Files]) -> sa.ColumnElement[bool]:
+        return sa.and_(
+            child.owner_type == parent.owner_type,
+            child.owner_user_id.is_not_distinct_from(parent.owner_user_id),
+            child.owner_service_id.is_not_distinct_from(parent.owner_service_id),
+            child.tenant_id == parent.tenant_id,
+        )
+
     async def _visible_children_query(
         self,
         *,
         parent_ids: list[UUID],
-        user_id: UUID | None = None,
+        owner: FileOwner | None = None,
         tenant_id: UUID | None = None,
         file_type: FileType | None = None,
     ) -> Select[tuple[Files]]:
@@ -436,13 +461,12 @@ class FileRepository:
             .join(parent, Files.parent_file_id == parent.id)
             .where(
                 Files.parent_file_id.in_(parent_ids),
-                Files.user_id == parent.user_id,
-                Files.tenant_id == parent.tenant_id,
+                self._same_owner(Files, parent),
                 await self._visible_family(),
             )
         )
-        if user_id is not None:
-            query = query.where(parent.user_id == user_id)
+        if owner is not None:
+            query = query.where(self._owned_by(parent, owner))
         if tenant_id is not None:
             query = query.where(parent.tenant_id == tenant_id)
         if file_type is not None:
@@ -485,10 +509,10 @@ class FileRepository:
         self.session.add(reference)
         await self.session.flush()
 
-    async def get_list_by_id_and_user(
+    async def get_list_by_id_and_owner(
         self,
         ids: list[UUID],
-        user_id: UUID,
+        owner: FileOwner,
     ) -> list[FileMetadata]:
         if not ids:
             return []
@@ -496,7 +520,7 @@ class FileRepository:
             sa.select(Files)
             .where(
                 Files.id.in_(ids),
-                Files.user_id == user_id,
+                self._owned_by(Files, owner),
                 await self._visible_family(),
             )
             .order_by(Files.created_at)
@@ -516,14 +540,14 @@ class FileRepository:
     async def get_by_parent_ids(
         self,
         parent_ids: list[UUID],
-        user_id: UUID,
+        owner: FileOwner,
     ) -> list[FileMetadata]:
         if not parent_ids:
             return []
         rows = await self.session.scalars(
             await self._visible_children_query(
                 parent_ids=parent_ids,
-                user_id=user_id,
+                owner=owner,
             )
         )
         return [FileMetadata.model_validate(row) for row in rows]
@@ -551,8 +575,7 @@ class FileRepository:
                     child,
                     sa.and_(
                         child.parent_file_id == parent.id,
-                        child.user_id == parent.user_id,
-                        child.tenant_id == parent.tenant_id,
+                        self._same_owner(child, parent),
                         child.file_type == FileType.IMAGE.value,
                     ),
                 )
@@ -602,23 +625,21 @@ class FileRepository:
         self,
         *,
         file_id: UUID,
-        user_id: UUID,
-        tenant_id: UUID,
+        owner: FileOwner,
     ) -> FileMetadata | None:
         row = await self.session.scalar(
             sa.select(Files).where(
                 Files.id == file_id,
-                Files.user_id == user_id,
-                Files.tenant_id == tenant_id,
+                self._owned_by(Files, owner),
             )
         )
         return None if row is None else FileMetadata.model_validate(row)
 
-    async def get_list_by_user(self, user_id: UUID) -> list[FileMetadata]:
+    async def get_list_by_owner(self, owner: FileOwner) -> list[FileMetadata]:
         rows = await self.session.scalars(
             sa.select(Files)
             .where(
-                Files.user_id == user_id,
+                self._owned_by(Files, owner),
                 Files.parent_file_id.is_(None),
                 await self._visible_family(),
             )
@@ -853,16 +874,14 @@ class FileRepository:
     async def delete_by_owner_for_lifecycle(
         self,
         id: UUID,
-        user_id: UUID,
-        tenant_id: UUID,
+        owner: FileOwner,
     ) -> FileMetadata | None:
         row = (
             await self.session.execute(
                 sa.delete(Files)
                 .where(
                     Files.id == id,
-                    Files.user_id == user_id,
-                    Files.tenant_id == tenant_id,
+                    self._owned_by(Files, owner),
                 )
                 .returning(*_FILE_METADATA_COLUMNS)
             )

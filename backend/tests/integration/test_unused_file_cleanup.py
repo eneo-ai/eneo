@@ -108,7 +108,7 @@ async def _create_file(
         mimetype="audio/mpeg",
         file_type=FileType.AUDIO.value,
         tenant_id=admin_user.tenant_id,
-        user_id=admin_user.id,
+        owner_user_id=admin_user.id,
         parent_file_id=parent_file_id,
         created_at=created_at,
         updated_at=created_at,
