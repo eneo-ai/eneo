@@ -428,6 +428,24 @@ it("keeps the field read-only while it reads the space's time, and saves nothing
   expect(field.value).toBe("60");
 });
 
+it("keeps the field read-only while a time is saved, so a clear made after it is not lost", async () => {
+  showSettings();
+  const patch = deferredPatch();
+  api.PATCH.mockReturnValueOnce(patch.promise);
+  const field = enterRetention("45");
+  await waitFor(() => expect(api.PATCH).toHaveBeenCalledTimes(1));
+  // A second change cannot be typed while the first is on its way.
+  expect(field.readOnly).toBe(true);
+  await act(async () => {
+    state.space = { ...state.space, data_retention_days: 45 };
+    patch.resolve(state.space);
+  });
+  await waitFor(() => expect(field.readOnly).toBe(false));
+  enterRetention("");
+  await waitFor(() => expect(api.PATCH).toHaveBeenCalledTimes(2));
+  expect(api.PATCH.mock.calls[1]![1].body).toEqual({ data_retention_days: null });
+});
+
 it("never sends an unconfirmed shorter time when the page is left", async () => {
   const { unmount } = showSettings();
   fireEvent.change(retentionField(), { target: { value: "7" } });

@@ -526,7 +526,9 @@ function RetentionSection() {
             setDaysVisited(true);
             void commit();
           }}
-          readOnly={checking}
+          // Read-only, not disabled: it keeps focus, and a change typed while the time is
+          // read or saved would otherwise be left unsaved.
+          readOnly={checking || update.isPending}
           disabled={!canEditRetention}
           {...fieldProblemProps(
             "retention-days",
