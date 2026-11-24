@@ -128,6 +128,8 @@ These stay:
 - a run whose audit row is not yet delivered or whose webhook delivery is still pending, until the delivery is done;
 - a file that another remaining run still uses. A rerun, or a new run from a reviewed transcription, shares its source run's audio file. Each run counts from its own time, and the file goes with the last of them. A run that started while the space had no time is never removed automatically, so it keeps the shared file, and it has its own copy of the transcript.
 
+The space's time does not reach content that never became part of a run. In this version, audio uploaded for a run that was never started, and live text never bound to a run, are not removed automatically, and the upload and debug-evidence windows under **Admin > Flow retention** are not enforced on a schedule. The explicit purge removes expired live text that no run uses.
+
 Create-run idempotency is tied to the run row. Once a run is removed, a request with the same `Idempotency-Key` creates a new run; if the upload it names has been removed too, that request can be refused when its input is checked.
 
 Eneo records each pass with the retention engine's audit events (`data_retention_batch` and `data_retention_run`), with counts and without run content. No event is written per run.
