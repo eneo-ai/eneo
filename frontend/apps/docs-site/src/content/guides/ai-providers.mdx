@@ -183,7 +183,7 @@ When a completion model is added, Eneo records which model settings its route of
 
 ## Transcription and speaker identification
 
-A transcription model is added like any other model, with the steps under [Adding a Provider](#adding-a-provider-admin-ui). Live transcription, where an app shows the text while someone records, needs a transcription model on a provider of type vLLM that is marked for live use. The steps for that, for speaker identification services such as Vemsa, and the settings on the vadsa and Vemsa servers are in [Transcription and speaker identification](/guides/transcription).
+A transcription model is added like any other model, with the steps under [Adding a Provider](#adding-a-provider-admin-ui). Live text, where an app shows the text while someone records, needs a transcription model marked for live text on a provider that can carry it: a provider of type vLLM with an endpoint, or a provider of type OpenAI whose endpoint is a server or gateway that serves vLLM's realtime API (not OpenAI's own service), in both cases without outbound headers, and switched on. A gateway already added as an OpenAI provider with its address works as it is; no second provider is needed. The steps for that, for speaker identification services such as Vemsa, and the settings on the vadsa and Vemsa servers are in [Transcription and speaker identification](/guides/transcription).
 
 ---
 
@@ -201,7 +201,7 @@ Outbound headers are available for the self-hosted OpenAI-compatible provider ty
 |---|---|
 | Every completion (chat, assistants, apps and other text generation), streamed and not, including tool-call follow-ups | Yes |
 | Embeddings, for search queries, uploads and website crawls | Yes |
-| Transcription | **No: the request is blocked** while headers are configured, because LiteLLM does not forward headers on this route. Use a separate provider for transcription models |
+| Transcription | **No: the request is blocked** while headers are configured, because LiteLLM does not forward headers on this route. Use a separate provider for transcription models. Live text cannot send them either, so a provider with headers cannot carry live text |
 | Image generation | **No: the request is blocked** while headers are configured, because it is not verified that LiteLLM forwards headers on this route. Use a separate provider for image models |
 | Connectivity tests, model validation and model listing in the admin UI | No; these are not user traffic |
 

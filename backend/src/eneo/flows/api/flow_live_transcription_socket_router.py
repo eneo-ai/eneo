@@ -55,7 +55,7 @@ from eneo.model_providers.infrastructure.litellm_provider import (
     build_litellm_provider_kwargs,
     load_active_litellm_provider,
 )
-from eneo.transcription_models.domain.realtime import speaks_realtime_dialect
+from eneo.transcription_models.domain.realtime import realtime_eligibility
 
 logger = get_logger(__name__)
 
@@ -198,7 +198,21 @@ async def _load_upstream_target(grant: LiveTranscriptionGrant) -> _UpstreamTarge
             provider = await load_active_litellm_provider(
                 session=session, provider_id=row.provider_id, tenant_id=grant.tenant_id
             )
-            if not speaks_realtime_dialect(provider.provider_type):
+            # The rule again, on the provider as it is now: its endpoint or
+            # headers may have changed since the ticket was issued. Checked
+            # before the key is decrypted or any connection is opened.
+            if (
+                realtime_eligibility(
+                    provider_type=provider.provider_type,
+                    credentials=provider.credentials,
+                    config=provider.config,
+                    has_outbound_headers=bool(provider.outbound_headers),
+                    # load_active_litellm_provider has already refused a
+                    # provider that is switched off.
+                    is_active=True,
+                )
+                != "eligible"
+            ):
                 raise unavailable
             kwargs = build_litellm_provider_kwargs(
                 provider.create_credential_resolver(container.encryption_service())

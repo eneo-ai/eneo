@@ -704,8 +704,8 @@ describe("checkDraft", () => {
   });
 
   it("asks for another live model when the space can no longer stream through the chosen one", () => {
-    const whisper = { id: "whisper", name: "kb-whisper-large", supports_realtime: false };
-    const live = { id: "live", name: "pianissimo-sv-live", supports_realtime: true };
+    const whisper = { id: "whisper", name: "kb-whisper-large", streams_live: false };
+    const live = { id: "live", name: "pianissimo-sv-live", streams_live: true };
     const flow = makeFlow({
       steps: [makeStep(1, { input_type: "audio", output_mode: "transcribe_only" })],
       metadata_json: {
@@ -726,8 +726,8 @@ describe("checkDraft", () => {
     expect(checkDraft(flow, offering([whisper])).flow).toEqual([
       { code: "live_model_unavailable" }
     ]);
-    expect(
-      checkDraft(flow, offering([whisper, { ...live, supports_realtime: false }])).flow
-    ).toEqual([{ code: "live_model_unavailable" }]);
+    expect(checkDraft(flow, offering([whisper, { ...live, streams_live: false }])).flow).toEqual([
+      { code: "live_model_unavailable" }
+    ]);
   });
 });

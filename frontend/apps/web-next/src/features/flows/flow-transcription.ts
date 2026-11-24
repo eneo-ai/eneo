@@ -46,7 +46,10 @@ export type TranscriptionModelLink = {
   name: string;
   nickname?: string | null;
   can_access?: boolean;
+  /** Marked for live text by an administrator, whether or not it can stream now. */
   supports_realtime?: boolean;
+  /** Can stream live text now: marked and its provider can carry it (backend's answer). */
+  streams_live?: boolean;
   /** Tells apart models of the same name from different providers. */
   provider_name?: string | null;
 };
@@ -193,9 +196,9 @@ export function withSpeakerService(
     : { ...settings, speakerService: { kind: "service", id: serviceId } };
 }
 
-/** The models the space may stream a live preview through (the core's rule). */
+/** The models the space may stream live text through (the backend's answer). */
 export function liveModels<T extends TranscriptionModelLink>(models: readonly T[]): T[] {
-  return models.filter((model) => model.supports_realtime === true && model.can_access !== false);
+  return models.filter((model) => model.streams_live === true && model.can_access !== false);
 }
 
 /**

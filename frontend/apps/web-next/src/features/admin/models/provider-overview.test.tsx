@@ -45,6 +45,7 @@ function provider(id: string, name: string, overrides: Partial<ModelProvider> = 
     provider_type: "openai",
     config: {},
     is_active: true,
+    realtime_eligibility: "unsupported_provider",
     masked_api_key: "...4f2a",
     key_expires_on: null,
     connection_check: null,

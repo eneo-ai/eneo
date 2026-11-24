@@ -189,13 +189,13 @@ describe("SpaceModelSelect", () => {
 
   it.each([true, false])("marks a model that does live transcription: %s", async (on) => {
     const { container } = renderModels([
-      { id: "live", name: "Pianissimo", org: "Nord AI", supports_realtime: on }
+      { id: "live", name: "Pianissimo", org: "Nord AI", streams_live: on }
     ]);
     openCard();
     // In words, not only a hover tooltip: read with the switch, seen without a pointer.
-    expect(Boolean(screen.queryByText("Livetranskribering"))).toBe(on);
+    expect(Boolean(screen.queryByText("Livetext"))).toBe(on);
     const toggle = screen.getByRole("switch", { name: "Pianissimo" });
-    expect(describedText(toggle)).toBe(on ? "Livetranskribering" : "");
+    expect(describedText(toggle)).toBe(on ? "Livetext" : "");
     await expectNoAxeViolations(container);
   });
 

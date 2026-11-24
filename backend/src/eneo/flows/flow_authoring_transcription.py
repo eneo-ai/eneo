@@ -186,8 +186,9 @@ def require_usable_live_model(model_id: UUID, *, space: Space) -> None:
     if model is None or not streams_live(model):
         code = FlowGraphIssueCode.FLOW_LIVE_TRANSCRIPTION_MODEL_UNAVAILABLE.value
         raise BadRequestException(
-            "The chosen live transcription model cannot be used in this space: "
-            "it is not available to the space, or it does not support realtime.",
+            "The chosen live text model cannot be used in this space: it is not "
+            "available to the space, or it cannot stream live text now (it is not "
+            "marked for live text, or its provider cannot carry it).",
             code=code,
             context={"issue_code": code, "live_model_id": str(model_id)},
         )

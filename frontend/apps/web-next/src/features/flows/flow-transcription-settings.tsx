@@ -87,7 +87,7 @@ function liveModelValue(
 function modelOption(model: TranscriptionModelLink, t: Translate, showsRole: boolean) {
   const facts = [
     model.provider_name?.trim(),
-    showsRole && model.supports_realtime ? t("flow_editor_tools_model_shows_live_text") : null
+    showsRole && model.streams_live ? t("flow_editor_tools_model_shows_live_text") : null
   ].filter(Boolean);
   return {
     value: model.id,
@@ -97,8 +97,9 @@ function modelOption(model: TranscriptionModelLink, t: Translate, showsRole: boo
 }
 
 /**
- * A streaming model chosen to write files, while the space has a model made
- * for files: the one to suggest instead.
+ * A model marked for live text chosen to write files, while the space has a
+ * model made for files: the one to suggest instead. A marked model is not made
+ * for files, even while its provider cannot carry live text.
  */
 function fileModelInstead(
   model: TranscriptionModelLink | undefined,

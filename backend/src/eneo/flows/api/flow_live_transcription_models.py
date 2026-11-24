@@ -110,7 +110,8 @@ class FlowLiveTranscriptionUnavailableContext(BaseModel):
             "in its space. `live_model_unavailable`: the flow's live transcription "
             "model is not available in its space. `model_not_realtime`: the model "
             "the live text would stream through, the live transcription model or "
-            "else the transcription model, does not support realtime."
+            "else the transcription model, cannot stream live text now: it is not "
+            "marked for live text, or its provider cannot carry it."
         )
     )
 

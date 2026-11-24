@@ -22,6 +22,7 @@ const provider = (overrides: Partial<ModelProvider>): ModelProvider => ({
   provider_type: "openai",
   config: {},
   is_active: true,
+  realtime_eligibility: "unsupported_provider",
   masked_api_key: "...abcd",
   created_at: "",
   updated_at: "",

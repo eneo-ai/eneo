@@ -52,8 +52,13 @@ class TenantTranscriptionModelCreate(BaseModel):
     supports_realtime: bool = Field(
         default=False,
         description=(
-            "The provider serves this model over the realtime WebSocket that live "
-            "transcription uses. Only providers of type vLLM qualify."
+            "Live text: the model is served over vLLM's realtime API "
+            "(/v1/realtime on the provider's endpoint). Allowed when the "
+            "provider's realtime_eligibility is eligible: a vLLM provider with "
+            "an endpoint, or an OpenAI provider whose endpoint is a gateway "
+            "serving that API (not OpenAI's own service), without outbound "
+            "headers and switched on. Otherwise 400 says what to change on the "
+            "provider."
         ),
     )
 
@@ -77,8 +82,14 @@ class TenantTranscriptionModelUpdate(BaseModel):
     supports_realtime: bool | None = Field(
         None,
         description=(
-            "Turn live transcription on or off for this model. Only providers of "
-            "type vLLM qualify."
+            "Turn live text on or off for this model. Turning it on needs a "
+            "provider whose realtime_eligibility is eligible (a vLLM provider "
+            "with an endpoint, or an OpenAI provider whose endpoint is a gateway "
+            "serving vLLM's realtime API, without outbound headers and switched "
+            "on); otherwise 400 says what to change on the provider. Sending "
+            "true again for a model that is already marked, or sending false, "
+            "passes this check even if its provider no longer qualifies; the "
+            "model's streams_live then reads false."
         ),
     )
 
@@ -95,7 +106,14 @@ def _service(
 
 @router.post(
     "/",
-    description="Create a new tenant-specific transcription model.",
+    description=(
+        "Create a new tenant-specific transcription model. Marking it for live "
+        "text (supports_realtime) needs a provider whose realtime_eligibility "
+        "is eligible. Otherwise (endpoint_required, unsupported_provider or "
+        "outbound_headers_configured) 400 says what to change on the "
+        "provider. A provider that is switched off is refused before this "
+        "check."
+    ),
     response_model=TranscriptionModelPublic,
     responses=responses.get_responses([400, 403, 404, 409]),
 )
@@ -121,9 +139,15 @@ async def create_tenant_transcription_model(
 
 @router.put(
     "/{model_id}/",
-    description="Update a tenant-specific transcription model.",
+    description=(
+        "Update a tenant-specific transcription model. Only turning live text "
+        "on (supports_realtime from false to true) checks the provider's "
+        "realtime_eligibility and answers 400 when it is not eligible, a "
+        "provider that is switched off included; a supports_realtime that "
+        "does not change, or turning it off, passes this check."
+    ),
     response_model=TranscriptionModelPublic,
-    responses=responses.get_responses([403, 404, 409]),
+    responses=responses.get_responses([400, 403, 404, 409]),
 )
 @endpoint_access(
     authentication=Authentication.USER,

@@ -164,7 +164,9 @@ async def create_flow_live_transcription_session(
             action=ActionType.FLOW_LIVE_TRANSCRIPTION_STARTED,
             entity_type=EntityType.FLOW,
             entity_id=id,
-            description=f"Started a live transcription session for flow {id}",
+            # Logged when the ticket is issued, before any connection to the
+            # model's server: the request, not a started stream.
+            description=f"Requested a live text session for flow {id}",
             metadata=AuditMetadata.standard(
                 actor=user,
                 target=live.flow,

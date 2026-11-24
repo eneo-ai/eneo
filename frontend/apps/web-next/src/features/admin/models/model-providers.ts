@@ -144,13 +144,26 @@ export function providerFields(caps: ProviderCapabilities, type: string): Provid
 }
 
 /**
- * Whether a provider serves the realtime API live transcription streams to.
- * Only vLLM does (any alias or casing), as `speaks_realtime_dialect` decides
- * in backend/src/eneo/transcription_models/domain/realtime.py.
+ * Whether a provider can carry live text, as the backend decides it
+ * (`realtime_eligibility`, backend/src/eneo/transcription_models/domain/realtime.py).
+ * web-next never decides this itself.
  */
-export function speaksRealtimeDialect(type: string | null | undefined): boolean {
-  const lower = type?.toLowerCase();
-  return lower != null && (PROVIDER_TYPE_ALIASES[lower] ?? lower) === "hosted_vllm";
+export type RealtimeEligibility = ModelProvider["realtime_eligibility"];
+
+const REALTIME_REFUSALS = {
+  endpoint_required: "live_text_reason_endpoint_required",
+  unsupported_provider: "live_text_reason_unsupported_provider",
+  outbound_headers_configured: "live_text_reason_outbound_headers_configured",
+  provider_inactive: "live_text_reason_provider_inactive"
+} as const satisfies Record<Exclude<RealtimeEligibility, "eligible">, string>;
+
+/**
+ * The message key that says why a provider cannot carry live text; null when
+ * it can, or while its answer is not known yet.
+ */
+export function realtimeRefusalKey(eligibility: RealtimeEligibility | undefined) {
+  if (eligibility === undefined || eligibility === "eligible") return null;
+  return REALTIME_REFUSALS[eligibility];
 }
 
 /** Whether the backend requires an API key for this provider type. */
@@ -188,7 +201,7 @@ export function providerFieldPlaceholder(
       return t("enter_api_key");
     case "endpoint":
       if (providerType === "azure") return "https://your-resource.openai.azure.com";
-      if (providerType === "hosted_vllm") return "https://your-vllm-server.com";
+      if (providerType === "hosted_vllm") return "https://your-vllm-server.com/v1";
       return "https://api.example.com/v1";
     case "api_version":
       return t("api_version_placeholder");
@@ -211,7 +224,11 @@ export function providerFieldHint(
       return t("will_be_encrypted");
     case "endpoint":
       if (providerType === "azure") return t("endpoint_required_azure");
-      if (providerType === "hosted_vllm") return t("endpoint_required_vllm");
+      // The two types that can carry live text, which streams from this address.
+      if (providerType === "hosted_vllm")
+        return `${t("endpoint_required_vllm")} ${t("endpoint_live_text_note")}`;
+      if (providerType === "openai")
+        return `${t("endpoint_optional_generic")} ${t("endpoint_live_text_note")}`;
       if (!required) return t("endpoint_optional_generic");
       return "";
     case "api_version":

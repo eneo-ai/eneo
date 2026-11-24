@@ -2233,7 +2233,7 @@ export interface paths {
     put?: never;
     /**
      * Create Tenant Transcription Model
-     * @description Create a new tenant-specific transcription model.
+     * @description Create a new tenant-specific transcription model. Marking it for live text (supports_realtime) needs a provider whose realtime_eligibility is eligible. Otherwise (endpoint_required, unsupported_provider or outbound_headers_configured) 400 says what to change on the provider. A provider that is switched off is refused before this check.
      */
     post: operations["create_tenant_transcription_model_api_v1_admin_tenant_models_transcription__post"];
     delete?: never;
@@ -2252,7 +2252,7 @@ export interface paths {
     get?: never;
     /**
      * Update Tenant Transcription Model
-     * @description Update a tenant-specific transcription model.
+     * @description Update a tenant-specific transcription model. Only turning live text on (supports_realtime from false to true) checks the provider's realtime_eligibility and answers 400 when it is not eligible, a provider that is switched off included; a supports_realtime that does not change, or turning it off, passes this check.
      */
     put: operations["update_tenant_transcription_model_api_v1_admin_tenant_models_transcription__model_id___put"];
     post?: never;
@@ -20323,7 +20323,7 @@ export interface components {
     FlowLiveTranscriptionUnavailableContext: {
       /**
        * Reason
-       * @description `transcription_disabled`: the flow does not transcribe audio. `model_unavailable`: the flow's transcription model is not available in its space. `live_model_unavailable`: the flow's live transcription model is not available in its space. `model_not_realtime`: the model the live text would stream through, the live transcription model or else the transcription model, does not support realtime.
+       * @description `transcription_disabled`: the flow does not transcribe audio. `model_unavailable`: the flow's transcription model is not available in its space. `live_model_unavailable`: the flow's live transcription model is not available in its space. `model_not_realtime`: the model the live text would stream through, the live transcription model or else the transcription model, cannot stream live text now: it is not marked for live text, or its provider cannot carry it.
        * @enum {string}
        */
       reason:
@@ -33909,6 +33909,17 @@ export interface components {
       /** Provider Type */
       provider_type: string;
       /**
+       * Realtime Eligibility
+       * @description Whether the provider can carry live text (a transcription model's supports_realtime), and if not, what the administrator does: endpoint_required (enter the endpoint of a server that serves vLLM's realtime API; OpenAI's own service does not), unsupported_provider (only vLLM, or OpenAI with such an endpoint, qualify), outbound_headers_configured (live text cannot send outbound headers) or provider_inactive (the provider is switched off).
+       * @enum {string}
+       */
+      realtime_eligibility:
+        | "eligible"
+        | "endpoint_required"
+        | "unsupported_provider"
+        | "outbound_headers_configured"
+        | "provider_inactive";
+      /**
        * Tenant Id
        * Format: uuid
        */
@@ -41500,7 +41511,7 @@ export interface components {
       security_classification?: components["schemas"]["ModelId"] | null;
       /**
        * Supports Realtime
-       * @description The provider serves this model over the realtime WebSocket that live transcription uses. Only providers of type vLLM qualify.
+       * @description Live text: the model is served over vLLM's realtime API (/v1/realtime on the provider's endpoint). Allowed when the provider's realtime_eligibility is eligible: a vLLM provider with an endpoint, or an OpenAI provider whose endpoint is a gateway serving that API (not OpenAI's own service), without outbound headers and switched on. Otherwise 400 says what to change on the provider.
        * @default false
        */
       supports_realtime?: boolean;
@@ -41546,7 +41557,7 @@ export interface components {
       stability?: string | null;
       /**
        * Supports Realtime
-       * @description Turn live transcription on or off for this model. Only providers of type vLLM qualify.
+       * @description Turn live text on or off for this model. Turning it on needs a provider whose realtime_eligibility is eligible (a vLLM provider with an endpoint, or an OpenAI provider whose endpoint is a gateway serving vLLM's realtime API, without outbound headers and switched on); otherwise 400 says what to change on the provider. Sending true again for a model that is already marked, or sending false, passes this check even if its provider no longer qualifies; the model's streams_live then reads false.
        */
       supports_realtime?: boolean | null;
     };
@@ -42293,7 +42304,13 @@ export interface components {
       /** Stability */
       stability?: string | null;
       /**
+       * Streams Live
+       * @description The model can stream live text now: it is marked (supports_realtime) and its provider can carry live text (the provider's realtime_eligibility is eligible). False while the provider is switched off, even though the mark stays saved.
+       */
+      streams_live: boolean;
+      /**
        * Supports Realtime
+       * @description The administrator marked the model for live text. Saved as chosen; whether the model can stream now is streams_live.
        * @default false
        */
       supports_realtime?: boolean;
@@ -42367,7 +42384,13 @@ export interface components {
       /** Stability */
       stability?: string | null;
       /**
+       * Streams Live
+       * @description The model can stream live text now: it is marked (supports_realtime) and its provider can carry live text (the provider's realtime_eligibility is eligible). False while the provider is switched off, even though the mark stays saved.
+       */
+      streams_live: boolean;
+      /**
        * Supports Realtime
+       * @description The administrator marked the model for live text. Saved as chosen; whether the model can stream now is streams_live.
        * @default false
        */
       supports_realtime?: boolean;
@@ -52358,6 +52381,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["TranscriptionModelPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */

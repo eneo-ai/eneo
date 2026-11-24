@@ -5,7 +5,7 @@ import { Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
 import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@/components/astryx/text-input";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useTranslations } from "use-intl";
+import { useFormatter, useTranslations } from "use-intl";
 import { useEffect, useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { Switch } from "@astryxdesign/core/Switch";
@@ -38,10 +38,11 @@ import {
   providerCapabilitiesQueryOptions,
   providerDisplayName,
   providerFields,
+  realtimeRefusalKey,
   updateProvider,
   outboundHeaderOptionsQueryOptions
 } from "./model-providers";
-import { MODELS_KEY } from "./models";
+import { invalidateSpaceLiveText, MODELS_KEY } from "./models";
 import { ProviderField, providerFieldProblem, useFieldFocus } from "./provider-form-fields";
 
 /** A new key replaces the stored one, so it is required once asked for. */
@@ -330,6 +331,9 @@ function ProviderEditForm({
   );
 }
 
+/** How many marked models the save notice names before "and N more". */
+const LISTED_MODELS = 3;
+
 /**
  * "Redigera leverantör", opened from the provider card's menu: name, on/off,
  * a new API key (typed twice), the key's expiry date and the type's config
@@ -337,14 +341,18 @@ function ProviderEditForm({
  */
 export function ProviderEditDialog({
   provider,
+  markedLiveTextModels = [],
   open,
   onOpenChange
 }: {
   provider: ModelProvider;
+  /** The names of the provider's models marked for live text, filtered out or not. */
+  markedLiveTextModels?: readonly string[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
   const t = useTranslations();
+  const format = useFormatter();
   const queryClient = useQueryClient();
   const formId = useId();
   // The menu item that opened the dialog is gone once it is open.
@@ -357,10 +365,36 @@ export function ProviderEditDialog({
   // The body can hold a new API key and secret header values.
   const save = useSecretMutation({
     mutationFn: (body: ModelProviderUpdate) => updateProvider(browserApi, provider.id, body),
-    onSuccess: () => {
+    onSuccess: (saved) => {
       void queryClient.invalidateQueries({ queryKey: PROVIDERS_KEY });
       void queryClient.invalidateQueries({ queryKey: MODELS_KEY });
-      toast.success(t("provider_updated_success"));
+      // The provider's models may stream live text now, or no longer.
+      if (saved.realtime_eligibility !== provider.realtime_eligibility) {
+        void invalidateSpaceLiveText(queryClient);
+      }
+      // The server's answers before and after the save: the marked models now
+      // do nothing, or do again, which the plain confirmation would hide.
+      const count = markedLiveTextModels.length;
+      const refusal = realtimeRefusalKey(saved.realtime_eligibility);
+      const models = format.list(
+        count > LISTED_MODELS
+          ? [
+              ...markedLiveTextModels.slice(0, LISTED_MODELS),
+              t("live_text_models_more", { count: count - LISTED_MODELS })
+            ]
+          : markedLiveTextModels
+      );
+      if (refusal && count > 0) {
+        toast.warning(t("live_text_provider_saved_unused", { models, count, reason: t(refusal) }));
+      } else if (
+        count > 0 &&
+        saved.realtime_eligibility === "eligible" &&
+        realtimeRefusalKey(provider.realtime_eligibility) !== null
+      ) {
+        toast.success(t("live_text_provider_saved_in_use_again", { models }));
+      } else {
+        toast.success(t("provider_updated_success"));
+      }
       setTakenName(null);
       setKeyRefusal(null);
       setFormRefusal(null);

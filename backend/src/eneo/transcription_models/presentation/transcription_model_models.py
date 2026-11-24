@@ -2,12 +2,13 @@ from decimal import Decimal
 from typing import Optional, Union
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from eneo.main.models import NOT_PROVIDED, ModelId, NotProvided
 from eneo.security_classifications.presentation.security_classification_models import (
     SecurityClassificationPublic,
 )
+from eneo.transcription_models.domain.realtime import streams_live
 from eneo.transcription_models.domain.transcription_model import TranscriptionModel
 
 
@@ -39,7 +40,21 @@ class TranscriptionModelPublic(BaseModel):
     provider_type: Optional[str] = None
     deprecation_date: Optional[str] = None
     migrated_to_model_id: Optional[UUID] = None
-    supports_realtime: bool = False
+    supports_realtime: bool = Field(
+        default=False,
+        description=(
+            "The administrator marked the model for live text. Saved as chosen; "
+            "whether the model can stream now is streams_live."
+        ),
+    )
+    streams_live: bool = Field(
+        description=(
+            "The model can stream live text now: it is marked (supports_realtime) "
+            "and its provider can carry live text (the provider's "
+            "realtime_eligibility is eligible). False while the provider is "
+            "switched off, even though the mark stays saved."
+        ),
+    )
 
     @classmethod
     def from_domain(cls, model: TranscriptionModel):
@@ -73,6 +88,7 @@ class TranscriptionModelPublic(BaseModel):
             deprecation_date=model.litellm_deprecation_date,
             migrated_to_model_id=model.migrated_to_model_id,
             supports_realtime=model.supports_realtime,
+            streams_live=streams_live(model),
         )
 
 

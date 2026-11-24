@@ -224,7 +224,8 @@ function transcriptionModel(supportsRealtime: boolean): TranscriptionModel {
     is_deprecated: false,
     cost_per_minute: null,
     provider_type: "hosted_vllm",
-    supports_realtime: supportsRealtime
+    supports_realtime: supportsRealtime,
+    streams_live: false
   };
 }
 

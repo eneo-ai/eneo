@@ -67,7 +67,7 @@ from eneo.rerank_models.domain.rerank_model_repo import RerankModelRepository
 from eneo.security_classifications.tenant_validation import (
     resolve_tenant_security_classification,
 )
-from eneo.transcription_models.domain.realtime import speaks_realtime_dialect
+from eneo.transcription_models.domain.realtime import RealtimeEligibility
 from eneo.transcription_models.domain.transcription_model_repo import (
     TranscriptionModelRepository,
 )
@@ -126,12 +126,38 @@ async def _validate_active_provider(
     return provider
 
 
-def _require_realtime_dialect(provider_type: str | None) -> None:
-    if provider_type is None or not speaks_realtime_dialect(provider_type):
-        raise BadRequestException(
-            "Live transcription needs a provider of type vLLM, which serves the "
-            "realtime API (for example vadsa)."
-        )
+# What the administrator does when a model cannot be marked for live text.
+_REALTIME_REFUSALS: dict[RealtimeEligibility, str] = {
+    "endpoint_required": (
+        "Live text needs the endpoint of a server that serves vLLM's realtime "
+        "API. Enter the server's or gateway's address on the provider; OpenAI's "
+        "own service does not serve that API."
+    ),
+    "unsupported_provider": (
+        "Live text needs a provider of type vLLM, or of type OpenAI with the "
+        "endpoint of a server that serves vLLM's realtime API. Choose such a "
+        "provider."
+    ),
+    "outbound_headers_configured": (
+        "Live text cannot send the provider's outbound headers. Use a provider "
+        "without outbound headers."
+    ),
+    "provider_inactive": (
+        "Live text needs an active provider. Switch the provider on, then turn "
+        "on live text."
+    ),
+}
+
+
+def _require_realtime_provider(eligibility: RealtimeEligibility) -> None:
+    """Refuse turning live text on for a model whose provider cannot carry it.
+
+    Only the change from off to on is checked: a mark that is already saved
+    stays (callers resend it with every edit), and turning it off always works.
+    Only ``eligible`` passes; a reason without a text fails rather than passes.
+    """
+    if eligibility != "eligible":
+        raise BadRequestException(_REALTIME_REFUSALS[eligibility])
 
 
 async def _unset_other_defaults(
@@ -761,7 +787,7 @@ class TenantTranscriptionModelService:
             self.session, payload.provider_id, self.user.tenant_id
         )
         if payload.supports_realtime:
-            _require_realtime_dialect(provider.provider_type)
+            _require_realtime_provider(provider.realtime_eligibility)
         await _validate_unique_display_name(
             self.session,
             TranscriptionModels,
@@ -877,14 +903,14 @@ class TenantTranscriptionModelService:
                 )
             )
         if payload.supports_realtime is not None:
-            if payload.supports_realtime:
-                provider_type = None
+            if payload.supports_realtime and not model.supports_realtime:
+                eligibility: RealtimeEligibility = "unsupported_provider"
                 if model.provider_id is not None:
                     provider = await ModelProviderRepository(
                         session=self.session, tenant_id=self.user.tenant_id
                     ).get_by_id(model.provider_id)
-                    provider_type = provider.provider_type
-                _require_realtime_dialect(provider_type)
+                    eligibility = provider.realtime_eligibility
+                _require_realtime_provider(eligibility)
             model.supports_realtime = payload.supports_realtime
 
         await self.session.flush()

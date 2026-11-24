@@ -1,5 +1,6 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
+import { Lock } from "lucide-react";
 import { useId, useState } from "react";
 import {
   FieldProblem,
@@ -45,8 +46,14 @@ import {
   isEmbeddingFamily,
   isHostingRegion
 } from "./model-metadata-options";
-import { speaksRealtimeDialect } from "./model-providers";
-import { type AdminModel, MODELS_KEY, type ModelKind, updateTenantModel } from "./models";
+import { modelProvidersQueryOptions, realtimeRefusalKey } from "./model-providers";
+import {
+  type AdminModel,
+  invalidateSpaceLiveText,
+  MODELS_KEY,
+  type ModelKind,
+  updateTenantModel
+} from "./models";
 import {
   isCandidateSetting,
   RERANK_CANDIDATE_FACTOR,
@@ -113,6 +120,7 @@ function EditModelForm({
   const helpId = useId();
   const realtimeHelpId = `${helpId}-realtime`;
   const realtimeUnavailableId = `${helpId}-realtime-unavailable`;
+  const realtimeKeptId = `${helpId}-realtime-kept`;
   const strictToolsHelpId = `${helpId}-strict-tools`;
 
   const [displayName, setDisplayName] = useState(model.nickname ?? model.name);
@@ -199,13 +207,26 @@ function EditModelForm({
   const [classificationId, setClassificationId] = useState(
     model.security_classification?.id ?? "__none__"
   );
-  // Live transcription streams over the realtime API, which only vLLM serves.
-  const [realtime, setRealtime] = useState(
-    "supports_realtime" in model ? (model.supports_realtime ?? false) : false
-  );
-  const realtimeAvailable = speaksRealtimeDialect(
-    "provider_type" in model ? model.provider_type : null
-  );
+  // Live text: whether the provider can carry it is the backend's answer.
+  const savedRealtime = "supports_realtime" in model ? (model.supports_realtime ?? false) : false;
+  const [realtime, setRealtime] = useState(savedRealtime);
+  const providers = useQuery({
+    ...modelProvidersQueryOptions(browserApi),
+    enabled: kind === "transcription"
+  });
+  // A model without a provider cannot carry live text: the backend answers the
+  // same for it. Otherwise the provider's own answer, once the list is here.
+  const realtimeEligibility =
+    model.provider_id == null
+      ? "unsupported_provider"
+      : providers.data?.find((provider) => provider.id === model.provider_id)?.realtime_eligibility;
+  const realtimeRefusal = realtimeRefusalKey(realtimeEligibility);
+  // Only turning on a mark that is not saved needs an eligible provider. A mark
+  // that is on, saved or only in this form, can always be turned off, and a
+  // saved one kept, even when the provider no longer carries live text.
+  const realtimeLocked = realtimeEligibility !== "eligible" && !savedRealtime && !realtime;
+  // A saved mark the provider cannot carry: say so before the reason.
+  const realtimeKeptUnused = savedRealtime && realtimeRefusal !== null;
 
   const save = useMutation({
     mutationFn: () => {
@@ -290,6 +311,7 @@ function EditModelForm({
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: MODELS_KEY });
+      if (realtime !== savedRealtime) void invalidateSpaceLiveText(queryClient);
       toast.success(t("model_updated_success"));
       onOpenChange(false);
     },
@@ -508,23 +530,41 @@ function EditModelForm({
             <div className="flex flex-col gap-1.5">
               <Label className="flex items-center justify-between gap-2 font-normal">
                 {t("live_transcription_support")}
+                {/* Locked rather than disabled: it stays in the tab order, so a
+                    keyboard or screen reader user reaches it and hears why. The
+                    lock dims the thumb and the track colour, not the switch: the
+                    switch draws the focus ring, which keeps its full contrast. */}
                 <Switch
                   checked={realtime}
-                  onCheckedChange={setRealtime}
-                  disabled={!realtimeAvailable}
-                  aria-describedby={
-                    realtimeAvailable
-                      ? realtimeHelpId
-                      : `${realtimeHelpId} ${realtimeUnavailableId}`
-                  }
+                  onCheckedChange={(next) => {
+                    if (!realtimeLocked) setRealtime(next);
+                  }}
+                  aria-disabled={realtimeLocked || undefined}
+                  className="aria-disabled:data-[state=unchecked]:bg-input/50 aria-disabled:cursor-not-allowed aria-disabled:*:opacity-50"
+                  aria-describedby={[
+                    realtimeHelpId,
+                    realtimeKeptUnused && realtimeKeptId,
+                    realtimeRefusal && realtimeUnavailableId
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
                 />
               </Label>
               <p id={realtimeHelpId} className="text-muted-foreground text-xs">
                 {t("live_transcription_help")}
               </p>
-              {!realtimeAvailable && (
-                <p id={realtimeUnavailableId} className="text-muted-foreground text-xs">
-                  {t("live_transcription_needs_vllm")}
+              {realtimeKeptUnused && (
+                <p id={realtimeKeptId} className="text-muted-foreground text-xs">
+                  {t("live_text_kept_unused_hint")}
+                </p>
+              )}
+              {realtimeRefusal && (
+                <p
+                  id={realtimeUnavailableId}
+                  className="text-muted-foreground flex items-start gap-1.5 text-xs"
+                >
+                  <Lock aria-hidden="true" className="mt-px size-3 shrink-0" />
+                  <span>{t(realtimeRefusal)}</span>
                 </p>
               )}
             </div>

@@ -7,11 +7,13 @@ import messages from "@/lib/i18n/messages/sv.json";
 import { SECURITY_CLASSIFICATIONS_KEY } from "@/features/admin/security-classifications/security-classifications";
 import { expectNoAxeViolations } from "@/test/axe";
 import { setViewport } from "@/test/setup-dom";
+import { spaceQueryOptions } from "@/features/spaces/space";
+import { readFresh } from "@/lib/api/query";
 import { CAPABILITIES_KEY, PROVIDERS_KEY } from "./model-providers";
 import { MODELS_KEY, type ModelsPresentation } from "./models";
 
 const api = vi.hoisted(() => ({ GET: vi.fn(), POST: vi.fn(), PUT: vi.fn(), DELETE: vi.fn() }));
-const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
+const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn() }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 vi.mock("sonner", () => ({ toast }));
 vi.mock("@/components/providers/app-context", () => ({
@@ -169,12 +171,12 @@ function choose(menu: HTMLElement, submenu: string, option: string) {
   fireEvent.click(within(items).getByRole("menuitemradio", { name: option }));
 }
 
-function renderPage(data = presentation) {
+function renderPage(data = presentation, providerList: unknown[] = providers) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } }
   });
   client.setQueryData(MODELS_KEY, data);
-  client.setQueryData(PROVIDERS_KEY, providers);
+  client.setQueryData(PROVIDERS_KEY, providerList);
   client.setQueryData(CAPABILITIES_KEY, capabilities);
   client.setQueryData(SECURITY_CLASSIFICATIONS_KEY, security);
   api.GET.mockImplementation((path: string) => {
@@ -190,6 +192,7 @@ function renderPage(data = presentation) {
       </QueryClientProvider>
     </IntlProvider>
   );
+  return client;
 }
 
 describe("ModelsPage", () => {
@@ -636,6 +639,72 @@ describe("ModelsPage", () => {
     await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("tabpanel")));
   });
 
+  it("shows a marked model as not in use after its provider stops carrying live text", async () => {
+    const marked = (id: string, name: string, nickname: string, streams: boolean) => ({
+      id,
+      name,
+      nickname,
+      is_deprecated: false,
+      is_org_enabled: true,
+      is_org_default: false,
+      provider_id: "p-vllm",
+      security_classification: null,
+      supports_realtime: true,
+      streams_live: streams
+    });
+    const live = (streams: boolean) =>
+      ({
+        ...presentation,
+        transcription_models: [
+          marked("t1", "pianissimo-sv", "Pianissimo", streams),
+          marked("t2", "forte-sv", "Forte", streams)
+        ]
+      }) as unknown as ModelsPresentation;
+    const withEligibility = (eligibility: string) =>
+      providers.map((item) =>
+        item.id === "p-vllm" ? { ...item, realtime_eligibility: eligibility } : item
+      );
+    renderPage(live(true));
+    const card = screen.getByRole("region", { name: "vLLM" });
+    expect(within(card).queryByText("Livetext används inte")).toBeNull();
+    expect(within(card).getByRole("button", { name: "Forte" })).toBeTruthy();
+    // The search hides one of the two marked models; the notice still names both.
+    fireEvent.change(screen.getByRole("textbox", { name: "Sök modeller och leverantörer" }), {
+      target: { value: "pianissimo" }
+    });
+    expect(within(card).queryByRole("button", { name: "Forte" })).toBeNull();
+
+    // Saved with outbound headers: the backend answers that it cannot carry live text.
+    api.PUT.mockImplementation(() =>
+      ok(withEligibility("outbound_headers_configured").find((item) => item.id === "p-vllm"))
+    );
+    api.GET.mockImplementation((path: string) =>
+      path === "/api/v1/admin/model-providers/"
+        ? ok(withEligibility("outbound_headers_configured"))
+        : path === "/api/v1/ai-models/"
+          ? ok(live(false))
+          : path === "/api/v1/admin/model-providers/outbound-headers/options/"
+            ? ok({ dynamic_values: [], supported_provider_types: ["hosted_vllm"], max_headers: 10 })
+            : ok([])
+    );
+    const menu = openRowMenu("vLLM", "Fler alternativ för");
+    fireEvent.click(within(menu).getByRole("menuitem", { name: /^Redigera/ }));
+    const dialog = await screen.findByRole("dialog", { name: "Redigera leverantör" });
+    fireEvent.change(within(dialog).getByLabelText(/^Leverantörsnamn/), {
+      target: { value: "vLLM prod" }
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Spara" }));
+
+    await waitFor(() => expect(toast.warning).toHaveBeenCalledTimes(1));
+    // Forte, hidden by the search, is named too.
+    expect(toast.warning.mock.calls[0]?.[0]).toContain(
+      "livetext används inte för Pianissimo och Forte."
+    );
+    // The page refetches providers and models; no reload.
+    expect(await within(card).findByText("Livetext används inte")).toBeTruthy();
+    expect(within(card).getByText(/^Livetext kan inte skicka utgående headers\./)).toBeTruthy();
+  });
+
   it("deletes a provider without models after confirmation and keeps focus on the page", async () => {
     renderPage();
     api.DELETE.mockImplementation(() => ok({}));
@@ -875,4 +944,227 @@ it("counts only usable models in the provider summary while historical models st
   expect(
     within(filteredMenu).getByRole("menuitem", { name: /^Ta bort leverantör/ }).textContent
   ).toContain("Ta bort dess 3 modeller först");
+});
+
+/** A transcription model on the vLLM provider: marked for live text or not, and streaming or not. */
+const transcription = (marked: boolean, streams = marked) => ({
+  id: "t1",
+  name: "pianissimo-sv",
+  nickname: "Pianissimo",
+  is_deprecated: false,
+  is_org_enabled: true,
+  is_org_default: false,
+  provider_id: "p-vllm",
+  security_classification: null,
+  supports_realtime: marked,
+  streams_live: streams
+});
+const withTranscription = (...models: ReturnType<typeof transcription>[]) =>
+  ({ ...presentation, transcription_models: models }) as unknown as ModelsPresentation;
+/** The providers, with the backend's answer for whether vLLM can carry live text. */
+const providersWith = (eligibility: string) =>
+  providers.map((item) =>
+    item.id === "p-vllm" ? { ...item, realtime_eligibility: eligibility } : item
+  );
+
+describe("the spaces' copies of whether a model streams live text", () => {
+  // The flow editor reads it from the space's details, the space settings from the space's model list.
+  const copies = [spaceQueryOptions(api as never, "s1").queryKey, ["ai-models", "s1"]];
+  const warm = (client: QueryClient) => {
+    for (const queryKey of copies) client.setQueryData(queryKey, {});
+  };
+  /** How many of them ask the server again on their next read, as the space's route reads it. */
+  async function refetched(client: QueryClient) {
+    const queryFn = vi.fn(() => Promise.resolve({}));
+    for (const queryKey of copies) await readFresh(client, { queryKey, queryFn });
+    return queryFn.mock.calls.length;
+  }
+  /** What the page reads again after a save: the lists as the server now holds them. */
+  const serverHolds = (data: ModelsPresentation, providerList: unknown[]) =>
+    api.GET.mockImplementation((path: string) =>
+      path === "/api/v1/admin/model-providers/outbound-headers/options/"
+        ? ok({ dynamic_values: [], supported_provider_types: ["hosted_vllm"], max_headers: 10 })
+        : path === "/api/v1/admin/model-providers/"
+          ? ok(providerList)
+          : path === "/api/v1/ai-models/"
+            ? ok(data)
+            : ok([])
+    );
+
+  it.each([
+    ["switches the provider off", "eligible", "provider_inactive", 2],
+    ["switches it on again", "provider_inactive", "eligible", 2],
+    ["leaves whether it carries live text as it was", "eligible", "eligible", 0]
+  ])("are read again after a provider save that %s", async (_case, before, after, reads) => {
+    const client = renderPage(withTranscription(transcription(true)), providersWith(before));
+    warm(client);
+    api.PUT.mockImplementation(() => ok(providersWith(after).find((item) => item.id === "p-vllm")));
+    serverHolds(withTranscription(transcription(true, after === "eligible")), providersWith(after));
+    const menu = openRowMenu("vLLM", "Fler alternativ för");
+    fireEvent.click(within(menu).getByRole("menuitem", { name: /^Redigera/ }));
+    const dialog = await screen.findByRole("dialog", { name: "Redigera leverantör" });
+    fireEvent.change(within(dialog).getByLabelText(/^Leverantörsnamn/), {
+      target: { value: "vLLM prod" }
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Spara" }));
+
+    await waitFor(() =>
+      expect(toast.success.mock.calls.length + toast.warning.mock.calls.length).toBe(1)
+    );
+    expect(await refetched(client)).toBe(reads);
+  });
+
+  it("stay stale when a read from before the save answers after it", async () => {
+    const client = renderPage(withTranscription(transcription(true)), providersWith("eligible"));
+    warm(client);
+    // Each copy is being read again, and the server's old answer arrives only after the save.
+    const held = Promise.withResolvers<unknown>();
+    const inFlight = Promise.allSettled(
+      copies.map((queryKey) =>
+        client.query({ queryKey, queryFn: () => held.promise, staleTime: 0 })
+      )
+    );
+    for (const queryKey of copies) {
+      expect(client.getQueryState(queryKey)?.fetchStatus).toBe("fetching");
+    }
+    api.PUT.mockImplementation(() =>
+      ok(providersWith("provider_inactive").find((item) => item.id === "p-vllm"))
+    );
+    serverHolds(withTranscription(transcription(true, false)), providersWith("provider_inactive"));
+    const menu = openRowMenu("vLLM", "Fler alternativ för");
+    fireEvent.click(within(menu).getByRole("menuitem", { name: /^Redigera/ }));
+    const dialog = await screen.findByRole("dialog", { name: "Redigera leverantör" });
+    fireEvent.change(within(dialog).getByLabelText(/^Leverantörsnamn/), {
+      target: { value: "vLLM prod" }
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Spara" }));
+    await waitFor(() =>
+      expect(toast.success.mock.calls.length + toast.warning.mock.calls.length).toBe(1)
+    );
+
+    held.resolve(withTranscription(transcription(true)));
+    await inFlight;
+    expect(await refetched(client)).toBe(2);
+  });
+
+  it("let a first read from before the save answer, and are read again after it", async () => {
+    const client = renderPage(withTranscription(transcription(true)), providersWith("eligible"));
+    // Nothing cached yet: each copy is being loaded, as a space route's loader waits for it.
+    const answer = withTranscription(transcription(true));
+    const held = Promise.withResolvers<unknown>();
+    const firstReads = Promise.allSettled(
+      copies.map((queryKey) => client.query({ queryKey, queryFn: () => held.promise }))
+    );
+    for (const queryKey of copies) {
+      expect(client.getQueryState(queryKey)).toMatchObject({
+        data: undefined,
+        fetchStatus: "fetching"
+      });
+    }
+    api.PUT.mockImplementation(() =>
+      ok(providersWith("provider_inactive").find((item) => item.id === "p-vllm"))
+    );
+    serverHolds(withTranscription(transcription(true, false)), providersWith("provider_inactive"));
+    const menu = openRowMenu("vLLM", "Fler alternativ för");
+    fireEvent.click(within(menu).getByRole("menuitem", { name: /^Redigera/ }));
+    const dialog = await screen.findByRole("dialog", { name: "Redigera leverantör" });
+    fireEvent.change(within(dialog).getByLabelText(/^Leverantörsnamn/), {
+      target: { value: "vLLM prod" }
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Spara" }));
+    await waitFor(() =>
+      expect(toast.success.mock.calls.length + toast.warning.mock.calls.length).toBe(1)
+    );
+
+    held.resolve(answer);
+    expect(await firstReads).toEqual([
+      { status: "fulfilled", value: answer },
+      { status: "fulfilled", value: answer }
+    ]);
+    expect(await refetched(client)).toBe(2);
+  });
+
+  it("are read again after a provider is deleted", async () => {
+    const client = renderPage();
+    warm(client);
+    api.DELETE.mockImplementation(() => ok({}));
+    serverHolds(
+      presentation,
+      providers.filter((item) => item.id !== "p-openai")
+    );
+    const menu = openRowMenu("OpenAI", "Fler alternativ för");
+    fireEvent.click(within(menu).getByRole("menuitem", { name: /^Ta bort leverantör/ }));
+    const dialog = await screen.findByRole("alertdialog", { name: "Ta bort leverantör" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Ta bort" }));
+
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("OpenAI togs bort"));
+    expect(await refetched(client)).toBe(2);
+  });
+
+  it.each([
+    ["turns live text on", false, 2],
+    ["turns it off", true, 2],
+    ["keeps the mark as it was", false, 0]
+  ])("are read again after a model save that %s", async (_case, marked, reads) => {
+    const client = renderPage(withTranscription(transcription(marked)), providersWith("eligible"));
+    warm(client);
+    api.PUT.mockImplementation(() => ok({}));
+    const menu = openRowMenu("Pianissimo");
+    fireEvent.click(within(menu).getByRole("menuitem", { name: /^Redigera/ }));
+    const dialog = await screen.findByRole("dialog", { name: "Redigera modell" });
+    if (reads > 0) {
+      const toggle = within(dialog).getByRole("switch", { name: "Livetext" });
+      await waitFor(() => expect(toggle.getAttribute("aria-disabled")).toBeNull());
+      fireEvent.click(toggle);
+    }
+    fireEvent.click(within(dialog).getByRole("button", { name: "Spara" }));
+
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Modellen har uppdaterats"));
+    expect(api.PUT.mock.calls[0]?.[1]).toMatchObject({
+      body: { supports_realtime: reads > 0 ? !marked : marked }
+    });
+    expect(await refetched(client)).toBe(reads);
+  });
+});
+
+describe("open model details", () => {
+  const liveText = (dialog: HTMLElement) =>
+    within(dialog).getByText("Livetext", { selector: "dt" }).nextElementSibling?.textContent;
+
+  it("follow the model and its provider as they are refreshed, both ways", async () => {
+    const client = renderPage(withTranscription(transcription(true)), providersWith("eligible"));
+    fireEvent.click(screen.getByRole("button", { name: "Pianissimo" }));
+    const dialog = await screen.findByRole("dialog", { name: "Pianissimo" });
+    expect(liveText(dialog)).toBe("Ja");
+
+    // The provider is switched off elsewhere, and both lists are fetched again.
+    act(() => {
+      client.setQueryData(PROVIDERS_KEY, providersWith("provider_inactive"));
+      client.setQueryData(MODELS_KEY, withTranscription(transcription(true, false)));
+    });
+    await waitFor(() =>
+      expect(liveText(dialog)).toBe(
+        "Livetext används inteLeverantören är avstängd, så den kan inte bära livetext."
+      )
+    );
+
+    act(() => {
+      client.setQueryData(PROVIDERS_KEY, providersWith("eligible"));
+      client.setQueryData(MODELS_KEY, withTranscription(transcription(true)));
+    });
+    await waitFor(() => expect(liveText(dialog)).toBe("Ja"));
+  });
+
+  it("close when the model is gone, leaving focus on its provider", async () => {
+    const client = renderPage(withTranscription(transcription(true)), providersWith("eligible"));
+    fireEvent.click(screen.getByRole("button", { name: "Pianissimo" }));
+    await screen.findByRole("dialog", { name: "Pianissimo" });
+
+    act(() => client.setQueryData(MODELS_KEY, withTranscription()));
+
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Pianissimo" })).toBeNull());
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole("region", { name: "vLLM" }))
+    );
+  });
 });

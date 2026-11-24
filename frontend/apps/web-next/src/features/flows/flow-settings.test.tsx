@@ -413,7 +413,8 @@ describe("FlowSettings", () => {
           id: "live-1",
           name: "pianissimo-sv-live",
           nickname: "Pianissimo",
-          supports_realtime: true
+          supports_realtime: true,
+          streams_live: true
         }
       ]
     };
@@ -430,12 +431,12 @@ describe("FlowSettings", () => {
     const { container } = renderInApp(
       <FlowSettings flow={whisperFlow} canEdit transcription={withLive} onSave={onSave} />
     );
-    expect(rowValue("Direktinspelning")).toBe("Ingen direktinspelning");
+    expect(rowValue("Livetext")).toBe("Ingen livetext");
     expect(rowValue("Ljudfiler")).toBe("Tal till text");
     fireEvent.click(screen.getByRole("button", { name: "Ändra inställningar" }));
 
-    const live = screen.getByRole("combobox", { name: /Modell för direktinspelning/ });
-    expect(live.textContent).toContain("Ingen direktinspelning");
+    const live = screen.getByRole("combobox", { name: /Modell för livetext/ });
+    expect(live.textContent).toContain("Ingen livetext");
     fireEvent.click(live);
     // The transcription model's list offers the same model, so pick from this list.
     const liveList = await waitFor(() =>
@@ -444,11 +445,11 @@ describe("FlowSettings", () => {
     fireEvent.click(await within(liveList).findByRole("option", { name: "Pianissimo" }));
     expect(
       screen.getByText(
-        "Skriver texten medan någon spelar in, och den texten blir transkriberingen."
+        "Visar livetext medan någon spelar in. Flödet använder livetexten när den täcker hela inspelningen och kan kopplas till ljudfilen. Annars transkriberas inspelningen efteråt."
       )
     ).toBeTruthy();
     // The routing at the top of the form follows the choice.
-    expect(rowValue("Direktinspelning")).toBe("Pianissimo");
+    expect(rowValue("Livetext")).toBe("Pianissimo");
     await expectNoAxeViolations(container);
     fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
 
@@ -482,8 +483,8 @@ describe("FlowSettings", () => {
     renderInApp(
       <FlowSettings flow={lostLive} canEdit={false} transcription={resources} onSave={vi.fn()} />
     );
-    expect(rowValue("Direktinspelning")).toBe(
-      "Den valda modellen kan inte längre användas för direktinspelning i ytan, så filerna transkriberas efteråt. Välj en annan."
+    expect(rowValue("Livetext")).toBe(
+      "Den valda modellen kan inte längre visa livetext i ytan, så inspelningen transkriberas efteråt. Välj en annan."
     );
   });
 
@@ -497,7 +498,8 @@ describe("FlowSettings", () => {
           id: "live-1",
           name: "pianissimo-sv-live",
           nickname: "Pianissimo",
-          supports_realtime: true
+          supports_realtime: true,
+          streams_live: true
         }
       ]
     };
@@ -514,12 +516,12 @@ describe("FlowSettings", () => {
     renderInApp(
       <FlowSettings flow={streamingFlow} canEdit transcription={withLive} onSave={onSave} />
     );
-    expect(rowValue("Direktinspelning")).toBe("Pianissimo");
+    expect(rowValue("Livetext")).toBe("Pianissimo");
     expect(rowValue("Ljudfiler")).toBe("Pianissimo");
     fireEvent.click(screen.getByRole("button", { name: "Ändra inställningar" }));
     expect(
       screen.getByText(
-        "Gjord för direktinspelning. Välj en modell för ljudfiler, till exempel Tal till text. Pianissimo skriver då fortfarande direktinspelningen."
+        "Markerad för livetext. Välj en modell för ljudfiler, till exempel Tal till text. Pianissimo visar då fortfarande livetexten."
       )
     ).toBeTruthy();
 
@@ -529,9 +531,9 @@ describe("FlowSettings", () => {
       document.getElementById(model.getAttribute("aria-controls") ?? "")!
     );
     fireEvent.click(await within(list).findByRole("option", { name: /Tal till text/ }));
-    expect(rowValue("Direktinspelning")).toBe("Pianissimo");
+    expect(rowValue("Livetext")).toBe("Pianissimo");
     expect(rowValue("Ljudfiler")).toBe("Tal till text");
-    expect(screen.queryByText(/Gjord för direktinspelning/)).toBeNull();
+    expect(screen.queryByText(/Markerad för livetext/)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
 
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
@@ -547,6 +549,84 @@ describe("FlowSettings", () => {
     );
   }, 20_000);
 
+  it("suggests a model that is not marked for live text, not one whose mark is not in use", () => {
+    const withStaleMark: TranscriptionResources = {
+      ...resources,
+      models: [
+        {
+          id: "live-1",
+          name: "pianissimo-sv-live",
+          nickname: "Pianissimo",
+          supports_realtime: true,
+          streams_live: true
+        },
+        // Marked, but its provider cannot carry live text now: still a live model, not one for files.
+        {
+          id: "stale-1",
+          name: "forte-sv-live",
+          nickname: "Forte",
+          supports_realtime: true,
+          streams_live: false
+        },
+        ...resources.models
+      ]
+    };
+    const streamingFlow = makeFlow({
+      steps: audioFlow.steps,
+      metadata_json: {
+        wizard: {
+          transcription_enabled: true,
+          transcription_model: { id: "live-1" },
+          transcription_speaker_service: null
+        }
+      }
+    });
+    renderInApp(
+      <FlowSettings flow={streamingFlow} canEdit transcription={withStaleMark} onSave={vi.fn()} />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Ändra inställningar" }));
+    expect(
+      screen.getByText(/Välj en modell för ljudfiler, till exempel Tal till text\./)
+    ).toBeTruthy();
+  });
+
+  it("warns about a model whose mark is not in use, chosen for audio files", () => {
+    const withStaleMark: TranscriptionResources = {
+      ...resources,
+      models: [
+        // Marked, but its provider cannot carry live text now: still not made for files.
+        {
+          id: "stale-1",
+          name: "forte-sv-live",
+          nickname: "Forte",
+          supports_realtime: true,
+          streams_live: false
+        },
+        ...resources.models
+      ]
+    };
+    const staleFlow = makeFlow({
+      steps: audioFlow.steps,
+      metadata_json: {
+        wizard: {
+          transcription_enabled: true,
+          transcription_model: { id: "stale-1" },
+          transcription_speaker_service: null
+        }
+      }
+    });
+    renderInApp(
+      <FlowSettings flow={staleFlow} canEdit transcription={withStaleMark} onSave={vi.fn()} />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Ändra inställningar" }));
+    expect(
+      screen.getByText(
+        "Markerad för livetext. Välj en modell för ljudfiler, till exempel Tal till text."
+      )
+    ).toBeTruthy();
+    expect(screen.queryByText(/visar då fortfarande livetexten/)).toBeNull();
+  });
+
   it("promises nothing about live recording when another model streams", async () => {
     const twoStreaming: TranscriptionResources = {
       ...resources,
@@ -556,9 +636,16 @@ describe("FlowSettings", () => {
           id: "live-1",
           name: "pianissimo-sv-live",
           nickname: "Pianissimo",
-          supports_realtime: true
+          supports_realtime: true,
+          streams_live: true
         },
-        { id: "live-2", name: "forte-sv-live", nickname: "Forte", supports_realtime: true }
+        {
+          id: "live-2",
+          name: "forte-sv-live",
+          nickname: "Forte",
+          supports_realtime: true,
+          streams_live: true
+        }
       ]
     };
     const flowWithBoth = makeFlow({
@@ -575,11 +662,11 @@ describe("FlowSettings", () => {
     renderInApp(
       <FlowSettings flow={flowWithBoth} canEdit transcription={twoStreaming} onSave={vi.fn()} />
     );
-    expect(rowValue("Direktinspelning")).toBe("Forte");
+    expect(rowValue("Livetext")).toBe("Forte");
     fireEvent.click(screen.getByRole("button", { name: "Ändra inställningar" }));
     expect(
       screen.getByText(
-        "Gjord för direktinspelning. Välj en modell för ljudfiler, till exempel Tal till text."
+        "Markerad för livetext. Välj en modell för ljudfiler, till exempel Tal till text."
       )
     ).toBeTruthy();
 
@@ -589,7 +676,7 @@ describe("FlowSettings", () => {
       document.getElementById(model.getAttribute("aria-controls") ?? "")!
     );
     fireEvent.click(await within(list).findByRole("option", { name: /Tal till text/ }));
-    expect(rowValue("Direktinspelning")).toBe("Forte");
+    expect(rowValue("Livetext")).toBe("Forte");
   }, 20_000);
 
   it("saves a renamed field and a transcription change as one edit", async () => {

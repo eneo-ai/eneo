@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { browserApi } from "@/lib/api/browser";
+import { modelProvidersQueryOptions, realtimeRefusalKey } from "./model-providers";
 import { modelDisplayName } from "@/lib/models/model-display-name";
 import { useImageOptionLabels } from "./image-model-options";
 import {
@@ -204,7 +205,7 @@ function InfoTab({
       {"supports_realtime" in model && (
         <Field
           label={t("live_transcription_support")}
-          value={t(model.supports_realtime ? "yes" : "no")}
+          value={<LiveTextValue model={model} t={t} />}
         />
       )}
       {kind === "image" && (
@@ -287,6 +288,32 @@ function UsageTab({
     <QueryStateBoundary query={details}>
       {(data) => <ModelUsageBreakdown data={data} />}
     </QueryStateBoundary>
+  );
+}
+
+/**
+ * The saved live text mark, and when it does not apply now (the provider can
+ * no longer carry live text) why, instead of a bare "Yes".
+ */
+function LiveTextValue({
+  model,
+  t
+}: {
+  model: Extract<AdminModel, { streams_live: boolean }>;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  const unused = model.supports_realtime === true && !model.streams_live;
+  const providers = useQuery({ ...modelProvidersQueryOptions(browserApi), enabled: unused });
+  if (!model.supports_realtime) return t("no");
+  if (!unused) return t("yes");
+  const refusal = realtimeRefusalKey(
+    providers.data?.find((provider) => provider.id === model.provider_id)?.realtime_eligibility
+  );
+  return (
+    <>
+      {t("live_text_saved_but_unused")}
+      {refusal && <p className="text-muted-foreground pt-1 text-xs">{t(refusal)}</p>}
+    </>
   );
 }
 

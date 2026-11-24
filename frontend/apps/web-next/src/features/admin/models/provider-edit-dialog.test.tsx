@@ -47,6 +47,7 @@ function provider(overrides: Partial<ModelProvider> = {}): ModelProvider {
     provider_type: "openai",
     config: {},
     is_active: true,
+    realtime_eligibility: "unsupported_provider",
     masked_api_key: "...4f2a",
     key_expires_on: "2026-10-12",
     connection_check: null,
@@ -58,14 +59,19 @@ function provider(overrides: Partial<ModelProvider> = {}): ModelProvider {
 }
 
 /** The card's use: a button opens the dialog, which closes itself on save. */
-function Opener({ item }: { item: ModelProvider }) {
+function Opener({ item, marked = [] }: { item: ModelProvider; marked?: string[] }) {
   const [open, setOpen] = useState(false);
   return (
     <>
       <button type="button" onClick={() => setOpen(true)}>
         Öppna
       </button>
-      <ProviderEditDialog provider={item} open={open} onOpenChange={setOpen} />
+      <ProviderEditDialog
+        provider={item}
+        markedLiveTextModels={marked}
+        open={open}
+        onOpenChange={setOpen}
+      />
     </>
   );
 }
@@ -73,7 +79,11 @@ function Opener({ item }: { item: ModelProvider }) {
 /** The client the last `renderDialog` rendered with. */
 let queryClient = testQueryClient();
 
-function renderDialog(item: ModelProvider = provider(), headerOptions = true) {
+function renderDialog(
+  item: ModelProvider = provider(),
+  headerOptions = true,
+  marked: string[] = []
+) {
   api.PUT.mockImplementation(() => ok(item));
   queryClient = testQueryClient();
   queryClient.setQueryData(PROVIDERS_KEY, [item]);
@@ -84,7 +94,7 @@ function renderDialog(item: ModelProvider = provider(), headerOptions = true) {
       supported_provider_types: ["hosted_vllm"],
       max_headers: 10
     });
-  renderInApp(<Opener item={item} />, { queryClient });
+  renderInApp(<Opener item={item} marked={marked} />, { queryClient });
   fireEvent.click(screen.getByRole("button", { name: "Öppna" }));
   return screen.getByRole("dialog", { name: "Redigera leverantör" });
 }
@@ -196,6 +206,103 @@ describe("ProviderEditDialog", () => {
     ]);
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Leverantör uppdaterad"));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it.each([
+    // Headers added to a vLLM provider whose models stream live text.
+    [
+      "outbound_headers_configured",
+      ["Pianissimo", "Forte"],
+      "Leverantören sparades, men livetext används inte för Pianissimo och Forte. Livetext kan inte skicka utgående headers. Lägg modellen på en leverantör utan sådana, eller ta bort dem på leverantören om inget annat behöver dem. Markeringarna står kvar."
+    ],
+    [
+      "endpoint_required",
+      ["Forte"],
+      "Leverantören sparades, men livetext används inte för Forte. Livetext kräver att leverantörens Endpoint-URL går till en server eller gateway med vLLM:s realtids-API. OpenAI:s egen tjänst har inte det API:t. Markeringen står kvar."
+    ],
+    [
+      "endpoint_required",
+      ["A", "B", "C", "D", "E"],
+      "Leverantören sparades, men livetext används inte för A, B, C och 2 till. Livetext kräver att leverantörens Endpoint-URL går till en server eller gateway med vLLM:s realtids-API. OpenAI:s egen tjänst har inte det API:t. Markeringarna står kvar."
+    ]
+  ] as const)(
+    "names the marked models that stop using live text when the saved provider cannot carry it: %s",
+    async (eligibility, marked, notice) => {
+      const dialog = renderDialog(
+        provider({ provider_type: "hosted_vllm", realtime_eligibility: "eligible" }),
+        true,
+        [...marked]
+      );
+      api.PUT.mockImplementation(() => ok(provider({ realtime_eligibility: eligibility })));
+      fireEvent.change(field(/^Leverantörsnamn/), { target: { value: "vLLM prod" } });
+
+      save(dialog);
+
+      await waitFor(() => expect(toast.warning).toHaveBeenCalledWith(notice));
+      expect(toast.success).not.toHaveBeenCalled();
+    }
+  );
+
+  it("says marked models stop using live text when the admin switches the provider off", async () => {
+    const dialog = renderDialog(
+      provider({ provider_type: "hosted_vllm", realtime_eligibility: "eligible" }),
+      true,
+      ["Pianissimo", "Forte"]
+    );
+    api.PUT.mockImplementation(() =>
+      ok(provider({ is_active: false, realtime_eligibility: "provider_inactive" }))
+    );
+    fireEvent.click(within(dialog).getByRole("switch", { name: "Leverantören är aktiv" }));
+
+    save(dialog);
+
+    await waitFor(() => expect(toast.warning).toHaveBeenCalledTimes(1));
+    expect(api.PUT.mock.calls[0]?.[1]).toMatchObject({ body: { is_active: false } });
+    expect(toast.warning).toHaveBeenCalledWith(
+      "Leverantören sparades, men livetext används inte för Pianissimo och Forte. Leverantören är avstängd, så den kan inte bära livetext. Markeringarna står kvar."
+    );
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  it("says live text is in use again when a save makes the provider carry it", async () => {
+    const dialog = renderDialog(
+      provider({ is_active: false, realtime_eligibility: "provider_inactive" }),
+      true,
+      ["Forte"]
+    );
+    api.PUT.mockImplementation(() =>
+      ok(provider({ is_active: true, realtime_eligibility: "eligible" }))
+    );
+    fireEvent.click(within(dialog).getByRole("switch", { name: "Leverantören är aktiv" }));
+
+    save(dialog);
+
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith(
+        "Leverantören sparades. Livetext används igen för Forte."
+      )
+    );
+    expect(toast.warning).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["no marked models", "endpoint_required", "endpoint_required", []],
+    ["no marked models, now eligible", "endpoint_required", "eligible", []],
+    ["a save that does not touch live text", "eligible", "eligible", ["Forte"]],
+    ["an answer not known before the save", undefined, "eligible", ["Forte"]]
+  ] as const)("confirms the save as usual for %s", async (_case, before, after, marked) => {
+    const dialog = renderDialog(
+      provider({ realtime_eligibility: before as ModelProvider["realtime_eligibility"] }),
+      true,
+      [...marked]
+    );
+    api.PUT.mockImplementation(() => ok(provider({ realtime_eligibility: after })));
+    fireEvent.change(field(/^Leverantörsnamn/), { target: { value: "OpenAI prod" } });
+
+    save(dialog);
+
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Leverantör uppdaterad"));
+    expect(toast.warning).not.toHaveBeenCalled();
   });
 
   it("asks for the key again when the endpoint changes, and says why", async () => {

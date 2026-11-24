@@ -23,11 +23,15 @@ SAMPLE_RATE: Final = 16_000
 
 
 def realtime_websocket_url(api_base: str) -> str:
-    """Turn a provider endpoint (with or without ``/v1``) into its realtime URL."""
-    base = normalize_endpoint_base(api_base)
+    """Turn a provider endpoint (with or without ``/v1``) into its realtime URL.
+
+    Accepts the same forms the live text rule does (``realtime.py``): spaces
+    around the endpoint and a scheme in any case.
+    """
+    base = normalize_endpoint_base(api_base.strip())
     for http_scheme, ws_scheme in (("https://", "wss://"), ("http://", "ws://")):
-        if base.startswith(http_scheme):
-            return ws_scheme + base.removeprefix(http_scheme) + REALTIME_PATH
+        if base[: len(http_scheme)].lower() == http_scheme:
+            return ws_scheme + base[len(http_scheme) :] + REALTIME_PATH
     raise ValueError("The provider endpoint must be an http or https URL.")
 
 

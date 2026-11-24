@@ -440,12 +440,12 @@ class TestLiveModelChoice:
     it must be able to stream."""
 
     @staticmethod
-    def _model(*, realtime: bool = True, provider_type: str = "hosted_vllm"):
+    def _model(*, realtime: bool = True, eligibility: str = "eligible"):
         return SimpleNamespace(
             id=uuid4(),
             can_access=True,
             supports_realtime=realtime,
-            provider_type=provider_type,
+            realtime_eligibility=eligibility,
         )
 
     @staticmethod
@@ -479,11 +479,12 @@ class TestLiveModelChoice:
     @pytest.mark.parametrize(
         "model",
         [
-            SimpleNamespace(realtime=False, provider_type="hosted_vllm"),
-            SimpleNamespace(realtime=True, provider_type="openai"),
+            SimpleNamespace(realtime=False, eligibility="eligible"),
+            SimpleNamespace(realtime=True, eligibility="endpoint_required"),
+            SimpleNamespace(realtime=True, eligibility="outbound_headers_configured"),
         ],
     )
     def test_a_model_that_cannot_stream_is_refused(self, model) -> None:
-        picked = self._model(realtime=model.realtime, provider_type=model.provider_type)
+        picked = self._model(realtime=model.realtime, eligibility=model.eligibility)
 
         self._refused(picked.id, SimpleNamespace(transcription_models=[picked]))

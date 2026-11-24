@@ -49,6 +49,7 @@ const existing: ModelProvider = {
   provider_type: "openai",
   config: {},
   is_active: true,
+  realtime_eligibility: "endpoint_required",
   masked_api_key: "...4f2a",
   key_expires_on: null,
   connection_check: null,
@@ -93,7 +94,10 @@ const liveImageModels = [
 const liveRerankModels = [{ name: "Qwen/Qwen3-Reranker-4B", mode: "rerank" }];
 
 /** The provider's transcription models, served when the list is asked for that mode. */
-const liveTranscriptionModels = [{ name: "pianissimo-sv", mode: "transcription" }];
+const liveTranscriptionModels = [
+  { name: "pianissimo-sv", mode: "transcription" },
+  { name: "forte-sv", mode: "transcription" }
+];
 
 function renderWizard({
   initialProviderId,
@@ -182,6 +186,13 @@ function renderWizard({
 
 const field = (name: RegExp) => screen.getByLabelText(name) as HTMLInputElement;
 
+/** The texts a control's aria-describedby points at, joined. */
+const describedBy = (element: HTMLElement) =>
+  (element.getAttribute("aria-describedby") ?? "")
+    .split(" ")
+    .map((id) => document.getElementById(id)?.textContent ?? "")
+    .join(" ");
+
 async function toCredentials() {
   const { dialog } = renderWizard();
   fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till OpenAI" }));
@@ -211,7 +222,7 @@ describe("the add-provider wizard's credentials", () => {
     expect(within(dialog).getByText(/^API-nyckel/).textContent).toContain("Obligatoriskt");
     expect(
       within(dialog).getByText(
-        "Ange den om leverantören är självhostad eller har en egen endpoint."
+        "Ange den om leverantören är självhostad eller har en egen endpoint. Livetext använder vLLM:s realtids-API (/v1/realtime) på servern."
       )
     ).toBeTruthy();
     await expectNoAxeViolations(document.body);
@@ -236,6 +247,22 @@ describe("the add-provider wizard's credentials", () => {
     ).toBeTruthy();
     expect(api.POST).not.toHaveBeenCalled();
     await expectNoAxeViolations(document.body);
+  });
+
+  it("says the type is fixed and where live text streams from, before the provider is saved", async () => {
+    const dialog = await toCredentials();
+    // One line: the gateway note follows the type note for the two types that carry live text.
+    expect(
+      within(dialog).getByText(
+        "Typen kan inte ändras efteråt. Finns din gateway redan som OpenAI-leverantör kan du använda den för livetext."
+      )
+    ).toBeTruthy();
+    const endpoint = field(/^Endpoint-URL/);
+    const help = (endpoint.getAttribute("aria-describedby") ?? "")
+      .split(" ")
+      .map((id) => document.getElementById(id)?.textContent ?? "")
+      .join(" ");
+    expect(help).toContain("Livetext använder vLLM:s realtids-API (/v1/realtime) på servern.");
   });
 
   it("creates the provider with its key expiry and moves on to its models", async () => {
@@ -319,6 +346,9 @@ describe("the add-provider wizard's credentials", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till Anthropic" }));
     await waitFor(() => expect(field(/^API-nyckel/).value).toBe(""));
     expect(field(/^Bekräfta API-nyckel/).value).toBe("");
+    // A type that cannot carry live text gets the type note alone.
+    expect(within(dialog).getByText("Typen kan inte ändras efteråt.")).toBeTruthy();
+    expect(within(dialog).queryByText(/gateway/)).toBeNull();
   });
 
   it("adds models to an existing provider through its own step", async () => {
@@ -833,24 +863,24 @@ describe("the add-model wizard's catalog", () => {
     expect(toast.success).toHaveBeenCalledWith("1 modell tillagd");
   });
 
-  function renderTranscriptionStep(providerType: string) {
+  const transcriptionCaps = {
+    ...capabilities,
+    providers: { openai: { ...capabilities.providers.openai, modes: ["transcription"] } }
+  };
+
+  function renderTranscriptionStep(eligibility: ModelProvider["realtime_eligibility"]) {
     return renderWizard({
       initialProviderId: "p-vllm",
       fixedKind: "transcription",
-      providerList: [{ ...existing, provider_type: providerType }],
-      caps: {
-        ...capabilities,
-        providers: {
-          [providerType]: { ...capabilities.providers.openai, modes: ["transcription"] }
-        }
-      }
+      providerList: [{ ...existing, realtime_eligibility: eligibility }],
+      caps: transcriptionCaps
     });
   }
 
-  it("creates a transcription model with live transcription on a vLLM provider", async () => {
-    const { dialog, onOpenChange } = renderTranscriptionStep("hosted_vllm");
+  it("creates a transcription model with live text on a provider that carries it", async () => {
+    const { dialog, onOpenChange } = renderTranscriptionStep("eligible");
     fireEvent.click(await within(dialog).findByRole("checkbox", { name: /pianissimo-sv/ }));
-    const live = within(dialog).getByRole("checkbox", { name: /^Livetranskribering/ });
+    const live = within(dialog).getByRole("checkbox", { name: /^Livetext$/ });
     expect((live as HTMLInputElement).checked).toBe(false);
     fireEvent.click(live);
     await expectNoAxeViolations(dialog);
@@ -862,20 +892,133 @@ describe("the add-model wizard's catalog", () => {
     });
   });
 
-  it("says why live transcription is unavailable and creates the model without it", async () => {
-    const { dialog, onOpenChange } = renderTranscriptionStep("openai");
-    fireEvent.click(await within(dialog).findByRole("checkbox", { name: /pianissimo-sv/ }));
-    const live = within(dialog).getByRole("checkbox", { name: /^Livetranskribering/ });
-    // Astryx keeps a disabled checkbox focusable; a press changes nothing.
-    expect(live.getAttribute("aria-disabled")).toBe("true");
-    expect(within(dialog).getByText("Kräver en leverantör av typen vLLM.")).toBeTruthy();
-    fireEvent.click(live);
-    fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till 1 modell" }));
+  it.each([
+    [
+      "endpoint_required",
+      "Livetext kräver att leverantörens Endpoint-URL går till en server eller gateway med vLLM:s realtids-API. OpenAI:s egen tjänst har inte det API:t."
+    ],
+    [
+      "unsupported_provider",
+      "Livetext kräver en leverantör av typen vLLM, eller OpenAI med en Endpoint-URL till en server med vLLM:s realtids-API."
+    ],
+    [
+      "outbound_headers_configured",
+      "Livetext kan inte skicka utgående headers. Lägg modellen på en leverantör utan sådana, eller ta bort dem på leverantören om inget annat behöver dem."
+    ],
+    ["provider_inactive", "Leverantören är avstängd, så den kan inte bära livetext."]
+  ] as const)(
+    "says why live text is locked when the provider says %s",
+    async (eligibility, reason) => {
+      const { dialog, onOpenChange } = renderTranscriptionStep(eligibility);
+      fireEvent.click(await within(dialog).findByRole("checkbox", { name: /pianissimo-sv/ }));
+      const live = within(dialog).getByRole("checkbox", { name: /^Livetext$/ });
+      // Locked but reachable: Astryx keeps it out of native disabled, so Tab stops
+      // on it and the reason is read; a press changes nothing.
+      expect(live.getAttribute("aria-disabled")).toBe("true");
+      expect(live.hasAttribute("disabled")).toBe(false);
+      live.focus();
+      expect(document.activeElement).toBe(live);
+      expect(describedBy(live)).toContain(reason);
+      fireEvent.click(live);
+      fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till 1 modell" }));
 
-    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
-    expect(api.POST).toHaveBeenCalledWith("/api/v1/admin/tenant-models/transcription/", {
-      body: expect.objectContaining({ name: "pianissimo-sv", supports_realtime: false })
+      await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+      expect(api.POST).toHaveBeenCalledWith("/api/v1/admin/tenant-models/transcription/", {
+        body: expect.objectContaining({ name: "pianissimo-sv", supports_realtime: false })
+      });
+    }
+  );
+
+  it("names live text for each selected model when several are picked", async () => {
+    const { dialog } = renderTranscriptionStep("eligible");
+    fireEvent.click(await within(dialog).findByRole("checkbox", { name: /pianissimo-sv/ }));
+    expect(within(dialog).getByRole("checkbox", { name: /^Livetext$/ })).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole("checkbox", { name: /forte-sv/ }));
+    expect(
+      within(dialog).getByRole("checkbox", { name: /^Livetext för valda modeller/ })
+    ).toBeTruthy();
+  });
+
+  /** Creates a provider in the wizard; the list keeps answering without it, as a refetch still in flight would. */
+  async function createProviderThatSays(
+    eligibility: ModelProvider["realtime_eligibility"]
+  ): Promise<HTMLElement> {
+    const { dialog } = renderWizard({ fixedKind: "transcription", caps: transcriptionCaps });
+    api.POST.mockImplementation((path: string) =>
+      path === "/api/v1/admin/model-providers/"
+        ? ok({ ...existing, id: "p-new", realtime_eligibility: eligibility })
+        : ok({})
+    );
+    fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till OpenAI" }));
+    await waitFor(() => expect(field(/^API-nyckel/)).toBeTruthy());
+    fireEvent.change(field(/^API-nyckel/), { target: { value: "sk-live-1234" } });
+    fireEvent.change(field(/^Bekräfta API-nyckel/), { target: { value: "sk-live-1234" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Nästa" }));
+    fireEvent.click(await within(dialog).findByRole("checkbox", { name: /pianissimo-sv/ }));
+    return within(dialog).getByRole("checkbox", { name: /^Livetext$/ });
+  }
+
+  it("uses the new provider's own answer before the provider list is fetched again", async () => {
+    const live = await createProviderThatSays("eligible");
+    expect(live.getAttribute("aria-disabled")).not.toBe("true");
+  });
+
+  it("says why a provider just created cannot carry live text", async () => {
+    const live = await createProviderThatSays("endpoint_required");
+    expect(live.getAttribute("aria-disabled")).toBe("true");
+    expect(describedBy(live)).toContain(
+      "Livetext kräver att leverantörens Endpoint-URL går till en server eller gateway med vLLM:s realtids-API. OpenAI:s egen tjänst har inte det API:t."
+    );
+  });
+
+  it("shows the reason on a line of its own with a lock, and reads it with the help", async () => {
+    const live = await createProviderThatSays("endpoint_required");
+    const lines = (live.getAttribute("aria-describedby") ?? "")
+      .split(" ")
+      .map((id) => document.getElementById(id));
+    // The reason comes first: Astryx puts the caller's description before its own.
+    expect(lines.map((line) => line?.textContent)).toEqual([
+      "Livetext kräver att leverantörens Endpoint-URL går till en server eller gateway med vLLM:s realtids-API. OpenAI:s egen tjänst har inte det API:t.",
+      "Visar texten medan någon spelar in. Modellens server behöver stödja vLLM:s realtids-API."
+    ]);
+    const reason = lines.find(
+      (line) =>
+        line?.textContent ===
+        "Livetext kräver att leverantörens Endpoint-URL går till en server eller gateway med vLLM:s realtids-API. OpenAI:s egen tjänst har inte det API:t."
+    );
+    expect(reason?.querySelector("svg[aria-hidden='true']")).not.toBeNull();
+  });
+
+  it("never shows another provider's answer after going back to pick a different one", async () => {
+    const gateway = { ...existing, id: "p-gw", name: "Gateway", realtime_eligibility: "eligible" };
+    const other = { ...existing, id: "p-other", name: "Annan leverantör" };
+    const { dialog, queryClient } = renderWizard({
+      initialProviderId: "p-gw",
+      fixedKind: "transcription",
+      providerList: [gateway, other] as ModelProvider[],
+      caps: transcriptionCaps
     });
+    fireEvent.click(await within(dialog).findByRole("checkbox", { name: /pianissimo-sv/ }));
+    expect(
+      within(dialog)
+        .getByRole("checkbox", { name: /^Livetext$/ })
+        .getAttribute("aria-disabled")
+    ).not.toBe("true");
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Tillbaka" }));
+    const picker = await within(dialog).findByRole("combobox", { name: /^Leverantör/ });
+    fireEvent.click(picker);
+    const list = await waitFor(() =>
+      document.getElementById(picker.getAttribute("aria-controls") ?? "")!
+    );
+    fireEvent.click(await within(list).findByRole("option", { name: "Annan leverantör" }));
+    // Fetched again meanwhile, without the chosen provider: its answer is not known.
+    act(() => queryClient.setQueryData(PROVIDERS_KEY, [gateway]));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Nästa" }));
+
+    // Asks for a provider again instead of offering live text on the first one's word.
+    expect(await within(dialog).findByText("Välj en leverantör.")).toBeTruthy();
+    expect(within(dialog).queryByRole("checkbox", { name: /^Livetext$/ })).toBeNull();
   });
 
   it("keeps the picks when the list is filtered", async () => {

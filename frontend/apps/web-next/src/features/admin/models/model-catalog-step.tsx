@@ -9,7 +9,7 @@ import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@/components/astryx/text-input";
 import { Token } from "@astryxdesign/core/Token";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, RefreshCw, Search } from "lucide-react";
+import { Lock, Plus, RefreshCw, Search } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
@@ -32,7 +32,11 @@ import {
   NO_SUGGESTIONS_PROVIDERS,
   staticCatalogModels
 } from "./model-catalog";
-import { providerCapabilitiesQueryOptions, speaksRealtimeDialect } from "./model-providers";
+import {
+  providerCapabilitiesQueryOptions,
+  type RealtimeEligibility,
+  realtimeRefusalKey
+} from "./model-providers";
 import { useModelTypeLabel } from "./model-type-label";
 import {
   type AdminModel,
@@ -126,6 +130,7 @@ function missingTokenLimits(model: CatalogModel, mode: ModelKind): boolean {
 export function ModelCatalogStep({
   providerId,
   providerType,
+  realtimeEligibility,
   mode = "completion",
   supportedModes,
   onModeChange,
@@ -136,6 +141,8 @@ export function ModelCatalogStep({
 }: {
   providerId: string;
   providerType: string;
+  /** The provider's answer to whether it can carry live text. */
+  realtimeEligibility: RealtimeEligibility | undefined;
   mode?: ModelKind;
   supportedModes?: ModelKind[];
   onModeChange?: (mode: ModelKind) => void;
@@ -196,9 +203,10 @@ export function ModelCatalogStep({
   const [hosting, setHosting] = useState(() => defaultModelHosting(providerType));
   const [embeddingFamily, setEmbeddingFamily] = useState<EmbeddingFamily>("openai");
   const [classificationId, setClassificationId] = useState(NO_CLASSIFICATION);
-  // Live transcription streams over the realtime API, which only vLLM serves.
   const [realtime, setRealtime] = useState(false);
-  const realtimeAvailable = speaksRealtimeDialect(providerType);
+  const realtimeAvailable = realtimeEligibility === "eligible";
+  const realtimeRefusal = realtimeRefusalKey(realtimeEligibility);
+  const realtimeReasonId = useId();
   const [validating, setValidating] = useState(false);
   const [createAnyway, setCreateAnyway] = useState(false);
   const [submitted, setSubmitted] = useState(false);
@@ -364,7 +372,7 @@ export function ModelCatalogStep({
               family: providerType,
               hosting,
               cost_per_minute: model.cost_per_minute ?? null,
-              supports_realtime: realtime,
+              supports_realtime: realtime && realtimeAvailable,
               security_classification: selectedClassification
             });
           }
@@ -523,15 +531,30 @@ export function ModelCatalogStep({
       )}
 
       {mode === "transcription" && (
-        <CheckboxInput
-          label={t("live_transcription_support")}
-          description={
-            realtimeAvailable ? t("live_transcription_help") : t("live_transcription_needs_vllm")
-          }
-          value={realtime}
-          onChange={setRealtime}
-          isDisabled={!realtimeAvailable}
-        />
+        <div className="flex flex-col gap-1">
+          {/* The reason is a line of its own under the help, so it reads as why
+              the box is locked rather than as more help; Astryx adds the
+              reason's id to its own description. */}
+          <CheckboxInput
+            label={t(
+              selected.size > 1 ? "live_text_for_selected_models" : "live_transcription_support"
+            )}
+            description={t("live_transcription_help")}
+            aria-describedby={realtimeRefusal ? realtimeReasonId : undefined}
+            value={realtime && realtimeAvailable}
+            onChange={setRealtime}
+            isDisabled={!realtimeAvailable}
+          />
+          {realtimeRefusal && (
+            <p id={realtimeReasonId} className="flex items-start gap-1.5 pl-8">
+              <Lock
+                aria-hidden="true"
+                className="text-ax-text-secondary mt-0.5 size-3.5 shrink-0"
+              />
+              <Text type="supporting">{t(realtimeRefusal)}</Text>
+            </p>
+          )}
+        </div>
       )}
 
       {canList && (

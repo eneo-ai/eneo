@@ -1,4 +1,4 @@
-import { queryOptions } from "@tanstack/react-query";
+import { type QueryClient, type QueryFilters, queryOptions } from "@tanstack/react-query";
 import type { EneoClient } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
@@ -38,6 +38,36 @@ export type MigratableModelKind = "completion" | "transcription";
 
 export const MODELS_KEY = ["admin-models"];
 export const MODEL_MIGRATION_HISTORY_KEY = ["model-migration-history"];
+
+/**
+ * After a save that can change a model's `streams_live`: the spaces' copies
+ * of it are marked stale, so their next read asks the server. They are each
+ * space's details (`spaceQueryOptions`, read by the flow editor) and each
+ * space's model list (`["ai-models", space.id]`, the space settings' picker).
+ * The space list and a space's other resources do not carry it. A read of
+ * either copy from before the save is cancelled first: answering after the
+ * save, it would make the old answer fresh again. A copy with no answer yet
+ * keeps its read, since cancelling it would fail whoever waits for it (a
+ * space route's loader), and is marked stale once that read has settled.
+ */
+export async function invalidateSpaceLiveText(queryClient: QueryClient) {
+  const filters: QueryFilters[] = [
+    { queryKey: ["spaces"], predicate: ({ queryKey }) => queryKey.length === 2 },
+    { queryKey: ["ai-models"] }
+  ];
+  const copies = filters.flatMap((filter) => queryClient.getQueryCache().findAll(filter));
+  await Promise.all(
+    copies.map(async (query) => {
+      const { queryKey } = query;
+      if (query.state.data === undefined) {
+        await query.promise?.catch(() => undefined);
+        return queryClient.invalidateQueries({ queryKey, exact: true, refetchType: "none" });
+      }
+      await queryClient.cancelQueries({ queryKey, exact: true });
+      return queryClient.invalidateQueries({ queryKey, exact: true });
+    })
+  );
+}
 
 /** Merged completion + transcription migration history, newest first. */
 export function migrationHistoryQueryOptions(api: EneoClient) {

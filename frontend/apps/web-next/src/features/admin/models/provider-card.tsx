@@ -20,7 +20,7 @@ import { Text } from "@astryxdesign/core/Text";
 import { useQueryClient } from "@tanstack/react-query";
 import { MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useFocusRescue } from "@/lib/focus-rescue";
 import { useMediaQuery } from "@astryxdesign/core/hooks";
 import { PHONE_QUERY } from "@/lib/hooks/use-media-match";
@@ -33,11 +33,11 @@ import { browserApi } from "@/lib/api/browser";
 import { modelDisplayName } from "@/lib/models/model-display-name";
 import { toast } from "@/lib/toast";
 import { DeleteBlockedDialog } from "./delete-blocked-dialog";
-import { deleteProvider, PROVIDERS_KEY } from "./model-providers";
+import { deleteProvider, PROVIDERS_KEY, type RealtimeEligibility } from "./model-providers";
 import { ModelDialogs, type ModelSelection } from "./model-dialogs";
 import { cn } from "@/lib/utils";
 import { COMPACT_HIDDEN, ModelRow } from "./model-row";
-import { MODELS_KEY } from "./models";
+import { invalidateSpaceLiveText, MODELS_KEY } from "./models";
 import { ProviderConnectionStatus } from "./provider-connection-status";
 import { ProviderEditDialog } from "./provider-management";
 import { useProviderNotices } from "./provider-notices";
@@ -54,6 +54,7 @@ function ModelTable({
   showKind,
   classifications,
   securityEnabled,
+  realtimeEligibility,
   onModelAction
 }: {
   models: KindedModel[];
@@ -61,6 +62,7 @@ function ModelTable({
   showKind: boolean;
   classifications: SecurityClassification[];
   securityEnabled: boolean;
+  realtimeEligibility: RealtimeEligibility;
   onModelAction: (selection: ModelSelection) => void;
 }) {
   const t = useTranslations();
@@ -153,6 +155,7 @@ function ModelTable({
             classifications={classifications}
             securityEnabled={securityEnabled}
             showKind={showKind}
+            realtimeEligibility={realtimeEligibility}
             onAction={(action) => onModelAction({ model, kind, action })}
           />
         ))}
@@ -196,6 +199,31 @@ export function ProviderCard({
   // All of them, not only those the filters show: any one blocks a delete.
   const dependencyCount = section.models.length;
   const visibleModelCount = models.length;
+  // Also those the filters hide: a save that stops live text affects them all.
+  const markedLiveTextModels = section.models
+    .filter(({ model }) => "supports_realtime" in model && model.supports_realtime === true)
+    .map(({ model }) => modelDisplayName(model));
+
+  // Details show the model as the lists hold it now, so a refresh changes
+  // what they say, and a model that is gone closes them. The edit form keeps
+  // the model it opened with: it holds unsaved values.
+  const detailModel =
+    modelSelection?.action === "detail"
+      ? section.models.find(
+          ({ model, kind }) => kind === modelSelection.kind && model.id === modelSelection.model.id
+        )
+      : undefined;
+  const shownSelection: ModelSelection | null =
+    modelSelection?.action === "detail"
+      ? detailModel
+        ? { ...detailModel, action: "detail" }
+        : null
+      : modelSelection;
+  // The gone model's row went too: focus moves to the card, as a close would.
+  const detailGone = modelSelection?.action === "detail" && detailModel === undefined;
+  useEffect(() => {
+    if (detailGone) rescueFocus(() => cardRef.current);
+  }, [detailGone, rescueFocus]);
 
   // The card, its menu and the dialog go with the provider: focus moves to
   // the page's RemovalFocusScope (the tab panel) once the lists refetched.
@@ -207,6 +235,8 @@ export function ProviderCard({
         queryClient.invalidateQueries({ queryKey: MODELS_KEY })
       ]),
     onRemoved: () => {
+      // The spaces' copies are not on this page: focus does not wait for them.
+      void invalidateSpaceLiveText(queryClient);
       setShowDelete(false);
       toast.success(t("admin_models_provider_deleted", { name: section.name }));
     }
@@ -318,6 +348,7 @@ export function ProviderCard({
                     classifications={classifications}
                     securityEnabled={securityEnabled}
                     showKind={showKind}
+                    realtimeEligibility={section.provider.realtime_eligibility}
                     onAction={(action) => setModelSelection({ model, kind, action })}
                     layout="list"
                   />
@@ -334,32 +365,38 @@ export function ProviderCard({
                 showKind={showKind}
                 classifications={classifications}
                 securityEnabled={securityEnabled}
+                realtimeEligibility={section.provider.realtime_eligibility}
               />
             </div>
           ) : null}
         </>
       )}
 
-      {modelSelection && (
+      {shownSelection && (
         <ModelDialogs
-          key={`${modelSelection.kind}:${modelSelection.model.id}`}
-          selection={modelSelection}
+          key={`${shownSelection.kind}:${shownSelection.model.id}`}
+          selection={shownSelection}
           classifications={classifications}
           securityEnabled={securityEnabled}
           onClose={() => {
             rescueFocus(
               () =>
                 cardRef.current?.querySelector<HTMLElement>(
-                  `[data-model-id="${CSS.escape(modelSelection.model.id)}"] [aria-haspopup="menu"]`
+                  `[data-model-id="${CSS.escape(shownSelection.model.id)}"] [aria-haspopup="menu"]`
                 ) ?? cardRef.current
             );
             setModelSelection((current) => (current === modelSelection ? null : current));
           }}
-          onMigrate={() => setModelSelection({ ...modelSelection, action: "migrate" })}
-          onEdit={() => setModelSelection({ ...modelSelection, action: "edit" })}
+          onMigrate={() => setModelSelection({ ...shownSelection, action: "migrate" })}
+          onEdit={() => setModelSelection({ ...shownSelection, action: "edit" })}
         />
       )}
-      <ProviderEditDialog provider={section.provider} open={showEdit} onOpenChange={setShowEdit} />
+      <ProviderEditDialog
+        provider={section.provider}
+        markedLiveTextModels={markedLiveTextModels}
+        open={showEdit}
+        onOpenChange={setShowEdit}
+      />
       {dependencyCount > 0 ? (
         <DeleteBlockedDialog
           open={showDelete}
