@@ -495,7 +495,7 @@ function RetentionSection() {
     let current: number | null;
     try {
       // A real read, not the cache: a time saved elsewhere since may make this one shorter.
-      const fresh = await queryClient.fetchQuery({
+      const fresh = await queryClient.query({
         ...spaceQueryOptions(browserApi, routeId),
         staleTime: 0
       });
