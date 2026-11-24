@@ -1025,6 +1025,12 @@ class FlowRuns(BasePublic):
         ForeignKey(Jobs.id, ondelete="SET NULL"),
         nullable=True,
     )
+    # Whether the run's shared space had a time when the run was inserted. Only
+    # such runs are removed automatically; nothing changes it afterwards.
+    started_under_space_retention: Mapped[bool] = mapped_column(
+        nullable=False,
+        server_default=sa.false(),
+    )
 
     __table_args__ = (
         CheckConstraint(

@@ -140,6 +140,9 @@ from eneo.flows.infrastructure.flow_run_list_query import (
     run_list_order,
     run_search_clause,
 )
+from eneo.flows.infrastructure.flow_run_retention_policy_query import (
+    started_under_space_retention,
+)
 from eneo.flows.infrastructure.flow_run_staleness import (
     flow_run_awaits_webhook_delivery,
     stale_running_flow_run_predicate,
@@ -731,6 +734,9 @@ class FlowRunRepository:
                 status=FlowRunStatus.QUEUED.value,
                 **start_flow_dispatch_epoch(now_utc),
                 input_payload_json=input_payload_json,
+                started_under_space_retention=started_under_space_retention(
+                    flow_id=flow_id, tenant_id=tenant_id
+                ),
             )
             .returning(FlowRuns)
         )
