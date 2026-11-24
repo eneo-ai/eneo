@@ -74,11 +74,22 @@ it("says what happens to a recording that runs when the session ends", () => {
   act(() => {
     release = holdRecording();
   });
-  const description = document.getElementById(dialog.getAttribute("aria-describedby")!);
-  expect(description?.textContent).toContain(messages.session_expiring_recording);
+  const description = () =>
+    document.getElementById(screen.getByRole("dialog").getAttribute("aria-describedby")!);
+  expect(description()?.textContent).toContain(messages.session_expiring_recording);
+  // True in every browser: where the running part lives only in the tab, it is
+  // lost if the page is left, so the person is told to stop first.
+  expect(messages.session_expiring_recording).toContain(
+    "Stoppa inspelningen innan du loggar in igen"
+  );
+
+  // The recording goes on after the session has ended, and so does the advice.
+  advance(120_000);
+  expect(screen.getByRole("dialog", { name: "Din session har gått ut" })).toBeTruthy();
+  expect(description()?.textContent).toContain(messages.session_expiring_recording);
 
   act(() => release());
-  expect(dialog.textContent).not.toContain(messages.session_expiring_recording);
+  expect(screen.getByRole("dialog").textContent).not.toContain(messages.session_expiring_recording);
 });
 
 it("waits out a session longer than a timer can wait", () => {
