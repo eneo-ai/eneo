@@ -84,6 +84,17 @@ Service keys store `created_by_user_id` (who created the key) separately from ow
 - `owner_user_id` is `NULL` for service keys (by design)
 - `created_by_user_id` becomes `NULL` (audit trail partially lost, but key works)
 
+#### The service principal behind a service key
+
+A key's id changes when the key is rotated, so the key is a poor identity for whatever a service does over time. Every service key therefore belongs to a **service principal**, a row in `service_principals`:
+
+- It is created together with the service key and carries the key's name, description and scope. Renaming the key renames the principal.
+- A rotated key points at the same principal as the key it replaces, so the whole rotation chain is one principal.
+- User keys have no service principal.
+- A principal is `active` or `disabled`. While it is disabled, every key that belongs to it is refused with `403` and `code: "service_principal_disabled"`. A principal is never deleted while a key points at it.
+
+There is no API for managing service principals yet; they follow their keys.
+
 ---
 
 ## Authentication Flow
@@ -104,7 +115,7 @@ The key hash is looked up against the `api_keys_v2` table using the `idx_api_key
 Based on the `ownership` field:
 
 - **User keys**: The owner is fetched from the database. The system verifies the owner exists and belongs to the key's tenant (`401 invalid_api_key` otherwise), is active (`403 owner_inactive`), and still has the required permissions for the key's scope (`403 owner_permission_revoked` or `403 owner_membership_revoked`).
-- **Service keys**: A synthetic user is constructed. No database user lookup occurs.
+- **Service keys**: The key's service principal is fetched. A principal that is missing or belongs to another tenant returns `401 invalid_api_key`, and a disabled one returns `403 service_principal_disabled`. A synthetic user is then constructed. No database user lookup occurs.
 
 Ownership is resolved before the key's own state is checked, so an expired key whose owner has been deactivated returns `403 owner_inactive` rather than `401`.
 
@@ -256,7 +267,7 @@ In the React beta, **Account → API keys** shows a key's scope, restrictions, l
 
 Rotation creates a new key while keeping the old one temporarily valid:
 
-1. A new key is generated with the same scope, permission, and restrictions
+1. A new key is generated with the same scope, permission, and restrictions. A rotated service key keeps the service principal of the key it replaces
 2. The old key gets a `rotation_grace_until` timestamp (default: 24 hours, configurable via tenant policy)
 3. Both keys work during the grace period
 4. After the grace period, the old key stops working

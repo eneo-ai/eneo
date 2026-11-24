@@ -21,6 +21,7 @@ import sqlalchemy as sa
 
 from eneo.database.tables.api_keys_v2_table import ApiKeysV2
 from eneo.database.tables.assistant_table import Assistants
+from eneo.database.tables.service_principals_table import ServicePrincipals
 from eneo.database.tables.sessions_table import Sessions
 from init_db import add_tenant_user
 
@@ -62,11 +63,22 @@ async def _insert_service_key(
 ) -> UUID:
     key_id = uuid4()
     suffix = secrets.token_hex(4)
+    service_principal_id = await session.scalar(
+        sa.insert(ServicePrincipals)
+        .values(
+            tenant_id=tenant_id,
+            display_name=f"svc-{suffix}",
+            scope_type="tenant",
+            created_by_user_id=creator_user_id,
+        )
+        .returning(ServicePrincipals.id)
+    )
     await session.execute(
         sa.insert(ApiKeysV2).values(
             id=key_id,
             tenant_id=tenant_id,
             ownership="service",
+            service_principal_id=service_principal_id,
             scope_type="tenant",
             permission="read",
             key_type="sk_",

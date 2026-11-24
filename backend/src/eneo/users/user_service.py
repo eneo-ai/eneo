@@ -39,6 +39,7 @@ from eneo.authentication.auth_models import (
     CredentialFacts,
     FederatedIdentity,
     JWTPayload,
+    ServicePrincipalState,
     compute_effective_state,
 )
 from eneo.authentication.auth_service import INTERNAL_MCP_AUDIENCE, AuthService
@@ -1167,10 +1168,10 @@ class UserService:
         only for its own loopback MCP servers, so only
         ``authenticate_internal_mcp_token`` falls through to the key itself;
         session authentication never does. The key must still be active:
-        revoking, suspending or expiring it ends the principal's access before
-        the token expires. Origin and IP guardrails do not apply here, the
-        loopback caller is Eneo itself, and no usage is recorded: the API call
-        that minted the token already was.
+        revoking, suspending or expiring it, or disabling its service
+        principal, ends the access before the token expires. Origin and IP
+        guardrails do not apply here, the loopback caller is Eneo itself, and
+        no usage is recorded: the API call that minted the token already was.
         """
         key = await self.api_key_v2_repo.get(
             key_id=payload.user_id, tenant_id=payload.tenant_id
@@ -1184,6 +1185,19 @@ class UserService:
             rotation_grace_until=key.rotation_grace_until,
         )
         if effective_state != ApiKeyState.ACTIVE:
+            return None
+        service_principal = (
+            None
+            if key.service_principal_id is None
+            else await self.api_key_v2_repo.get_service_principal(
+                service_principal_id=key.service_principal_id,
+                tenant_id=key.tenant_id,
+            )
+        )
+        if (
+            service_principal is None
+            or service_principal.state != ServicePrincipalState.ACTIVE
+        ):
             return None
         return await self._build_service_user(key)
 

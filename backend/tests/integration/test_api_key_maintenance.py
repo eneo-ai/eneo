@@ -111,9 +111,19 @@ async def insert_key(
 ) -> UUID:
     """A service key straight in the table, for runs that never sign in."""
     async with db_container() as container:
-        key = await container.api_key_v2_repo().create(
+        repo = container.api_key_v2_repo()
+        principal = await repo.create_service_principal(
+            tenant_id=tenant_id,
+            display_name=name,
+            description=None,
+            scope_type=ApiKeyScopeType.TENANT.value,
+            scope_id=None,
+            created_by_user_id=None,
+        )
+        key = await repo.create(
             tenant_id=tenant_id,
             ownership=ApiKeyOwnership.SERVICE.value,
+            service_principal_id=principal.id,
             scope_type=ApiKeyScopeType.TENANT.value,
             permission=ApiKeyPermission.READ.value,
             key_type=ApiKeyType.SK.value,

@@ -529,9 +529,18 @@ async def test_module_installation_rejects_key_from_another_tenant(
             TenantBase(name=f"other-tenant-{uuid4().hex[:8]}")
         )
         assert other_tenant is not None
+        other_principal = await container.api_key_v2_repo().create_service_principal(
+            tenant_id=other_tenant.id,
+            display_name="other tenant module key",
+            description=None,
+            scope_type=ApiKeyScopeType.TENANT.value,
+            scope_id=None,
+            created_by_user_id=None,
+        )
         other_key = await container.api_key_v2_repo().create(
             tenant_id=other_tenant.id,
             ownership=ApiKeyOwnership.SERVICE.value,
+            service_principal_id=other_principal.id,
             owner_user_id=None,
             created_by_user_id=None,
             scope_type=ApiKeyScopeType.TENANT.value,

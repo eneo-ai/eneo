@@ -529,3 +529,184 @@ async def test_service_key_survives_member_removal(
             {"sid": space_id, "uid": str(default_user.id)},
         )
         await session.commit()
+
+
+# ---------------------------------------------------------------------------
+# Service principal: the stable identity behind a service key
+# ---------------------------------------------------------------------------
+
+
+async def _principal_id_of(db_container, key_id: str) -> UUID | None:
+    async with db_container() as container:
+        return await container.session().scalar(
+            sa.text("SELECT service_principal_id FROM api_keys_v2 WHERE id = :id"),
+            {"id": key_id},
+        )
+
+
+async def _principal(db_container, principal_id: UUID):
+    async with db_container() as container:
+        result = await container.session().execute(
+            sa.text(
+                "SELECT tenant_id, display_name, description, scope_type, scope_id,"
+                " state, created_by_user_id FROM service_principals WHERE id = :id"
+            ),
+            {"id": principal_id},
+        )
+        return result.mappings().one()
+
+
+def _error_code(response) -> str | None:
+    payload = response.json()
+    detail = payload.get("detail")
+    if isinstance(detail, dict):
+        return detail.get("code")
+    return payload.get("code")
+
+
+async def test_service_key_is_created_with_its_own_principal(
+    client, db_container, default_user, default_user_token
+):
+    space_id = await _create_space(client, token=default_user_token)
+
+    resp = await _create_service_key(
+        client,
+        token=default_user_token,
+        scope_type="space",
+        scope_id=space_id,
+    )
+    assert resp.status_code == 201, resp.text
+    key = resp.json()["api_key"]
+
+    principal_id = await _principal_id_of(db_container, key["id"])
+    assert principal_id is not None
+    principal = await _principal(db_container, principal_id)
+    assert principal["tenant_id"] == default_user.tenant_id
+    assert principal["display_name"] == key["name"]
+    assert principal["scope_type"] == "space"
+    assert str(principal["scope_id"]) == space_id
+    assert principal["state"] == "active"
+    assert principal["created_by_user_id"] == default_user.id
+
+
+async def test_two_service_keys_get_two_principals(
+    client, db_container, default_user_token
+):
+    first = await _create_service_key(client, token=default_user_token)
+    second = await _create_service_key(client, token=default_user_token)
+    assert first.status_code == 201, first.text
+    assert second.status_code == 201, second.text
+
+    first_principal = await _principal_id_of(
+        db_container, first.json()["api_key"]["id"]
+    )
+    second_principal = await _principal_id_of(
+        db_container, second.json()["api_key"]["id"]
+    )
+
+    assert first_principal is not None
+    assert second_principal is not None
+    assert first_principal != second_principal
+
+
+async def test_user_key_has_no_principal(client, db_container, default_user_token):
+    resp = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": f"user-key-{uuid4().hex[:8]}",
+            "key_type": "sk_",
+            "permission": "read",
+            "scope_type": "tenant",
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert resp.status_code == 201, resp.text
+
+    assert await _principal_id_of(db_container, resp.json()["api_key"]["id"]) is None
+
+
+async def test_rotated_service_key_keeps_its_principal(
+    client, db_container, default_user_token
+):
+    created = await _create_service_key(client, token=default_user_token)
+    assert created.status_code == 201, created.text
+    old_key_id = created.json()["api_key"]["id"]
+    principal_id = await _principal_id_of(db_container, old_key_id)
+
+    rotated = await client.post(
+        f"/api/v1/api-keys/{old_key_id}/rotate",
+        json={},
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert rotated.status_code == 200, rotated.text
+    new_key_id = rotated.json()["api_key"]["id"]
+
+    assert new_key_id != old_key_id
+    assert await _principal_id_of(db_container, new_key_id) == principal_id
+    assert await _principal_id_of(db_container, old_key_id) == principal_id
+
+    probe = await client.get(
+        _AUTH_ENDPOINT, headers={"X-API-Key": rotated.json()["secret"]}
+    )
+    assert probe.status_code == 200, probe.text
+
+
+async def test_renaming_a_service_key_renames_its_principal(
+    client, db_container, default_user_token
+):
+    created = await _create_service_key(client, token=default_user_token)
+    assert created.status_code == 201, created.text
+    key_id = created.json()["api_key"]["id"]
+    new_name = f"renamed-{uuid4().hex[:8]}"
+
+    patched = await client.patch(
+        f"/api/v1/api-keys/{key_id}",
+        json={"name": new_name, "description": "Reads invoices"},
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert patched.status_code == 200, patched.text
+
+    principal_id = await _principal_id_of(db_container, key_id)
+    assert principal_id is not None
+    principal = await _principal(db_container, principal_id)
+    assert principal["display_name"] == new_name
+    assert principal["description"] == "Reads invoices"
+
+
+async def test_service_key_is_refused_while_its_principal_is_disabled(
+    client, db_container, default_user_token
+):
+    created = await _create_service_key(client, token=default_user_token)
+    assert created.status_code == 201, created.text
+    secret = created.json()["secret"]
+    principal_id = await _principal_id_of(db_container, created.json()["api_key"]["id"])
+
+    async with db_container() as container:
+        session = container.session()
+        await session.execute(
+            sa.text(
+                "UPDATE service_principals SET state = 'disabled', disabled_at = now()"
+                " WHERE id = :id"
+            ),
+            {"id": principal_id},
+        )
+        await session.commit()
+
+    refused = await client.get(_AUTH_ENDPOINT, headers={"X-API-Key": secret})
+
+    assert refused.status_code == 403, refused.text
+    assert _error_code(refused) == "service_principal_disabled"
+
+    async with db_container() as container:
+        session = container.session()
+        await session.execute(
+            sa.text(
+                "UPDATE service_principals SET state = 'active', disabled_at = NULL"
+                " WHERE id = :id"
+            ),
+            {"id": principal_id},
+        )
+        await session.commit()
+
+    allowed = await client.get(_AUTH_ENDPOINT, headers={"X-API-Key": secret})
+    assert allowed.status_code == 200, allowed.text

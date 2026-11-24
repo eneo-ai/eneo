@@ -11,11 +11,14 @@ from eneo.authentication.api_key_resolver import (
 )
 from eneo.authentication.auth_models import (
     ApiKeyHashVersion,
+    ApiKeyOwnership,
     ApiKeyPermission,
     ApiKeyScopeType,
     ApiKeyState,
     ApiKeyType,
     ApiKeyV2InDB,
+    ServicePrincipalInDB,
+    ServicePrincipalState,
 )
 
 
@@ -173,3 +176,96 @@ async def test_resolve_has_no_legacy_table_fallback(resolver: ApiKeyAuthResolver
         await resolver.resolve("inp_never_migrated")
 
     assert exc.value.code == "invalid_api_key"
+
+
+def _service_key(**overrides: object) -> ApiKeyV2InDB:
+    return _make_v2_key(
+        ownership=ApiKeyOwnership.SERVICE,
+        owner_user_id=None,
+        **{"service_principal_id": uuid4(), **overrides},
+    )
+
+
+def _principal(key: ApiKeyV2InDB, *, state: ServicePrincipalState):
+    return ServicePrincipalInDB(
+        id=key.service_principal_id,
+        tenant_id=key.tenant_id,
+        display_name=key.name,
+        scope_type=key.scope_type,
+        state=state,
+    )
+
+
+async def test_resolve_returns_a_service_key_whose_principal_is_active(
+    resolver: ApiKeyAuthResolver,
+):
+    key = _service_key()
+    resolver.api_key_repo.get_by_hash = AsyncMock(return_value=key)
+    resolver.api_key_repo.get_service_principal = AsyncMock(
+        return_value=_principal(key, state=ServicePrincipalState.ACTIVE)
+    )
+
+    resolved = await resolver.resolve("sk_abc123")
+
+    assert resolved.key.id == key.id
+    resolver.api_key_repo.get_service_principal.assert_awaited_once_with(
+        service_principal_id=key.service_principal_id,
+        tenant_id=key.tenant_id,
+    )
+
+
+async def test_resolve_refuses_a_service_key_whose_principal_is_disabled(
+    resolver: ApiKeyAuthResolver,
+):
+    key = _service_key()
+    resolver.api_key_repo.get_by_hash = AsyncMock(return_value=key)
+    resolver.api_key_repo.get_service_principal = AsyncMock(
+        return_value=_principal(key, state=ServicePrincipalState.DISABLED)
+    )
+
+    with pytest.raises(ApiKeyValidationError) as exc:
+        await resolver.resolve("sk_abc123")
+
+    assert exc.value.status_code == 403
+    assert exc.value.code == "service_principal_disabled"
+
+
+async def test_resolve_rejects_a_service_key_whose_principal_is_not_in_its_tenant(
+    resolver: ApiKeyAuthResolver,
+):
+    key = _service_key()
+    resolver.api_key_repo.get_by_hash = AsyncMock(return_value=key)
+    resolver.api_key_repo.get_service_principal = AsyncMock(return_value=None)
+
+    with pytest.raises(ApiKeyValidationError) as exc:
+        await resolver.resolve("sk_abc123")
+
+    assert exc.value.status_code == 401
+    assert exc.value.code == "invalid_api_key"
+
+
+async def test_resolve_rejects_a_service_key_without_a_principal(
+    resolver: ApiKeyAuthResolver,
+):
+    key = _service_key(service_principal_id=None)
+    resolver.api_key_repo.get_by_hash = AsyncMock(return_value=key)
+    resolver.api_key_repo.get_service_principal = AsyncMock()
+
+    with pytest.raises(ApiKeyValidationError) as exc:
+        await resolver.resolve("sk_abc123")
+
+    assert exc.value.status_code == 401
+    assert exc.value.code == "invalid_api_key"
+    resolver.api_key_repo.get_service_principal.assert_not_awaited()
+
+
+async def test_resolve_does_not_look_up_a_principal_for_a_user_key(
+    resolver: ApiKeyAuthResolver,
+):
+    key = _make_v2_key()
+    resolver.api_key_repo.get_by_hash = AsyncMock(return_value=key)
+    resolver.api_key_repo.get_service_principal = AsyncMock()
+
+    await resolver.resolve("sk_abc123")
+
+    resolver.api_key_repo.get_service_principal.assert_not_awaited()
