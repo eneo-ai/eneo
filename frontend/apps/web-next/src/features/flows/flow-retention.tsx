@@ -186,11 +186,13 @@ function RetentionForm({
   };
 
   const save = useMutation({
-    mutationFn: (sent: number | null) =>
+    // `expected` is the time that applied when the warning was decided; the server refuses
+    // the save (409 `retention_time_changed`) when another administrator has changed it since.
+    mutationFn: ({ sent, expected }: { sent: number | null; expected: number | null }) =>
       unwrap(
         browserApi.PUT("/api/v1/settings/flow-run-retention-policy/flows/{flow_id}", {
           params: { path: { flow_id: flow.id } },
-          body: { policy: sent === null ? null : { days: sent } }
+          body: { policy: sent === null ? null : { days: sent }, expected_effective_days: expected }
         })
       ),
     onSuccess: async (saved) => {
@@ -207,6 +209,16 @@ function RetentionForm({
       onClose();
     },
     onError: async (error) => {
+      if (error instanceof EneoApiError && error.reason === "retention_time_changed") {
+        // Changed by someone else: nothing was saved. The times are read again and the
+        // draft stays, so the warning is decided again on what applies now.
+        toastApiError(error, t);
+        setWarnedFor(null);
+        void queryClient.invalidateQueries({ queryKey: policyKey(flow.id), exact: true });
+        void queryClient.invalidateQueries({ queryKey: flowKeys.flow(flow.id), exact: true });
+        field.current?.focus();
+        return;
+      }
       const refusedAt = refusedCap(error);
       if (refusedAt === null) {
         toastApiError(error, t);
@@ -281,7 +293,8 @@ function RetentionForm({
               else if (shortens && warnedFor !== days) {
                 setWarnedFor(days);
                 field.current?.focus();
-              } else save.mutate(days);
+              } else
+                save.mutate({ sent: days, expected: settings.effective.effective_days ?? null });
             }}
           >
             <NumberInput

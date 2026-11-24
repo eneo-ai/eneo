@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { browserApi } from "@/lib/api/browser";
 import { EneoApiError } from "@/lib/api/errors";
 import type { Permission } from "@/lib/auth/permissions";
+import messages from "@/lib/i18n/messages/sv.json";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
 import { makeFlow, makeStep } from "./flow-fixtures";
@@ -27,13 +28,27 @@ const configured = {
   contributors: { space: { days: 60 }, flow: null }
 } as const;
 const answered = (data: unknown) => ({ data, response: new Response("{}") });
-const settings = (local: unknown, inherited: unknown) =>
+type Days = { days: number } | null;
+/** What applies, as the server resolves it: the Flow's own time when it is at most the Space's. */
+const effectiveOf = (local: Days, inherited: Days) => {
+  const contributors = { space: inherited, flow: local };
+  if (!local && !inherited)
+    return { state: "off", source: "none", effective_days: null, contributors };
+  const flowWins = local !== null && (inherited === null || local.days <= inherited.days);
+  return {
+    state: "configured",
+    source: flowWins ? "flow" : "space",
+    effective_days: flowWins ? local.days : inherited!.days,
+    contributors
+  };
+};
+const settings = (local: Days, inherited: Days) =>
   answered({
     scope: "flow",
     scope_id: "flow-1",
     local_policy: local,
     inherited_policy: inherited,
-    effective: configured
+    effective: effectiveOf(local, inherited)
   });
 const resources = { models: [], services: [] };
 const policyKey = ["flows", "retention", "flow-1"];
@@ -175,7 +190,10 @@ describe("flow retention", () => {
     fireEvent.blur(days);
     pressSave();
     await waitFor(() => expect(backend.PUT).toHaveBeenCalledTimes(1));
-    expect(backend.PUT.mock.calls[0]![1].body).toEqual({ policy: { days: 30 } });
+    expect(backend.PUT.mock.calls[0]![1].body).toEqual({
+      policy: { days: 30 },
+      expected_effective_days: 60
+    });
   });
 
   it("follows a later read of the space's time while the dialog is open", async () => {
@@ -227,7 +245,11 @@ describe("flow retention", () => {
     expect(days.value).toBe("5");
     pressSave();
     await waitFor(() => expect(backend.PUT).toHaveBeenCalledTimes(1));
-    expect(backend.PUT.mock.calls[0]![1].body).toEqual({ policy: { days: 5 } });
+    expect(backend.PUT.mock.calls[0]![1].body).toEqual({
+      policy: { days: 5 },
+      // The time the later read brought is what the save replaces.
+      expected_effective_days: 10
+    });
   });
 
   it("keeps a deliberately cleared field when a later read brings a time", async () => {
@@ -246,7 +268,10 @@ describe("flow retention", () => {
     expect(days.value).toBe("");
     pressSave();
     await waitFor(() => expect(backend.PUT).toHaveBeenCalledTimes(1));
-    expect(backend.PUT.mock.calls[0]![1].body).toEqual({ policy: null });
+    expect(backend.PUT.mock.calls[0]![1].body).toEqual({
+      policy: null,
+      expected_effective_days: 10
+    });
   });
 
   it("warns before a shorter time is saved, and saves it on the next press", async () => {
@@ -267,12 +292,72 @@ describe("flow retention", () => {
     await expectNoAxeViolations(document.body);
     fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
     await waitFor(() => expect(backend.PUT).toHaveBeenCalledTimes(1));
-    expect(backend.PUT.mock.calls[0]![1].body).toEqual({ policy: { days: 30 } });
+    expect(backend.PUT.mock.calls[0]![1].body).toEqual({
+      policy: { days: 30 },
+      expected_effective_days: 60
+    });
+  });
+
+  it("does not save a shorter time without its warning when another administrator changed the time meanwhile", async () => {
+    // The server's times; a save that carries an older time that applied is refused.
+    let own: Days = { days: 7 };
+    const space = { days: 90 };
+    backend.GET.mockImplementation(() => Promise.resolve(settings(own, space)));
+    backend.PUT.mockImplementation(
+      (_path: string, { body }: { body: { policy: Days; expected_effective_days?: number } }) => {
+        const applies = effectiveOf(own, space).effective_days;
+        if ("expected_effective_days" in body && body.expected_effective_days !== applies) {
+          return Promise.reject(
+            new EneoApiError("The retention time has changed.", {
+              status: 409,
+              code: 9087,
+              reason: "retention_time_changed",
+              context: { current_days: applies }
+            })
+          );
+        }
+        own = body.policy;
+        return Promise.resolve(settings(own, space));
+      }
+    );
+    const days = (await openDialog()) as HTMLInputElement;
+    expect(days.value).toBe("7");
+    // Another administrator raises the flow's time to 60 while the dialog is open.
+    own = { days: 60 };
+    fireEvent.change(days, { target: { value: "30" } });
+    fireEvent.blur(days);
+    // Longer than the 7 the dialog read: sent on the first press, with the 7 it was compared with.
+    fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
+    await waitFor(() => expect(backend.PUT).toHaveBeenCalledTimes(1));
+    // Refused: the 60 stands.
+    await settle();
+    expect(own).toEqual({ days: 60 });
+    expect(backend.PUT.mock.calls[0]![1].body).toEqual({
+      policy: { days: 30 },
+      expected_effective_days: 7
+    });
+    await waitFor(() => expect(toastError).toHaveBeenCalledTimes(1));
+    expect(toastError.mock.calls[0]![0]).toBe(messages.eneo_error_9087);
+    // The draft stays, and the times are read again: 30 is now shorter than 60, so it warns.
+    await waitFor(() => expect(backend.GET.mock.calls.length).toBeGreaterThan(1));
+    await settle();
+    expect(days.value).toBe("30");
+    fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
+    expect(await screen.findByText(/Spara igen för att använda den/)).toBeTruthy();
+    expect(backend.PUT).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
+    await waitFor(() => expect(backend.PUT).toHaveBeenCalledTimes(2));
+    expect(backend.PUT.mock.calls[1]![1].body).toEqual({
+      policy: { days: 30 },
+      expected_effective_days: 60
+    });
+    expect(own).toEqual({ days: 30 });
   });
 
   it.each([
     ["a longer flow time", { days: 30 }, { days: 60 }, "45"],
-    ["a time while the space has none", null, null, "30"]
+    ["a time while the space has none", null, null, "30"],
+    ["a shorter flow time while the space has none", { days: 30 }, null, "20"]
   ])("saves %s on the first press, without a warning", async (_, local, inherited, typed) => {
     backend.GET.mockResolvedValue(settings(local, inherited));
     backend.PUT.mockResolvedValue(settings({ days: Number(typed) }, inherited));
@@ -283,6 +368,10 @@ describe("flow retention", () => {
     fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
     await waitFor(() => expect(backend.PUT).toHaveBeenCalledTimes(1));
     expect(screen.queryByText(/tas bort vid en kommande kontroll/)).toBeNull();
+    // It carries the time that applied as the server resolves it, also with no space time.
+    expect(backend.PUT.mock.calls[0]![1].body.expected_effective_days).toBe(
+      effectiveOf(local, inherited).effective_days
+    );
   });
 
   it("says automatic removal is paused while the space has no time, also with a flow time", async () => {
@@ -356,6 +445,8 @@ describe("flow retention", () => {
       fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
       await waitFor(() => expect(backend.PUT).toHaveBeenCalledTimes(1));
       expect(screen.queryByText(/tas bort vid en kommande kontroll/)).toBeNull();
+      // The flow's 45 applies, as the server resolves it, though nothing warns here.
+      expect(backend.PUT.mock.calls[0]![1].body.expected_effective_days).toBe(45);
     }
   );
 
@@ -753,7 +844,10 @@ describe("flow retention", () => {
     fireEvent.blur(days);
     pressSave();
     await waitFor(() => expect(backend.PUT).toHaveBeenCalledTimes(1));
-    expect(backend.PUT.mock.calls[0]![1].body).toEqual({ policy: null });
+    expect(backend.PUT.mock.calls[0]![1].body).toEqual({
+      policy: null,
+      expected_effective_days: 60
+    });
   });
 });
 
