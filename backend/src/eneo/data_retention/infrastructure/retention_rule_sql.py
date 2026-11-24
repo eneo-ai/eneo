@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from sqlalchemy.sql.elements import ColumnElement
 from sqlalchemy.sql.functions import coalesce
 
-from eneo.data_retention.domain.rules import RuleTask
+from eneo.data_retention.domain.rules import RuleExemption, RuleTask
 from eneo.policy_levels import PolicyLevel
 
 
@@ -39,7 +39,8 @@ def _nearest(
 
 
 def rule_period(
-    rule: RuleTask, chosen: Mapping[PolicyLevel, ColumnElement[int | None]]
+    rule: RuleTask | RuleExemption,
+    chosen: Mapping[PolicyLevel, ColumnElement[int | None]],
 ) -> RulePeriodSQL:
     """The kernel's resolution of a rule: the period that applies and the
     level that chose it.
@@ -50,8 +51,10 @@ def rule_period(
     a NULL, and is NULL only when nothing is chosen). On a tie the nearest
     level is the source, and among equal caps the outermost.
     """
+    if not rule.levels:
+        raise ValueError("The rule has no levels to resolve a period from.")
     if set(chosen) != set(rule.levels):
-        raise ValueError(f"{rule.task} needs a column for each of {rule.levels}.")
+        raise ValueError(f"The rule needs a column for each of {rule.levels}.")
     levels = [(level, chosen[level]) for level in rule.levels]
     nearest = _nearest(levels)
     caps = [

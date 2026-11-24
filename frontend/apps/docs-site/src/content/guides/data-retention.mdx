@@ -82,8 +82,9 @@ A removed conversation never comes back.
 
 Every time is a whole number of days.
 
-**A space** (someone who may edit the space; the organization space has no
-retention setting):
+**A space** (someone who may edit the space and whose role has
+`retention_manage`, signed in: an API key is refused, because the time also
+caps the space's Flows; the organization space has no retention setting):
 
 - **Svelte app:** **Spaces**, the space, **Settings**, **Security & Privacy**,
   **Conversation History Retention**. Switch on **Override policy**, enter the
@@ -163,34 +164,30 @@ can still contain deleted rows; a `pg_dump` backup holds only existing rows.
 
 ### Flow run history [#flow-run-history]
 
-Retention does not remove Flow run and step history in this version. Flow run
-history has its own policy, separate from the conversation times above. An
-organization administrator sets it on the organization, a space or a single
-Flow, and the most specific complete policy wins: a child either inherits its
-parent's policy or replaces both its mode and its days.
+Retention does not remove Flow run and step history in this version. A space's
+time above also caps the run history of every Flow in the space, and a Flow may
+choose a shorter time of its own, never a longer one. The organization sets no
+time for Flows. A personal space's time cannot be changed, so its Flows use only
+their own time.
 
-| Scope | Policy | Result |
+| Scope | Time | Result |
 | --- | --- | --- |
-| Organization | Manual purge eligibility after 30 days | The default for Flows without a more specific policy |
-| Procurement space | Review before purge after 60 days | Every Flow in the space uses 60 days unless it has its own policy |
-| Supplier assessment Flow | Manual purge eligibility after 90 days | This Flow alone uses 90 days |
+| Procurement space | 60 days | Every Flow in the space uses 60 days unless it has a shorter time |
+| Supplier assessment Flow | 30 days | This Flow alone uses 30 days |
+| A Flow asking for 90 days | Refused | A Flow cannot keep runs longer than its space |
 
-- **Manual purge eligibility (`preserve`):** after the age threshold, an
-  administrator may include the history in a separately requested purge.
-- **Review before purge (`review_required`):** after the threshold, the run
-  appears in the read-only retention review queue, and a purge needs explicit
-  human approval.
-
-Neither mode schedules or performs a removal. Without a policy at any level,
-Flow run history has no age threshold and is kept. Saving or clearing a policy
-writes the audit event `flow_run_retention_policy_changed` with the policy, not
-run content, and removes, redacts or approves nothing. Flow runtime uploads and
+After the time, an administrator with `retention_manage` may include the
+history in a separately requested purge. Nothing schedules or performs a
+removal. Without a time on the space or the Flow, Flow run history has no age
+threshold and is kept. Changing a Flow's time, or a shared space's time,
+writes the audit event `flow_run_retention_policy_changed` with the old and new
+time, not run content, and removes or redacts nothing. Flow runtime uploads and
 Flow debug evidence have no scheduled removal either: the cleanup of unused
 uploads keeps a file that a Flow runtime upload refers to. A chat that edits a
 Flow is an ordinary conversation and follows the conversation times above.
 
-[Flow run-history retention](/guides/flows/retention-policy) has the screens,
-the API and the review queue.
+[Flow run-history retention](/guides/flows/retention-policy) has the screens
+and the API.
 
 ### When removal happens [#when-removal-happens]
 

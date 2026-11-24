@@ -73,7 +73,6 @@ def _flow(flow_id):
         metadata_json=None,
         run_history_retention=FlowRunRetentionOff(
             contributors=FlowRunRetentionContributors(
-                organization=None,
                 space=None,
                 flow=None,
             ),

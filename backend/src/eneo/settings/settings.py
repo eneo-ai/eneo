@@ -824,7 +824,6 @@ class FlowRunHistoryPurgeRequest(BaseModel):
 class FlowRunHistoryPurgeBlockedPublic(BaseModel):
     undelivered_audit: int
     unresolved_webhook: int
-    review_required: int
     legal_hold: int = Field(
         description=(
             "Due terminal runs that an active legal hold keeps. They are counted "
@@ -859,9 +858,8 @@ class FlowRunHistoryPurgePublic(BaseModel):
                 "blocked": {
                     "undelivered_audit": 0,
                     "unresolved_webhook": 0,
-                    "review_required": 1,
                     "legal_hold": 0,
-                    "counted_runs": 3,
+                    "counted_runs": 2,
                     "complete": True,
                 },
             }
@@ -896,14 +894,12 @@ class FlowRunHistoryPurgePublic(BaseModel):
 class FlowRunRetentionPolicyReplaceRequest(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
-        json_schema_extra={
-            "example": {"policy": {"mode": "review_required", "days": 60}}
-        },
+        json_schema_extra={"example": {"policy": {"days": 30}}},
     )
 
     policy: FlowRunRetentionPolicy | None = Field(
         description=(
-            "Complete local policy, or null to clear this level and inherit its parent."
+            "The Flow's own time, at most its Space's, or null to follow the Space."
         )
     )
 

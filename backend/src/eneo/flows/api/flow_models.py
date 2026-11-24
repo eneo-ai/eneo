@@ -179,10 +179,10 @@ from eneo.users.user import UserSparse
 from eneo.websites.presentation.website_models import WebsitePublic
 
 FLOW_RUN_RETENTION_PROJECTION_DESCRIPTION = (
-    "Effective Flow run-history retention policy. A complete Flow policy overrides "
-    "its complete Space policy, and Space overrides the Organization default. "
-    "Preserve requires an explicit administrator purge; review_required requires "
-    "human approval. Off means no eligibility policy is configured."
+    "The Flow run-history time that applies. The Space's time caps every Flow in "
+    "the Space, and a Flow may choose a shorter one. Runs past it are removed only "
+    "by an explicit administrator purge. Off means neither the Space nor the Flow "
+    "has a time."
 )
 FLOW_SPARSE_STEP_COUNT_DESCRIPTION = (
     "Number of steps in the flow's current step definitions. This reflects "
@@ -381,14 +381,9 @@ FLOW_SPARSE_PUBLIC_EXAMPLE: dict[str, Any] = {
     "metadata_json": {"wizard": {"transcription_enabled": True}},
     "run_history_retention": {
         "state": "configured",
-        "mode": "preserve",
         "effective_days": 30,
         "source": "flow",
-        "contributors": {
-            "organization": {"mode": "preserve", "days": 90},
-            "space": {"mode": "review_required", "days": 14},
-            "flow": {"mode": "preserve", "days": 30},
-        },
+        "contributors": {"space": {"days": 90}, "flow": {"days": 30}},
     },
     "permissions": {
         "can_edit": True,

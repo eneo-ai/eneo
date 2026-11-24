@@ -48,7 +48,7 @@ export function makeFlow(overrides: Partial<FlowPublic> = {}): FlowPublic {
     run_history_retention: {
       state: "off",
       source: "none",
-      contributors: { organization: null, space: null, flow: null }
+      contributors: { space: null, flow: null }
     },
     permissions: flowPermissions(),
     ...overrides,

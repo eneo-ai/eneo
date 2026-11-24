@@ -34,35 +34,20 @@ def _compile(stmt: sa.Select[tuple[UUID]]) -> str:
     )
 
 
-def test_due_flow_run_history_purge_query_keeps_exact_policy_after_anchor_gate() -> (
-    None
-):
+def test_due_flow_run_history_purge_query_reads_the_space_time_as_the_cap() -> None:
     service = FlowRetentionRepository(cast(AsyncSession, object()))
     now = datetime(2026, 6, 10, 12, 0, tzinfo=timezone.utc)
 
     compiled = _compile(service._build_due_flow_run_history_purge_query(now=now))
 
-    assert (
-        compiled.count("coalesce(flow_runs.finished_at, flow_runs.created_at) <=") == 2
-    )
+    anchor = "coalesce(flow_runs.finished_at, flow_runs.created_at)"
+    assert f"{anchor} <= '2026-06-10 12:00:00+00:00' - make_interval" in compiled
+    assert f"{anchor} + make_interval(0, 0, 0, least(" in compiled
     assert "flow_runs.status IN ('completed', 'failed', 'cancelled')" in compiled
-    assert compiled.count("make_interval") >= 2
-    assert "JOIN tenants ON flow_runs.tenant_id = tenants.id" in compiled
-    effective_retention_sql = (
-        "coalesce(flows.flow_run_history_retention_days, "
-        "spaces.flow_run_history_retention_days, "
-        "tenants.flow_run_history_retention_days)"
-    )
-    assert f"make_interval(0, 0, 0, {effective_retention_sql})" in compiled
-    assert "spaces.data_retention_days" not in compiled
-    assert (
-        "coalesce(flows.flow_run_history_retention_mode, "
-        "spaces.flow_run_history_retention_mode, "
-        "tenants.flow_run_history_retention_mode) = 'preserve'" in compiled
-    )
-    assert "flow_classification_retention_policies" not in compiled
-    assert "minimum_retention" not in compiled
-    assert "no_purge" not in compiled
+    assert "spaces.data_retention_days" in compiled
+    assert "flows.flow_run_history_retention_days" in compiled
+    assert "tenants" not in compiled
+    assert "retention_mode" not in compiled
 
 
 @pytest.mark.asyncio

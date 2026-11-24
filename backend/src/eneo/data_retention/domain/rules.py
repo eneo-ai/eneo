@@ -17,6 +17,7 @@ from eneo.policy_levels import LevelSetting, PolicyLevel, Resolved, resolve
 class RetentionRule(StrEnum):
     CONVERSATION_HISTORY = "conversation_history"
     WIDGET_CONVERSATIONS = "widget_conversations"
+    FLOW_RUN_HISTORY = "flow_run_history"
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,9 +32,13 @@ class RuleTask:
 
 @dataclass(frozen=True, slots=True)
 class RuleExemption:
-    """Declared, and removed by no registered task, for this reason."""
+    """Declared, and removed by no registered task, for this reason. An
+    exemption that something else removes by a chosen period declares the
+    levels and caps of that period, like a task."""
 
     reason: str
+    levels: tuple[PolicyLevel, ...] = ()
+    bounding: frozenset[PolicyLevel] = frozenset()
 
 
 RETENTION_RULES: Mapping[str, RuleTask | RuleExemption] = MappingProxyType(
@@ -51,6 +56,21 @@ RETENTION_RULES: Mapping[str, RuleTask | RuleExemption] = MappingProxyType(
             "Each widget's own nightly job removes its conversations, held to "
             "the organisation's widget policy."
         ),
+        # Terminal Flow runs, by their end (or their creation). The space's
+        # time is the cap; a flow may choose a shorter one. The organisation
+        # is no level here: an empty space gives its flows no time, even when
+        # the organisation keeps a conversation time, so no conversation
+        # setting makes a run removable without a space administrator's
+        # choice. A personal space has no writer for its time, so its flows in
+        # practice have only the flow level; a value stored outside the API
+        # caps them, as it caps conversations. Nothing removes a run
+        # automatically yet.
+        RetentionRule.FLOW_RUN_HISTORY: RuleExemption(
+            "No task removes Flow run history; an administrator's explicit "
+            "purge selects runs by this period.",
+            levels=(PolicyLevel.SPACE, PolicyLevel.FLOW),
+            bounding=frozenset({PolicyLevel.SPACE, PolicyLevel.FLOW}),
+        ),
     }
 )
 
@@ -59,6 +79,15 @@ def rule_task(rule: RetentionRule) -> RuleTask:
     disposition = RETENTION_RULES[rule]
     if not isinstance(disposition, RuleTask):
         raise ValueError(f"No registered task removes {rule.value}.")
+    return disposition
+
+
+def rule_chain(rule: RetentionRule) -> RuleTask | RuleExemption:
+    """The rule's levels and caps, whether a task or an explicit action removes
+    by them. Refuses a rule that declares no period."""
+    disposition = RETENTION_RULES[rule]
+    if not disposition.levels:
+        raise ValueError(f"No period is chosen for {rule.value}.")
     return disposition
 
 
@@ -95,9 +124,9 @@ def resolve_period(
     rule: RetentionRule, chosen: Mapping[PolicyLevel, int | None]
 ) -> Resolved[int]:
     """The period in days that applies, and the level that chose it."""
-    task = rule_task(rule)
+    chain = rule_chain(rule)
     return resolve(
-        [LevelSetting(level, chosen.get(level)) for level in task.levels],
+        [LevelSetting(level, chosen.get(level)) for level in chain.levels],
         stricter=fewer_days,
-        bounding=task.bounding,
+        bounding=chain.bounding,
     )

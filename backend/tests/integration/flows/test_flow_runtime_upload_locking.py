@@ -82,7 +82,6 @@ async def _create_runtime_upload(
             owner_user_id=admin_user.id,
             published_version=None,
             metadata_json=None,
-            flow_run_history_retention_mode="preserve",
             flow_run_history_retention_days=30,
         )
         session.add(flow)

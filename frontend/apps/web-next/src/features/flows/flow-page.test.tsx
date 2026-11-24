@@ -1019,6 +1019,25 @@ describe("FlowPage", () => {
     expect(screen.getByRole("button", { name: "Publicera" })).toBeTruthy();
   });
 
+  it("offers a personal space's flow time only to someone who may edit the flow", () => {
+    const personal = makeSpace({ permissions: ["read"], overrides: { personal: true } });
+    const permissions: Permission[] = ["flows_view", "flows_manage", "retention_manage"];
+    const change = () => screen.queryByRole("button", { name: messages.flows_retention_change });
+    renderPage(
+      makeFlow({ steps, permissions: flowPermissions({ can_edit: false }) }),
+      permissions,
+      personal
+    );
+    expect(change()).toBeNull();
+    cleanup();
+    renderPage(makeFlow({ steps }), permissions, personal);
+    expect(change()).toBeTruthy();
+    cleanup();
+    // A published flow keeps its time dialog.
+    renderPage(makeFlow({ steps, published_version: 3 }), permissions, personal);
+    expect(change()).toBeTruthy();
+  });
+
   it("lists the flow's runs in their own tab and remembers it in the address", async () => {
     const { container } = renderPage(makeFlow({ steps, published_version: 3 }));
 

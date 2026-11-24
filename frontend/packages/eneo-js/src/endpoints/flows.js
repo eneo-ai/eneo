@@ -257,7 +257,8 @@ export function initFlows(client) {
     retention: {
       /**
        * Preview or explicitly purge a bounded batch of due Flow run history.
-       * Requires tenant-admin permission. Review-required runs remain stored.
+       * Requires the `retention_manage` permission and a signed-in person; an API
+       * key is refused. Runs under a legal hold remain stored.
        * @param {(import('../types/schema').components['schemas']['FlowRunHistoryPurgeRequest'] & ({scope?: 'organization'} | {scope: 'space', spaceId: string} | {scope: 'flow', flowId: string}))} [options]
        * @throws {EneoError}
        */

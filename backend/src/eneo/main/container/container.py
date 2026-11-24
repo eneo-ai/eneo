@@ -1148,6 +1148,8 @@ class Container(containers.DeclarativeContainer):
         user=user,
         repository=flow_run_retention_policy_repo,
         audit_service=audit_service,
+        space_repo=space_repo,
+        actor_manager=actor_manager,
     )
     flow_retention_hold_service = providers.Factory(
         FlowRetentionHoldService,
@@ -1372,6 +1374,7 @@ class Container(containers.DeclarativeContainer):
         security_classification_service=security_classification_service,
         icon_repo=icon_repo,
         api_key_scope_revoker=api_key_scope_revoker,
+        audit_service=audit_service,
     )
     skill_service = providers.Factory(
         SkillService,

@@ -57,7 +57,6 @@ from eneo.main.models import (
     GeneralError,
     ModelId,
     PaginatedResponse,
-    is_provided,
 )
 from eneo.roles.permissions import Permission
 from eneo.server import protocol
@@ -300,9 +299,14 @@ async def get_space(
     status_code=200,
     description=(
         "Update a space's settings (name, description, models, MCP servers, "
-        "security classification, data retention)."
+        "security classification, data retention). The space's time is also the "
+        "cap on its Flows' run history: in a shared space, changing it needs the "
+        "`retention_manage` permission and a signed-in person (an API key gets "
+        "403 `retention_person_required`), and it waits for an open Flow history "
+        "deletion (409 `flow_retention_lock_busy` when that takes too long). "
+        "Sending the stored value is no change."
     ),
-    responses=responses.get_responses([400, 403, 404]),
+    responses=responses.get_responses([400, 403, 404, 409]),
 )
 @endpoint_access(
     authentication=Authentication.USER,
@@ -312,7 +316,12 @@ async def get_space(
 async def update_space(
     id: UUID,
     update_space_req: UpdateSpaceRequest,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    # A change of the space's time writes a required audit row; it must
+    # commit before the 200 is sent, not after.
+    container: Annotated[
+        Container,
+        Depends(get_container(with_user=True, transaction_scope="function")),
+    ],
 ):
     service = container.space_service()
     current_user = container.user()
@@ -346,7 +355,7 @@ async def update_space(
     if "icon_id" in original_request:
         icon_id = update_space_req.icon_id
 
-    space = await service.update_space(
+    space, retention_change = await service.update_space(
         id=id,
         name=update_space_req.name,
         description=update_space_req.description,
@@ -378,14 +387,10 @@ async def update_space(
             "old": old_space.description,
             "new": update_space_req.description,
         }
-    if (
-        is_provided(data_retention_days)
-        and data_retention_days != old_space.data_retention_days
-    ):
-        changes["data_retention_days"] = {
-            "old": old_space.data_retention_days,
-            "new": data_retention_days,
-        }
+    # The time's change as decided under the lock, not from the read above:
+    # another change may have committed in between.
+    if retention_change is not None:
+        changes["data_retention_days"] = retention_change
 
     # Track model-link changes as SET comparisons (avoids false positives from
     # ordering) over every linked model, whether a model list or a

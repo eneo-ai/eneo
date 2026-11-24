@@ -20,7 +20,9 @@ from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 from eneo.data_retention.infrastructure import gallring_lock
 from eneo.database.tables.audit_log_table import AuditLog
 from eneo.database.tables.flow_tables import (
+    FlowOutboxDeliveryStatus,
     FlowRetentionHolds,
+    FlowRunAuditOutbox,
     FlowRuns,
     Flows,
     FlowVersions,
@@ -30,10 +32,7 @@ from eneo.database.tables.spaces_table import Spaces, SpacesUsers
 from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.users_table import users_roles_table
 from eneo.flows.domain.flow_retention_hold import FlowRetentionHoldCreateRequest
-from eneo.flows.domain.flow_run_retention_policy import (
-    FlowRunRetentionMode,
-    FlowRunRetentionPolicy,
-)
+from eneo.flows.domain.flow_run_retention_policy import FlowRunRetentionPolicy
 from eneo.flows.infrastructure import flow_retention_repo
 from eneo.flows.infrastructure.flow_retention_repo import FlowRetentionRepository
 from eneo.flows.infrastructure.flow_run_history_purge_repo import (
@@ -100,7 +99,6 @@ async def history(db_container, admin_user):
                 name=f"Hold {label} {uuid4()}",
                 tenant_id=admin_user.tenant_id,
                 space_id=space.id,
-                flow_run_history_retention_mode="preserve",
                 flow_run_history_retention_days=1,
             )
             session.add(flow)
@@ -409,14 +407,13 @@ async def test_policy_replacement_waits_for_an_open_purge(
 ):
     flow_id = history["flow_id"]
     await _add_run(db_container, admin_user, flow_id)
+    await _make_space_admin(db_container, history["space_id"], admin_user.id)
 
     async def replace_policy():
         async with db_container() as changing:
             return await changing.flow_run_retention_policy_service().replace_flow(
                 flow_id=flow_id,
-                policy=FlowRunRetentionPolicy(
-                    mode=FlowRunRetentionMode.REVIEW_REQUIRED, days=30
-                ),
+                policy=FlowRunRetentionPolicy(days=30),
             )
 
     async with db_container() as purging:
@@ -431,9 +428,7 @@ async def test_policy_replacement_waits_for_an_open_purge(
             replacing.cancel()
             raise
     changed = await replacing
-    assert changed.local_policy == FlowRunRetentionPolicy(
-        mode=FlowRunRetentionMode.REVIEW_REQUIRED, days=30
-    )
+    assert changed.local_policy == FlowRunRetentionPolicy(days=30)
 
 
 async def test_a_busy_retention_lock_is_refused_typed_and_writes_nothing(
@@ -922,9 +917,26 @@ async def test_extending_a_review_needs_a_later_date_and_a_reason_and_is_audited
         ]
 
 
+async def _make_space_admin(db_container, space_id: UUID, user_id: UUID) -> None:
+    async with db_container() as container:
+        container.session().add(
+            SpacesUsers(space_id=space_id, user_id=user_id, role="admin")
+        )
+
+
 async def _token_with_permissions(
     db_container, admin_user, user_factory, permissions: list[str]
 ) -> str:
+    return (
+        await _user_with_permissions(
+            db_container, admin_user, user_factory, permissions
+        )
+    )[1]
+
+
+async def _user_with_permissions(
+    db_container, admin_user, user_factory, permissions: list[str]
+) -> tuple[UUID, str]:
     async with db_container() as container:
         session = container.session()
         user = await user_factory(session, tenant_id=admin_user.tenant_id)
@@ -941,7 +953,7 @@ async def _token_with_permissions(
         user_id = user.id
     async with db_container() as container:
         loaded = await container.user_repo().get_user_by_id(user_id)
-        return container.auth_service().create_access_token_for_user(loaded)
+        return user_id, container.auth_service().create_access_token_for_user(loaded)
 
 
 async def test_rules_and_holds_need_their_own_retention_permission(
@@ -953,9 +965,8 @@ async def test_rules_and_holds_need_their_own_retention_permission(
         for perms in (["retention_holds"], ["retention_manage"], ["admin"])
     ]
     rule_path = f"/api/v1/settings/flow-run-retention-policy/flows/{flow_id}"
-    rule = {"policy": {"mode": "preserve", "days": 30}}
+    rule = {"policy": {"days": 30}}
     limit_path = "/api/v1/settings/flow-run-retention-policy/hold-review-limit"
-    queue_path = "/api/v1/settings/flow-run-retention-policy/review-queue"
     hold_body = {
         "flow_id": str(flow_id),
         "reason": "Request",
@@ -983,16 +994,17 @@ async def test_rules_and_holds_need_their_own_retention_permission(
         await client.get(HOLDS, headers=bearer(plain_admin)),
         await client.put(rule_path, json=rule, headers=bearer(plain_admin)),
         await client.post(HOLDS, json=hold_body, headers=bearer(plain_admin)),
-        await client.get(queue_path, headers=bearer(holds_only)),
         await client.put(limit_path, json={"days": 30}, headers=bearer(holds_only)),
         await client.put(limit_path, json={"days": 30}, headers=bearer(plain_admin)),
     ):
         assert refused.status_code == 403, refused.text
         assert refused.json()["code"] == "retention_permission_required"
-    changed = await client.put(rule_path, json=rule, headers=bearer(rules_only))
-    assert changed.status_code == 200, changed.text
+    # The permission alone does not reach a Flow in a space where the person
+    # has no role: that is the space admin's decision.
+    no_role = await client.put(rule_path, json=rule, headers=bearer(rules_only))
+    assert no_role.status_code == 403, no_role.text
+    assert no_role.json()["code"] == "forbidden_action"
     assert (await client.get(HOLDS, headers=bearer(rules_only))).status_code == 200
-    assert (await client.get(queue_path, headers=bearer(rules_only))).status_code == 200
 
     limited = await client.put(
         limit_path, json={"days": 30}, headers=bearer(rules_only)
@@ -1029,6 +1041,126 @@ async def test_rules_and_holds_need_their_own_retention_permission(
         ] == [(365, 30), (30, 365)]
 
 
+async def test_a_flow_time_needs_the_space_admin_or_the_personal_owner(
+    client, admin_user, db_container, history, user_factory, patch_auth_service_jwt
+):
+    """Mutants: the permission alone reaches any Flow; a space editor may set it;
+    a personal space's owner who may edit Flows is refused on their own Flow;
+    an owner who may not edit Flows, or a tenant admin in someone else's
+    personal space, may set it."""
+    flow_id, space_id = history["flow_id"], history["space_id"]
+    path = f"/api/v1/settings/flow-run-retention-policy/flows/{flow_id}"
+    (no_role, no_role_token), (editor, editor_token), (admin, admin_token) = [
+        await _user_with_permissions(
+            db_container, admin_user, user_factory, ["retention_manage"]
+        )
+        for _ in range(3)
+    ]
+    # In a personal space a Flow's time follows the right to edit the Flow
+    # there, not the right to edit its assistants or apps.
+    owner, owner_token = await _user_with_permissions(
+        db_container, admin_user, user_factory, ["retention_manage", "flows_manage"]
+    )
+    assistants_owner, assistants_owner_token = await _user_with_permissions(
+        db_container,
+        admin_user,
+        user_factory,
+        ["retention_manage", "assistants", "flows_view"],
+    )
+    # Both permissions, so that only the space rule can refuse.
+    _, tenant_admin_token = await _user_with_permissions(
+        db_container,
+        admin_user,
+        user_factory,
+        ["admin", "retention_manage", "flows_manage"],
+    )
+    async with db_container() as container:
+        session = container.session()
+        session.add(SpacesUsers(space_id=space_id, user_id=editor, role="editor"))
+        session.add(SpacesUsers(space_id=space_id, user_id=admin, role="admin"))
+        personal_flow_ids = []
+        for user_id in (owner, assistants_owner):
+            personal = Spaces(
+                name=f"Personal {uuid4()}",
+                tenant_id=admin_user.tenant_id,
+                user_id=user_id,
+            )
+            session.add(personal)
+            await session.flush()
+            personal_flow = Flows(
+                name=f"Own {uuid4()}",
+                tenant_id=admin_user.tenant_id,
+                space_id=personal.id,
+            )
+            session.add(personal_flow)
+            await session.flush()
+            personal_flow_ids.append(personal_flow.id)
+    own_flow_id, assistants_flow_id = personal_flow_ids
+
+    async def put(token: str, path: str = path, days: int = 30):
+        return await client.put(
+            path,
+            json={"policy": {"days": days}},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    async def stored(flow: UUID) -> tuple[int | None, int]:
+        """The Flow's time and its number of audit rows."""
+        async with db_container() as container:
+            session = container.session()
+            days = await session.scalar(
+                sa.select(Flows.flow_run_history_retention_days).where(Flows.id == flow)
+            )
+            rows = await session.scalar(
+                sa.select(sa.func.count(AuditLog.id)).where(
+                    AuditLog.action == "flow_run_retention_policy_changed",
+                    AuditLog.log_metadata["scope_id"].astext == str(flow),
+                )
+            )
+            return days, rows
+
+    def assert_refused(response) -> None:
+        assert response.status_code == 403, response.text
+        assert response.json()["code"] == "forbidden_action"
+
+    async def may_edit(token: str, flow: UUID) -> bool:
+        """What the Flow API tells the page: the right that gates the dialog."""
+        read = await client.get(
+            f"/api/v1/flows/{flow}/", headers={"Authorization": f"Bearer {token}"}
+        )
+        assert read.status_code == 200, read.text
+        return read.json()["permissions"]["can_edit"]
+
+    for token in (no_role_token, editor_token):
+        assert_refused(await put(token))
+    assert await stored(flow_id) == (1, 0)
+
+    allowed = await put(admin_token)
+    assert allowed.status_code == 200, allowed.text
+    assert allowed.json()["local_policy"] == {"days": 30}
+
+    own_path = f"/api/v1/settings/flow-run-retention-policy/flows/{own_flow_id}"
+    assert_refused(await put(no_role_token, own_path))
+    own = await put(owner_token, own_path)
+    assert own.status_code == 200, own.text
+    assert own.json()["local_policy"] == {"days": 30}
+    assert await stored(own_flow_id) == (30, 1)
+    # The page offers the dialog exactly to those the PUT lets through.
+    assert await may_edit(owner_token, own_flow_id) == (own.status_code == 200)
+    assert_refused(await put(tenant_admin_token, own_path, days=7))
+    assert await stored(own_flow_id) == (30, 1)
+
+    assistants_path = (
+        f"/api/v1/settings/flow-run-retention-policy/flows/{assistants_flow_id}"
+    )
+    refused = await put(assistants_owner_token, assistants_path, days=7)
+    assert_refused(refused)
+    assert await stored(assistants_flow_id) == (None, 0)
+    assert await may_edit(assistants_owner_token, assistants_flow_id) == (
+        refused.status_code == 200
+    )
+
+
 async def test_an_api_key_never_changes_or_stops_retention(
     client, admin_user, db_container, history
 ):
@@ -1052,7 +1184,7 @@ async def test_an_api_key_never_changes_or_stops_retention(
         ),
         await client.put(
             f"/api/v1/settings/flow-run-retention-policy/flows/{flow_id}",
-            json={"policy": {"mode": "preserve", "days": 30}},
+            json={"policy": {"days": 30}},
             headers=headers,
         ),
         await client.get(HOLDS, headers=headers),
@@ -1125,12 +1257,29 @@ async def test_purge_preview_counts_held_runs_apart_from_real_blockers(
     flow_id, sibling_id = history["flow_id"], history["sibling_id"]
     for _ in range(2):
         await _add_run(db_container, admin_user, flow_id)
-    await _add_run(db_container, admin_user, sibling_id)
+    sibling_run_id = await _add_run(db_container, admin_user, sibling_id)
     async with db_container() as container:
-        await container.session().execute(
-            sa.update(Flows)
-            .where(Flows.id == sibling_id)
-            .values(flow_run_history_retention_mode="review_required")
+        session = container.session()
+        sibling_run = await session.get(FlowRuns, sibling_run_id)
+        assert sibling_run is not None
+        session.add(
+            FlowRunAuditOutbox(
+                tenant_id=admin_user.tenant_id,
+                flow_id=sibling_id,
+                flow_run_id=sibling_run_id,
+                run_revision=sibling_run.revision,
+                description="flow_run_completed:executor_completed",
+                action="flow_run_completed",
+                entity_type="flow_run",
+                entity_id=sibling_run_id,
+                actor_id=admin_user.id,
+                actor_type="user",
+                source="executor_completed",
+                target_status="completed",
+                delivery_status=FlowOutboxDeliveryStatus.PENDING.value,
+                delivery_attempts=0,
+                next_delivery_at=datetime.now(timezone.utc),
+            )
         )
     await _place(client, admin_token, flow_id=flow_id)
     monkeypatch.setattr(
@@ -1145,9 +1294,8 @@ async def test_purge_preview_counts_held_runs_apart_from_real_blockers(
     assert response.status_code == 200, response.text
     assert response.json()["candidate_count"] == 0
     assert response.json()["blocked"] == {
-        "undelivered_audit": 0,
+        "undelivered_audit": 1,
         "unresolved_webhook": 0,
-        "review_required": 1,
         "legal_hold": 1,
         "counted_runs": 1,
         "complete": False,

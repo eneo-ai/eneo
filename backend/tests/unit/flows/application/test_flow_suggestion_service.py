@@ -67,9 +67,7 @@ def _flow(steps: list[FlowStep], **fields: Any) -> Flow:
             "created_by_user_id": uuid4(),
             "owner_user_id": uuid4(),
             "run_history_retention": FlowRunRetentionOff(
-                contributors=FlowRunRetentionContributors(
-                    organization=None, space=None, flow=None
-                )
+                contributors=FlowRunRetentionContributors(space=None, flow=None)
             ),
             "draft_revision": 3,
             "created_at": now,

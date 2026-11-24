@@ -1,6 +1,6 @@
 ---
 title: Gallring
-translationSource: guides/data-retention.mdx@99fd2998704c
+translationSource: guides/data-retention.mdx@efcaad856771
 ---
 
 # Gallring
@@ -88,8 +88,9 @@ En borttagen konversation kommer aldrig tillbaka.
 
 Varje tid är ett helt antal dagar.
 
-**En yta** (den som får redigera ytan; organisationsytan har ingen
-gallringsinställning):
+**En yta** (den som får redigera ytan och vars roll har `retention_manage`,
+inloggad: en API-nyckel nekas, eftersom tiden också är taket för ytans Flöden;
+organisationsytan har ingen gallringsinställning):
 
 - **Svelte-appen:** **Delat**, ytan, **Inställningar**, **Säkerhet &
   Integritet**, **Gallring av konversationshistorik**. Slå på **Åsidosätt
@@ -175,35 +176,30 @@ rader; en backup med `pg_dump` innehåller bara befintliga rader.
 ### Körhistorik för Flöden [#flow-run-history]
 
 Gallringen tar inte bort körhistorik och steghistorik för Flöden i den här
-versionen. Körhistoriken har en egen policy, skild från konversationstiderna
-ovan. En organisationsadministratör sätter den på organisationen, en yta eller
-ett enskilt Flöde, och den mest specifika fullständiga policyn gäller: en nivå
-ärver antingen sin överordnades policy eller ersätter både läge och dagar.
+versionen. En ytas tid ovan är också taket för körhistoriken i varje Flöde på
+ytan, och ett Flöde kan välja en kortare egen tid, aldrig en längre.
+Organisationen sätter ingen tid för Flöden. En personlig ytas tid kan inte
+ändras, så dess Flöden använder bara sin egen tid.
 
-| Nivå | Policy | Resultat |
+| Nivå | Tid | Resultat |
 | --- | --- | --- |
-| Organisation | Manuell rensning tillåten efter 30 dagar | Förval för Flöden utan en mer specifik policy |
-| Ytan Upphandling | Granskning före rensning efter 60 dagar | Varje Flöde på ytan använder 60 dagar om det inte har en egen policy |
-| Flödet Leverantörsbedömning | Manuell rensning tillåten efter 90 dagar | Bara det här Flödet använder 90 dagar |
+| Ytan Upphandling | 60 dagar | Varje Flöde på ytan använder 60 dagar om det inte har en kortare tid |
+| Flödet Leverantörsbedömning | 30 dagar | Bara det här Flödet använder 30 dagar |
+| Ett Flöde som ber om 90 dagar | Nekas | Ett Flöde kan inte spara körningar längre än sin yta |
 
-- **Manuell rensning tillåten (`preserve`):** efter åldersgränsen får en
-  administratör ta med historiken i en rensning som begärs separat.
-- **Granskning före rensning (`review_required`):** efter gränsen visas
-  körningen i den skrivskyddade granskningskön, och en rensning kräver att en
-  människa uttryckligen godkänner den.
-
-Inget av lägena schemalägger eller utför en borttagning. Utan policy på någon
-nivå har körhistoriken ingen åldersgräns och sparas. Att spara eller rensa en
-policy skriver granskningshändelsen `flow_run_retention_policy_changed` med
-policyn, inte körningens innehåll, och tar inte bort, maskerar eller godkänner
-något. Uppladdningar till Flödeskörningar och felsökningsunderlag för Flöden
-tas inte heller bort enligt schema: städningen av oanvända uppladdningar
-behåller en fil som en uppladdning till en Flödeskörning hänvisar till. En
-chatt som redigerar ett Flöde är en vanlig konversation och följer
-konversationstiderna ovan.
+Efter tiden får en administratör med `retention_manage` ta med historiken i en
+rensning som begärs separat. Inget schemalägger eller utför en borttagning.
+Utan tid på ytan eller Flödet har körhistoriken ingen åldersgräns och sparas.
+Att ändra ett Flödes tid, eller en delad ytas tid, skriver granskningshändelsen
+`flow_run_retention_policy_changed` med den tidigare och den nya tiden, inte
+körningens innehåll, och tar inte bort eller maskerar något. Uppladdningar till
+Flödeskörningar och felsökningsunderlag för Flöden tas inte heller bort enligt
+schema: städningen av oanvända uppladdningar behåller en fil som en
+uppladdning till en Flödeskörning hänvisar till. En chatt som redigerar ett
+Flöde är en vanlig konversation och följer konversationstiderna ovan.
 
 [Flow run-history retention](/guides/flows/retention-policy) (på engelska)
-beskriver vyerna, API:t och granskningskön.
+beskriver vyerna och API:t.
 
 ### När borttagningen sker [#when-removal-happens]
 

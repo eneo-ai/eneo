@@ -57,16 +57,15 @@ Do not claim evidence proves which retrieved passage influenced a model. It reco
 
 ## Retention and deletion
 
-Flow retention policy is opt-in and hierarchical. It records when history or file content becomes eligible for an administrator-reviewed purge. It does not itself delete data.
+Flow run-history retention is opt-in. The space's time caps every Flow in the space, and a Flow may set a shorter time; a longer one is refused with `400` and code 9086 (`retention_exceeds_space`), with `context.cap_days`. A time records when history becomes eligible for an explicit administrator purge. It does not itself delete data.
 
 For this release:
 
 - no scheduled Flow-owned task automatically purges run history, step history, generated files, or evidence;
-- no public admin purge endpoint is exposed;
-- an absent policy means keep data until an administrator deliberately configures retention;
-- a `review_required` policy still requires a future explicit purge action;
+- the only purge is an explicit administrator call with `retention_manage`, never an API key;
+- no time on the space or the Flow means keep data until an administrator deliberately sets one;
 - metadata can outlive file bytes, so clients must handle `availability: content_purged` and HTTP `410` even when viewing retained run records.
 
-Do not tell users that a retention duration guarantees deletion on that date. Describe it as eligibility under the effective organization, space, or Flow policy. Actual purge tooling and approval remain operator concerns outside this runtime consumer skill.
+Do not tell users that a retention duration guarantees deletion on that date. Describe it as eligibility under the effective space or Flow time. Actual purge tooling and approval remain operator concerns outside this runtime consumer skill.
 
 Runtime uploads abandoned before a run are a separate concern: the consumer should delete them explicitly. Once a file is attached to a run, retention and deletion are server-owned.

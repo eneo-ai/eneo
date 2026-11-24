@@ -24,7 +24,7 @@ Flow events use different guarantees based on what could be exposed or changed:
 
 | Guarantee                         | Used for                                                                                                                                                          | What happens if audit storage is unavailable                                                                                                                      |
 | --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Required in the state transaction | Run creation and terminal/review transitions, redispatch, runtime input upload or deletion, run-history policy changes, package import, and future purge receipts | The protected database change does not commit.                                                                                                                    |
+| Required in the state transaction | Run creation and terminal/review transitions, redispatch, runtime input upload or deletion, run-history policy changes, package import, and purge receipts        | The protected database change does not commit.                                                                                                                    |
 | Required before access            | Run input/result detail, active review payloads, evidence and provider-call views or exports, template/run-file download URLs, and Flow package export            | Eneo returns `503` and does not return protected content, package bytes, or a signed URL.                                                                         |
 | Configurable and asynchronous     | Routine Flow authoring and most tenant Flow-setting changes                                                                                                       | The action can succeed when its configured audit event is disabled or the audit queue is temporarily unavailable.                                                 |
 | Operational, best effort          | Executed Flow HTTP and transcription audit summaries                                                                                                              | Runtime step/attempt state, webhook delivery state, and provider-call evidence remain the durable records. The additional admin audit summary may be unavailable. |
@@ -122,7 +122,7 @@ Conversation data (questions and app runs) has its own retention hierarchy, set 
 
 A flow authoring chat is an ordinary conversation and follows the same Space/conversation retention. This is separate from Flow run-history policy.
 
-Flow run and step history is never deleted by that scheduled worker. Its dedicated Organization → Space → Flow policy only sets eligibility or a human-review queue. See [Data retention and deletion](/guides/data-retention).
+Flow run and step history is never deleted by that scheduled worker. The space's time, which caps every Flow in the space, and a Flow's shorter time do not authorize scheduled deletion of Flow history and only make it eligible for an explicit purge. See [Data retention and deletion](/guides/data-retention).
 
 ## Exporting audit logs
 

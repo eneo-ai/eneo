@@ -179,13 +179,8 @@ GET /api/v1/settings/flow-mapped-execution-policy
 GET /api/v1/settings/flow-rag-evidence-policy
 GET /api/v1/settings/flow-retention-holds
 GET /api/v1/settings/flow-retention-policy
-GET /api/v1/settings/flow-run-retention-policy
 GET /api/v1/settings/flow-run-retention-policy/flows/{flow_id}
-GET /api/v1/settings/flow-run-retention-policy/flows/{flow_id}/review-queue
 GET /api/v1/settings/flow-run-retention-policy/hold-review-limit
-GET /api/v1/settings/flow-run-retention-policy/review-queue
-GET /api/v1/settings/flow-run-retention-policy/spaces/{space_id}
-GET /api/v1/settings/flow-run-retention-policy/spaces/{space_id}/review-queue
 GET /api/v1/settings/flow-run-retention-policy/targets/spaces
 GET /api/v1/settings/flow-run-retention-policy/targets/spaces/{space_id}/flows
 GET /api/v1/settings/flow-runtime-policy

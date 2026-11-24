@@ -25,7 +25,6 @@ from eneo.database.tables.flow_tables import (
 )
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.tenant_table import Tenants
-from eneo.flows.domain.flow_run_retention_policy import FlowRunRetentionMode
 from eneo.flows.enums import TERMINAL_FLOW_RUN_STATUS_VALUES
 from eneo.flows.flow_retention_policy import resolve_flow_retention_policy
 from eneo.flows.infrastructure.flow_retention_hold_repo import flow_run_held_predicate
@@ -38,9 +37,9 @@ from eneo.flows.infrastructure.flow_run_history_purge_repo import (
     flow_run_unresolved_webhook_exists,
 )
 from eneo.flows.infrastructure.flow_run_retention_policy_query import (
-    EffectiveFlowRunRetentionPolicySql,
-    effective_flow_run_retention_policy_sql,
     flow_run_history_due_predicates,
+    flow_run_history_period_sql,
+    flow_run_retention_anchor,
 )
 from eneo.flows.runtime.live_transcription.repository import LiveTranscriptRepository
 
@@ -66,7 +65,6 @@ class _FlowRuntimeRetentionAction:
 class FlowRunHistoryPurgeBlockedCounts:
     skipped_undelivered_audit: int = 0
     skipped_unresolved_webhook: int = 0
-    skipped_review_required: int = 0
     skipped_legal_hold: int = 0
     counted_runs: int = 0
     complete: bool = True
@@ -189,15 +187,13 @@ class FlowRetentionRepository:
         space_id: UUID | None = None,
         flow_id: UUID | None = None,
     ) -> FlowRunHistoryPurgeBlockedCounts:
-        _, preserve = self._flow_run_history_purge_eligibility_predicates()
-        anchor = self._flow_run_history_retention_anchor()
+        anchor = flow_run_retention_anchor()
         held = flow_run_held_predicate(run_id=FlowRuns.id, flow_id=FlowRuns.flow_id)
         due = self._build_due_flow_run_history_purge_query(
             now=now,
             tenant_id=tenant_id,
             space_id=space_id,
             flow_id=flow_id,
-            include_blocked=True,
         )
         # Held runs are counted apart, bounded like the window, so they never
         # push runs with a real blocker out of it.
@@ -213,7 +209,7 @@ class FlowRetentionRepository:
         )
         due_runs = (
             due.where(sa.not_(held))
-            .add_columns(preserve.label("preserve"), anchor.label("anchor"))
+            .add_columns(anchor.label("anchor"))
             .order_by(anchor, FlowRuns.id)
             .limit(FLOW_RUN_HISTORY_PURGE_DIAGNOSTIC_WINDOW + 1)
             .subquery()
@@ -224,7 +220,6 @@ class FlowRetentionRepository:
         rows = (
             await self.session.execute(
                 sa.select(
-                    due_runs.c.preserve,
                     undelivered_audit_exists,
                     unresolved_webhook_exists,
                 )
@@ -233,11 +228,9 @@ class FlowRetentionRepository:
             )
         ).all()
         window = rows[:FLOW_RUN_HISTORY_PURGE_DIAGNOSTIC_WINDOW]
-        audit_count = webhook_count = review_count = 0
-        for preserves_history, undelivered_audit, unresolved_webhook in window:
-            if not preserves_history:
-                review_count += 1
-            elif undelivered_audit:
+        audit_count = webhook_count = 0
+        for undelivered_audit, unresolved_webhook in window:
+            if undelivered_audit:
                 audit_count += 1
             elif unresolved_webhook:
                 webhook_count += 1
@@ -245,7 +238,6 @@ class FlowRetentionRepository:
         return FlowRunHistoryPurgeBlockedCounts(
             skipped_undelivered_audit=audit_count,
             skipped_unresolved_webhook=webhook_count,
-            skipped_review_required=review_count,
             skipped_legal_hold=min(
                 held_count, FLOW_RUN_HISTORY_PURGE_DIAGNOSTIC_WINDOW
             ),
@@ -337,7 +329,7 @@ class FlowRetentionRepository:
         space_id: UUID | None = None,
         flow_id: UUID | None = None,
     ) -> sa.Select[tuple[UUID]]:
-        retention_anchor = self._flow_run_history_retention_anchor()
+        retention_anchor = flow_run_retention_anchor()
         return (
             self._build_due_flow_run_history_purge_query(
                 now=now, tenant_id=tenant_id, space_id=space_id, flow_id=flow_id
@@ -355,10 +347,6 @@ class FlowRetentionRepository:
             .limit(limit)
         )
 
-    @staticmethod
-    def _flow_run_history_retention_anchor() -> Any:
-        return sa.func.coalesce(FlowRuns.finished_at, FlowRuns.created_at)
-
     def _build_due_flow_run_history_purge_query(
         self,
         *,
@@ -366,11 +354,9 @@ class FlowRetentionRepository:
         tenant_id: UUID | None = None,
         space_id: UUID | None = None,
         flow_id: UUID | None = None,
-        include_blocked: bool = False,
     ) -> sa.Select[tuple[UUID]]:
-        anchor = self._flow_run_history_retention_anchor()
-        effective_policy = self._effective_flow_run_history_policy_sql()
-        terminal, preserve = self._flow_run_history_purge_eligibility_predicates()
+        anchor = flow_run_retention_anchor()
+        period = flow_run_history_period_sql()
         stmt = (
             sa.select(FlowRuns.id.label("run_id"))
             .join(
@@ -385,16 +371,13 @@ class FlowRetentionRepository:
                     Flows.space_id == Spaces.id, Flows.tenant_id == Spaces.tenant_id
                 ),
             )
-            .join(Tenants, FlowRuns.tenant_id == Tenants.id)
             .where(
-                terminal,
+                FlowRuns.status.in_(TERMINAL_FLOW_RUN_STATUS_VALUES),
                 *flow_run_history_due_predicates(
-                    now=now, anchor=anchor, effective_days=effective_policy.days
+                    now=now, anchor=anchor, effective_days=period.days
                 ),
             )
         )
-        if not include_blocked:
-            stmt = stmt.where(preserve)
         if tenant_id is not None:
             stmt = stmt.where(FlowRuns.tenant_id == tenant_id)
         if space_id is not None:
@@ -402,30 +385,6 @@ class FlowRetentionRepository:
         if flow_id is not None:
             stmt = stmt.where(FlowRuns.flow_id == flow_id)
         return stmt
-
-    def _flow_run_history_purge_eligibility_predicates(
-        self,
-    ) -> tuple[sa.ColumnElement[bool], sa.ColumnElement[bool]]:
-        return (
-            FlowRuns.status.in_(TERMINAL_FLOW_RUN_STATUS_VALUES),
-            self._effective_flow_run_history_policy_sql().mode
-            == FlowRunRetentionMode.PRESERVE.value,
-        )
-
-    @staticmethod
-    def _effective_flow_run_history_policy_sql() -> EffectiveFlowRunRetentionPolicySql:
-        return effective_flow_run_retention_policy_sql(
-            organization_mode=(
-                Tenants.flow_run_history_retention_mode.__clause_element__()
-            ),
-            organization_days=(
-                Tenants.flow_run_history_retention_days.__clause_element__()
-            ),
-            space_mode=(Spaces.flow_run_history_retention_mode.__clause_element__()),
-            space_days=Spaces.flow_run_history_retention_days.__clause_element__(),
-            flow_mode=Flows.flow_run_history_retention_mode.__clause_element__(),
-            flow_days=Flows.flow_run_history_retention_days.__clause_element__(),
-        )
 
     async def redact_old_flow_debug_evidence(
         self, *, now: datetime
@@ -491,7 +450,7 @@ class FlowRetentionRepository:
         return total_counts
 
     async def _iter_flow_debug_retention_rows(self, *, older_than: datetime):
-        anchor = sa.func.coalesce(FlowRuns.finished_at, FlowRuns.created_at)
+        anchor = flow_run_retention_anchor()
         last_run_id: UUID | None = None
         while True:
             stmt = (

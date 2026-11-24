@@ -36,7 +36,6 @@ from eneo.flow_packages.domain.flow_package_import_record import (
 from eneo.flows.domain.flow_retention_hold import (
     MAX_FLOW_RETENTION_HOLD_REASON_LENGTH,
 )
-from eneo.flows.domain.flow_run_retention_policy import FLOW_RUN_RETENTION_MODE_VALUES
 from eneo.flows.domain.provider_call import (
     PROVIDER_CALL_KIND_VALUES,
     PROVIDER_CALL_REASON_VALUES,
@@ -248,9 +247,6 @@ class Flows(BasePublic):
     metadata_json: Mapped[Optional[dict[str, Any]]] = mapped_column(
         JSONB, nullable=True
     )
-    flow_run_history_retention_mode: Mapped[Optional[str]] = mapped_column(
-        sa.String(32), nullable=True
-    )
     flow_run_history_retention_days: Mapped[Optional[int]] = mapped_column(
         nullable=True
     )
@@ -264,19 +260,6 @@ class Flows(BasePublic):
         CheckConstraint(
             FLOW_RUN_HISTORY_RETENTION_DAYS_RANGE_CHECK,
             name="ck_flows_flow_run_history_retention_days_range",
-        ),
-        CheckConstraint(
-            "(flow_run_history_retention_mode IS NULL AND "
-            "flow_run_history_retention_days IS NULL) OR "
-            "(flow_run_history_retention_mode IS NOT NULL AND "
-            "flow_run_history_retention_days IS NOT NULL)",
-            name="ck_flows_flow_run_history_retention_complete",
-        ),
-        CheckConstraint(
-            "flow_run_history_retention_mode IS NULL OR "
-            "flow_run_history_retention_mode IN "
-            f"({','.join(repr(value) for value in FLOW_RUN_RETENTION_MODE_VALUES)})",
-            name="ck_flows_flow_run_history_retention_mode",
         ),
         UniqueConstraint("id", "tenant_id", name="uq_flows_id_tenant_id"),
         UniqueConstraint(

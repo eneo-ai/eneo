@@ -824,14 +824,12 @@ A sensitive flow has no export gate of its own: with `evidence_policy.allow_expo
 
 Flow retention settings define eligibility, not authorization to delete:
 
-- Run-history policy resolves the first complete `{mode, days}` pair in Flow → Space → Organization order. `days` accepts `1..2555`; `mode` is `preserve` or `review_required`; no policy means there is no age threshold.
-- A Space or Flow either inherits its complete parent policy or replaces the complete pair. Parent values are defaults, not maximums, so one Flow can retain history longer than its Space.
+- Run history follows the space's time (`data_retention_days`, the time its conversations use), which caps every Flow in the space. A Flow may set a shorter time of its own (`days` in `1..2555`); a longer one is refused with code 9086. No time at either level means there is no age threshold.
 - Tenant `flow_settings.retention_policy.run_debug_evidence_days` independently defines when debug evidence can become eligible, and `flow_runtime_upload_abandonment_days` does the same for unbound runtime uploads.
-- `review_required` exposes matching terminal runs through a bounded, read-only queue that omits inputs and outputs. Reading it has no side effects.
-- Saving any policy never deletes, approves, schedules, or redacts Flow data. The daily shared retention worker does not mutate Flow-owned data.
-- The current settings surface has no Flow run-history purge action. A future purge must preview the exact scope, require confirmation and a reason, execute in bounded tenant-scoped batches, respect audit/webhook blockers, and leave an immutable audit receipt.
+- Saving any time never deletes, schedules, or redacts Flow data. The daily shared retention worker does not mutate Flow-owned data.
+- No screen offers a Flow run-history purge. The explicit purge is an API call with `retention_manage`: it previews with `dry_run`, runs in bounded tenant-scoped batches, respects legal holds and audit/webhook blockers, and leaves an audit receipt.
 
-Eligible Flow data remains stored until that separate purge workflow exists and an administrator explicitly completes it.
+Eligible Flow data remains stored until an administrator explicitly purges it.
 
 Reusable runtime uploads that are still owned outside a completed run are not deleted by the run-history purge. If a workflow needs upload-library cleanup independent of run history, that needs a separate file-lifecycle policy.
 

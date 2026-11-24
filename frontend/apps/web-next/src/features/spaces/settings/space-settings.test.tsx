@@ -2,7 +2,8 @@
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
-import { renderInApp } from "@/test/render";
+import type { Permission } from "@/lib/auth/permissions";
+import { renderInApp, testAppContext } from "@/test/render";
 import { router } from "@/test/navigation";
 import messages from "@/lib/i18n/messages/sv.json";
 import { setViewport } from "@/test/setup-dom";
@@ -57,7 +58,8 @@ function showSettings(
   models: typeof availableModels = [],
   embeddingModels: typeof availableModels = [],
   routeId = "space-1",
-  space?: Space
+  space?: Space,
+  permissions: Permission[] = ["retention_manage"]
 ) {
   state.routeId = routeId;
   state.space =
@@ -90,7 +92,7 @@ function showSettings(
     state.space = { ...state.space, ...request.body } as Space;
     return ok(state.space);
   });
-  return renderInApp(<SpaceSettings />);
+  return renderInApp(<SpaceSettings />, { appContext: testAppContext({ permissions }) });
 }
 
 afterEach(() => {
@@ -266,10 +268,12 @@ it("keeps an empty space name and explains the error at the field until correcte
 });
 
 it("keeps invalid retention input, explains the allowed format and saves a correction", async () => {
-  const { container } = showSettings();
+  const { container, queryClient } = showSettings();
   const retention = screen.getByRole("textbox", { name: "Gallring av konversationshistorik" });
   // "yta", as the rest of the settings say.
   expect(screen.getByText(/appar i denna yta som inte har/)).toBeTruthy();
+  expect(screen.getByText(/Tiden är också taket för körhistoriken i ytans flöden/)).toBeTruthy();
+  queryClient.setQueryData(["flows", "detail", "flow-1"], { id: "flow-1" });
 
   fireEvent.change(retention, { target: { value: "1.5" } });
   fireEvent.blur(retention);
@@ -289,6 +293,23 @@ it("keeps invalid retention input, explains the allowed format and saves a corre
     })
   );
   expect(retention.getAttribute("aria-invalid")).toBeNull();
+  // The flows' effective times follow the new cap.
+  await waitFor(() =>
+    expect(queryClient.getQueryState(["flows", "detail", "flow-1"])?.isInvalidated).toBe(true)
+  );
+});
+
+it("asks a space admin without retention_manage for the permission and keeps the time read-only", async () => {
+  const { container } = showSettings(undefined, [], [], "space-1", undefined, []);
+  const retention = screen.getByRole("textbox", { name: "Gallring av konversationshistorik" });
+  expect(retention.hasAttribute("disabled")).toBe(true);
+  const hint = screen.getByText(
+    "För att ändra tiden krävs behörigheten Gallring – hantera regler. En administratör ger den till en roll."
+  );
+  expect(retention.getAttribute("aria-describedby")).toContain(hint.id);
+  // The rest of the space stays editable.
+  expect(screen.getByRole("textbox", { name: "Namn" }).hasAttribute("disabled")).toBe(false);
+  await expectNoAxeViolations(container);
 });
 
 it("shows the retention policy read-only to someone who may not edit the space", async () => {

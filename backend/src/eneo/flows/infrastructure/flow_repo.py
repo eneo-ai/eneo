@@ -33,7 +33,6 @@ from eneo.database.tables.security_classifications_table import (
     SecurityClassification,
 )
 from eneo.database.tables.spaces_table import Spaces
-from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.users_table import Users
 from eneo.flows.assistant_authoring_snapshot import (
     AssistantAuthoringResourceRef,
@@ -48,7 +47,6 @@ from eneo.flows.domain.flow import (
     FlowStepResult,
 )
 from eneo.flows.domain.flow_run_retention_policy import (
-    flow_run_retention_policy_from_storage,
     resolve_flow_run_retention_policy,
 )
 from eneo.flows.enums import (
@@ -180,28 +178,10 @@ def _derived_step_projection(
 
 
 def _attach_run_history_retention(
-    flow: _FlowReadModel,
-    *,
-    organization_mode: str | None,
-    organization_days: int | None,
-    space_mode: str | None,
-    space_days: int | None,
-    flow_mode: str | None,
-    flow_days: int | None,
+    flow: _FlowReadModel, *, space_days: int | None, flow_days: int | None
 ) -> _FlowReadModel:
     retention = resolve_flow_run_retention_policy(
-        organization_policy=flow_run_retention_policy_from_storage(
-            mode=organization_mode,
-            days=organization_days,
-        ),
-        space_policy=flow_run_retention_policy_from_storage(
-            mode=space_mode,
-            days=space_days,
-        ),
-        flow_policy=flow_run_retention_policy_from_storage(
-            mode=flow_mode,
-            days=flow_days,
-        ),
+        space_days=space_days, flow_days=flow_days
     )
     return flow.model_copy(update={"run_history_retention": retention})
 
@@ -248,40 +228,19 @@ class FlowRepository:
 
     @staticmethod
     def _select_flows_with_run_history_retention() -> sa.Select[
-        tuple[
-            Flows,
-            str | None,
-            int | None,
-            str | None,
-            int | None,
-            str | None,
-            int | None,
-            str,
-        ]
+        tuple[Flows, int | None, int | None, str]
     ]:
-        return (
-            sa.select(
-                Flows,
-                Tenants.flow_run_history_retention_mode.label(
-                    "retention_organization_mode"
-                ),
-                Tenants.flow_run_history_retention_days.label(
-                    "retention_organization_days"
-                ),
-                Spaces.flow_run_history_retention_mode.label("retention_space_mode"),
-                Spaces.flow_run_history_retention_days.label("retention_space_days"),
-                Flows.flow_run_history_retention_mode.label("retention_flow_mode"),
-                Flows.flow_run_history_retention_days.label("retention_flow_days"),
-                Spaces.name.label("space_name"),
-            )
-            .join(
-                Spaces,
-                sa.and_(
-                    Flows.space_id == Spaces.id,
-                    Flows.tenant_id == Spaces.tenant_id,
-                ),
-            )
-            .join(Tenants, Flows.tenant_id == Tenants.id)
+        return sa.select(
+            Flows,
+            Spaces.data_retention_days.label("retention_space_days"),
+            Flows.flow_run_history_retention_days.label("retention_flow_days"),
+            Spaces.name.label("space_name"),
+        ).join(
+            Spaces,
+            sa.and_(
+                Flows.space_id == Spaces.id,
+                Flows.tenant_id == Spaces.tenant_id,
+            ),
         )
 
     async def _get_flow_steps(self, flow_id: UUID, tenant_id: UUID) -> list[FlowSteps]:
@@ -442,16 +401,7 @@ class FlowRepository:
         row = (await self.session.execute(stmt)).one_or_none()
         if row is None:
             raise NotFoundException("Flow not found.")
-        (
-            flow_in_db,
-            organization_mode,
-            organization_days,
-            space_mode,
-            space_days,
-            flow_mode,
-            flow_days,
-            space_name,
-        ) = row
+        flow_in_db, space_days, flow_days, space_name = row
         steps = await self._get_flow_steps(flow_id=flow_id, tenant_id=tenant_id)
         sparse_fields = {
             **FlowSparse.model_validate(flow_in_db).model_dump(),
@@ -467,11 +417,7 @@ class FlowRepository:
                 **sparse_fields,
                 steps=[FlowStep.model_validate(step) for step in steps],
             ),
-            organization_mode=organization_mode,
-            organization_days=organization_days,
-            space_mode=space_mode,
             space_days=space_days,
-            flow_mode=flow_mode,
             flow_days=flow_days,
         )
 
@@ -620,12 +566,8 @@ class FlowRepository:
                         "space_name": row.space_name,
                     }
                 ),
-                organization_mode=row[1],
-                organization_days=row[2],
-                space_mode=row[3],
-                space_days=row[4],
-                flow_mode=row[5],
-                flow_days=row[6],
+                space_days=row[1],
+                flow_days=row[2],
             )
             for row in flow_rows
         ]

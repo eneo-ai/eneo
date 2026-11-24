@@ -5,8 +5,7 @@ path calls it. Only signed-in people decide: a request authenticated with any
 API key (user-owned or service) is refused whatever its permissions, because
 stopping or changing gallring must always name a person.
 
-- retention_manage: rules at Organization/Space/Flow level, the review queue
-  and the explicit purge.
+- retention_manage: a Flow's own time and the explicit purge.
 - retention_holds: place, extend the review of, and release legal holds.
 - Either permission may read the shared status views (Flow targets, holds,
   effective rules).

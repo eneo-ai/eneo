@@ -76,9 +76,46 @@ editing (Svelte and web-next). Startup never rewrites an existing role; a reset
 to the template removes them. The downgrade of `202610041000` removes both from
 every role, and upgrading again does not give them back. The web-next page
 `/admin/flow-data-retention` stays in the admin menu for `admin` when Flows
-are on, because its upload and debug windows are admin settings; the retention
-rules on it follow the two permissions, and the backend checks every request
+are on, because its upload and debug windows are admin settings; it has no
+retention rules of its own any more, and the backend checks every request
 (`flow_retention_authz.py`).
+
+### Run history follows the space's time
+
+From `202611231030`, a Flow's run history has one rule: the space's time
+(`spaces.data_retention_days`, the time its conversations already use) caps
+every Flow in the space, and a Flow may choose a shorter time of its own. What
+an upgrade changes:
+
+- Every Flow's own time is emptied; an administrator chooses again. The modes
+  (`preserve`, `review_required`) are gone, and a request that still sends
+  `mode` gets 422.
+- The organisation and space Flow-policy routes
+  (`/api/v1/settings/flow-run-retention-policy` and `.../spaces/{space_id}`)
+  and the three review-queue routes are gone. The Flow route, the targets,
+  the holds and the three purges with `dry_run` stay.
+- A space's existing time now also decides what an explicit purge may remove
+  from its Flows. Nothing is removed automatically. Runs that
+  `review_required` kept out of a purge are no longer kept: an explicit
+  purge removes them once they pass the space's time, so run it with
+  `dry_run` (the default) first. Before upgrading, run the listing query in
+  the guide ("Before upgrading: list the runs whose eligibility changes" in
+  `guides/flows/retention-policy.mdx`) on the old version: it lists every run
+  the upgrade makes purgeable or no longer purgeable, since the old times and
+  modes are gone afterwards.
+- A Flow time longer than its space's is refused with 400 and code 9086
+  (`retention_exceeds_space`), naming the cap.
+- Changing a shared space's time needs `retention_manage` as well as the
+  right to edit the space, and a signed-in person: an API key gets 403
+  `retention_person_required`. No role holds `retention_manage` after an
+  upgrade unless it was granted, so until an administrator grants it to a
+  role, no space administrator can change a space's time, for conversations
+  too, and the Svelte app shows a 403. Existing grants keep working. A change
+  writes an audit row with the earlier and the new time.
+- Changing a Flow's own time needs `retention_manage` and the admin role in
+  the Flow's space, or, in a personal space, being its owner with the right to
+  edit Flows. Anyone else,
+  a space editor too, gets 403 `forbidden_action`.
 
 ## Starting points
 
@@ -404,9 +441,10 @@ admin area is for admins again, without the retention-only entry. web-next
 keeps every string it reads: the keys only it still used moved to its
 `extra/` catalog. The SDK lost the settings client's flow wrappers and the MCP
 `flowUsage` wrapper; its flows client stays for applications that run flows.
-Run-history retention and legal holds have no screen in either app: they are
-set through the API (see the retention guide) until the platform initiative
-under Open decisions settles them. The backend is unchanged.
+In web-next a space's time is set in the space's settings and a Flow's own
+run-history time in the Flow's settings. Legal holds have no screen in either
+app: they are set through the API (see the retention guide) until the platform
+initiative under Open decisions settles them. The backend is unchanged.
 
 ## Documents
 

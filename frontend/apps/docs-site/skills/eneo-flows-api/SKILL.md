@@ -59,7 +59,7 @@ Do not recreate server-owned response objects as broad maps or `any`. Generate t
 
 - Poll `.../status/` for routine progress. It intentionally omits inputs, results, files, terminal errors and usage. `result_delivery` tells where the latest delivery stands, without the address, headers or content.
 - Treat run detail, review content, evidence, provider calls, and signed artifact access as sensitive reads. They are audited and may fail closed with `503` if required audit persistence is unavailable.
-- Do not assume retention policy means deletion. Flow retention records eligibility and review decisions; this release has no scheduled Flow-owned purge and no public admin purge endpoint.
+- Do not assume a retention time means deletion. The space's and the Flow's times only make run history eligible; this release has no scheduled Flow-owned purge, and the only purge is an explicit administrator call with `retention_manage`, never an API key.
 - Delete abandoned runtime uploads explicitly before run creation. Once attached to a run, their lifecycle belongs to that run.
 
 ## Validate the integration

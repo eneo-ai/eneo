@@ -34,6 +34,7 @@ import {
 } from "@/components/composites/sectioned-settings";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
 import { useAutosave, useAutosaveField } from "@/components/composites/use-autosave";
+import { useAppContext } from "@/components/providers/app-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -417,15 +418,19 @@ function SecuritySection() {
 }
 
 /**
- * The space's retention policy. Only those who may edit the space change it
- * (the backend refuses everyone else); the rest read the value.
+ * The space's time, which is also the cap on its flows' run history. Changing it
+ * takes the right to edit the space and the permission to manage retention (the
+ * backend refuses everyone else); the rest read the value.
  */
 function RetentionSection() {
   const t = useTranslations();
   const { space, can } = useSpace();
+  const managesRetention = useAppContext().can("retention_manage");
+  const queryClient = useQueryClient();
   const update = useUpdateSpace();
   const readOnlyHintId = useId();
-  const canEditRetention = can("edit", "space");
+  const editsSpace = can("edit", "space");
+  const canEditRetention = editsSpace && managesRetention;
   const [daysVisited, setDaysVisited] = useState(false);
 
   const days = useAutosaveField({
@@ -433,7 +438,9 @@ function RetentionSection() {
     value: space.data_retention_days?.toString() ?? "",
     save: (value) => update.mutateAsync({ data_retention_days: parseRetentionDays(value) }),
     // Empty means "keep forever".
-    validate: (value) => parseRetentionDays(value) !== undefined
+    validate: (value) => parseRetentionDays(value) !== undefined,
+    // The flows' effective times follow the new cap.
+    onSaved: () => void queryClient.invalidateQueries({ queryKey: ["flows"] })
   });
   const daysProblem =
     daysVisited && parseRetentionDays(days.value) === undefined
@@ -469,9 +476,14 @@ function RetentionSection() {
         <span className="text-muted-foreground text-sm">{t("days")}</span>
       </div>
       <FieldProblem id="retention-days" problem={daysProblem} />
+      <p className="text-muted-foreground text-sm">{t("space_retention_flows_cap")}</p>
       {!canEditRetention && (
         <p id={readOnlyHintId} className="text-muted-foreground text-sm">
-          {t("conversation_retention_space_admin_only")}
+          {editsSpace
+            ? t("space_retention_needs_permission", {
+                permission: t("permission_retention_manage")
+              })
+            : t("conversation_retention_space_admin_only")}
         </p>
       )}
     </SettingsRow>

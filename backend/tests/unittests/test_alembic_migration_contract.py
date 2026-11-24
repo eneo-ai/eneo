@@ -52,6 +52,20 @@ def test_transcript_source_migration_is_transactional_and_matches_model(monkeypa
     assert operations.execute.call_args_list[0] == call("SET LOCAL lock_timeout = '5s'")
 
 
+@pytest.mark.parametrize("direction", ["upgrade", "downgrade"])
+def test_flow_retention_rule_migration_bounds_its_lock_waits(monkeypatch, direction):
+    migration = runpy.run_path(
+        str(
+            Path(__file__).parents[2]
+            / "alembic/versions/202611231030_remove_flow_retention_modes.py"
+        )
+    )
+    operations = MagicMock()
+    monkeypatch.setitem(migration[direction].__globals__, "op", operations)
+    migration[direction]()
+    assert operations.mock_calls[0] == call.execute("SET LOCAL lock_timeout = '5s'")
+
+
 def _abandonment_migration():
     return runpy.run_path(
         str(
