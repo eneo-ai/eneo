@@ -267,7 +267,10 @@ def flow_run_owned_row_count(run_id: UUID, ceiling: int) -> sa.Select[tuple[int]
     # One LIMIT over every relation bounds the rows read, however large the run.
     rows = (
         sa.union_all(
-            *(sa.select(sa.literal_column("1")).where(condition) for condition in owned)
+            *(
+                sa.select(sa.literal_column("1", sa.Integer)).where(condition)
+                for condition in owned
+            )
         )
         .limit(ceiling + 1)
         .subquery("flow_run_rows")

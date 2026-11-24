@@ -221,10 +221,11 @@ class FlowRunHistoryRetentionTask:
                 )
             case FlowRunRemovalOutcome.REFUSED:
                 self._failed(run_id, None, out)
-            case FlowRunRemovalOutcome.FAILED if removal.error is not None:
-                if not is_run_failure(removal.error):
-                    raise removal.error
-                self._failed(run_id, removal.error, out)
+            case FlowRunRemovalOutcome.FAILED:
+                error = removal.error
+                if error is not None and not is_run_failure(error):
+                    raise error
+                self._failed(run_id, error, out)
         return usage
 
     @staticmethod
