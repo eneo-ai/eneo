@@ -1047,6 +1047,43 @@ describe("the spaces' copies of whether a model streams live text", () => {
     expect(await refetched(client)).toBe(2);
   });
 
+  it("let a first read from before the save answer, and are read again after it", async () => {
+    const client = renderPage(withTranscription(transcription(true)), providersWith("eligible"));
+    // Nothing cached yet: each copy is being loaded, as a space route's loader waits for it.
+    const answer = withTranscription(transcription(true));
+    const held = Promise.withResolvers<unknown>();
+    const firstReads = Promise.allSettled(
+      copies.map((queryKey) => client.query({ queryKey, queryFn: () => held.promise }))
+    );
+    for (const queryKey of copies) {
+      expect(client.getQueryState(queryKey)).toMatchObject({
+        data: undefined,
+        fetchStatus: "fetching"
+      });
+    }
+    api.PUT.mockImplementation(() =>
+      ok(providersWith("provider_inactive").find((item) => item.id === "p-vllm"))
+    );
+    serverHolds(withTranscription(transcription(true, false)), providersWith("provider_inactive"));
+    const menu = openRowMenu("vLLM", "Fler alternativ för");
+    fireEvent.click(within(menu).getByRole("menuitem", { name: /^Redigera/ }));
+    const dialog = await screen.findByRole("dialog", { name: "Redigera leverantör" });
+    fireEvent.change(within(dialog).getByLabelText(/^Leverantörsnamn/), {
+      target: { value: "vLLM prod" }
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Spara" }));
+    await waitFor(() =>
+      expect(toast.success.mock.calls.length + toast.warning.mock.calls.length).toBe(1)
+    );
+
+    held.resolve(answer);
+    expect(await firstReads).toEqual([
+      { status: "fulfilled", value: answer },
+      { status: "fulfilled", value: answer }
+    ]);
+    expect(await refetched(client)).toBe(2);
+  });
+
   it("are read again after a provider is deleted", async () => {
     const client = renderPage();
     warm(client);
