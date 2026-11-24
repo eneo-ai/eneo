@@ -76,7 +76,9 @@ def test_every_table_under_a_run_is_counted_in_its_rows() -> None:
                 grown = True
 
     compiled = str(
-        flow_run_owned_row_count(uuid4()).compile(dialect=postgresql.dialect())
+        flow_run_owned_row_count(uuid4(), ceiling=10).compile(
+            dialect=postgresql.dialect()
+        )
     )
 
     assert set(re.findall(r"FROM (\w+)", compiled)) == under_a_run

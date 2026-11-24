@@ -202,10 +202,11 @@ _REFUSALS = {
 }
 
 
-def flow_run_owned_row_count(run_id: UUID) -> sa.ColumnElement[int]:
-    """Every row that goes with a run: the run, its direct children and the
-    rows under its attempts and correction sets. Pinned to the foreign keys
-    under ``flow_runs`` by a test, so a new child table is counted."""
+def flow_run_owned_row_count(run_id: UUID, ceiling: int) -> sa.Select[tuple[int]]:
+    """Every row that goes with a run, counting at most ``ceiling + 1``: the
+    run, its direct children and the rows under its attempts and correction
+    sets. Pinned to the foreign keys under ``flow_runs`` by a test, so a new
+    child table is counted."""
     attempts = sa.select(FlowStepAttempts.id).where(
         FlowStepAttempts.flow_run_id == run_id
     )
@@ -234,14 +235,15 @@ def flow_run_owned_row_count(run_id: UUID) -> sa.ColumnElement[int]:
         FlowProviderCalls.flow_step_attempt_id.in_(attempts),
         FlowTranscriptCorrectionRevisions.correction_set_id.in_(corrections),
     ]
-    counts: list[sa.ColumnElement[int]] = [
-        sa.select(sa.func.count()).where(condition).scalar_subquery()
-        for condition in owned
-    ]
-    total = counts[0]
-    for count in counts[1:]:
-        total = total + count
-    return total
+    # One LIMIT over every relation bounds the rows read, however large the run.
+    rows = (
+        sa.union_all(
+            *(sa.select(sa.literal_column("1")).where(condition) for condition in owned)
+        )
+        .limit(ceiling + 1)
+        .subquery("flow_run_rows")
+    )
+    return sa.select(sa.func.count()).select_from(rows)
 
 
 def flow_run_undelivered_audit_exists(run_id_col: object) -> sa.Exists:
@@ -453,18 +455,26 @@ class FlowRunHistoryPurgeRepository:
                 2,
             )
         rows = 1
+        # Counted up to the call's rows before anything else of the run is
+        # read or locked: a run too large for them is refused at that cost.
+        run_rows = cast(
+            int,
+            await self.session.scalar(
+                flow_run_owned_row_count(run_id, ceiling=max_rows - rows)
+            ),
+        )
+        rows += run_rows
+        if rows > max_rows:
+            return stopped(FlowRunRemovalOutcome.SHORT, rows)
         step_results = await self._lock_all(
-            sa.select(FlowStepResults.id).where(FlowStepResults.flow_run_id == run_id)
+            sa.select(FlowStepResults.id).where(FlowStepResults.flow_run_id == run_id),
+            cap=run_rows,
         )
         if step_results is None:
             return stopped(FlowRunRemovalOutcome.LOCKED, rows)
         if not await self._purgeable_locked_runs({run_id}):
             return stopped(FlowRunRemovalOutcome.NOT_PURGEABLE, rows)
 
-        run_rows = cast(
-            int, await self.session.scalar(sa.select(flow_run_owned_row_count(run_id)))
-        )
-        rows += run_rows
         result_file_ids = set(
             await self.session.scalars(
                 sa.select(FlowRunStepResultFiles.file_id).where(
@@ -479,16 +489,14 @@ class FlowRunHistoryPurgeRepository:
                 )
             )
         )
-        bindings = await self._lock_all(
+        for uses in (
             sa.select(FlowRuntimeUploadedFiles.file_id).where(
                 _uuid_is_in_batch(
                     FlowRuntimeUploadedFiles.file_id,
                     input_file_ids,
                     parameter_name="run_binding_file_ids",
                 )
-            )
-        )
-        live_transcripts = await self._lock_all(
+            ),
             sa.select(FlowLiveTranscripts.id).where(
                 FlowLiveTranscripts.bound_file_ids.overlap(
                     sa.bindparam(
@@ -497,12 +505,15 @@ class FlowRunHistoryPurgeRepository:
                         type_=postgresql.ARRAY(postgresql.UUID(as_uuid=True)),
                     )
                 )
-            )
-        )
-        if bindings is None or live_transcripts is None:
-            return stopped(FlowRunRemovalOutcome.LOCKED, rows)
-        rows += bindings + live_transcripts
-        if rows > max_rows or (max_files == 0 and (result_file_ids or input_file_ids)):
+            ),
+        ):
+            locked = await self._lock_all(uses, cap=max_rows - rows)
+            if locked is None:
+                return stopped(FlowRunRemovalOutcome.LOCKED, rows)
+            rows += locked
+            if rows > max_rows:
+                return stopped(FlowRunRemovalOutcome.SHORT, rows)
+        if max_files == 0 and (result_file_ids or input_file_ids):
             return stopped(FlowRunRemovalOutcome.SHORT, rows)
 
         input_sizes = await self._primary_file_sizes(input_file_ids)
@@ -566,18 +577,24 @@ class FlowRunHistoryPurgeRepository:
             files_kept=kept,
         )
 
-    async def _lock_all(self, rows: sa.Select[tuple[UUID]]) -> int | None:
-        """Lock every row ``rows`` selects without waiting: their number, or
-        None when another transaction holds one. The caller's lock on the run
-        keeps new rows out between the two reads."""
+    async def _lock_all(self, rows: sa.Select[tuple[UUID]], *, cap: int) -> int | None:
+        """Lock every row ``rows`` selects without waiting, reading at most
+        ``cap + 1``: their number (more than ``cap`` when they do not fit, and
+        then none is locked), or None when another transaction holds one or a
+        row arrived between the two reads."""
+        bounded = rows.limit(cap + 1)
         total = cast(
             int,
             await self.session.scalar(
-                sa.select(sa.func.count()).select_from(rows.subquery())
+                sa.select(sa.func.count()).select_from(bounded.subquery())
             ),
         )
+        if total > cap:
+            return total
         locked = len(
-            (await self.session.scalars(rows.with_for_update(skip_locked=True))).all()
+            (
+                await self.session.scalars(bounded.with_for_update(skip_locked=True))
+            ).all()
         )
         return total if locked == total else None
 

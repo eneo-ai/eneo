@@ -435,15 +435,28 @@ async def test_a_held_or_undelivered_run_stays_and_the_probe_says_no(
     assert await _exists(session, run_id)
 
 
-async def test_an_oversized_run_is_blocked_and_a_smaller_one_after_it_goes(
+@pytest.mark.parametrize(
+    ("chunk", "rows", "same_pass"),
+    [(20, None, True), (2000, 20, False)],
+    ids=["chunk-is-the-room", "execution-is-the-room"],
+)
+async def test_an_oversized_run_is_blocked_before_its_locks_and_a_smaller_one_goes(
     retention_session: AsyncSession,
     test_tenant,
     admin_user,
     shared_space: Spaces,
     space_assistant: Assistants,
+    chunk: int,
+    rows: int | None,
+    same_pass: bool,
 ):
-    """Mutant: an oversized run deferred like one that does not fit the rest
-    of the pass, which would end every pass at it."""
+    """A run with more rows than one removal can take is blocked by a bounded
+    count before anything else of it is read or locked, so a transcript edit
+    on it does not hide it as locked. When the pass has fewer rows than the
+    chunk, the pass is the run's whole room: blocked, not deferred, and the
+    next pass goes on after it. Mutants: an oversized run deferred like one
+    that does not fit the rest of the pass, which would end every pass at it;
+    the run's rows counted after its locks."""
     session = retention_session
     oversized = await _aged_run(
         session,
@@ -453,19 +466,53 @@ async def test_an_oversized_run_is_blocked_and_a_smaller_one_after_it_goes(
         assistant=space_assistant,
         days_old=SPACE_DAYS + 10,
     )
-    small = await _small_run(session, oversized, days_old=SPACE_DAYS + 5)
-    settings = get_settings().model_copy(
-        update={"retention_chunk_rows": 4, "retention_max_family_rows": 3}
+    at = oversized.run.created_at
+    session.add_all(
+        FlowStepAttempts(
+            flow_run_id=oversized.run.id,
+            flow_id=oversized.flow.id,
+            tenant_id=test_tenant.id,
+            step_id=oversized.step_id,
+            step_order=1,
+            attempt_no=attempt_no,
+            status="completed",
+            started_at=at,
+            finished_at=at,
+            created_at=at,
+            updated_at=at,
+        )
+        for attempt_no in range(2, 32)
     )
+    small = await _small_run(session, oversized, days_old=SPACE_DAYS + 5)
+    oversized_id = oversized.run.id
+    step_result_id = oversized.step_result.id
+    await session.commit()
+    limits: dict[str, object] = {
+        "retention_chunk_rows": chunk,
+        "retention_max_family_rows": 3,
+    }
+    if rows is not None:
+        limits["retention_max_rows_per_run"] = rows
+    settings = get_settings().model_copy(update=limits)
 
-    report = await _run(session, settings=settings)
+    async with sessionmanager.session() as holder, holder.begin():
+        await holder.execute(
+            select(FlowStepResults.id)
+            .where(FlowStepResults.id == step_result_id)
+            .with_for_update()
+        )
+        report = await _run(session, settings=settings)
 
     assert _blocked(report) == {"runs.unit_exceeds_budget": 1}, report
-    assert _counts(report)["runs.runs_deleted"] == 1, report
-    assert await _exists(session, oversized.run.id)
-    assert not await _exists(session, small)
+    assert await _exists(session, oversized_id)
     with pytest.raises(RetentionReadbackFailed, match="unit_exceeds_budget"):
         RetentionReadback([FLOW_RUN_HISTORY_TASK]).add_round([report])
+    if not same_pass:
+        assert await _exists(session, small)
+        report = await _run(session, settings=settings)
+    assert _counts(report)["runs.runs_deleted"] == 1, report
+    assert not await _exists(session, small)
+    assert await _exists(session, oversized_id)
 
 
 @pytest.mark.parametrize(
