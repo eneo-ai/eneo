@@ -79,6 +79,10 @@ function showSettings(
     if (path === "/api/v1/security-classifications/") {
       return ok({ security_enabled: false, security_classifications: [] });
     }
+    // The space as the server has it now: the retention field reads it before it decides.
+    if (path === "/api/v1/spaces/{id}/" || path.startsWith("/api/v1/spaces/type/")) {
+      return ok(state.space);
+    }
     if (path === "/api/v1/ai-models/") {
       return ok({
         completion_models: models,
@@ -335,12 +339,43 @@ it.each([
   const note =
     sent === null
       ? messages.space_retention_saved_off
-      : `Körningar i ytans flöden som startar medan ytan har en tid tas bort när de är äldre än ${sent} dagar, eller flödets kortare tid. Körningar som startade medan ytan saknade tid rörs inte. Kontrollen görs var femte minut.`;
+      : `Körningar i ytans flöden som startar medan ytan har en tid räknas som förfallna när de är äldre än ${sent} dagar, eller flödets kortare tid, och tas bort vid en kommande kontroll. Kontrollen görs var femte minut; en spärr, en kö eller ett lås kan fördröja borttagningen. Körningar som startade medan ytan saknade tid rörs inte.`;
   // Shown under the field and said once, politely, without moving the focus.
   const section = document.getElementById("security")!;
   expect(await within(section).findByText(note)).toBeTruthy();
   await waitFor(() => expect(said).toContain(note));
   await expectNoAxeViolations(container);
+});
+
+it("promises nothing about flow runs in a personal space", async () => {
+  showSettings(
+    undefined,
+    [],
+    [],
+    "personal",
+    makeSpace({
+      permissions: ["read", "edit"],
+      overrides: {
+        personal: true,
+        data_retention_days: 30,
+        completion_models: [],
+        embedding_models: []
+      }
+    })
+  );
+  const section = document.getElementById("security")!;
+  expect(
+    within(section).getByText(
+      "Gäller assistenter och appar i ytan som inte har en egen tid. Det som har passerat tiden räknas som förfallet och tas bort vid en kommande kontroll. Det går inte att återställa."
+    )
+  ).toBeTruthy();
+  enterRetention("45");
+  expect(
+    await within(section).findByText(
+      "Sparat. Assistenter och appar i ytan utan egen tid följer nu 45 dagar."
+    )
+  ).toBeTruthy();
+  expect(within(section).queryByText(/flöden/)).toBeNull();
 });
 
 it("asks before a shorter time is saved and saves it once confirmed", async () => {
@@ -350,7 +385,7 @@ it("asks before a shorter time is saved and saves it once confirmed", async () =
   expect(api.PATCH).not.toHaveBeenCalled();
   expect(
     within(dialog).getByText(
-      "Innehåll som följer ytans tid och redan är äldre än 7 dagar tas bort vid nästa kontroll. Det går inte att återställa."
+      "Innehåll som följer ytans tid och redan är äldre än 7 dagar räknas som förfallet och tas bort vid en kommande kontroll. Det går inte att återställa."
     )
   ).toBeTruthy();
   // The least destructive choice has the focus.
@@ -388,6 +423,73 @@ it.each([
   await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
   expect(retentionField().value).toBe("30");
   expect(api.PATCH).not.toHaveBeenCalled();
+});
+
+it("decides on the space's time as the server has it now, not as the page read it", async () => {
+  showSettings();
+  // Another administrator lengthened the time after this page read 30.
+  state.space = { ...state.space, data_retention_days: 90 };
+  enterRetention("60");
+  expect(await screen.findByRole("alertdialog", { name: "Korta gallringstiden?" })).toBeTruthy();
+  expect(api.PATCH).not.toHaveBeenCalled();
+});
+
+it("keeps the field read-only while it reads the space's time, and saves nothing when the read fails", async () => {
+  showSettings();
+  let answer!: (value: unknown) => void;
+  const read = new Promise((resolve) => {
+    answer = resolve;
+  });
+  const reads = api.GET.getMockImplementation()!;
+  api.GET.mockImplementation((path: string, init: unknown) =>
+    path === "/api/v1/spaces/{id}/" ? read : reads(path, init)
+  );
+  const field = enterRetention("60");
+  await waitFor(() => expect(field.readOnly).toBe(true));
+  await act(async () => {
+    answer({
+      error: { message: "Temporary failure" },
+      response: new Response("{}", { status: 503 })
+    });
+  });
+  await waitFor(() => expect(field.readOnly).toBe(false));
+  expect(screen.queryByRole("alertdialog")).toBeNull();
+  expect(api.PATCH).not.toHaveBeenCalled();
+  // The typed time stays, to be tried again.
+  expect(field.value).toBe("60");
+});
+
+it("keeps the field read-only while a time is saved, so a clear made after it is not lost", async () => {
+  showSettings();
+  const patch = deferredPatch();
+  api.PATCH.mockReturnValueOnce(patch.promise);
+  const field = enterRetention("45");
+  await waitFor(() => expect(api.PATCH).toHaveBeenCalledTimes(1));
+  // A second change cannot be typed while the first is on its way.
+  expect(field.readOnly).toBe(true);
+  await act(async () => {
+    state.space = { ...state.space, data_retention_days: 45 };
+    patch.resolve(state.space);
+  });
+  await waitFor(() => expect(field.readOnly).toBe(false));
+  enterRetention("");
+  await waitFor(() => expect(api.PATCH).toHaveBeenCalledTimes(2));
+  expect(api.PATCH.mock.calls[1]![1].body).toEqual({ data_retention_days: null });
+});
+
+it("puts the focus back on the field when a shorter time is not confirmed, also after a click elsewhere", async () => {
+  showSettings();
+  const field = retentionField();
+  field.focus();
+  fireEvent.change(field, { target: { value: "7" } });
+  // A click on nothing focusable: the focus leaves the field for the page.
+  field.blur();
+  expect(document.activeElement).toBe(document.body);
+  fireEvent.blur(field);
+  const dialog = await screen.findByRole("alertdialog");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Avbryt" }));
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  await waitFor(() => expect(document.activeElement).toBe(field));
 });
 
 it("never sends an unconfirmed shorter time when the page is left", async () => {

@@ -1805,6 +1805,27 @@ describe("FlowRunPage", () => {
       expect(screen.queryByText(messages.flow_runs_result_pending)).toBeNull();
     });
 
+    it("puts the focus on the message when the run is removed under it", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const running = makeRunSummary({ status: "running", finished_at: null, revision: 2 });
+      answerRun(running, makeRunDetail({ ...running, result: null }));
+      renderRun();
+      const refresh = await screen.findByRole("button", { name: messages.flow_run_more_refresh });
+      refresh.focus();
+
+      state.routes[STATUS] = () => ({ status: 404, body: { message: "Not found" } });
+      await act(() => vi.advanceTimersByTimeAsync(2_100));
+      const title = await screen.findByRole("heading", {
+        level: 1,
+        name: messages.flow_run_gone_title
+      });
+      // On the message itself, not left on the page.
+      await waitFor(() => {
+        expect(document.activeElement).not.toBe(document.body);
+        expect(document.activeElement?.contains(title)).toBe(true);
+      });
+    });
+
     it("keeps the error and its retry for any other failure", async () => {
       answerRun(makeRunSummary());
       state.routes[STATUS] = () => ({ status: 500, body: { message: "Broken" } });

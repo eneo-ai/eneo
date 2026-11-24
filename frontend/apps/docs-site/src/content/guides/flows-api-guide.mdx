@@ -324,7 +324,7 @@ PATCH requests distinguish omission from null: omit a field to preserve it, or s
 - `run_debug_evidence_days`
 - `flow_runtime_upload_abandonment_days`
 
-The inputs are nullable integers in the range `1..2555`. `flow_runtime_upload_abandonment_days` sets eligibility for runtime uploads that were never attached to a run input. Debug-evidence eligibility remains independently configured. Saving either value does not delete or redact Flow data, and no scheduled task removes these uploads or this evidence.
+The inputs are nullable integers in the range `1..2555`. `flow_runtime_upload_abandonment_days` sets when live text that is never bound to a run expires (fixed when the text is created); the explicit purge removes such expired live text. Debug-evidence eligibility remains independently configured. Saving either value does not delete or redact Flow data, and in this version no scheduled task and no administrator purge removes runtime uploads that were never attached to a run, or debug evidence.
 
 Run and step history follows the space's time (`data_retention_days` on `PATCH /api/v1/spaces/{id}/`, the time its conversations use), which caps every Flow in the space. A Flow may set a shorter time of its own:
 

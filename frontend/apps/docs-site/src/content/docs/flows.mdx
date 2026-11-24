@@ -825,10 +825,10 @@ A sensitive flow has no export gate of its own: with `evidence_policy.allow_expo
 Flow retention settings decide when Flow data becomes due:
 
 - Run history follows the space's time (`data_retention_days`, the time its conversations use), which caps every Flow in the space. A Flow may set a shorter time of its own (`days` in `1..2555`); a longer one is refused with code 9086. No time at either level means there is no age threshold.
-- Tenant `flow_settings.retention_policy.run_debug_evidence_days` independently defines when debug evidence can become eligible, and `flow_runtime_upload_abandonment_days` does the same for unbound runtime uploads.
+- Tenant `flow_settings.retention_policy.run_debug_evidence_days` independently defines when debug evidence can become eligible, and `flow_runtime_upload_abandonment_days` sets when live text never bound to a run expires; the explicit purge removes such expired live text.
 - Runs that start while their space has a time are removed automatically once due, by the shared retention engine's task `flows.run_history`, every five minutes. Runs that started while the space had no time are never removed automatically. Legal holds and audit/webhook blockers keep a run.
 - No screen offers a Flow run-history purge. The explicit purge is an API call with `retention_manage`: it previews with `dry_run`, runs in bounded tenant-scoped batches, removes any due run, respects legal holds and audit/webhook blockers, and leaves an audit receipt.
-- Debug evidence and unbound runtime uploads are not removed in this version: no scheduled task and no administrator purge applies these windows to them.
+- Debug evidence and runtime uploads never attached to a run are not removed in this version: no scheduled task and no administrator purge applies to them.
 
 Reusable runtime uploads that are still owned outside a completed run are not deleted by the run-history purge. If a workflow needs upload-library cleanup independent of run history, that needs a separate file-lifecycle policy.
 

@@ -98,16 +98,18 @@ an upgrade changes:
   from its Flows. Runs that `review_required` kept out of a purge are no
   longer kept: an explicit purge removes them once they pass the space's
   time, so run it with `dry_run` (the default) first. Before upgrading, run
-  the listing query in the guide ("Before upgrading: list the runs that
-  become due or stop being due" in `guides/flows/retention-policy.mdx`) on
+  the listing query in the guide ("Before upgrading past `202611231030`: list
+  the runs that become due or stop being due" in `guides/flows/retention-policy.mdx`) on
   the old version, in the application's `TimeZone`: it lists every run that
   becomes due or stops being due, since the old times and modes are gone
   afterwards.
 
 ### Runs are removed by the space's time
 
-A space's time now also removes its Flows' runs automatically. What an
-upgrade changes:
+From `202611241000`, a space's time also removes its Flows' runs
+automatically. The revision only adds, on each run, whether its space had a
+time when the run started; the cleared times and modes above belong to
+`202611231030`. What an upgrade changes:
 
 - A space that already has a time starts removing the Flow runs that start
   after the upgrade, once they are older than the space's time or the Flow's

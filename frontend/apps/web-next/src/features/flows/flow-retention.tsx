@@ -70,7 +70,7 @@ export function FlowRetentionSummary({
  * The flow's own time, or none to use the space's. It has an endpoint of its own and
  * stays open on a published flow: it changes when runs may be purged, not the
  * definition, so it is no part of the settings form. Saving deletes nothing itself, but
- * a shorter time lets the space's automatic removal take older runs at its next check,
+ * a shorter time lets the space's automatic removal take older runs at a coming check,
  * so the first press of Save for a shorter time shows a warning instead of saving. In
  * a personal space nothing is removed automatically, so it neither warns nor waits.
  */
