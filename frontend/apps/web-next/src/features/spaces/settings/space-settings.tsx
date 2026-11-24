@@ -77,6 +77,7 @@ import { parseRetentionDays } from "@/features/spaces/retention-days";
 import {
   invalidateDeletedSpace,
   invalidateSpacesList,
+  readSpace,
   spaceQueryOptions,
   type Space
 } from "@/features/spaces/space";
@@ -494,11 +495,14 @@ function RetentionSection() {
     setChecking(true);
     let current: number | null;
     try {
-      // A real read, not the cache: a time saved elsewhere since may make this one shorter.
-      const fresh = await queryClient.query({
-        ...spaceQueryOptions(browserApi, routeId),
-        staleTime: 0
-      });
+      // A request of its own, outside the query cache: a time saved elsewhere since may
+      // make this one shorter. Through the cache the read could join a fetch begun before
+      // that change, or, cancelled by another save on the page, answer with the cached time.
+      const { queryKey } = spaceQueryOptions(browserApi, routeId);
+      await queryClient.cancelQueries({ queryKey, exact: true });
+      const fresh = await readSpace(browserApi, routeId);
+      // The page shows what the decision read; a fetch cancelled above cannot replace it.
+      queryClient.setQueryData(queryKey, fresh);
       current = fresh.data_retention_days ?? null;
     } catch (error) {
       // Without the current time nothing is saved: the typed time stays, to try again.
