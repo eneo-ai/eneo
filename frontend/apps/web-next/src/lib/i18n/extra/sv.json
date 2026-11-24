@@ -2409,6 +2409,7 @@
   "live_text_reason_endpoint_required": "Ange adressen till servern eller gatewayen på leverantören. OpenAI:s egen tjänst har inte vLLM:s realtids-API.",
   "live_text_reason_unsupported_provider": "Välj en leverantör som stöds: vLLM, eller OpenAI med adressen till en server som har vLLM:s realtids-API.",
   "live_text_reason_outbound_headers_configured": "Använd en leverantör utan utgående rubriker. Livetext kan inte skicka dem.",
+  "live_text_reason_provider_inactive": "Leverantören är avstängd, så den kan inte bära livetext.",
   "live_transcription_support": "Livetext",
   "live_transcription_help": "Visar texten medan någon spelar in. Modellens server behöver stödja vLLM:s realtids-API.",
   "audit_action_flow_live_transcription_started": "Livetext begärd",

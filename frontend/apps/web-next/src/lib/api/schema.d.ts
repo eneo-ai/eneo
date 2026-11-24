@@ -2233,7 +2233,7 @@ export interface paths {
     put?: never;
     /**
      * Create Tenant Transcription Model
-     * @description Create a new tenant-specific transcription model. Marking it for live text (supports_realtime) needs a provider whose realtime_eligibility is eligible; otherwise 400 says what to change on the provider.
+     * @description Create a new tenant-specific transcription model. Marking it for live text (supports_realtime) needs a provider whose realtime_eligibility is eligible. Otherwise (endpoint_required, unsupported_provider, outbound_headers_configured or provider_inactive) 400 says what to change on the provider.
      */
     post: operations["create_tenant_transcription_model_api_v1_admin_tenant_models_transcription__post"];
     delete?: never;
@@ -2252,7 +2252,7 @@ export interface paths {
     get?: never;
     /**
      * Update Tenant Transcription Model
-     * @description Update a tenant-specific transcription model. Only turning live text on (supports_realtime from false to true) checks the provider's realtime_eligibility and answers 400 when it is not eligible; a supports_realtime that does not change is accepted, and turning it off always works.
+     * @description Update a tenant-specific transcription model. Only turning live text on (supports_realtime from false to true) checks the provider's realtime_eligibility and answers 400 when it is not eligible, a provider that is switched off included; a supports_realtime that does not change is accepted, and turning it off always works.
      */
     put: operations["update_tenant_transcription_model_api_v1_admin_tenant_models_transcription__model_id___put"];
     post?: never;
@@ -34157,11 +34157,15 @@ export interface components {
       provider_type: string;
       /**
        * Realtime Eligibility
-       * @description Whether the provider can carry live text (a transcription model's supports_realtime), and if not, what the administrator does: endpoint_required (enter the endpoint of a server that serves vLLM's realtime API; OpenAI's own service does not), unsupported_provider (only vLLM, or OpenAI with such an endpoint, qualify) or outbound_headers_configured (live text cannot send outbound headers).
+       * @description Whether the provider can carry live text (a transcription model's supports_realtime), and if not, what the administrator does: endpoint_required (enter the endpoint of a server that serves vLLM's realtime API; OpenAI's own service does not), unsupported_provider (only vLLM, or OpenAI with such an endpoint, qualify), outbound_headers_configured (live text cannot send outbound headers) or provider_inactive (the provider is switched off).
        * @enum {string}
        */
       realtime_eligibility:
-        "eligible" | "endpoint_required" | "unsupported_provider" | "outbound_headers_configured";
+        | "eligible"
+        | "endpoint_required"
+        | "unsupported_provider"
+        | "outbound_headers_configured"
+        | "provider_inactive";
       /**
        * Tenant Id
        * Format: uuid
@@ -41754,7 +41758,7 @@ export interface components {
       security_classification?: components["schemas"]["ModelId"] | null;
       /**
        * Supports Realtime
-       * @description Live text: the model is served over vLLM's realtime API (/v1/realtime on the provider's endpoint). Allowed when the provider's realtime_eligibility is eligible: a vLLM provider with an endpoint, or an OpenAI provider whose endpoint is a gateway serving that API (not OpenAI's own service), without outbound headers. Otherwise 400 says what to change on the provider.
+       * @description Live text: the model is served over vLLM's realtime API (/v1/realtime on the provider's endpoint). Allowed when the provider's realtime_eligibility is eligible: a vLLM provider with an endpoint, or an OpenAI provider whose endpoint is a gateway serving that API (not OpenAI's own service), without outbound headers and switched on. Otherwise 400 says what to change on the provider.
        * @default false
        */
       supports_realtime?: boolean;
@@ -41800,7 +41804,7 @@ export interface components {
       stability?: string | null;
       /**
        * Supports Realtime
-       * @description Turn live text on or off for this model. Turning it on needs a provider whose realtime_eligibility is eligible (a vLLM provider with an endpoint, or an OpenAI provider whose endpoint is a gateway serving vLLM's realtime API, without outbound headers); otherwise 400 says what to change on the provider. Sending true again for a model that is already marked succeeds even if its provider no longer qualifies; the model's streams_live then reads false. Turning it off always succeeds.
+       * @description Turn live text on or off for this model. Turning it on needs a provider whose realtime_eligibility is eligible (a vLLM provider with an endpoint, or an OpenAI provider whose endpoint is a gateway serving vLLM's realtime API, without outbound headers and switched on); otherwise 400 says what to change on the provider. Sending true again for a model that is already marked succeeds even if its provider no longer qualifies; the model's streams_live then reads false. Turning it off always succeeds.
        */
       supports_realtime?: boolean | null;
     };
@@ -42548,7 +42552,7 @@ export interface components {
       stability?: string | null;
       /**
        * Streams Live
-       * @description The model can stream live text now: it is marked (supports_realtime) and its provider can carry live text (the provider's realtime_eligibility is eligible).
+       * @description The model can stream live text now: it is marked (supports_realtime) and its provider can carry live text (the provider's realtime_eligibility is eligible). False while the provider is switched off, even though the mark stays saved.
        */
       streams_live: boolean;
       /**
@@ -42628,7 +42632,7 @@ export interface components {
       stability?: string | null;
       /**
        * Streams Live
-       * @description The model can stream live text now: it is marked (supports_realtime) and its provider can carry live text (the provider's realtime_eligibility is eligible).
+       * @description The model can stream live text now: it is marked (supports_realtime) and its provider can carry live text (the provider's realtime_eligibility is eligible). False while the provider is switched off, even though the mark stays saved.
        */
       streams_live: boolean;
       /**

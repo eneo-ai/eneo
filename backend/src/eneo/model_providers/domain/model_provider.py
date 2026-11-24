@@ -103,6 +103,7 @@ class ModelProvider:
             credentials=self.credentials,
             config=self.config,
             has_outbound_headers=bool(self.outbound_headers),
+            is_active=self.is_active,
         )
 
     def to_dict(self) -> dict[str, Any]:

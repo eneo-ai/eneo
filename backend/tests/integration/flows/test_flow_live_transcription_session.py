@@ -797,6 +797,106 @@ async def test_a_provider_switched_off_after_admission_opens_nothing(
     assert [event["code"] for event in events] == ["model_unavailable"]
     assert live_stack.model_server.authorization is None
 
+    refused = await live_stack.client.post(
+        live_stack.flow.sessions_path, headers=live_stack.headers
+    )
+    assert refused.status_code == 409, refused.text
+    assert refused.json()["context"] == {"reason": "model_not_realtime"}
+
+
+async def test_a_gateway_switched_off_keeps_its_marks_and_carries_no_live_text(
+    client, flow_process_auth_headers, db_container
+):
+    # M1 is marked and is the flow's model; M2, on the same gateway, is not.
+    headers = dict(flow_process_auth_headers)
+    flow = await _published_flow(client, headers, db_container, provider_type="openai")
+    async with db_container() as container:
+        provider_id = (
+            await container.session().execute(
+                sa.select(TranscriptionModels.provider_id).where(
+                    TranscriptionModels.id == UUID(flow.model_id)
+                )
+            )
+        ).scalar_one()
+    m1 = f"/api/v1/admin/tenant-models/transcription/{flow.model_id}/"
+    created = await client.post(
+        "/api/v1/admin/tenant-models/transcription/",
+        headers=headers,
+        json={
+            "provider_id": str(provider_id),
+            "name": f"realtime-asr-{uuid4().hex[:6]}",
+            "display_name": f"Unmarked {uuid4().hex[:8]}",
+        },
+    )
+    assert created.status_code == 200, created.text
+    m2_id = created.json()["id"]
+    m2 = f"/api/v1/admin/tenant-models/transcription/{m2_id}/"
+    # Another draft in the space, to pick M1 as its live model.
+    other = await _draft_flow(
+        client, headers, db_container, supports_realtime=False, space_id=flow.space_id
+    )
+    picked = await _with_live_model(client, headers, other, flow.model_id)
+    assert picked.status_code == 200, picked.text
+    # A saved draft keeps its pick; the next pick is checked anew.
+    cleared = await _with_live_model(client, headers, other, None)
+    assert cleared.status_code == 200, cleared.text
+
+    async def switch(on: bool) -> str:
+        response = await client.put(
+            f"/api/v1/admin/model-providers/{provider_id}/",
+            headers=headers,
+            json={"is_active": on},
+        )
+        assert response.status_code == 200, response.text
+        return response.json()["realtime_eligibility"]
+
+    async def in_space() -> dict[str, Any]:
+        space = await client.get(f"/api/v1/spaces/{flow.space_id}/", headers=headers)
+        assert space.status_code == 200, space.text
+        return next(
+            item
+            for item in space.json()["transcription_models"]
+            if item["id"] == flow.model_id
+        )
+
+    assert await switch(False) == "provider_inactive"
+
+    listed = await in_space()
+    assert listed["supports_realtime"] is True
+    assert listed["streams_live"] is False
+    # Not among the flow's choices for live text: the editor reads streams_live,
+    # and saving the pick is refused.
+    refused_pick = await _with_live_model(client, headers, other, flow.model_id)
+    assert refused_pick.status_code == 400, refused_pick.text
+    assert refused_pick.json()["code"] == _LIVE_MODEL_UNAVAILABLE
+
+    # Resending the saved mark with another change is not turning it on.
+    edited = await client.put(
+        m1, headers=headers, json={"supports_realtime": True, "description": "Kept"}
+    )
+    assert edited.status_code == 200, edited.text
+    assert edited.json()["supports_realtime"] is True
+    assert edited.json()["streams_live"] is False
+    turned_on = await client.put(m2, headers=headers, json={"supports_realtime": True})
+    assert turned_on.status_code == 400, turned_on.text
+    assert turned_on.json()["message"] == (
+        "Live text needs an active provider. Switch the provider on, then turn "
+        "on live text."
+    )
+
+    refused = await client.post(flow.sessions_path, headers=headers)
+    assert refused.status_code == 409, refused.text
+    assert refused.json()["context"] == {"reason": "model_not_realtime"}
+
+    assert await switch(True) == "eligible"
+    assert (await in_space())["streams_live"] is True
+    listed_models = await client.get("/api/v1/transcription-models/", headers=headers)
+    assert listed_models.status_code == 200, listed_models.text
+    m2_listed = next(
+        item for item in listed_models.json()["items"] if item["id"] == m2_id
+    )
+    assert m2_listed["supports_realtime"] is False
+
 
 async def test_a_gateway_registered_as_openai_streams_live_text(
     client, app, flow_process_auth_headers, db_container

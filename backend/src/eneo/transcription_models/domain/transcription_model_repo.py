@@ -22,7 +22,8 @@ if TYPE_CHECKING:
 
 
 # Only the provider facts the read models need: the live text rule reads the
-# endpoint and whether outbound headers are configured. Neither the API key nor
+# endpoint, whether outbound headers are configured and whether the provider is
+# switched on. Neither the API key nor
 # any header value is loaded, so listing models decrypts nothing. The endpoint
 # keeps its JSON type, so the rule sees the value the provider itself holds.
 _PROVIDER_FACTS = (
@@ -40,6 +41,7 @@ _PROVIDER_FACTS = (
         )
         > 0
     ).label("has_outbound_headers"),
+    ModelProviders.is_active.label("provider_is_active"),
 )
 
 
@@ -58,6 +60,9 @@ def _to_domain(row: "sa.Row[Any]", tenant: "TenantInDB") -> TranscriptionModel:
             credentials={"endpoint": row.credential_endpoint},
             config={"endpoint": row.config_endpoint},
             has_outbound_headers=bool(row.has_outbound_headers),
+            # A model without a provider row has no type, so the rule answers
+            # unsupported_provider before it reads this.
+            is_active=bool(row.provider_is_active),
         ),
     )
 

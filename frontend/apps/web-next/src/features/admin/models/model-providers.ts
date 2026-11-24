@@ -153,12 +153,13 @@ export type RealtimeEligibility = ModelProvider["realtime_eligibility"];
 const REALTIME_REFUSALS = {
   endpoint_required: "live_text_reason_endpoint_required",
   unsupported_provider: "live_text_reason_unsupported_provider",
-  outbound_headers_configured: "live_text_reason_outbound_headers_configured"
+  outbound_headers_configured: "live_text_reason_outbound_headers_configured",
+  provider_inactive: "live_text_reason_provider_inactive"
 } as const satisfies Record<Exclude<RealtimeEligibility, "eligible">, string>;
 
 /**
- * The message key that says what an administrator does so that a provider can
- * carry live text; null when it can, or while its answer is not known yet.
+ * The message key that says why a provider cannot carry live text; null when
+ * it can, or while its answer is not known yet.
  */
 export function realtimeRefusalKey(eligibility: RealtimeEligibility | undefined) {
   if (eligibility === undefined || eligibility === "eligible") return null;

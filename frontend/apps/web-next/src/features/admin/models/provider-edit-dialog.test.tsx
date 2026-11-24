@@ -230,6 +230,27 @@ describe("ProviderEditDialog", () => {
     }
   );
 
+  it("says marked models stop using live text when the admin switches the provider off", async () => {
+    const dialog = renderDialog(
+      provider({ provider_type: "hosted_vllm", realtime_eligibility: "eligible" }),
+      true,
+      2
+    );
+    api.PUT.mockImplementation(() =>
+      ok(provider({ is_active: false, realtime_eligibility: "provider_inactive" }))
+    );
+    fireEvent.click(within(dialog).getByRole("switch", { name: "Leverantören är aktiv" }));
+
+    save(dialog);
+
+    await waitFor(() => expect(toast.warning).toHaveBeenCalledTimes(1));
+    expect(api.PUT.mock.calls[0]?.[1]).toMatchObject({ body: { is_active: false } });
+    expect(toast.warning.mock.calls[0]?.[0]).toContain(
+      "Leverantören är avstängd, så den kan inte bära livetext."
+    );
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["no marked models", "endpoint_required", 0],
     ["a provider that still carries live text", "eligible", 3]

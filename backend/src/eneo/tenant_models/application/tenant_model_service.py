@@ -142,6 +142,10 @@ _REALTIME_REFUSALS: dict[RealtimeEligibility, str] = {
         "Live text cannot send the provider's outbound headers. Use a provider "
         "without outbound headers."
     ),
+    "provider_inactive": (
+        "Live text needs an active provider. Switch the provider on, then turn "
+        "on live text."
+    ),
 }
 
 

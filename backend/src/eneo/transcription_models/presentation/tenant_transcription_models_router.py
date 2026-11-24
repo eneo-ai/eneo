@@ -57,7 +57,8 @@ class TenantTranscriptionModelCreate(BaseModel):
             "provider's realtime_eligibility is eligible: a vLLM provider with "
             "an endpoint, or an OpenAI provider whose endpoint is a gateway "
             "serving that API (not OpenAI's own service), without outbound "
-            "headers. Otherwise 400 says what to change on the provider."
+            "headers and switched on. Otherwise 400 says what to change on the "
+            "provider."
         ),
     )
 
@@ -84,8 +85,9 @@ class TenantTranscriptionModelUpdate(BaseModel):
             "Turn live text on or off for this model. Turning it on needs a "
             "provider whose realtime_eligibility is eligible (a vLLM provider "
             "with an endpoint, or an OpenAI provider whose endpoint is a gateway "
-            "serving vLLM's realtime API, without outbound headers); otherwise "
-            "400 says what to change on the provider. Sending true again for a "
+            "serving vLLM's realtime API, without outbound headers and switched "
+            "on); otherwise 400 says what to change on the provider. Sending "
+            "true again for a "
             "model that is already marked succeeds even if its provider no "
             "longer qualifies; the model's streams_live then reads false. "
             "Turning it off always succeeds."
@@ -108,7 +110,9 @@ def _service(
     description=(
         "Create a new tenant-specific transcription model. Marking it for live "
         "text (supports_realtime) needs a provider whose realtime_eligibility "
-        "is eligible; otherwise 400 says what to change on the provider."
+        "is eligible. Otherwise (endpoint_required, unsupported_provider, "
+        "outbound_headers_configured or provider_inactive) 400 says what to "
+        "change on the provider."
     ),
     response_model=TranscriptionModelPublic,
     responses=responses.get_responses([400, 403, 404, 409]),
@@ -138,9 +142,9 @@ async def create_tenant_transcription_model(
     description=(
         "Update a tenant-specific transcription model. Only turning live text "
         "on (supports_realtime from false to true) checks the provider's "
-        "realtime_eligibility and answers 400 when it is not eligible; a "
-        "supports_realtime that does not change is accepted, and turning it "
-        "off always works."
+        "realtime_eligibility and answers 400 when it is not eligible, a "
+        "provider that is switched off included; a supports_realtime that "
+        "does not change is accepted, and turning it off always works."
     ),
     response_model=TranscriptionModelPublic,
     responses=responses.get_responses([400, 403, 404, 409]),

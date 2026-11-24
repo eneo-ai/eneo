@@ -51,7 +51,8 @@ class TranscriptionModelPublic(BaseModel):
         description=(
             "The model can stream live text now: it is marked (supports_realtime) "
             "and its provider can carry live text (the provider's "
-            "realtime_eligibility is eligible)."
+            "realtime_eligibility is eligible). False while the provider is "
+            "switched off, even though the mark stays saved."
         ),
     )
 

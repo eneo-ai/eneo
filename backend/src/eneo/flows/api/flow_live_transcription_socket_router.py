@@ -207,6 +207,9 @@ async def _load_upstream_target(grant: LiveTranscriptionGrant) -> _UpstreamTarge
                     credentials=provider.credentials,
                     config=provider.config,
                     has_outbound_headers=bool(provider.outbound_headers),
+                    # load_active_litellm_provider has already refused a
+                    # provider that is switched off.
+                    is_active=True,
                 )
                 != "eligible"
             ):

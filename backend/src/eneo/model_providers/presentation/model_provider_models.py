@@ -246,8 +246,9 @@ class ModelProviderPublic(BaseModel):
             "supports_realtime), and if not, what the administrator does: "
             "endpoint_required (enter the endpoint of a server that serves vLLM's "
             "realtime API; OpenAI's own service does not), unsupported_provider "
-            "(only vLLM, or OpenAI with such an endpoint, qualify) or "
-            "outbound_headers_configured (live text cannot send outbound headers)."
+            "(only vLLM, or OpenAI with such an endpoint, qualify), "
+            "outbound_headers_configured (live text cannot send outbound "
+            "headers) or provider_inactive (the provider is switched off)."
         ),
     )
     outbound_headers: list[OutboundHeaderPublic] = []

@@ -24,12 +24,14 @@ def _eligibility(
     config: dict[str, Any] | None = None,
     credentials: dict[str, Any] | None = None,
     headers: bool = False,
+    active: bool = True,
 ) -> str:
     return realtime_eligibility(
         provider_type=provider_type,
         credentials=credentials or {},
         config=config or {},
         has_outbound_headers=headers,
+        is_active=active,
     )
 
 
@@ -138,6 +140,37 @@ def test_a_provider_with_outbound_headers_cannot_carry_live_text(provider_type: 
 
 
 @pytest.mark.parametrize(
+    ("provider_type", "config", "headers", "active", "expected"),
+    [
+        ("openai", {"endpoint": GATEWAY}, False, True, "eligible"),
+        ("openai", {"endpoint": GATEWAY}, False, False, "provider_inactive"),
+        # Switching the provider on fixes neither its endpoint nor its headers,
+        # so those reasons come first.
+        ("openai", {}, False, False, "endpoint_required"),
+        (
+            "hosted_vllm",
+            {"endpoint": GATEWAY},
+            True,
+            False,
+            "outbound_headers_configured",
+        ),
+        (None, {"endpoint": GATEWAY}, False, False, "unsupported_provider"),
+    ],
+)
+def test_a_switched_off_provider_carries_no_live_text_and_says_so_last(
+    provider_type: str | None,
+    config: dict[str, Any],
+    headers: bool,
+    active: bool,
+    expected: str,
+):
+    assert (
+        _eligibility(provider_type, config=config, headers=headers, active=active)
+        == expected
+    )
+
+
+@pytest.mark.parametrize(
     ("marked", "eligibility", "expected"),
     [
         (True, "eligible", True),
@@ -145,6 +178,7 @@ def test_a_provider_with_outbound_headers_cannot_carry_live_text(provider_type: 
         (True, "endpoint_required", False),
         (True, "unsupported_provider", False),
         (True, "outbound_headers_configured", False),
+        (True, "provider_inactive", False),
     ],
 )
 def test_a_model_streams_live_only_when_marked_and_its_provider_is_eligible(

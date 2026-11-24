@@ -6,11 +6,13 @@ text when it points at a server that serves that API: a vLLM provider (vadsa,
 the NeMo server for Swedish ASR, presents itself as one), or an OpenAI provider
 with the endpoint of a gateway that speaks the dialect. OpenAI's own service
 does not, and a provider with outbound headers cannot be used because the live
-path does not send them, just as file transcription refuses them.
+path does not send them, just as file transcription refuses them. A provider
+that is switched off carries no live text until it is switched on again.
 
 Trust boundary: the answer decides where Eneo opens a WebSocket with the
-provider's key. Saving the mark, admitting a session and opening the socket all
-read this rule; nothing else may decide it.
+provider's key, and whether a switched-off provider is used at all. Saving the
+mark, admitting a session and opening the socket all read this rule; nothing
+else may decide it.
 """
 
 from __future__ import annotations
@@ -37,6 +39,7 @@ RealtimeEligibility = Literal[
     "endpoint_required",
     "unsupported_provider",
     "outbound_headers_configured",
+    "provider_inactive",
 ]
 
 _OPENAI_DOMAIN = "openai.com"
@@ -48,6 +51,7 @@ def realtime_eligibility(
     credentials: Mapping[str, Any],
     config: Mapping[str, Any],
     has_outbound_headers: bool,
+    is_active: bool,
 ) -> RealtimeEligibility:
     """Whether a provider can carry live text, and if not, what is missing.
 
@@ -55,6 +59,8 @@ def realtime_eligibility(
     first, and an empty credential value shadows config. A vLLM endpoint only
     has to be there; an OpenAI one must be an explicit http(s) URL whose host
     is not OpenAI's own (any ``*.openai.com``, regional hosts included).
+    Whether the provider is switched on is asked last: switching it on fixes
+    neither its endpoint nor its headers, so those reasons come first.
     """
     canonical = get_canonical_provider_type(provider_type) if provider_type else None
     if canonical not in ("hosted_vllm", "openai"):
@@ -68,6 +74,8 @@ def realtime_eligibility(
         return "endpoint_required"
     if has_outbound_headers:
         return "outbound_headers_configured"
+    if not is_active:
+        return "provider_inactive"
     return "eligible"
 
 
