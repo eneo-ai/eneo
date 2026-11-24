@@ -316,6 +316,48 @@ describe("flow retention", () => {
     ).toBeTruthy();
   });
 
+  it.each([
+    ["with a time stored on the space", { days: 60 }],
+    ["without a time", null]
+  ])(
+    "says runs in a personal space are not removed automatically, %s, and never warns",
+    async (_, spaceTime) => {
+      backend.GET.mockResolvedValue(settings({ days: 45 }, spaceTime));
+      backend.PUT.mockResolvedValue(settings({ days: 30 }, spaceTime));
+      renderInApp(
+        <FlowSettings
+          flow={makeFlow({
+            run_history_retention: {
+              state: "configured",
+              source: "flow",
+              effective_days: 45,
+              contributors: { space: spaceTime, flow: { days: 45 } }
+            }
+          })}
+          canEdit
+          setsSpaceRetention
+          personalSpace
+          transcription={resources}
+          onSave={vi.fn()}
+        />,
+        { appContext: testAppContext({ permissions: ["retention_manage"] }) }
+      );
+      const personal =
+        "Körningar i personliga ytor tas inte bort automatiskt i den här versionen. Flödets tid gäller då bara en administratörs uttryckliga rensning.";
+      expect(screen.getByText(personal)).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: "Ändra gallring" }));
+      const days = await screen.findByRole("spinbutton", { name: /Egen tid för det här flödet/ });
+      expect(screen.getAllByText(personal)).toHaveLength(2);
+      expect(screen.queryByText(/tas bort automatiskt när/)).toBeNull();
+      expect(screen.queryByText(/Ytan har ingen tid/)).toBeNull();
+      fireEvent.change(days, { target: { value: "30" } });
+      fireEvent.blur(days);
+      fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
+      await waitFor(() => expect(backend.PUT).toHaveBeenCalledTimes(1));
+      expect(screen.queryByText(/tas bort vid nästa kontroll/)).toBeNull();
+    }
+  );
+
   it("says the space has no time when nothing applies", async () => {
     backend.GET.mockResolvedValue(settings(null, null));
     await openDialog();

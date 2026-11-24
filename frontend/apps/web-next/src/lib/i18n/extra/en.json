@@ -4580,6 +4580,7 @@
   "flows_retention_cap_space": "The space allows at most {days, plural, one {# day} other {# days}}.",
   "flows_retention_longer_saved": "{days, plural, one {# day} other {# days}} saved on the flow. The space's shorter time applies.",
   "flows_retention_shorter_warning": "Runs already older than the new time are removed at the next check and cannot be restored. Save again to use it.",
+  "flows_retention_personal": "Runs in personal spaces are not removed automatically in this version. The flow's time then applies only to an administrator's explicit purge.",
   "flows_classification_heading": "Security classification",
   "flows_classification_raised": "{name}, {count, plural, one {# step raises} other {# steps raise}} the level",
   "flows_classification_hint": "Inherited from the space, and a step can raise it.",
