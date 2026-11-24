@@ -1056,3 +1056,45 @@ describe("the spaces' copies of whether a model streams live text", () => {
     expect(await refetched(client)).toBe(reads);
   });
 });
+
+describe("open model details", () => {
+  const liveText = (dialog: HTMLElement) =>
+    within(dialog).getByText("Livetext", { selector: "dt" }).nextElementSibling?.textContent;
+
+  it("follow the model and its provider as they are refreshed, both ways", async () => {
+    const client = renderPage(withTranscription(transcription(true)), providersWith("eligible"));
+    fireEvent.click(screen.getByRole("button", { name: "Pianissimo" }));
+    const dialog = await screen.findByRole("dialog", { name: "Pianissimo" });
+    expect(liveText(dialog)).toBe("Ja");
+
+    // The provider is switched off elsewhere, and both lists are fetched again.
+    act(() => {
+      client.setQueryData(PROVIDERS_KEY, providersWith("provider_inactive"));
+      client.setQueryData(MODELS_KEY, withTranscription(transcription(true, false)));
+    });
+    await waitFor(() =>
+      expect(liveText(dialog)).toBe(
+        "Livetext används inteLeverantören är avstängd, så den kan inte bära livetext."
+      )
+    );
+
+    act(() => {
+      client.setQueryData(PROVIDERS_KEY, providersWith("eligible"));
+      client.setQueryData(MODELS_KEY, withTranscription(transcription(true)));
+    });
+    await waitFor(() => expect(liveText(dialog)).toBe("Ja"));
+  });
+
+  it("close when the model is gone, leaving focus on its provider", async () => {
+    const client = renderPage(withTranscription(transcription(true)), providersWith("eligible"));
+    fireEvent.click(screen.getByRole("button", { name: "Pianissimo" }));
+    await screen.findByRole("dialog", { name: "Pianissimo" });
+
+    act(() => client.setQueryData(MODELS_KEY, withTranscription()));
+
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Pianissimo" })).toBeNull());
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole("region", { name: "vLLM" }))
+    );
+  });
+});
