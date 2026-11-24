@@ -167,18 +167,22 @@ class FlowRunRemovalOutcome(StrEnum):
     TOO_LARGE = "too_large"
     # The file owner refused a family for another reason.
     REFUSED = "refused"
+    # An error rolled the run back; ``error`` says which.
+    FAILED = "failed"
 
 
 @dataclass(frozen=True, slots=True)
 class FlowRunRemoval:
     """One run's removal: removed whole, or nothing (its savepoint rolled back).
 
-    ``rows`` and ``files`` are the work charged, reads included; the counts
-    below are what was removed and are zero unless the run was removed."""
+    ``rows`` and ``files`` are the work charged, reads included, also for a
+    run that rolled back; the counts below are what was removed and are zero
+    unless the run was removed."""
 
     outcome: FlowRunRemovalOutcome
     rows: int
     files: int = 0
+    error: Exception | None = None
     tenant_id: UUID | None = None
     run_rows: int = 0
     uploads_released: int = 0
@@ -200,6 +204,31 @@ _REFUSALS = {
     FileRetentionReason.INSUFFICIENT_BUDGET: FlowRunRemovalOutcome.SHORT,
     FileRetentionReason.FAMILY_EXCEEDS_BUDGET: FlowRunRemovalOutcome.TOO_LARGE,
 }
+
+
+@dataclass(slots=True)
+class _Work:
+    """The rows and files one removal has used so far, reads and released
+    families included; still charged when its savepoint rolls back."""
+
+    rows: int = 0
+    files: int = 0
+
+    def charged(
+        self,
+        outcome: FlowRunRemovalOutcome,
+        *,
+        max_rows: int,
+        max_files: int,
+        error: Exception | None = None,
+    ) -> FlowRunRemoval:
+        """A rolled-back removal, charged within the call's allowance."""
+        return FlowRunRemoval(
+            outcome=outcome,
+            rows=max(1, min(self.rows, max_rows)),
+            files=min(self.files, max_files),
+            error=error,
+        )
 
 
 def flow_run_owned_row_count(run_id: UUID, ceiling: int) -> sa.Select[tuple[int]]:
@@ -414,28 +443,40 @@ class FlowRunHistoryPurgeRepository:
         transcript edit locks the step result and then reaches the run through
         a foreign key, the opposite order. Anything but REMOVED rolls the
         savepoint back, so a run is never gone while one of its files can
-        still be read. An error rolls back and propagates."""
-        async with self.session.begin_nested() as unit:
-            removal = await self._remove_run(
-                run_id,
+        still be read. An error rolls the savepoint back and gives FAILED
+        with the error; the caller decides whether it is the run's own."""
+        work = _Work()
+        try:
+            async with self.session.begin_nested() as unit:
+                removal = await self._remove_run(
+                    run_id,
+                    work,
+                    max_rows=max_rows,
+                    max_files=max_files,
+                    max_family_rows=max_family_rows,
+                )
+                if removal.outcome is not FlowRunRemovalOutcome.REMOVED:
+                    await unit.rollback()
+        except Exception as error:
+            return work.charged(
+                FlowRunRemovalOutcome.FAILED,
                 max_rows=max_rows,
                 max_files=max_files,
-                max_family_rows=max_family_rows,
+                error=error,
             )
-            if removal.outcome is not FlowRunRemovalOutcome.REMOVED:
-                await unit.rollback()
         return removal
 
     async def _remove_run(
         self,
         run_id: UUID,
+        work: _Work,
         *,
         max_rows: int,
         max_files: int,
         max_family_rows: int,
     ) -> FlowRunRemoval:
-        def stopped(outcome: FlowRunRemovalOutcome, rows: int) -> FlowRunRemoval:
-            return FlowRunRemoval(outcome=outcome, rows=max(1, min(rows, max_rows)))
+        def stopped(outcome: FlowRunRemovalOutcome) -> FlowRunRemoval:
+            return work.charged(outcome, max_rows=max_rows, max_files=max_files)
 
         # The run's lock also fences new child rows: their foreign key needs a
         # share lock on it.
@@ -445,35 +486,35 @@ class FlowRunHistoryPurgeRepository:
             .with_for_update(of=FlowRuns, skip_locked=True)
         )
         if tenant_id is None:
+            work.rows = 2
             held = await self.session.scalar(
                 sa.select(sa.literal(True)).where(FlowRuns.id == run_id)
             )
             return stopped(
                 FlowRunRemovalOutcome.LOCKED
                 if held
-                else FlowRunRemovalOutcome.NOT_PURGEABLE,
-                2,
+                else FlowRunRemovalOutcome.NOT_PURGEABLE
             )
-        rows = 1
+        work.rows = 1
         # Counted up to the call's rows before anything else of the run is
         # read or locked: a run too large for them is refused at that cost.
         run_rows = cast(
             int,
             await self.session.scalar(
-                flow_run_owned_row_count(run_id, ceiling=max_rows - rows)
+                flow_run_owned_row_count(run_id, ceiling=max_rows - work.rows)
             ),
         )
-        rows += run_rows
-        if rows > max_rows:
-            return stopped(FlowRunRemovalOutcome.SHORT, rows)
+        work.rows += run_rows
+        if work.rows > max_rows:
+            return stopped(FlowRunRemovalOutcome.SHORT)
         step_results = await self._lock_all(
             sa.select(FlowStepResults.id).where(FlowStepResults.flow_run_id == run_id),
             cap=run_rows,
         )
         if step_results is None:
-            return stopped(FlowRunRemovalOutcome.LOCKED, rows)
+            return stopped(FlowRunRemovalOutcome.LOCKED)
         if not await self._purgeable_locked_runs({run_id}):
-            return stopped(FlowRunRemovalOutcome.NOT_PURGEABLE, rows)
+            return stopped(FlowRunRemovalOutcome.NOT_PURGEABLE)
 
         result_file_ids = set(
             await self.session.scalars(
@@ -507,14 +548,14 @@ class FlowRunHistoryPurgeRepository:
                 )
             ),
         ):
-            locked = await self._lock_all(uses, cap=max_rows - rows)
+            locked = await self._lock_all(uses, cap=max_rows - work.rows)
             if locked is None:
-                return stopped(FlowRunRemovalOutcome.LOCKED, rows)
-            rows += locked
-            if rows > max_rows:
-                return stopped(FlowRunRemovalOutcome.SHORT, rows)
+                return stopped(FlowRunRemovalOutcome.LOCKED)
+            work.rows += locked
+            if work.rows > max_rows:
+                return stopped(FlowRunRemovalOutcome.SHORT)
         if max_files == 0 and (result_file_ids or input_file_ids):
-            return stopped(FlowRunRemovalOutcome.SHORT, rows)
+            return stopped(FlowRunRemovalOutcome.SHORT)
 
         input_sizes = await self._primary_file_sizes(input_file_ids)
         await self._delete_webhook_deliveries({run_id})
@@ -524,20 +565,20 @@ class FlowRunHistoryPurgeRepository:
             raise RuntimeError("A locked, purgeable run was not deleted.")
 
         usage = FileUsageRepository(self.session)
-        files = roots = members = references = 0
+        roots = members = references = 0
         kept: Counter[FileRetentionReason] = Counter()
         released_inputs: set[UUID] = set()
 
         async def release(file_id: UUID) -> FlowRunRemovalOutcome | None:
-            nonlocal rows, files, roots, members, references
+            nonlocal roots, members, references
             result = await usage.delete_unused_root(
                 file_id,
-                max_rows=max_rows - rows,
-                max_files=max_files - files,
+                max_rows=max_rows - work.rows,
+                max_files=max_files - work.files,
                 max_family_rows=max_family_rows,
             )
-            rows += result.rows
-            files += result.files
+            work.rows += result.rows
+            work.files += result.files
             if result.reason.is_refusal:
                 return _REFUSALS.get(result.reason, FlowRunRemovalOutcome.REFUSED)
             if result.reason is FileRetentionReason.DELETED:
@@ -552,18 +593,18 @@ class FlowRunHistoryPurgeRepository:
         for file_id in sorted(result_file_ids):
             refused = await release(file_id)
             if refused is not None:
-                return stopped(refused, rows)
+                return stopped(refused)
         # The live text and the binding use the input File; they go first.
         live_deleted = await self._delete_released_live_transcripts(input_file_ids)
         unbound = await self._delete_unreferenced_runtime_uploads(input_file_ids)
         for file_id in sorted(unbound):
             refused = await release(file_id)
             if refused is not None:
-                return stopped(refused, rows)
+                return stopped(refused)
         return FlowRunRemoval(
             outcome=FlowRunRemovalOutcome.REMOVED,
-            rows=rows,
-            files=files,
+            rows=work.rows,
+            files=work.files,
             tenant_id=tenant_id,
             run_rows=run_rows,
             uploads_released=len(unbound),

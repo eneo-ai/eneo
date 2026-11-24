@@ -613,14 +613,14 @@ async def test_a_run_that_raises_is_blocked_and_the_others_go(
     )
     other = await _small_run(session, failing, days_old=SPACE_DAYS + 5)
     failing_id = failing.run.id
-    original = FlowRunHistoryPurgeRepository.purge_due_run
+    original = FlowRunHistoryPurgeRepository._remove_run
 
-    async def purge_due_run(self, run_id: UUID, **kwargs: int):
+    async def _remove_run(self, run_id: UUID, *args: Any, **kwargs: Any):
         if run_id == failing_id:
             raise error
-        return await original(self, run_id, **kwargs)
+        return await original(self, run_id, *args, **kwargs)
 
-    monkeypatch.setattr(FlowRunHistoryPurgeRepository, "purge_due_run", purge_due_run)
+    monkeypatch.setattr(FlowRunHistoryPurgeRepository, "_remove_run", _remove_run)
 
     report = await _run(session, error_code=error_code)
 
@@ -827,6 +827,72 @@ async def test_a_pdf_run_goes_whole_and_its_content_is_tombstoned(
             )
         )
     assert states == {ContentState.TOMBSTONED.value}
+
+
+async def test_a_run_kept_after_a_released_file_still_charges_that_file(
+    retention_session: AsyncSession,
+    test_tenant,
+    admin_user,
+    shared_space: Spaces,
+    space_assistant: Assistants,
+):
+    """The run's result file is released, then another transaction holds an
+    image extracted from its input: the run rolls back whole, and the released
+    family still counts against the pass's files, so a later run that needs
+    two files waits for the next pass. Mutant: a rolled-back run charged no
+    files, which let one pass use more files than its budget."""
+    session = retention_session
+    kept = await _aged_run(
+        session,
+        tenant=test_tenant,
+        user=admin_user,
+        space=shared_space,
+        assistant=space_assistant,
+        days_old=SPACE_DAYS + 10,
+    )
+    kept.runtime_input_file.mimetype = "application/pdf"
+    image = await _create_durable_file(
+        session,
+        tenant_id=test_tenant.id,
+        user_id=admin_user.id,
+        name="page-1.png",
+        mimetype="image/png",
+        file_type=FileType.IMAGE,
+        payload=b"p" * 13,
+        variant=FileContentVariant.ORIGINAL,
+        created_at=datetime.now(timezone.utc),
+        parent_file_id=kept.runtime_input_file.id,
+    )
+    later = await _aged_run(
+        session,
+        tenant=test_tenant,
+        user=admin_user,
+        space=shared_space,
+        assistant=space_assistant,
+        days_old=SPACE_DAYS + 5,
+    )
+    kept_id, image_id, later_id = kept.run.id, image.id, later.run.id
+    kept_result_id = kept.generated_file.id
+    await session.commit()
+    settings = get_settings().model_copy(
+        update={"retention_max_files_per_run": 2, "retention_max_family_rows": 3}
+    )
+
+    async with sessionmanager.session() as holder, holder.begin():
+        await holder.execute(
+            select(Files.id).where(Files.id == image_id).with_for_update()
+        )
+        report = await _run(session, settings=settings)
+
+    assert _blocked(report) == {"runs.run_locked": 1}, report
+    assert await _exists(session, kept_id)
+    assert await _file_exists(session, kept_result_id)
+    assert await _exists(session, later_id)
+
+    report = await _run(session, settings=settings)
+
+    assert _counts(report)["runs.runs_deleted"] == 1, report
+    assert not await _exists(session, later_id)
 
 
 async def test_an_error_after_the_first_released_file_rolls_back_the_whole_run(

@@ -171,20 +171,12 @@ class FlowRunHistoryRetentionTask:
     async def _remove(
         self, run_id: UUID, *, rows: int, files: int, out: RetentionEffects
     ) -> RetentionUnitUsage:
-        try:
-            removal = await self.purge.purge_due_run(
-                run_id,
-                max_rows=rows,
-                max_files=files,
-                max_family_rows=self.family_rows,
-            )
-        except (RetentionContractError, RetentionOwnershipLost):
-            raise
-        except Exception as exc:
-            if is_transient_database_error(exc):
-                raise
-            self._failed(run_id, exc, out)
-            return RetentionUnitUsage(rows=1, files=0)
+        removal = await self.purge.purge_due_run(
+            run_id,
+            max_rows=rows,
+            max_files=files,
+            max_family_rows=self.family_rows,
+        )
         usage = RetentionUnitUsage(rows=removal.rows, files=removal.files)
         match removal.outcome:
             case FlowRunRemovalOutcome.REMOVED:
@@ -199,13 +191,20 @@ class FlowRunHistoryRetentionTask:
                 # Short of a run's whole room: retried in a fresh chunk.
                 return RetentionUnitUsage(
                     rows=removal.rows,
-                    files=0,
+                    files=removal.files,
                     disposition=RetentionUnitDisposition.DOES_NOT_FIT,
                 )
             case FlowRunRemovalOutcome.SHORT | FlowRunRemovalOutcome.TOO_LARGE:
                 out.blocked[UNIT_EXCEEDS_BUDGET] += 1
             case FlowRunRemovalOutcome.REFUSED:
                 self._failed(run_id, None, out)
+            case FlowRunRemovalOutcome.FAILED if removal.error is not None:
+                error = removal.error
+                if isinstance(
+                    error, (RetentionContractError, RetentionOwnershipLost)
+                ) or is_transient_database_error(error):
+                    raise error
+                self._failed(run_id, error, out)
         return usage
 
     @staticmethod
