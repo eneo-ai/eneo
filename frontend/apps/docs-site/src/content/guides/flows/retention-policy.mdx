@@ -19,7 +19,7 @@ There is no automatic Flow run-history deletion. History is deleted only by the 
 - A Flow without its own time uses the space's. A space without a time sets no cap, and its Flows' runs become eligible only through a time of their own.
 - No time means no age threshold: no run history is eligible for a purge. The same purge still deletes expired live transcripts that no run uses (see [Administrator purge of due run history](/guides/flows-api-guide#administrator-purge-of-due-run-history)).
 - The organisation sets no time for Flows.
-- Changing a shared space's time and a Flow's own time, and purging, need `retention_manage`; the two times also need the person's role in the space: its admin, or for a Flow in a personal space its owner; placing, reviewing and releasing holds need `retention_holds` (see [Who may change or stop retention](#who-may-change-or-stop-retention)).
+- Changing a shared space's time and a Flow's own time, and purging, need `retention_manage`; the two times also need the person's role in the space: its admin, or for a Flow in a personal space its owner if they may edit Flows; placing, reviewing and releasing holds need `retention_holds` (see [Who may change or stop retention](#who-may-change-or-stop-retention)).
 - A Flow's time can be changed after the Flow is published.
 
 On upgrade to this version, every Flow's own time is cleared without an audit row and the space's time applies to its Flows, so an administrator should check the spaces' times before the next purge.
@@ -263,7 +263,7 @@ space's time, for conversations too, a Flow's time or legal holds, so grant them
 right after upgrading. Changing a shared space's time also needs the right to edit
 the space; a personal space's time cannot be changed, so its Flows use only
 their own time. Changing a Flow's own time also needs the admin role in the
-Flow's space, or ownership of the personal space it is in; anyone else,
+Flow's space, or, in a personal space, being its owner with the right to edit Flows; anyone else,
 a space editor too, is refused with `forbidden_action` (403) and the time is
 unchanged. Resetting a role to
 its template removes them again.

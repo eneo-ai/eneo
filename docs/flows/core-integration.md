@@ -113,7 +113,8 @@ an upgrade changes:
   too, and the Svelte app shows a 403. Existing grants keep working. A change
   writes an audit row with the earlier and the new time.
 - Changing a Flow's own time needs `retention_manage` and the admin role in
-  the Flow's space, or ownership of the personal space it is in. Anyone else,
+  the Flow's space, or, in a personal space, being its owner with the right to
+  edit Flows. Anyone else,
   a space editor too, gets 403 `forbidden_action`.
 
 ## Starting points
