@@ -279,9 +279,10 @@ describe("flow retention", () => {
     const days = await openDialog();
     fireEvent.change(days, { target: { value: typed } });
     fireEvent.blur(days);
-    expect(screen.queryByText(/tas bort vid en kommande kontroll/)).toBeNull();
-    pressSave();
+    // One press saves: no warning stands between it and the save.
+    fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
     await waitFor(() => expect(backend.PUT).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText(/tas bort vid en kommande kontroll/)).toBeNull();
   });
 
   it("says automatic removal is paused while the space has no time, also with a flow time", async () => {
