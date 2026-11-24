@@ -8480,7 +8480,7 @@
   "live_text_reason_outbound_headers_configured": "Live text cannot send outbound headers. Add the model on a provider without them, or remove them from the provider if nothing else needs them.",
   "live_text_reason_provider_inactive": "The provider is switched off, so it cannot carry live text.",
   "provider_type_fixed_note": "The type cannot be changed later.",
-  "provider_gateway_as_openai_note": "Already added your gateway as OpenAI? Use the existing provider.",
+  "provider_gateway_as_openai_note": "If your gateway is already an OpenAI provider, you can use it for live text.",
   "endpoint_live_text_note": "Live text uses vLLM's realtime API under /v1/realtime at this address.",
   "flow_editor_tools_model_shows_live_text": "For live text",
   "flow_editor_tools_transcription_model_description": "Writes the text of audio files, and takes over when the live text cannot be used.",

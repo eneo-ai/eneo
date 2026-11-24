@@ -474,13 +474,12 @@ export function AddModelWizard({
               {t("enter_provider_credentials")}
             </Text>
             <Text type="supporting" display="block">
-              {t("provider_type_fixed_note")}
+              {/* The two types that can carry live text: a gateway already added
+                  as OpenAI needs no second provider. */}
+              {providerType === "hosted_vllm" || providerType === "openai"
+                ? `${t("provider_type_fixed_note")} ${t("provider_gateway_as_openai_note")}`
+                : t("provider_type_fixed_note")}
             </Text>
-            {(providerType === "hosted_vllm" || providerType === "openai") && (
-              <Text type="supporting" display="block">
-                {t("provider_gateway_as_openai_note")}
-              </Text>
-            )}
           </div>
         </div>
         <form id={credentialsFormId} onSubmit={submitCredentials} noValidate>

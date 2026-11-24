@@ -8480,7 +8480,7 @@
   "live_text_reason_outbound_headers_configured": "Livetext kan inte skicka utgående headers. Lägg modellen på en leverantör utan sådana, eller ta bort dem på leverantören om inget annat behöver dem.",
   "live_text_reason_provider_inactive": "Leverantören är avstängd, så den kan inte bära livetext.",
   "provider_type_fixed_note": "Typen kan inte ändras efteråt.",
-  "provider_gateway_as_openai_note": "Har du redan lagt till din gateway som OpenAI? Använd den befintliga leverantören.",
+  "provider_gateway_as_openai_note": "Finns din gateway redan som OpenAI-leverantör kan du använda den för livetext.",
   "endpoint_live_text_note": "Livetext använder vLLM:s realtids-API under /v1/realtime på adressen.",
   "flow_editor_tools_model_shows_live_text": "För livetext",
   "flow_editor_tools_transcription_model_description": "Skriver ljudfilernas text, och tar över när livetexten inte går att använda.",

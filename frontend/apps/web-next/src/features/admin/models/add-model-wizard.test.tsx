@@ -251,10 +251,10 @@ describe("the add-provider wizard's credentials", () => {
 
   it("says the type is fixed and where live text streams from, before the provider is saved", async () => {
     const dialog = await toCredentials();
-    expect(within(dialog).getByText(/Typen kan inte ändras efteråt\./)).toBeTruthy();
+    // One line: the gateway note follows the type note for the two types that carry live text.
     expect(
       within(dialog).getByText(
-        "Har du redan lagt till din gateway som OpenAI? Använd den befintliga leverantören."
+        "Typen kan inte ändras efteråt. Finns din gateway redan som OpenAI-leverantör kan du använda den för livetext."
       )
     ).toBeTruthy();
     const endpoint = field(/^Endpoint-URL/);
@@ -346,6 +346,9 @@ describe("the add-provider wizard's credentials", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till Anthropic" }));
     await waitFor(() => expect(field(/^API-nyckel/).value).toBe(""));
     expect(field(/^Bekräfta API-nyckel/).value).toBe("");
+    // A type that cannot carry live text gets the type note alone.
+    expect(within(dialog).getByText("Typen kan inte ändras efteråt.")).toBeTruthy();
+    expect(within(dialog).queryByText(/gateway/)).toBeNull();
   });
 
   it("adds models to an existing provider through its own step", async () => {
