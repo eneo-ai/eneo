@@ -2405,6 +2405,7 @@
   "flow_editor_tools_live_model_lost": "The chosen model can no longer show live text in the space, so the recording is transcribed afterwards. Choose another.",
   "live_text_for_selected_models": "Live text for selected models",
   "live_text_saved_but_unused": "Live text not in use",
+  "live_text_kept_unused_hint": "The mark is saved but not in use now. You can turn it off.",
   "live_text_provider_saved_unused": "The provider was saved, but live text is not in use for {models}. {reason} {count, plural, one {The mark is kept.} other {The marks are kept.}}",
   "live_text_provider_saved_in_use_again": "The provider was saved. Live text is in use again for {models}.",
   "live_text_models_more": "{count} more",

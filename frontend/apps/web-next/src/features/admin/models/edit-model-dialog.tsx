@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
+import { Lock } from "lucide-react";
 import { useId, useState } from "react";
 import {
   FieldProblem,
@@ -113,6 +114,7 @@ function EditModelForm({
   const helpId = useId();
   const realtimeHelpId = `${helpId}-realtime`;
   const realtimeUnavailableId = `${helpId}-realtime-unavailable`;
+  const realtimeKeptId = `${helpId}-realtime-kept`;
   const strictToolsHelpId = `${helpId}-strict-tools`;
 
   const [displayName, setDisplayName] = useState(model.nickname ?? model.name);
@@ -216,6 +218,8 @@ function EditModelForm({
   // A saved mark can always be kept or turned off, even when the provider no
   // longer carries live text; only turning it on needs an eligible provider.
   const realtimeLocked = realtimeEligibility !== "eligible" && !savedRealtime;
+  // A saved mark the provider cannot carry: say so before the reason.
+  const realtimeKeptUnused = savedRealtime && realtimeRefusal !== null;
 
   const save = useMutation({
     mutationFn: () => {
@@ -529,17 +533,30 @@ function EditModelForm({
                   }}
                   aria-disabled={realtimeLocked || undefined}
                   className="aria-disabled:data-[state=unchecked]:bg-input/50 aria-disabled:cursor-not-allowed aria-disabled:*:opacity-50"
-                  aria-describedby={
-                    realtimeRefusal ? `${realtimeHelpId} ${realtimeUnavailableId}` : realtimeHelpId
-                  }
+                  aria-describedby={[
+                    realtimeHelpId,
+                    realtimeKeptUnused && realtimeKeptId,
+                    realtimeRefusal && realtimeUnavailableId
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
                 />
               </Label>
               <p id={realtimeHelpId} className="text-muted-foreground text-xs">
                 {t("live_transcription_help")}
               </p>
+              {realtimeKeptUnused && (
+                <p id={realtimeKeptId} className="text-muted-foreground text-xs">
+                  {t("live_text_kept_unused_hint")}
+                </p>
+              )}
               {realtimeRefusal && (
-                <p id={realtimeUnavailableId} className="text-muted-foreground text-xs">
-                  {t(realtimeRefusal)}
+                <p
+                  id={realtimeUnavailableId}
+                  className="text-muted-foreground flex items-start gap-1.5 text-xs"
+                >
+                  <Lock aria-hidden="true" className="mt-px size-3 shrink-0" />
+                  <span>{t(realtimeRefusal)}</span>
                 </p>
               )}
             </div>

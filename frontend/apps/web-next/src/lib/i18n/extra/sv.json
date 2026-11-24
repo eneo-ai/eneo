@@ -2405,6 +2405,7 @@
   "flow_editor_tools_live_model_lost": "Den valda modellen kan inte längre visa livetext i ytan, så inspelningen transkriberas efteråt. Välj en annan.",
   "live_text_for_selected_models": "Livetext för valda modeller",
   "live_text_saved_but_unused": "Livetext används inte",
+  "live_text_kept_unused_hint": "Markeringen är sparad men används inte nu. Du kan stänga av den.",
   "live_text_provider_saved_unused": "Leverantören sparades, men livetext används inte för {models}. {reason} {count, plural, one {Markeringen står kvar.} other {Markeringarna står kvar.}}",
   "live_text_provider_saved_in_use_again": "Leverantören sparades. Livetext används igen för {models}.",
   "live_text_models_more": "{count} till",

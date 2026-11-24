@@ -508,6 +508,41 @@ describe("live text on a transcription model", () => {
     );
   });
 
+  it("says a saved mark is not in use and can be turned off, then why, each on its own line", async () => {
+    providersSay({ p1: "endpoint_required" });
+    const toggle = await editLiveTranscription(transcriptionModel("p1", true));
+    await screen.findByText(REASONS.endpoint_required);
+    const lines = (toggle.getAttribute("aria-describedby") ?? "")
+      .split(" ")
+      .map((id) => document.getElementById(id));
+    expect(lines.map((line) => line?.textContent)).toEqual([
+      "Visar texten medan någon spelar in. Modellens server behöver stödja vLLM:s realtids-API.",
+      "Markeringen är sparad men används inte nu. Du kan stänga av den.",
+      REASONS.endpoint_required
+    ]);
+    expect(lines[2]?.querySelector("svg[aria-hidden='true']")).not.toBeNull();
+  });
+
+  it("shows only the help when the provider carries live text", async () => {
+    providersSay({ p1: "eligible" });
+    const toggle = await editLiveTranscription(transcriptionModel("p1", true));
+    expect(descriptions(toggle)).toEqual([
+      "Visar texten medan någon spelar in. Modellens server behöver stödja vLLM:s realtids-API."
+    ]);
+  });
+
+  it("gives a mark that is not saved the reason with a lock, without the hint", async () => {
+    providersSay({ p1: "provider_inactive" });
+    const toggle = await editLiveTranscription(transcriptionModel("p1"));
+    await screen.findByText(REASONS.provider_inactive);
+    expect(descriptions(toggle)).toEqual([
+      "Visar texten medan någon spelar in. Modellens server behöver stödja vLLM:s realtids-API.",
+      REASONS.provider_inactive
+    ]);
+    const reason = screen.getByText(REASONS.provider_inactive).closest("[id]");
+    expect(reason?.querySelector("svg[aria-hidden='true']")).not.toBeNull();
+  });
+
   it("saves other changes with the saved mark the provider no longer carries", async () => {
     providersSay({ p1: "outbound_headers_configured" });
     await editLiveTranscription(transcriptionModel("p1", true));

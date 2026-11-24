@@ -968,6 +968,25 @@ describe("the add-model wizard's catalog", () => {
     );
   });
 
+  it("shows the reason on a line of its own with a lock, and reads it with the help", async () => {
+    const live = await createProviderThatSays("endpoint_required");
+    const lines = (live.getAttribute("aria-describedby") ?? "")
+      .split(" ")
+      .map((id) => document.getElementById(id));
+    expect(lines.map((line) => line?.textContent)).toEqual(
+      expect.arrayContaining([
+        "Visar texten medan någon spelar in. Modellens server behöver stödja vLLM:s realtids-API.",
+        "Livetext kräver att leverantörens Endpoint-URL går till en server eller gateway med vLLM:s realtids-API. OpenAI:s egen tjänst har inte det API:t."
+      ])
+    );
+    const reason = lines.find(
+      (line) =>
+        line?.textContent ===
+        "Livetext kräver att leverantörens Endpoint-URL går till en server eller gateway med vLLM:s realtids-API. OpenAI:s egen tjänst har inte det API:t."
+    );
+    expect(reason?.querySelector("svg[aria-hidden='true']")).not.toBeNull();
+  });
+
   it("never shows another provider's answer after going back to pick a different one", async () => {
     const gateway = { ...existing, id: "p-gw", name: "Gateway", realtime_eligibility: "eligible" };
     const other = { ...existing, id: "p-other", name: "Annan leverantör" };

@@ -9,7 +9,7 @@ import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@/components/astryx/text-input";
 import { Token } from "@astryxdesign/core/Token";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, RefreshCw, Search } from "lucide-react";
+import { Lock, Plus, RefreshCw, Search } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
@@ -206,6 +206,7 @@ export function ModelCatalogStep({
   const [realtime, setRealtime] = useState(false);
   const realtimeAvailable = realtimeEligibility === "eligible";
   const realtimeRefusal = realtimeRefusalKey(realtimeEligibility);
+  const realtimeReasonId = useId();
   const [validating, setValidating] = useState(false);
   const [createAnyway, setCreateAnyway] = useState(false);
   const [submitted, setSubmitted] = useState(false);
@@ -530,17 +531,30 @@ export function ModelCatalogStep({
       )}
 
       {mode === "transcription" && (
-        <CheckboxInput
-          label={t(
-            selected.size > 1 ? "live_text_for_selected_models" : "live_transcription_support"
+        <div className="flex flex-col gap-1">
+          {/* The reason is a line of its own under the help, so it reads as why
+              the box is locked rather than as more help; Astryx adds the
+              reason's id to its own description. */}
+          <CheckboxInput
+            label={t(
+              selected.size > 1 ? "live_text_for_selected_models" : "live_transcription_support"
+            )}
+            description={t("live_transcription_help")}
+            aria-describedby={realtimeRefusal ? realtimeReasonId : undefined}
+            value={realtime && realtimeAvailable}
+            onChange={setRealtime}
+            isDisabled={!realtimeAvailable}
+          />
+          {realtimeRefusal && (
+            <p id={realtimeReasonId} className="flex items-start gap-1.5 pl-6">
+              <Lock
+                aria-hidden="true"
+                className="text-ax-text-secondary mt-0.5 size-3.5 shrink-0"
+              />
+              <Text type="supporting">{t(realtimeRefusal)}</Text>
+            </p>
           )}
-          description={[t("live_transcription_help"), realtimeRefusal && t(realtimeRefusal)]
-            .filter(Boolean)
-            .join(" ")}
-          value={realtime && realtimeAvailable}
-          onChange={setRealtime}
-          isDisabled={!realtimeAvailable}
-        />
+        </div>
       )}
 
       {canList && (
