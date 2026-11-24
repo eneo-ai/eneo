@@ -79,6 +79,10 @@ function showSettings(
     if (path === "/api/v1/security-classifications/") {
       return ok({ security_enabled: false, security_classifications: [] });
     }
+    // The space as the server has it now: the retention field reads it before it decides.
+    if (path === "/api/v1/spaces/{id}/" || path.startsWith("/api/v1/spaces/type/")) {
+      return ok(state.space);
+    }
     if (path === "/api/v1/ai-models/") {
       return ok({
         completion_models: models,
@@ -388,6 +392,40 @@ it.each([
   await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
   expect(retentionField().value).toBe("30");
   expect(api.PATCH).not.toHaveBeenCalled();
+});
+
+it("decides on the space's time as the server has it now, not as the page read it", async () => {
+  showSettings();
+  // Another administrator lengthened the time after this page read 30.
+  state.space = { ...state.space, data_retention_days: 90 };
+  enterRetention("60");
+  expect(await screen.findByRole("alertdialog", { name: "Korta gallringstiden?" })).toBeTruthy();
+  expect(api.PATCH).not.toHaveBeenCalled();
+});
+
+it("keeps the field read-only while it reads the space's time, and saves nothing when the read fails", async () => {
+  showSettings();
+  let answer!: (value: unknown) => void;
+  const read = new Promise((resolve) => {
+    answer = resolve;
+  });
+  const reads = api.GET.getMockImplementation()!;
+  api.GET.mockImplementation((path: string, init: unknown) =>
+    path === "/api/v1/spaces/{id}/" ? read : reads(path, init)
+  );
+  const field = enterRetention("60");
+  await waitFor(() => expect(field.readOnly).toBe(true));
+  await act(async () => {
+    answer({
+      error: { message: "Temporary failure" },
+      response: new Response("{}", { status: 503 })
+    });
+  });
+  await waitFor(() => expect(field.readOnly).toBe(false));
+  expect(screen.queryByRole("alertdialog")).toBeNull();
+  expect(api.PATCH).not.toHaveBeenCalled();
+  // The typed time stays, to be tried again.
+  expect(field.value).toBe("60");
 });
 
 it("never sends an unconfirmed shorter time when the page is left", async () => {

@@ -74,7 +74,12 @@ import {
   type SecurityClassification
 } from "@/features/admin/security-classifications/security-classifications";
 import { parseRetentionDays } from "@/features/spaces/retention-days";
-import { invalidateDeletedSpace, invalidateSpacesList, type Space } from "@/features/spaces/space";
+import {
+  invalidateDeletedSpace,
+  invalidateSpacesList,
+  spaceQueryOptions,
+  type Space
+} from "@/features/spaces/space";
 import { editorSummaries } from "@/features/spaces/editor-summaries";
 import { useSpace } from "@/features/spaces/use-space";
 import { PageHeader } from "@/components/composites/page-header";
@@ -430,11 +435,13 @@ function SecuritySection() {
  *
  * It saves on blur like the other fields, but a shorter time removes content for
  * good, so it waits for a confirmation instead, and a draft is never sent when the
- * page is left (no unmount flush, unlike `useAutosaveField`).
+ * page is left (no unmount flush, unlike `useAutosaveField`). Whether a time is
+ * shorter is decided on the time the server has now, read again on blur: another
+ * administrator may have changed it since this page read it.
  */
 function RetentionSection() {
   const t = useTranslations();
-  const { space, can } = useSpace();
+  const { space, routeId, can } = useSpace();
   const managesRetention = useAppContext().can("retention_manage");
   const queryClient = useQueryClient();
   const update = useUpdateSpace();
@@ -453,6 +460,8 @@ function RetentionSection() {
   const [shorter, setShorter] = useState<number | null>(null);
   // What applies from now, after this page saved a time.
   const [note, setNote] = useState<string | null>(null);
+  // The space's time is being read again; the field waits for it.
+  const [checking, setChecking] = useState(false);
   useDirtySaveStatus("retention-days", days !== saved);
 
   const daysProblem = daysVisited && days === undefined ? t("space_retention_invalid") : null;
@@ -475,9 +484,26 @@ function RetentionSection() {
     return true;
   }
 
-  function commit() {
-    if (days === undefined || days === saved || update.isPending) return;
-    if (days !== null && saved !== null && days < saved) setShorter(days);
+  async function commit() {
+    if (draft === null || days === undefined || checking || update.isPending) return;
+    setChecking(true);
+    let current: number | null;
+    try {
+      // A real read, not the cache: a time saved elsewhere since may make this one shorter.
+      const fresh = await queryClient.fetchQuery({
+        ...spaceQueryOptions(browserApi, routeId),
+        staleTime: 0
+      });
+      current = fresh.data_retention_days ?? null;
+    } catch (error) {
+      // Without the current time nothing is saved: the typed time stays, to try again.
+      toastApiError(error, t);
+      return;
+    } finally {
+      setChecking(false);
+    }
+    if (days === current) setDraft(null);
+    else if (days !== null && current !== null && days < current) setShorter(days);
     else void save(days);
   }
 
@@ -498,8 +524,9 @@ function RetentionSection() {
           onChange={(event) => setDraft(event.target.value)}
           onBlur={() => {
             setDaysVisited(true);
-            commit();
+            void commit();
           }}
+          readOnly={checking}
           disabled={!canEditRetention}
           {...fieldProblemProps(
             "retention-days",
