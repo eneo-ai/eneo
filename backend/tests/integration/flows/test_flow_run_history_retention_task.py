@@ -67,6 +67,8 @@ from eneo.flows.application.flow_run_history_retention_task import (
 from eneo.flows.infrastructure.flow_retention_repo import FlowRetentionRepository
 from eneo.flows.infrastructure.flow_run_history_purge_repo import (
     FlowRunHistoryPurgeRepository,
+    FlowRunRemovalOutcome,
+    flow_run_owned_row_count,
 )
 from eneo.main.config import Settings, get_settings
 from eneo.main.retention_tasks import retention_task_registrations
@@ -1019,6 +1021,136 @@ async def test_a_run_kept_after_a_released_file_still_charges_that_file(
 
     assert _counts(report)["runs.runs_deleted"] == 1, report
     assert not await _exists(session, later_id)
+
+
+async def test_a_run_with_a_held_binding_is_charged_the_bindings_it_counted(
+    retention_session: AsyncSession,
+    test_tenant,
+    admin_user,
+    shared_space: Spaces,
+    space_assistant: Assistants,
+):
+    """Two input Files with their bindings, one held by another transaction:
+    the run stays as locked and is charged the bindings it counted with its
+    own rows. Mutant: a skipped lock charged nothing of what it read."""
+    session = retention_session
+    fixture = await _aged_run(
+        session,
+        tenant=test_tenant,
+        user=admin_user,
+        space=shared_space,
+        assistant=space_assistant,
+        days_old=SPACE_DAYS + 10,
+    )
+    at = fixture.run.created_at
+    second = await _create_durable_file(
+        session,
+        tenant_id=test_tenant.id,
+        user_id=admin_user.id,
+        name="second-input.txt",
+        mimetype="text/plain",
+        file_type=FileType.TEXT,
+        payload=b"s" * 16,
+        variant=FileContentVariant.EXTRACTED_TEXT,
+        created_at=at,
+    )
+    session.add(
+        FlowRuntimeUploadedFiles(
+            file_id=second.id,
+            flow_id=fixture.flow.id,
+            tenant_id=test_tenant.id,
+            uploaded_for_step_id=fixture.step_id,
+            owner_type="user",
+            owner_user_id=admin_user.id,
+            owner_service_id=None,
+            created_at=at,
+            updated_at=at,
+        )
+    )
+    # The input row's foreign key needs the binding first.
+    await session.flush()
+    session.add(
+        FlowRunStepInputFiles(
+            flow_run_id=fixture.run.id,
+            flow_id=fixture.flow.id,
+            tenant_id=test_tenant.id,
+            step_id=fixture.step_id,
+            step_order=1,
+            attempt_no=1,
+            file_id=second.id,
+            ordinal=1,
+            created_at=at,
+            updated_at=at,
+        )
+    )
+    run_id, held_id = fixture.run.id, second.id
+    await session.commit()
+    await session.begin()
+    run_rows = await session.scalar(flow_run_owned_row_count(run_id, ceiling=1000))
+    assert run_rows is not None
+
+    async with sessionmanager.session() as holder, holder.begin():
+        await holder.execute(
+            select(FlowRuntimeUploadedFiles.file_id)
+            .where(FlowRuntimeUploadedFiles.file_id == held_id)
+            .with_for_update()
+        )
+        removal = await FlowRunHistoryPurgeRepository(session).purge_due_run(
+            run_id, max_rows=100, max_files=10, max_family_rows=50
+        )
+
+    assert removal.outcome is FlowRunRemovalOutcome.LOCKED, removal
+    # The run's lock, its rows and both bindings.
+    assert removal.rows == 1 + run_rows + 2, removal
+    assert await _exists(session, run_id)
+
+
+async def test_a_release_that_fails_after_reading_its_family_is_charged_its_reservation(
+    retention_session: AsyncSession,
+    test_tenant,
+    admin_user,
+    shared_space: Spaces,
+    space_assistant: Assistants,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """The database refuses a statement while the result File's family is
+    released, after its members were read: the run rolls back whole, no File
+    goes, and the call is charged what the release could read, here the rest
+    of its rows. Mutant: a release that raised charged none of its reads."""
+    session = retention_session
+    fixture = await _aged_run(
+        session,
+        tenant=test_tenant,
+        user=admin_user,
+        space=shared_space,
+        assistant=space_assistant,
+        days_old=SPACE_DAYS + 10,
+    )
+    run_id, result_id = fixture.run.id, fixture.generated_file.id
+    input_id = fixture.runtime_input_file.id
+    await session.commit()
+    await session.begin()
+    lock_cascade_rows = FileUsageRepository._lock_cascade_rows
+
+    async def refused_after_the_reads(self, *args: Any, **kwargs: Any):
+        locks = await lock_cascade_rows(self, *args, **kwargs)
+        await self._session.execute(text("SELECT 1 / 0"))
+        return locks
+
+    monkeypatch.setattr(
+        FileUsageRepository, "_lock_cascade_rows", refused_after_the_reads
+    )
+
+    removal = await FlowRunHistoryPurgeRepository(session).purge_due_run(
+        run_id, max_rows=100, max_files=10, max_family_rows=1000
+    )
+
+    assert removal.outcome is FlowRunRemovalOutcome.FAILED, removal
+    assert isinstance(removal.error, DBAPIError), removal
+    assert (removal.rows, removal.files) == (100, 0), removal
+    assert await _exists(session, run_id)
+    assert await _file_exists(session, result_id)
+    assert await _file_exists(session, input_id)
 
 
 async def test_an_error_after_the_first_released_file_rolls_back_the_whole_run(

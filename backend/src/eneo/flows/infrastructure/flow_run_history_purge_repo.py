@@ -209,10 +209,13 @@ _REFUSALS = {
 @dataclass(slots=True)
 class _Work:
     """The rows and files one removal has used so far, reads and released
-    families included; still charged when its savepoint rolls back."""
+    families included; still charged when its savepoint rolls back.
+    ``attempt`` bounds what a family release in flight may read: its own
+    reads are unknown when it raises, so the unit is charged that bound."""
 
     rows: int = 0
     files: int = 0
+    attempt: int = 0
 
     def charged(
         self,
@@ -225,7 +228,7 @@ class _Work:
         """A rolled-back removal, charged within the call's allowance."""
         return FlowRunRemoval(
             outcome=outcome,
-            rows=max(1, min(self.rows, max_rows)),
+            rows=max(1, min(self.rows + self.attempt, max_rows)),
             files=min(self.files, max_files),
             error=error,
         )
@@ -513,15 +516,18 @@ class FlowRunHistoryPurgeRepository:
         # - review checkpoint edits: the review editor and approval, which lock
         #   the run first.
         cap = max_rows - work.rows
-        step_results = await self._lock_all(
+        step_results, locked = await self._lock_all(
             sa.select(FlowStepResults.id).where(FlowStepResults.flow_run_id == run_id),
             cap=cap,
         )
-        if step_results is None:
-            return stopped(FlowRunRemovalOutcome.LOCKED)
-        if step_results > cap:
+        # Charged only when the unit stops here; the count below includes them.
+        if not locked:
             work.rows += step_results
-            return stopped(FlowRunRemovalOutcome.SHORT)
+            return stopped(
+                FlowRunRemovalOutcome.SHORT
+                if step_results > cap
+                else FlowRunRemovalOutcome.LOCKED
+            )
         # Counted up to the call's rows before the run's files are read and
         # its bindings and live texts locked: a run too large for them is
         # refused at that cost.
@@ -572,12 +578,15 @@ class FlowRunHistoryPurgeRepository:
             # A run without input files has no binding or live text to lock.
             if not input_file_ids:
                 break
-            locked = await self._lock_all(uses, cap=max_rows - work.rows)
-            if locked is None:
-                return stopped(FlowRunRemovalOutcome.LOCKED)
-            work.rows += locked
-            if work.rows > max_rows:
-                return stopped(FlowRunRemovalOutcome.SHORT)
+            cap = max_rows - work.rows
+            used, locked = await self._lock_all(uses, cap=cap)
+            work.rows += used
+            if not locked:
+                return stopped(
+                    FlowRunRemovalOutcome.SHORT
+                    if used > cap
+                    else FlowRunRemovalOutcome.LOCKED
+                )
         if max_files == 0 and (result_file_ids or input_file_ids):
             return stopped(FlowRunRemovalOutcome.SHORT)
 
@@ -595,12 +604,15 @@ class FlowRunHistoryPurgeRepository:
 
         async def release(file_id: UUID) -> FlowRunRemovalOutcome | None:
             nonlocal roots, members, references
+            # A family release reads at most its allowance and its cap.
+            work.attempt = min(max_rows - work.rows, max_family_rows)
             result = await usage.delete_unused_root(
                 file_id,
                 max_rows=max_rows - work.rows,
                 max_files=max_files - work.files,
                 max_family_rows=max_family_rows,
             )
+            work.attempt = 0
             work.rows += result.rows
             work.files += result.files
             if result.reason.is_refusal:
@@ -642,11 +654,13 @@ class FlowRunHistoryPurgeRepository:
             files_kept=kept,
         )
 
-    async def _lock_all(self, rows: sa.Select[tuple[UUID]], *, cap: int) -> int | None:
+    async def _lock_all(
+        self, rows: sa.Select[tuple[UUID]], *, cap: int
+    ) -> tuple[int, bool]:
         """Lock every row ``rows`` selects without waiting, reading at most
-        ``cap + 1``: their number (more than ``cap`` when they do not fit, and
-        then none is locked), or None when another transaction holds one or a
-        row arrived between the two reads."""
+        ``cap + 1``: their number, and whether all of them are locked. None is
+        when they are more than ``cap``; not all when another transaction
+        holds one or a row arrived between the two reads."""
         bounded = rows.limit(cap + 1)
         total = cast(
             int,
@@ -655,13 +669,13 @@ class FlowRunHistoryPurgeRepository:
             ),
         )
         if total > cap:
-            return total
+            return total, False
         locked = len(
             (
                 await self.session.scalars(bounded.with_for_update(skip_locked=True))
             ).all()
         )
-        return total if locked == total else None
+        return total, locked == total
 
     async def purge_abandoned_runtime_uploads(
         self,
