@@ -99,7 +99,9 @@ def _run_room(settings: Settings) -> Mapping[str, tuple[str, ...]]:
     limits = ("retention_max_family_rows", "retention_max_files_per_run")
     if settings.retention_chunk_rows > family:
         limits += ("retention_chunk_rows",)
-    if settings.retention_max_rows_per_run < max(settings.retention_chunk_rows, family):
+    if settings.retention_max_rows_per_run <= max(
+        settings.retention_chunk_rows, family
+    ):
         limits += ("retention_max_rows_per_run",)
     return MappingProxyType({UNIT_EXCEEDS_BUDGET: limits})
 

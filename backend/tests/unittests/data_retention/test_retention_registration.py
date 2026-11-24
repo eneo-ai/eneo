@@ -309,6 +309,16 @@ _CHUNK = "retention_chunk_rows"
             (_FAMILY, _FILES, _CHUNK, "retention_max_rows_per_run"),
             id="the execution's rows are the room",
         ),
+        pytest.param(
+            {_CHUNK: 2000, _FAMILY: 3, "retention_max_rows_per_run": 2000},
+            (_FAMILY, _FILES, _CHUNK, "retention_max_rows_per_run"),
+            id="the execution's rows equal the chunk",
+        ),
+        pytest.param(
+            {_FAMILY: 4999, "retention_max_rows_per_run": 5000},
+            (_FAMILY, _FILES, "retention_max_rows_per_run"),
+            id="the execution's rows equal a family plus discovery",
+        ),
     ],
 )
 def test_a_run_kept_for_its_size_names_the_settings_that_can_hold_it(
