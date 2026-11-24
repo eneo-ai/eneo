@@ -590,6 +590,43 @@ describe("FlowSettings", () => {
     ).toBeTruthy();
   });
 
+  it("warns about a model whose mark is not in use, chosen for audio files", () => {
+    const withStaleMark: TranscriptionResources = {
+      ...resources,
+      models: [
+        // Marked, but its provider cannot carry live text now: still not made for files.
+        {
+          id: "stale-1",
+          name: "forte-sv-live",
+          nickname: "Forte",
+          supports_realtime: true,
+          streams_live: false
+        },
+        ...resources.models
+      ]
+    };
+    const staleFlow = makeFlow({
+      steps: audioFlow.steps,
+      metadata_json: {
+        wizard: {
+          transcription_enabled: true,
+          transcription_model: { id: "stale-1" },
+          transcription_speaker_service: null
+        }
+      }
+    });
+    renderInApp(
+      <FlowSettings flow={staleFlow} canEdit transcription={withStaleMark} onSave={vi.fn()} />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Ändra inställningar" }));
+    expect(
+      screen.getByText(
+        "Markerad för livetext. Välj en modell för ljudfiler, till exempel Tal till text."
+      )
+    ).toBeTruthy();
+    expect(screen.queryByText(/visar då fortfarande livetexten/)).toBeNull();
+  });
+
   it("promises nothing about live recording when another model streams", async () => {
     const twoStreaming: TranscriptionResources = {
       ...resources,
