@@ -10,9 +10,10 @@ path does not send them, just as file transcription refuses them. A provider
 that is switched off carries no live text until it is switched on again.
 
 Trust boundary: the answer decides where Eneo opens a WebSocket with the
-provider's key, and whether a switched-off provider is used at all. Saving the
-mark, admitting a session and opening the socket all read this rule; nothing
-else may decide it.
+provider's key. Saving the mark, admitting a session and opening the socket all
+read this rule; nothing else may decide it. The socket's provider loader has
+already refused a provider that is switched off, so the socket passes it as
+active.
 """
 
 from __future__ import annotations
