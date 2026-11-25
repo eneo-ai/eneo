@@ -123,27 +123,30 @@ describe("Vite API transports", () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps the session when a refusal's body is cut off, and still reads a whole one", async () => {
-    // A 401 whose body would have named another person's session (9090).
-    const body = new ReadableStream<Uint8Array>({
-      start(controller) {
-        controller.enqueue(new TextEncoder().encode('{"message":"Refused","eneo_error_code":90'));
-        controller.error(new TypeError("network error"));
-      }
-    });
-    fetcher.mockResolvedValueOnce(
-      new Response(body, { status: 401, headers: { "content-type": "application/json" } })
-    );
-    await expect(transport.apiFetch("/api/v1/example")).rejects.toThrow("network error");
-    expect(navigate).not.toHaveBeenCalled();
-    expect(owner.getSessionSnapshot()).toEqual({ status: "bound", generation: "session-a" });
+  it.each([new TypeError("network error"), new SyntaxError("stream failed")])(
+    "keeps the session when a refusal's body is cut off (%s), and still reads a whole one",
+    async (lost) => {
+      // A 401 whose body would have named another person's session (9090).
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('{"message":"Refused","eneo_error_code":90'));
+          controller.error(lost);
+        }
+      });
+      fetcher.mockResolvedValueOnce(
+        new Response(body, { status: 401, headers: { "content-type": "application/json" } })
+      );
+      await expect(transport.apiFetch("/api/v1/example")).rejects.toBe(lost);
+      expect(navigate).not.toHaveBeenCalled();
+      expect(owner.getSessionSnapshot()).toEqual({ status: "bound", generation: "session-a" });
 
-    fetcher.mockResolvedValueOnce(
-      Response.json({ message: "Refused", eneo_error_code: 9090 }, { status: 401 })
-    );
-    await expect(transport.apiFetch("/api/v1/example")).rejects.toMatchObject({ code: 9090 });
-    expect(navigate).toHaveBeenCalledExactlyOnceWith("/login", { replace: true });
-  });
+      fetcher.mockResolvedValueOnce(
+        Response.json({ message: "Refused", eneo_error_code: 9090 }, { status: 401 })
+      );
+      await expect(transport.apiFetch("/api/v1/example")).rejects.toMatchObject({ code: 9090 });
+      expect(navigate).toHaveBeenCalledExactlyOnceWith("/login", { replace: true });
+    }
+  );
 
   it("preserves caller cancellation as well as session cancellation", async () => {
     const caller = new AbortController();

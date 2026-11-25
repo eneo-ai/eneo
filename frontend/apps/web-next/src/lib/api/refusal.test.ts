@@ -737,6 +737,40 @@ describe("session expiry and renewal", () => {
     expect(navigate).not.toHaveBeenCalled();
   });
 
+  it("never applies a renewal whose answer is read after another sign-in ended the page", async () => {
+    await bound();
+    let reading!: () => void;
+    const started = new Promise<void>((resolve) => (reading = resolve));
+    let body!: ReadableStreamDefaultController<Uint8Array>;
+    const stream = new ReadableStream<Uint8Array>(
+      { start: (controller) => void (body = controller), pull: () => reading() },
+      { highWaterMark: 0 }
+    );
+    fetcher.mockResolvedValueOnce(
+      new Response(stream, {
+        headers: { "content-type": "application/json", [GENERATION]: "document-session" }
+      })
+    );
+
+    const renewal = owner.extendBrowserSession().catch((reason: unknown) => reason);
+    await started;
+    // Another request is refused: another person's sign-in now holds the cookie.
+    await expect(owner.handleRefusal(refusal(9090), "/api/v1/spaces/")).rejects.toMatchObject({
+      code: 9090
+    });
+    body.enqueue(
+      new TextEncoder().encode(
+        JSON.stringify({ generation: "document-session", expires_in: 86_400 })
+      )
+    );
+    body.close();
+
+    expect(await renewal).toMatchObject({ name: "EneoApiError", status: 401, code: 9090 });
+    expect(owner.getSessionSnapshot()).toEqual({ status: "stale", destination: "/login" });
+    expect(navigate).toHaveBeenCalledExactlyOnceWith("/login", { replace: true });
+    expect(FakeChannel.all.flatMap((channel) => channel.posted)).toEqual([]);
+  });
+
   const sessionNow = (generation: string, seconds: string) =>
     new Response(null, {
       status: 204,
@@ -1062,6 +1096,33 @@ describe("session expiry and renewal", () => {
       });
       expect(FakeChannel.all.flatMap((channel) => channel.posted)).toEqual([]);
       expect(navigate).not.toHaveBeenCalled();
+    });
+
+    it("never applies a renewal whose answer is read after the limit", async () => {
+      await bound();
+      // This body goes on after the abort, as a late answer would.
+      let body!: ReadableStreamDefaultController<Uint8Array>;
+      fetcher.mockResolvedValueOnce(
+        new Response(
+          new ReadableStream<Uint8Array>({ start: (controller) => void (body = controller) }),
+          { headers: { "content-type": "application/json", [GENERATION]: "document-session" } }
+        )
+      );
+      const renewal = owner.extendBrowserSession().catch((reason: unknown) => reason);
+      await vi.advanceTimersByTimeAsync(LIMIT);
+      body.enqueue(
+        new TextEncoder().encode(
+          JSON.stringify({ generation: "document-session", expires_in: 86_400 })
+        )
+      );
+      body.close();
+      expect(await done(renewal)).toBe(true);
+      expect(await renewal).toMatchObject({ name: "EneoApiError", status: 504 });
+      expect(owner.getSessionSnapshot()).toEqual({
+        status: "bound",
+        generation: "document-session"
+      });
+      expect(FakeChannel.all.flatMap((channel) => channel.posted)).toEqual([]);
     });
 
     it.each(asks)("never takes a %s refusal the limit cut off for an expiry", async (_, ask) => {
