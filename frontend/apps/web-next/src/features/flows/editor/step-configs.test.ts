@@ -243,6 +243,12 @@ describe("tools", () => {
     });
     expect(argumentValue("fem", "integer")).toEqual({ ok: false });
     expect(argumentValue("", "string")).toEqual({ ok: true, value: undefined });
+    // Without a type, text that is valid JSON is stored as its value.
+    expect(argumentValue("[\n 1,\n 2\n]", null)).toEqual({ ok: true, value: [1, 2] });
+    // A text that is only a line break is empty: the argument is left out.
+    expect(argumentValue("\n", "string")).toEqual({ ok: true, value: undefined });
+    // Leading empty lines are part of a text and are kept.
+    expect(argumentValue("\n\nSELECT 1", "string")).toEqual({ ok: true, value: "\n\nSELECT 1" });
   });
 });
 
