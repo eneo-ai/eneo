@@ -104,12 +104,13 @@ export function FlowPhonePage({ flowId, onStart }: { flowId: string; onStart: ()
               />
             </div>
           </Collapsible>
-          {/* Folded, the settings still say whether runs are removed, in line with the toggle's text. */}
+          {/* Folded, the settings still say whether runs are removed, in line with the toggle's text:
+              the indent is the leading chevron's box plus its gap, as the Collapsible sizes them. */}
           {settingsOpen ? null : (
             <FlowRetentionFoldedLine
               flow={flow}
               personalSpace={space.personal}
-              className="text-ax-text-secondary m-0 ps-7 text-sm"
+              className="text-ax-text-secondary m-0 ps-[calc(var(--text-large-size)_+_var(--spacing-2))] text-sm"
             />
           )}
         </section>
