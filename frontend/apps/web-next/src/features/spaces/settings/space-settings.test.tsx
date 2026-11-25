@@ -350,7 +350,7 @@ it.each([
   expect(screen.queryByRole("alertdialog")).toBeNull();
   const note =
     sent === null
-      ? messages.space_retention_saved_off
+      ? "Sparat. Ytan har ingen tid, så den automatiska gallringen av körningar står still tills ytan har en tid."
       : `Sparat. Körningar i ytans flöden som startar medan ytan har en tid tas bort när de är äldre än ${sent} dagar, eller flödets kortare tid. Kontrollen görs var femte minut. Andra körningar tas inte bort automatiskt.`;
   // Shown under the field and said once, politely, without moving the focus.
   const section = document.getElementById("security")!;

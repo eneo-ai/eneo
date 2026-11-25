@@ -322,7 +322,7 @@ describe("flow retention", () => {
     // The first press shows the warning instead of saving: it was not on screen before, and
     // it names the days.
     const warning = await screen.findByText(
-      "Flödets körningar som startade medan ytan hade en tid och är äldre än 30 dagar tas bort vid en kommande kontroll. Det går inte att återställa. Välj Spara ändå för att använda tiden."
+      "Flödets körningar som startade medan ytan hade en tid och är äldre än 30 dagar tas bort. Kontrollen görs var femte minut. Det går inte att återställa. Välj Spara ändå för att använda tiden."
     );
     expect(days.getAttribute("aria-describedby")).toContain(
       warning.closest("[id]")?.getAttribute("id")
@@ -460,7 +460,7 @@ describe("flow retention", () => {
     // One press saves: no warning stands between it and the save.
     fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
     await waitFor(() => expect(backend.PUT).toHaveBeenCalledTimes(1));
-    expect(screen.queryByText(/tas bort vid en kommande kontroll/)).toBeNull();
+    expect(screen.queryByText(/Välj Spara ändå/)).toBeNull();
     // It carries the time that applied as the server resolves it, also with no space time,
     // and the space's time as read.
     expect(backend.PUT.mock.calls[0]![1].body.expected_effective_days).toBe(
@@ -541,7 +541,7 @@ describe("flow retention", () => {
       fireEvent.blur(days);
       fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
       await waitFor(() => expect(backend.PUT).toHaveBeenCalledTimes(1));
-      expect(screen.queryByText(/tas bort vid en kommande kontroll/)).toBeNull();
+      expect(screen.queryByText(/Välj Spara ändå/)).toBeNull();
       // The flow's 45 applies, as the server resolves it, though nothing warns here; the
       // space's time goes as read, also one stored on a personal space.
       expect(backend.PUT.mock.calls[0]![1].body.expected_effective_days).toBe(45);
