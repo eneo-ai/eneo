@@ -51,7 +51,9 @@ beforeEach(() => {
         security_classifications: [{ id: "classification", name: "Intern" }]
       });
     if (path === "/api/v1/admin/model-providers/")
-      return ok([{ id: "provider", name: "Provider", provider_type: "openai", is_active: true }]);
+      return ok([
+        { id: "provider", name: "Provider", provider_type: "openai", is_active: true, config: {} }
+      ]);
     if (path === "/api/v1/admin/model-providers/capabilities/")
       return ok({
         providers: { openai: { modes: ["image"], models: {}, fields: [] } },

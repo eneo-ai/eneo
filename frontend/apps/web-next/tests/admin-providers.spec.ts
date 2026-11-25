@@ -21,8 +21,12 @@ test("adds a provider and a model through the wizard, and tests the connection",
   await wizard.getByLabel(/^Endpoint-URL/).fill("http://e2e-mock-model:8200/v1");
   await wizard.getByRole("button", { name: "Nästa" }).click();
 
-  // Stored: the wizard goes on to the new provider's models. The mock lists
-  // none, so the model is added by its id, with the token limits it asks for.
+  // Stored: the wizard goes on to the new provider's models. A provider at an
+  // address of its own has no default region, so one is chosen. The mock
+  // lists no models, so the model is added by its id, with the token limits
+  // it asks for.
+  await wizard.getByRole("combobox", { name: /^Hosting-region/ }).click();
+  await page.getByRole("option", { name: "Sverige", exact: true }).click();
   const modelId = wizard.getByLabel("Saknas modellen? Lägg till med id");
   await modelId.fill("e2e-wizard-model");
   await modelId.press("Enter");

@@ -163,6 +163,61 @@ describe("SpaceModelSelect", () => {
     expect(screen.getByText("Övriga")).toBeTruthy();
   });
 
+  it("groups models by their provider's name as written, and search still finds the org", () => {
+    // Two servers of the same type: only the provider's name tells them apart.
+    // More than six models, so the search field is shown.
+    renderModels([
+      ...models,
+      {
+        id: "files",
+        name: "kb-whisper-large",
+        org: "KB",
+        provider_type: "hosted_vllm",
+        provider_name: "kb-server"
+      },
+      {
+        id: "live",
+        name: "pianissimo-sv",
+        org: "KlangAI",
+        provider_type: "hosted_vllm",
+        provider_name: "livetext-server"
+      },
+      { id: "cloud", name: "whisper-1", provider_type: "openai" }
+    ]);
+    openCard();
+
+    expect(screen.getByRole("button", { name: "kb-server" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "livetext-server" })).toBeTruthy();
+    // Without a provider's name, the type as before.
+    expect(screen.getByRole("button", { name: "Openai" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Hosted_vllm" })).toBeNull();
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Sök modeller och leverantörer" }), {
+      target: { value: "klangai" }
+    });
+    expect(screen.getByText("pianissimo-sv")).toBeTruthy();
+    expect(screen.queryByText("kb-whisper-large")).toBeNull();
+  });
+
+  it("keeps a long provider name whole, so two names with the same start stay apart", () => {
+    // On a phone the heading wraps on as many lines as it needs: a cap would
+    // cut names that differ only at the end.
+    const first = "Talserver hos Regionförbundet Norra (vLLM) r2";
+    const second = "Talserver hos Regionförbundet Norra (vLLM) EN";
+    renderModels([
+      { id: "r2", name: "whisper-r2", provider_type: "hosted_vllm", provider_name: first },
+      { id: "en", name: "whisper-en", provider_type: "hosted_vllm", provider_name: second }
+    ]);
+    openCard();
+
+    for (const name of [first, second]) {
+      const heading = screen.getByText(name);
+      expect(heading.getAttribute("title")).toBe(name);
+      expect(heading.className).toContain("break-words");
+      expect(heading.className).not.toMatch(/line-clamp|truncate/);
+    }
+  });
+
   it("finds a provider, explains no matches and returns focus when search is cleared", async () => {
     const { container } = renderModels(models);
     openCard();

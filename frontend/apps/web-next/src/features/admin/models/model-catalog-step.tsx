@@ -56,7 +56,8 @@ import {
   HOSTING_REGIONS,
   isEmbeddingFamily,
   isHostingRegion,
-  type EmbeddingFamily
+  type EmbeddingFamily,
+  type HostingRegion
 } from "./model-metadata-options";
 
 const NO_CLASSIFICATION = "__none__";
@@ -120,7 +121,8 @@ function missingTokenLimits(model: CatalogModel, mode: ModelKind): boolean {
 
 /**
  * The wizard's model step: the provider's live model list (`/models`), else
- * the static LiteLLM catalog, to pick several from, plus models added by id.
+ * the static LiteLLM catalog (never for a server of its own), to pick several
+ * from, plus models added by id.
  * Picks the catalog knows no token limits for ask for them. All picks are
  * validated with the provider and created in one batch.
  *
@@ -130,6 +132,7 @@ function missingTokenLimits(model: CatalogModel, mode: ModelKind): boolean {
 export function ModelCatalogStep({
   providerId,
   providerType,
+  hasOwnEndpoint,
   realtimeEligibility,
   mode = "completion",
   supportedModes,
@@ -141,6 +144,8 @@ export function ModelCatalogStep({
 }: {
   providerId: string;
   providerType: string;
+  /** A server at an address of its own: only its list says what it has (`hasOwnEndpoint`). */
+  hasOwnEndpoint: boolean;
   /** The provider's answer to whether it can carry live text. */
   realtimeEligibility: RealtimeEligibility | undefined;
   mode?: ModelKind;
@@ -190,8 +195,25 @@ export function ModelCatalogStep({
   );
 
   const liveModels = liveQuery.data?.models ?? [];
-  const catalog = liveModels.length > 0 ? liveModels : staticModels;
+  // The type's built-in models say nothing about a server of its own, so
+  // they are never offered for one (they came with the type's prices).
+  const catalog = liveModels.length > 0 || hasOwnEndpoint ? liveModels : staticModels;
   const usedFallback = liveModels.length === 0 && Boolean(liveQuery.data?.error);
+  /** Why a server of its own offers nothing: one banner instead of the count. */
+  const listNotice =
+    hasOwnEndpoint && liveModels.length === 0
+      ? liveQuery.data?.error
+        ? {
+            status: "warning" as const,
+            title: t("provider_models_list_failed"),
+            description: t("provider_models_list_failed_description")
+          }
+        : {
+            status: "info" as const,
+            title: t("provider_models_none_of_type", { type: typeLabel(mode) }),
+            description: t("provider_models_none_of_type_description")
+          }
+      : null;
   const loading = liveQuery.isLoading || capsQuery.isLoading || modelsQuery.isLoading;
 
   const [selected, setSelected] = useState<Map<string, CatalogModel>>(new Map());
@@ -200,10 +222,15 @@ export function ModelCatalogStep({
   const [manualBusy, setManualBusy] = useState(false);
   /** An id typed in that the provider has already. */
   const [manualTaken, setManualTaken] = useState<string | null>(null);
-  const [hosting, setHosting] = useState(() => defaultModelHosting(providerType));
+  const [chosenHosting, setChosenHosting] = useState<HostingRegion | null>(null);
+  // The type says where its cloud service stands; it says nothing about a
+  // server of its own, so that one has no default and must be chosen.
+  const hosting = chosenHosting ?? (hasOwnEndpoint ? null : defaultModelHosting(providerType));
+  const hostingRef = useRef<HTMLButtonElement>(null);
   const [embeddingFamily, setEmbeddingFamily] = useState<EmbeddingFamily>("openai");
   const [classificationId, setClassificationId] = useState(NO_CLASSIFICATION);
-  const [realtime, setRealtime] = useState(false);
+  /** The picked models marked for live text, by id. */
+  const [liveNames, setLiveNames] = useState<Set<string>>(new Set());
   const realtimeAvailable = realtimeEligibility === "eligible";
   const realtimeRefusal = realtimeRefusalKey(realtimeEligibility);
   const realtimeReasonId = useId();
@@ -214,10 +241,13 @@ export function ModelCatalogStep({
     { model: string; message: string }[]
   >([]);
 
-  const countText = `${t("models_found_count", { count: catalog.length })}${
-    usedFallback ? ` · ${t("provider_models_fallback_notice")}` : ""
-  }`;
-  // How many models the list offers, once it has loaded (WCAG 4.1.3).
+  const countText =
+    listNotice?.title ??
+    `${t("models_found_count", { count: catalog.length })}${
+      usedFallback ? ` · ${t("provider_models_fallback_notice")}` : ""
+    }`;
+  // How many models the list offers, or the banner's title when it offers
+  // none, once it has loaded (WCAG 4.1.3).
   const wasLoading = useRef(loading);
   useEffect(() => {
     if (wasLoading.current && !loading) announce(countText);
@@ -291,6 +321,7 @@ export function ModelCatalogStep({
   }
 
   const selectedModels = useMemo(() => [...selected.values()], [selected]);
+  const onlyPick = selectedModels.length === 1 ? selectedModels[0] : undefined;
   const needsLimits = selectedModels.filter((model) => missingTokenLimits(model, mode));
   const selectedClassification =
     classificationId === NO_CLASSIFICATION ? null : { id: classificationId };
@@ -320,7 +351,7 @@ export function ModelCatalogStep({
   }
 
   const create = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (region: HostingRegion) => {
       const models = selectedModels;
       const results = await Promise.allSettled(
         models.map((model) => {
@@ -333,7 +364,7 @@ export function ModelCatalogStep({
               family: embeddingFamily,
               dimensions: model.output_vector_size ?? null,
               max_input: model.max_input_tokens ?? null,
-              hosting,
+              hosting: region,
               input_cost_per_token: model.input_cost_per_token ?? null,
               output_cost_per_token: model.output_cost_per_token ?? null,
               security_classification: selectedClassification
@@ -345,7 +376,7 @@ export function ModelCatalogStep({
               name: model.name,
               display_name: displayName,
               family: providerType,
-              hosting,
+              hosting: region,
               cost_per_image: model.cost_per_image ?? null,
               // The request defaults are edited afterwards; "auto" lets the model decide.
               default_size: "auto",
@@ -360,7 +391,7 @@ export function ModelCatalogStep({
               name: model.name,
               display_name: displayName,
               family: providerType,
-              hosting,
+              hosting: region,
               security_classification: selectedClassification
             });
           }
@@ -370,9 +401,9 @@ export function ModelCatalogStep({
               name: model.name,
               display_name: displayName,
               family: providerType,
-              hosting,
+              hosting: region,
               cost_per_minute: model.cost_per_minute ?? null,
-              supports_realtime: realtime && realtimeAvailable,
+              supports_realtime: liveNames.has(model.name) && realtimeAvailable,
               security_classification: selectedClassification
             });
           }
@@ -385,7 +416,7 @@ export function ModelCatalogStep({
             vision: model.supports_vision,
             reasoning: model.supports_reasoning,
             supports_tool_calling: model.supports_function_calling,
-            hosting,
+            hosting: region,
             family: providerType,
             input_cost_per_token: model.input_cost_per_token ?? null,
             output_cost_per_token: model.output_cost_per_token ?? null,
@@ -432,6 +463,10 @@ export function ModelCatalogStep({
 
   /** Moves focus to the first problem, shown at its field (WCAG 3.3.1). */
   function focusFirstProblem(): boolean {
+    if (!hosting) {
+      hostingRef.current?.focus();
+      return Boolean(hostingRef.current);
+    }
     if (selected.size === 0) return focus.focus("list") || focus.focus("manual");
     const model = needsLimits[0];
     if (!model) return false;
@@ -442,7 +477,7 @@ export function ModelCatalogStep({
 
   async function handleCreate() {
     if (busy) return;
-    if (selected.size === 0 || needsLimits.length > 0) {
+    if (!hosting || selected.size === 0 || needsLimits.length > 0) {
       flushSync(() => setSubmitted(true));
       focusFirstProblem();
       return;
@@ -471,7 +506,7 @@ export function ModelCatalogStep({
       }
       setValidating(false);
     }
-    create.mutate();
+    create.mutate(hosting);
   }
 
   const noSelection = submitted && selected.size === 0;
@@ -486,6 +521,7 @@ export function ModelCatalogStep({
           onChange={(value) => {
             onModeChange(value as ModelKind);
             setSelected(new Map());
+            setLiveNames(new Set());
             setSubmitted(false);
             resetOutcome();
           }}
@@ -493,11 +529,20 @@ export function ModelCatalogStep({
       )}
 
       <Selector
+        ref={hostingRef}
         label={t("hosting_region")}
+        description={hasOwnEndpoint ? t("hosting_region_own_server_help") : undefined}
+        placeholder={t("hosting_region_placeholder")}
         options={HOSTING_REGIONS.map((value) => ({ value, label: t(`hosting_${value}`) }))}
-        value={hosting}
+        value={hosting ?? undefined}
+        isRequired={hasOwnEndpoint}
+        status={
+          submitted && !hosting
+            ? { type: "error", message: t("form_problem_choose_hosting_region") }
+            : undefined
+        }
         onChange={(value) => {
-          if (isHostingRegion(value)) setHosting(value);
+          if (isHostingRegion(value)) setChosenHosting(value);
         }}
       />
       {mode === "embedding" && (
@@ -528,33 +573,6 @@ export function ModelCatalogStep({
           value={classificationId}
           onChange={setClassificationId}
         />
-      )}
-
-      {mode === "transcription" && (
-        <div className="flex flex-col gap-1">
-          {/* The reason is a line of its own under the help, so it reads as why
-              the box is locked rather than as more help; Astryx adds the
-              reason's id to its own description. */}
-          <CheckboxInput
-            label={t(
-              selected.size > 1 ? "live_text_for_selected_models" : "live_transcription_support"
-            )}
-            description={t("live_transcription_help")}
-            aria-describedby={realtimeRefusal ? realtimeReasonId : undefined}
-            value={realtime && realtimeAvailable}
-            onChange={setRealtime}
-            isDisabled={!realtimeAvailable}
-          />
-          {realtimeRefusal && (
-            <p id={realtimeReasonId} className="flex items-start gap-1.5 pl-8">
-              <Lock
-                aria-hidden="true"
-                className="text-ax-text-secondary mt-0.5 size-3.5 shrink-0"
-              />
-              <Text type="supporting">{t(realtimeRefusal)}</Text>
-            </p>
-          )}
-        </div>
       )}
 
       {canList && (
@@ -589,9 +607,19 @@ export function ModelCatalogStep({
             <LoadingState rows={3} label={t("loading")} />
           ) : (
             <>
-              <Text type="supporting">{countText}</Text>
+              {listNotice ? (
+                <Banner
+                  status={listNotice.status}
+                  title={listNotice.title}
+                  description={listNotice.description}
+                />
+              ) : (
+                <Text type="supporting">{countText}</Text>
+              )}
               {listed.length === 0 ? (
-                <Text type="supporting">{t("no_models_found")}</Text>
+                listNotice ? null : (
+                  <Text type="supporting">{t("no_models_found")}</Text>
+                )
               ) : (
                 <CheckboxList
                   ref={focus.ref("list")}
@@ -672,7 +700,7 @@ export function ModelCatalogStep({
                     type: "error",
                     message: t("provider_form_model_added_error", { name: manualTaken })
                   }
-                : noSelection && !canList
+                : noSelection && (!canList || listed.length === 0)
                   ? { type: "error", message: t("provider_form_select_model_required") }
                   : undefined
             }
@@ -688,6 +716,59 @@ export function ModelCatalogStep({
           {t("add")}
         </Button>
       </div>
+
+      {/* Live text is marked per picked model, below the list they are picked
+          in: a model for audio files must not get it because a live model
+          was picked with it. Nothing to mark before a model is picked. */}
+      {mode === "transcription" &&
+        selected.size > 0 &&
+        (selected.size > 1 && realtimeAvailable ? (
+          <CheckboxList
+            label={t("live_transcription_support")}
+            description={t("live_text_per_model_help")}
+            value={selectedModels.map((model) => model.name).filter((name) => liveNames.has(name))}
+            onChange={(names) => setLiveNames(new Set(names))}
+            density="compact"
+          >
+            {selectedModels.map((model) => (
+              <CheckboxListItem
+                key={model.name}
+                value={model.name}
+                label={model.display_name ?? model.name}
+              />
+            ))}
+          </CheckboxList>
+        ) : (
+          <div className="flex flex-col gap-1">
+            {/* The reason is a line of its own under the help, so it reads as
+                why the box is locked rather than as more help; Astryx adds the
+                reason's id to its own description. Locked, it is one box
+                however many models are picked. */}
+            <CheckboxInput
+              label={t("live_transcription_support")}
+              description={t("live_transcription_help")}
+              aria-describedby={realtimeRefusal ? realtimeReasonId : undefined}
+              value={realtimeAvailable && Boolean(onlyPick && liveNames.has(onlyPick.name))}
+              onChange={(value) => {
+                if (!onlyPick) return;
+                const next = new Set(liveNames);
+                if (value) next.add(onlyPick.name);
+                else next.delete(onlyPick.name);
+                setLiveNames(next);
+              }}
+              isDisabled={!realtimeAvailable}
+            />
+            {realtimeRefusal && (
+              <p id={realtimeReasonId} className="flex items-start gap-1.5 pl-8">
+                <Lock
+                  aria-hidden="true"
+                  className="text-ax-text-secondary mt-0.5 size-3.5 shrink-0"
+                />
+                <Text type="supporting">{t(realtimeRefusal)}</Text>
+              </p>
+            )}
+          </div>
+        ))}
 
       {needsLimits.map((model) => (
         <fieldset key={model.name} className="flex min-w-0 flex-col gap-3">

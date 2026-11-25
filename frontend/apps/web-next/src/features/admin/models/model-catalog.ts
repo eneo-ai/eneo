@@ -28,6 +28,38 @@ export interface CatalogModel {
 /** Providers whose API can't enumerate models (Azure lists deployments, not models). */
 export const NO_SUGGESTIONS_PROVIDERS = new Set(["azure"]);
 
+/**
+ * OpenAI's own service: openai.com and every host under it, as live text's
+ * rule reads it (`_is_gateway` in
+ * backend/src/eneo/transcription_models/domain/realtime.py).
+ */
+function isOpenAIHost(endpoint: string): boolean {
+  try {
+    // The URL parser lowercases the host and maps full-width full stops to
+    // dots; a dot at the end names the same host.
+    const host = new URL(endpoint).hostname.replace(/\.$/, "");
+    return host === "openai.com" || host.endsWith(".openai.com");
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The provider is a server at an address of its own: its models are whatever
+ * that server has, and where it stands is unknown. That holds for vLLM, whose
+ * address is required, and for OpenAI at a host other than OpenAI's own, since
+ * other servers speak OpenAI's API. Every other type is its cloud service: an
+ * address there is the type's own service or a proxy in front of it, so the
+ * type's catalog and region still apply.
+ */
+export function hasOwnEndpoint(providerType: string, endpoint: unknown): boolean {
+  const type = providerType.toLowerCase();
+  if (type === "hosted_vllm" || type === "vllm") return true;
+  if (type !== "openai") return false;
+  if (typeof endpoint !== "string" || endpoint.trim() === "") return false;
+  return !isOpenAIHost(endpoint.trim());
+}
+
 function num(value: unknown): number | undefined {
   return typeof value === "number" ? value : undefined;
 }

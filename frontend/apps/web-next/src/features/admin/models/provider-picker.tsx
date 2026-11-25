@@ -1,16 +1,25 @@
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
+import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@/components/astryx/text-input";
 import { ToggleButton } from "@astryxdesign/core/ToggleButton";
 import { Token } from "@astryxdesign/core/Token";
 import { Search, Server, Star } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import { ProviderLogo } from "@/components/ai-elements/provider-logo";
 import { matchesSearch } from "@/lib/search";
 import type { ProviderOption } from "./model-providers";
 import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 
 type CapabilityFilter = "all" | "embedding" | "transcription" | "image" | "rerank";
+
+/**
+ * The words an administrator looks for when the server is someone else's:
+ * vLLM is the type for any OpenAI-compatible server, its name says neither.
+ */
+const SEARCH_ALIASES: Record<string, string> = {
+  hosted_vllm: "openai-compatible openai-kompatibel openai compatible kompatibel gateway"
+};
 
 const CAPABILITY_FILTERS: CapabilityFilter[] = [
   "all",
@@ -66,6 +75,7 @@ function ProviderTile({
   onToggleFavorite: (type: string) => void;
 }) {
   const t = useTranslations();
+  const noteId = useId();
   return (
     <li className="bg-ax-card border-ax-border hover:border-ax-border-strong hover:bg-ax-hover rounded-ax-container relative border transition-colors">
       {/* Full-card selectable surface; the favorite toggle sits above it (z-20). */}
@@ -73,6 +83,7 @@ function ProviderTile({
         type="button"
         onClick={() => onSelect(option.type)}
         aria-label={t("add_provider_named", { name: option.name })}
+        aria-describedby={option.type === "hosted_vllm" ? noteId : undefined}
         className="focus-visible:outline-ring rounded-ax-container absolute inset-0 z-0 focus-visible:outline-2 focus-visible:outline-offset-2"
       />
       <div className="pointer-events-none relative z-10 flex flex-col gap-2 p-3">
@@ -81,9 +92,15 @@ function ProviderTile({
         </span>
         <div className="min-w-0">
           <div className="truncate text-sm font-medium">{option.name}</div>
-          {option.selfHosted && (
+          {/* vLLM is also the type for a server another host runs, which a
+              "self-hosted" label would steer away from. */}
+          {option.type === "hosted_vllm" ? (
+            <Text id={noteId} type="supporting" display="block">
+              {t("provider_vllm_tile_note")}
+            </Text>
+          ) : option.selfHosted ? (
             <div className="text-ax-text-secondary text-xs">{t("provider_filter_self_hosted")}</div>
-          )}
+          ) : null}
         </div>
         <ModeTokens modes={option.modes} />
       </div>
@@ -123,7 +140,7 @@ export function ProviderPicker({
     return options.filter((option) => {
       if (capability !== "all" && !option.modes.includes(capability)) return false;
       if (selfHostedOnly && !option.selfHosted) return false;
-      return matchesSearch([option.name, option.type], search);
+      return matchesSearch([option.name, option.type, SEARCH_ALIASES[option.type]], search);
     });
   }, [options, search, capability, selfHostedOnly]);
 

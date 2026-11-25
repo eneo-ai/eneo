@@ -83,7 +83,7 @@ it("connects a service with the entered settings, on by default, and stays open 
     is_enabled: true,
     security_classification: null
   });
-  expect(await screen.findByRole("heading", { name: "Vemsa Sundsvall är ansluten" })).toBeTruthy();
+  expect(await screen.findByRole("heading", { name: "Vemsa Sundsvall är sparad" })).toBeTruthy();
   // The key is saved and never shown again; the field now offers to replace it.
   expect(field(KEY).value).toBe("");
   expect(field(KEY).type).toBe("password");
@@ -121,6 +121,8 @@ it("shows the new service's test and lets a refused key be fixed in place", asyn
     })
   );
   expect(await screen.findByText("Nyckeln godtogs inte")).toBeTruthy();
+  // The heading says only what happened; the callout alone says how the check went.
+  expect(screen.getByRole("heading", { name: "Vemsa Sundsvall är sparad" })).toBeTruthy();
 
   type(KEY, "right-key");
   fireEvent.click(button("Spara"));
@@ -129,6 +131,34 @@ it("shows the new service's test and lets a refused key be fixed in place", asyn
   expect(update).toHaveBeenCalledWith("s1", { api_key: "right-key" });
   expect(screen.getByRole("dialog")).toBeTruthy();
   expect(onOpenChange).not.toHaveBeenCalled();
+});
+
+it("says a new service is saved, and lets the callout alone say it could not be reached", async () => {
+  const { rerender } = renderDialog(props(null));
+  fillNew();
+  fireEvent.click(button("Anslut"));
+  await waitFor(() => expect(create).toHaveBeenCalledOnce());
+
+  rerender(
+    props(null, {
+      check: {
+        outcome: "unavailable",
+        identifies_speakers: null,
+        times_words: null,
+        reason: "unreachable",
+        status_code: null,
+        service_version: null,
+        checked_at: "2026-10-09T07:00:00Z"
+      }
+    })
+  );
+
+  expect(await screen.findByText("Inte tillgänglig")).toBeTruthy();
+  expect(screen.getByRole("heading", { name: "Vemsa Sundsvall är sparad" })).toBeTruthy();
+  expect(screen.queryByText(/är ansluten/)).toBeNull();
+  await act(async () => {
+    await expectNoAxeViolations(document.body);
+  });
 });
 
 it("asks for a new key before saving a moved address", async () => {
