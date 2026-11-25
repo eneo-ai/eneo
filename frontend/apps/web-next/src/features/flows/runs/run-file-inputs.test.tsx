@@ -66,6 +66,33 @@ describe("RunFileInput", () => {
     expect(screen.getByText("Filer: 2 av 2")).toBeTruthy();
   });
 
+  it("counts a recorded part that waits to be sent again, as the step's limit does", () => {
+    const part = { name: "Del 1", size: 1, mimetype: "audio/webm" };
+    renderInApp(
+      <RunFileInput
+        formId="form"
+        input={makeInput({ max_files: 2, input_format: "audio" })}
+        entries={[
+          { ...part, key: "a", state: "done", progress: 1, fileId: "file-1" },
+          {
+            ...part,
+            key: "b",
+            state: "failed",
+            progress: 0,
+            problem: "Filen kom inte fram.",
+            retryable: true,
+            recording: { sessionId: "rec-1", index: 1, durationMs: 1000, streamed: false }
+          }
+        ]}
+        message={null}
+        onAdd={() => {}}
+        onRemove={() => {}}
+        singleRecording={{ offered: false, value: false, onChange: () => {} }}
+      />
+    );
+    expect(screen.getByText("Filer: 2 av 2")).toBeTruthy();
+  });
+
   it("counts the files only near the limit", () => {
     const entry = { name: "brev.pdf", size: 1, mimetype: "application/pdf" };
     renderInApp(

@@ -43,7 +43,7 @@ export type RecorderProblem =
 
 /**
  * Why the last recording stopped: the person, the step's longest recording
- * or last file slot, parts waiting for their upload, the microphone going
+ * or last file slot, parts only this tab holds waiting for their upload, the microphone going
  * away, no audio arriving any more, or a recorder error.
  */
 export type RecordingEnd =
@@ -90,7 +90,7 @@ export type RecorderLimits = {
   partsBefore: number;
   /** Free file slots of the step, not counting what this recording has yet to hand over. */
   filesLeft: number;
-  /** The step's recorded parts handed over and not uploaded yet. */
+  /** The step's recorded parts handed over, not uploaded yet and held only by this tab. */
   awaitingUpload: number;
 };
 
@@ -174,8 +174,10 @@ const TIMESLICE_MS = 1_000;
 export const ROTATION_OVERLAP_MS = 150;
 const TICK_MS = 500;
 /**
- * More parts than this waiting for their upload stop the recording rather
- * than pile up audio the server has not received (the running part counts).
+ * More parts than this waiting for their upload, held only by this tab, stop
+ * the recording rather than pile up audio that a closed tab or a crash would
+ * lose (the running part counts). Parts kept on the device do not count:
+ * they are safe until they upload, also through a long outage.
  */
 export const MAX_PARTS_AWAITING_UPLOAD = 3;
 /**

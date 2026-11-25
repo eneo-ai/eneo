@@ -12,7 +12,7 @@ import { formatBytes } from "@/lib/format";
 import { useFocusRescue } from "@/lib/focus-rescue";
 import { HANDHELD_QUERY } from "@/lib/hooks/use-media-match";
 import { UploadRetryHint } from "./recording/upload-retry-hint";
-import type { InputProblem, UploadEntry } from "./run-contract";
+import { stays, type InputProblem, type UploadEntry } from "./run-contract";
 import { inputLimitsText } from "./run-format";
 import type { RuntimeInput } from "./runs-api";
 
@@ -213,7 +213,7 @@ export function RunFileInput({
   // A pick with no file the step takes: the field's own sentence (the wrong type or size, by
   // name) says more than the form's earlier one, which would otherwise cover it.
   const [pickRejected, setPickRejected] = useState(false);
-  const counted = entries.filter((entry) => entry.state !== "failed").length;
+  const counted = entries.filter(stays).length;
   // A removed row takes its button with it: focus goes back to the field, not to the page.
   const rescue = useFocusRescue();
   const fieldControl = () =>

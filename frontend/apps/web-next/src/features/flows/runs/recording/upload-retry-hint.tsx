@@ -2,8 +2,8 @@ import { useLocale, useTranslations } from "use-intl";
 
 /**
  * When a recorded part whose upload failed goes again by itself: at a time
- * (or as soon as the browser is back online), or no more by itself once its
- * automatic attempts are spent.
+ * (or as soon as the browser is back online), or, once its timed attempts
+ * are spent, only when the browser is back online.
  */
 export function UploadRetryHint({ nextRetryAt }: { nextRetryAt: number | null | undefined }) {
   const t = useTranslations();
