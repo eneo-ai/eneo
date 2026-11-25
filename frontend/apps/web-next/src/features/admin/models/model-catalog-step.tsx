@@ -226,7 +226,7 @@ export function ModelCatalogStep({
   // The type says where its cloud service stands; it says nothing about a
   // server of its own, so that one has no default and must be chosen.
   const hosting = chosenHosting ?? (hasOwnEndpoint ? null : defaultModelHosting(providerType));
-  const hostingRef = useRef<HTMLDivElement>(null);
+  const hostingRef = useRef<HTMLButtonElement>(null);
   const [embeddingFamily, setEmbeddingFamily] = useState<EmbeddingFamily>("openai");
   const [classificationId, setClassificationId] = useState(NO_CLASSIFICATION);
   /** The picked models marked for live text, by id. */
@@ -464,9 +464,8 @@ export function ModelCatalogStep({
   /** Moves focus to the first problem, shown at its field (WCAG 3.3.1). */
   function focusFirstProblem(): boolean {
     if (!hosting) {
-      const trigger = hostingRef.current?.querySelector<HTMLElement>('[role="combobox"]');
-      trigger?.focus();
-      return Boolean(trigger);
+      hostingRef.current?.focus();
+      return Boolean(hostingRef.current);
     }
     if (selected.size === 0) return focus.focus("list") || focus.focus("manual");
     const model = needsLimits[0];
@@ -529,24 +528,23 @@ export function ModelCatalogStep({
         />
       )}
 
-      <div ref={hostingRef}>
-        <Selector
-          label={t("hosting_region")}
-          description={hasOwnEndpoint ? t("hosting_region_own_server_help") : undefined}
-          placeholder={t("hosting_region_placeholder")}
-          options={HOSTING_REGIONS.map((value) => ({ value, label: t(`hosting_${value}`) }))}
-          value={hosting ?? undefined}
-          isRequired={hasOwnEndpoint}
-          status={
-            submitted && !hosting
-              ? { type: "error", message: t("form_problem_choose_hosting_region") }
-              : undefined
-          }
-          onChange={(value) => {
-            if (isHostingRegion(value)) setChosenHosting(value);
-          }}
-        />
-      </div>
+      <Selector
+        ref={hostingRef}
+        label={t("hosting_region")}
+        description={hasOwnEndpoint ? t("hosting_region_own_server_help") : undefined}
+        placeholder={t("hosting_region_placeholder")}
+        options={HOSTING_REGIONS.map((value) => ({ value, label: t(`hosting_${value}`) }))}
+        value={hosting ?? undefined}
+        isRequired={hasOwnEndpoint}
+        status={
+          submitted && !hosting
+            ? { type: "error", message: t("form_problem_choose_hosting_region") }
+            : undefined
+        }
+        onChange={(value) => {
+          if (isHostingRegion(value)) setChosenHosting(value);
+        }}
+      />
       {mode === "embedding" && (
         <Selector
           label={t("model_family")}
