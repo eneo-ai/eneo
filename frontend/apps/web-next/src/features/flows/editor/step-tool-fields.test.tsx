@@ -178,6 +178,16 @@ describe("an argument's field", () => {
     expect((await screen.findByRole("textbox", { name: /^sql/ })).getAttribute("rows")).toBe("1");
   });
 
+  it("keeps the touch height of the one-line field while the text is short", async () => {
+    // The theme sets the element size to 44 px on a touch screen; a one-line
+    // text area is lower by itself. The box around it is the touch target.
+    renderArguments();
+    const sql = await screen.findByRole("textbox", { name: /^sql/ });
+    expect(sql.parentElement?.className.split(" ")).toEqual(
+      expect.arrayContaining(["min-h-(--size-element-md)", "content-center"])
+    );
+  });
+
   it("still reads a whole reference with spaces or line breaks around it, and says what is wrong as before", async () => {
     renderArguments({
       sql: "\n  {{flow_input.namn}}\n",

@@ -200,17 +200,21 @@ function RequestPreview({
               <MetadataListItem key={name} label={name}>
                 {typeof value === "string" && value.includes("{{") ? (
                   <Template parts={previewParts(value, stepOrder, flow)} flow={flow} />
-                ) : (
-                  // A long value (a query) keeps its lines and scrolls in its box.
+                ) : typeof value === "string" ? (
+                  // A long text (a query) keeps its lines and scrolls in its box.
                   <ScrollableArea
                     axis="block"
+                    role="region"
                     label={t("flow_editor_tools_preview_argument_value", { name })}
                     className="bg-ax-sunken rounded-ax-element focus-visible:outline-ring max-h-60 min-w-0 focus-visible:outline-2 focus-visible:-outline-offset-2"
                   >
                     <pre className="text-ax-text m-0 px-3 py-2 font-mono text-xs [overflow-wrap:anywhere] whitespace-pre-wrap">
-                      {argumentText(value)}
+                      {value}
                     </pre>
                   </ScrollableArea>
+                ) : (
+                  // Other values are written on one line, as JSON.
+                  <code className="font-mono text-xs break-all">{argumentText(value)}</code>
                 )}
               </MetadataListItem>
             ))}

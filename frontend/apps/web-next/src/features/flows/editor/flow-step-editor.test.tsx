@@ -927,11 +927,15 @@ describe("FlowStepEditor", () => {
     const dialog = await screen.findByRole("dialog", {
       name: messages.flow_editor_tools_preview_title
     });
-    const value = within(dialog).getByRole("group", {
-      name: messages.flow_editor_tools_preview_argument_value.replace("{name}", "sql")
-    });
+    const valueName = (name: string) =>
+      messages.flow_editor_tools_preview_argument_value.replace("{name}", name);
+    const value = within(dialog).getByRole("region", { name: valueName("sql") });
     // Its own lines, kept by a preformatted block (a plain inline element folds them).
     expect(value.querySelector("pre")?.textContent).toBe(sql);
+    // A number stays inline: it never scrolls, so it gets no named box.
+    expect(within(dialog).queryByRole("region", { name: valueName("limit") })).toBeNull();
+    expect(within(dialog).queryByRole("group", { name: valueName("limit") })).toBeNull();
+    expect(within(dialog).getByText("5", { selector: "code" })).toBeTruthy();
   }, 20_000);
 
   it("names a stored credential as stored in the preview, never its value", async () => {

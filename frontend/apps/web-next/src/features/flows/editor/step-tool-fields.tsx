@@ -25,7 +25,9 @@ import type { VariableGroup } from "./step-variables";
 /**
  * How many lines a text argument's field grows to before it scrolls: about
  * a screen's third on a laptop, so the fields under it stay in reach. The
- * field's class caps its height at the same `15lh`.
+ * field's class caps its height at the same `15lh`, plus the text area's
+ * vertical padding (`--spacing-1` at size md): the text area is border-box,
+ * so a bare `15lh` holds only 14.6 lines.
  */
 const MAX_ROWS = 15;
 
@@ -133,16 +135,19 @@ function ArgumentField({
     <div className="flex flex-col gap-2">
       {/* A text (a query, a message) is kept as written, line breaks and all,
           so it gets a field that grows with it up to MAX_ROWS lines and then
-          scrolls. Other types are stored as JSON and written back on one
-          line, so they keep the one-line field. */}
+          scrolls. Without a type, text that is valid JSON is stored as its
+          value, as for the other types. Those are stored as JSON and written
+          back on one line, so they keep the one-line field. */}
       {type === null || type === "string" ? (
         <TextArea
           {...props}
           // Fits the text where the browser can (`field-sizing`); elsewhere
           // `rows` opens it on its own lines. A dragged height would stop it
-          // following the text, so it does not resize by hand.
-          rows={Math.min(MAX_ROWS, text.split("\n").length)}
-          controlClassName="[&_textarea]:resize-none [&_textarea]:[field-sizing:content] [&_textarea]:max-h-[min(15lh,50dvh)]"
+          // following the text, so it does not resize by hand. The box keeps
+          // the one-line field's height, 44 px on a touch screen, with a
+          // short text in its middle as in the one-line field.
+          rows={text.split("\n", MAX_ROWS).length}
+          controlClassName="min-h-(--size-element-md) content-center [&_textarea]:resize-none [&_textarea]:[field-sizing:content] [&_textarea]:max-h-[min(calc(15lh_+_2*var(--spacing-1)),50dvh)]"
           // A value for a tool, not prose: no red marks under a query.
           hasSpellCheck={false}
           width="100%"
