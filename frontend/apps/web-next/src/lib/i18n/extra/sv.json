@@ -3476,6 +3476,7 @@
   "flow_transcript_rec_microphone_failed": "Mikrofonen kunde inte användas. Försök igen.",
   "flow_transcript_rec_files_full": "{count, plural, one {Steget tar emot en fil, och den platsen är använd.} other {Steget tar emot högst # filer, och alla platser är använda.}} Ta bort en fil om du vill spela in mer.",
   "flow_transcript_rec_refused_part_holds_slot": "En del som inte kunde laddas upp håller en plats. Ta bort delen för att frigöra platsen. Spara den som fil först om du vill ha en kopia.",
+  "flow_transcript_rec_refused_part_holds_time": "En del som inte kunde laddas upp räknas i inspelningens längd. Ta bort delen för att få tillbaka tiden. Spara den som fil först om du vill ha en kopia.",
   "flow_transcript_rec_ended_title": "Inspelningen stoppades",
   "flow_transcript_rec_ended_length": "Inspelningen nådde flödets maxlängd. Det som spelats in finns kvar.",
   "flow_transcript_rec_ended_files": "Alla filplatser i steget är använda. Det som spelats in finns kvar.",

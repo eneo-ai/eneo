@@ -1159,19 +1159,40 @@ describe("Keeping a recording on the device", () => {
     return { dialog, remove };
   }
 
-  it("counts a part the core refused for good in the recording's length", async () => {
+  it("counts a part the core refused for good in the recording's length, and says so", async () => {
     // Two hours less a minute's room and the handovers: an hour and 59 minutes fill it.
     const { dialog } = await continueWithRefusedPart(59);
     fireEvent.click(button(dialog, messages.flow_transcript_rec_continue));
+    const ended = await within(dialog).findByText(
+      new RegExp(`^${messages.flow_transcript_rec_ended_length.replace(/\./g, "\\.")}`),
+      {},
+      { timeout: 2_000 }
+    );
+    expect(ended.textContent).toMatch(
+      /En del som inte kunde laddas upp räknas i inspelningens längd\. Ta bort delen för att få tillbaka tiden\. Spara den som fil först om du vill ha en kopia\.$/
+    );
+    // A manual start is not held back: the part it began, under a second, is handed over.
+    expect(await within(dialog).findByText(/^Inspelning, del 3 \(00:0[01]\)/)).toBeTruthy();
+  });
+
+  it("says only that the length is reached when no refused part takes time", async () => {
+    installBrowser();
+    grantMicrophone();
+    await device.db.putPart(keptPart(0, { durationMs: 60 * 60_000 }));
+    await device.db.putPart(keptPart(1, { durationMs: 59 * 60_000 }));
+    const { dialog } = await openDialog(audioContract());
+    fireEvent.click(
+      await within(dialog).findByRole("button", { name: messages.flow_transcript_resume_continue })
+    );
+    await waitFor(() => expect(FakeUpload.sent).toHaveLength(2));
+    fireEvent.click(button(dialog, messages.flow_transcript_rec_continue));
     expect(
       await within(dialog).findByText(
-        new RegExp(`^${messages.flow_transcript_rec_ended_length.replace(/\./g, "\\.")}`),
+        messages.flow_transcript_rec_ended_length,
         {},
         { timeout: 2_000 }
       )
     ).toBeTruthy();
-    // A manual start is not held back: the part it began, under a second, is handed over.
-    expect(await within(dialog).findByText(/^Inspelning, del 3 \(00:0[01]\)/)).toBeTruthy();
   });
 
   it("gives the time back once the refused part is taken off the form", async () => {

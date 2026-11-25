@@ -841,6 +841,9 @@ export function RunRecorder({
   const slotHeld = entries.some((entry) => entry.recording && !stays(entry))
     ? t("flow_transcript_rec_refused_part_holds_slot")
     : null;
+  // Likewise its length counts in the recording's: when the time is used, say which row to take off.
+  const timeHeld =
+    keptParts.length > formParts.length ? t("flow_transcript_rec_refused_part_holds_time") : null;
 
   /** What the step lets a recording hold, as the form says it under its heading. */
   function limitHint(): string | null {
@@ -986,7 +989,10 @@ export function RunRecorder({
         <Banner
           status="warning"
           title={t("flow_transcript_rec_ended_title")}
-          description={[endedText(ended, t), ended === "files" ? slotHeld : null]
+          description={[
+            endedText(ended, t),
+            ended === "files" ? slotHeld : ended === "length" ? timeHeld : null
+          ]
             .filter(Boolean)
             .join(" ")}
           collapsible={false}
