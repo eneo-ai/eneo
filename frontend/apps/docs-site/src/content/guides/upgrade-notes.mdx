@@ -134,7 +134,7 @@ flowchart TB
 | The audit action `user_access_token_issued` records each token the operator takes for a user with the super API key, always and before the token is issued | Clients with a fixed list of audit actions | Accept the new value |
 | [API keys that should have expired stop working](#api-keys-expire) | Integrations and modules with API keys; tenants with the unused-key policy | Replace the keys; check the policy's days |
 | [Service keys own their files and conversations](#service-key-files) | Integrations with service API keys; operators; anyone who writes to `api_keys_v2`, `files` or `sessions` directly | Plan downtime; expect `200` where file upload and delete answered `403` |
-| [Resources and scheduled work no longer need a person](#creator-optional) | API consumers that read the creator of a resource; integrations with service API keys; operators; anyone who reads `user_id` on the changed tables directly | Accept an empty creator; plan downtime; tell users that removing a person no longer removes what they made in a shared space |
+| [Resources and scheduled work no longer need a person](#creator-optional) | API consumers that read the creator of a resource; integrations with service API keys; operators; anyone who reads `user_id` on the changed tables directly | Accept an empty creator; plan downtime; deploy backend and both frontends together |
 
 ### Retention, logs and storage [#retention-logs-storage]
 
@@ -369,7 +369,7 @@ Migration `202611241000` creates `service_principals` and gives each existing se
 
 ### Resources and scheduled work no longer need a person [#creator-optional]
 
-The person who created an assistant, an app, a service, a prompt, a collection, a website or an info blob was required, and in most cases removing that person removed the resource. Access never came from the creator: it comes from the space. The creator is now a record of who made the resource, and it may be empty.
+The person who created an assistant, an app, a service, a prompt, a collection, a website or an info blob was required, so nothing could be created or run without one. Access never came from the creator: it comes from the space. The creator is now a record of who made the resource, and it may be empty.
 
 What changes for the API:
 
@@ -380,7 +380,7 @@ What changes for the API:
 
 What changes in behavior:
 
-- Removing a person no longer removes the assistants, services, prompts, collections, websites and indexed content they created in a shared space. The creator becomes empty and the resource stays. A person's own space still goes with the person, with what is in it.
+- Removing a person in Eneo works as before: the person is marked as removed, their own space is deleted with what is in it, and what they created in shared spaces stays. Only the database rule changes: if a row is deleted from `users` directly, the resources that person created now stay with an empty creator, where the database deleted them before.
 - A scheduled crawl runs as the space the website is in, not as the person who added the website. It keeps running when that person is gone. An organization's SharePoint connection syncs as the space too; it used to run as the oldest tenant administrator.
 - Content that a scheduled crawl or such a sync publishes has no creator, so it counts toward the organization's storage limit only. Before, it counted toward the limit of the person who added the website. Content a person publishes still counts toward that person's limit.
 - The organization's storage total counts all its content, with or without a creator.

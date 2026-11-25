@@ -1,6 +1,6 @@
 ---
 title: Uppgraderingsanteckningar
-translationSource: guides/upgrade-notes.mdx@add0b4ebf514
+translationSource: guides/upgrade-notes.mdx@cdeb2ba6515b
 ---
 
 import { Callout } from "nextra/components";
@@ -139,7 +139,7 @@ flowchart TB
 | Granskningshändelsen `user_access_token_issued` registrerar varje token som driftansvarig tar ut för en användare med super-API-nyckeln, alltid och innan tokenet lämnas ut | Klienter med en fast lista över granskningshändelser | Godta det nya värdet |
 | [API-nycklar som borde ha gått ut slutar fungera](#api-keys-expire) | Integrationer och moduler med API-nycklar; organisationer med policyn för oanvända nycklar | Ersätt nycklarna; kontrollera policyns antal dagar |
 | [Tjänstenycklar äger sina filer och konversationer](#service-key-files) | Integrationer med tjänstenycklar; driftansvariga; alla som skriver direkt till `api_keys_v2`, `files` eller `sessions` | Planera driftstopp; räkna med `200` där uppladdning och borttagning av filer svarade `403` |
-| [Resurser och schemalagt arbete behöver inte längre en person](#creator-optional) | API-klienter som läser vem som skapat en resurs; integrationer med tjänstenycklar; driftansvariga; alla som läser `user_id` direkt i de ändrade tabellerna | Godta att skaparen kan saknas; planera driftstopp; berätta för användarna att det en person har skapat i ett delat space finns kvar när personen tas bort |
+| [Resurser och schemalagt arbete behöver inte längre en person](#creator-optional) | API-klienter som läser vem som skapat en resurs; integrationer med tjänstenycklar; driftansvariga; alla som läser `user_id` direkt i de ändrade tabellerna | Godta att skaparen kan saknas; planera driftstopp; driftsätt backend och båda frontendapparna tillsammans |
 
 ### Gallring, loggar och lagring [#retention-logs-storage]
 
@@ -374,7 +374,7 @@ Migreringen `202611241000` skapar `service_principals` och ger varje befintlig t
 
 ### Resurser och schemalagt arbete behöver inte längre en person [#creator-optional]
 
-Den som skapade en assistent, en app, en tjänst, en prompt, en samling, en webbplats eller en info-blob var obligatorisk, och i de flesta fall försvann resursen när personen togs bort. Åtkomsten kom aldrig från skaparen: den kommer från spacet. Nu är skaparen en uppgift om vem som gjorde resursen, och den kan vara tom.
+Den som skapade en assistent, en app, en tjänst, en prompt, en samling, en webbplats eller en info-blob var obligatorisk, så ingenting kunde skapas eller köras utan en person. Åtkomsten kom aldrig från skaparen: den kommer från spacet. Nu är skaparen en uppgift om vem som gjorde resursen, och den kan vara tom.
 
 Det här ändras i API:t:
 
@@ -385,7 +385,7 @@ Det här ändras i API:t:
 
 Det här ändras i beteendet:
 
-- När en person tas bort försvinner inte längre de assistenter, tjänster, promptar, samlingar, webbplatser och det indexerade innehåll som personen har skapat i ett delat space. Skaparen blir tom och resursen finns kvar. En persons eget space följer fortfarande med personen, med det som finns i det.
+- Att ta bort en person i Eneo fungerar som förut: personen markeras som borttagen, personens eget space tas bort med det som finns i det, och det personen har skapat i delade space finns kvar. Bara databasregeln ändras: om en rad tas bort direkt ur `users` finns de resurser personen har skapat nu kvar med tom skapare, där databasen tidigare tog bort dem.
 - En schemalagd crawlning körs som det space webbplatsen ligger i, inte som den som lade till webbplatsen. Den fortsätter när personen är borta. En organisations SharePoint-anslutning synkar också som spacet; tidigare kördes den som den äldsta administratören i organisationen.
 - Innehåll som en schemalagd crawlning eller en sådan synkning publicerar har ingen skapare, så det räknas bara mot organisationens lagringsgräns. Tidigare räknades det mot gränsen för den som lade till webbplatsen. Innehåll som en person publicerar räknas fortfarande mot den personens gräns.
 - Organisationens lagringssumma räknar allt dess innehåll, med eller utan skapare.

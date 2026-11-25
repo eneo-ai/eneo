@@ -67,7 +67,7 @@ A service key works inside spaces. Within its scope it creates, reads, updates a
 A few things still need a person, because they record a person and nothing else yet. These endpoints return `403` with `code: "service_key_cannot_create_resources"` when called by a service key:
 
 - creating a space (`POST /spaces/`)
-- creating a service outside a space (`POST /services/`)
+- creating a service or a collection outside a space (`POST /services/` and the deprecated `POST /groups/`)
 - uploading an icon, creating a role, an MCP server or a document template
 - starting a run with a help assistant
 - saving a new version of a conversation document
@@ -99,7 +99,7 @@ A key's id changes when the key is rotated, so the key is a poor identity for wh
 - It is created together with the service key and carries the key's name, description and scope. Renaming the key renames the principal.
 - A rotated key points at the same principal as the key it replaces, so the whole rotation chain is one principal.
 - What a service key owns belongs to its principal, not to the key: the files it uploads, the conversations it starts, the jobs it queues and the apps it runs. A rotated key keeps them. A revoked or expired key that started conversations can be deleted; the conversations stay with the principal.
-- What a service key creates in a space names the principal as its creator. Deleting the principal empties that field; the resource stays.
+- What a service key creates in a space names the principal as its creator. The resource belongs to the space and does not depend on the principal.
 - User keys have no service principal.
 - A principal is `active` or `disabled`. While it is disabled, every key that belongs to it is refused with `403` and `code: "service_principal_disabled"`. A principal is never deleted while a key points at it.
 
@@ -431,11 +431,11 @@ No. API-key management endpoints require a session login. API-key callers, inclu
 
 Yes, inside a space. A service key creates assistants, apps, services, collections, websites, info blobs and integration knowledge in the spaces its scope reaches, and it uploads its own files. The resource belongs to the space, and its creator is the key's service principal instead of a person.
 
-A space itself, a role, an MCP server, an icon and a document template still need a user account; those endpoints reject service-key callers with `code: "service_key_cannot_create_resources"`.
+A space itself, a role, an MCP server, an icon and a document template still need a user account, and so does anything created outside a space; those endpoints reject service-key callers with `code: "service_key_cannot_create_resources"`.
 
 ### What happens to resources when their creator leaves?
 
-They stay. The creator of an assistant, app, service, prompt, collection, website or info blob is a record of who made it, not an owner. When the person is removed, the field becomes empty and the resource keeps working in its space. Scheduled crawls and syncs of an organization's connection run as the space itself, not as the person who set them up, so they keep running too. A person's own space is the exception: it goes with the person, and so does what is in it.
+They stay. The creator of an assistant, app, service, prompt, collection, website or info blob is a record of who made it, not an owner, and the resource keeps working in its space when that person is removed. Scheduled crawls and syncs of an organization's connection run as the space itself, not as the person who set them up, so they keep running too. A person's own space is the exception: it is deleted with the person, and so is what is in it.
 
 ### What happens to our old keys?
 
