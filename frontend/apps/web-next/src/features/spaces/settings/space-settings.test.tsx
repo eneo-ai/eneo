@@ -627,9 +627,10 @@ function answerSavesAsServer() {
   });
 }
 
-it("saves nothing when another administrator changed the time, and decides the next try on the new time", async () => {
+it("saves nothing when another administrator changed the time, shows the time read, and asks before a shorter retry", async () => {
   showSettings();
   answerSavesAsServer();
+  const section = document.getElementById("security")!;
   // Another administrator lengthened the time after this page read 30.
   state.space = { ...state.space, data_retention_days: 90 };
   // Longer than the 30 the page has: saved at once, with the time it was compared with.
@@ -640,17 +641,21 @@ it("saves nothing when another administrator changed the time, and decides the n
       body: { data_retention_days: 60, expected_data_retention_days: 30 }
     })
   );
-  // Said once, in a short line: the time changed, check it and save again.
+  // Said once, in a short line: the time changed, nothing was saved, it is read again.
   await waitFor(() => expect(toastError).toHaveBeenCalledTimes(1));
   expect(toastError.mock.calls[0]![0]).toBe(messages.eneo_error_9087);
   expect(state.space.data_retention_days).toBe(90);
-  // The draft stays while the page reads the space again.
-  await waitFor(() => expect(field.readOnly).toBe(false));
-  expect(field.value).toBe("60");
-  expect(screen.queryByText(/äldre än 60 dagar/)).toBeNull();
-
-  // The next try is decided on the 90 read: 60 is shorter, so it asks first.
+  // The draft is dropped: once the space is read again, the field shows the time saved now.
+  await waitFor(() => expect(field.value).toBe("90"));
+  expect(field.readOnly).toBe(false);
+  expect(within(section).queryByText(/äldre än 60 dagar/)).toBeNull();
+  // Leaving the field again sends nothing: no time the person has not typed since.
   fireEvent.blur(field);
+  expect(screen.queryByRole("alertdialog")).toBeNull();
+  expect(api.PATCH).toHaveBeenCalledTimes(1);
+
+  // Typed again, 60 is shorter than the 90 read, so it asks first.
+  enterRetention("60");
   const dialog = await screen.findByRole("alertdialog", { name: "Spara gallringstiden?" });
   expect(api.PATCH).toHaveBeenCalledTimes(1);
   fireEvent.click(
@@ -665,7 +670,7 @@ it("saves nothing when another administrator changed the time, and decides the n
   expect(state.space.data_retention_days).toBe(60);
 });
 
-it("closes the confirmation and keeps the typed time when the time changed before it was confirmed", async () => {
+it("closes the confirmation and shows the time read when the time changed before it was confirmed", async () => {
   showSettings();
   answerSavesAsServer();
   const field = enterRetention("7");
@@ -682,12 +687,24 @@ it("closes the confirmation and keeps the typed time when the time changed befor
     expected_data_retention_days: 30
   });
   expect(state.space.data_retention_days).toBe(10);
-  expect(field.value).toBe("7");
-  // Decided again on the 10 read, not sent again with the 30 it was compared with.
-  await waitFor(() => expect(retentionField().readOnly).toBe(false));
+  // The field shows the 10 read, not the 7 that was refused, and a blur asks nothing.
+  await waitFor(() => expect(field.value).toBe("10"));
+  expect(field.readOnly).toBe(false);
   fireEvent.blur(field);
-  expect(await screen.findByRole("alertdialog", title)).toBeTruthy();
+  expect(screen.queryByRole("alertdialog")).toBeNull();
+  // Typed again, 7 is decided on the 10 read, not sent with the 30 it was compared with.
+  enterRetention("7");
+  const again = await screen.findByRole("alertdialog", title);
   expect(api.PATCH).toHaveBeenCalledTimes(1);
+  fireEvent.click(
+    within(again).getByRole("button", { name: messages.space_retention_shorten_confirm })
+  );
+  await waitFor(() => expect(api.PATCH).toHaveBeenCalledTimes(2));
+  expect(api.PATCH.mock.calls[1]![1].body).toEqual({
+    data_retention_days: 7,
+    expected_data_retention_days: 10
+  });
+  expect(state.space.data_retention_days).toBe(7);
 });
 
 /** Space reads from here on, and a hook to hold the next one. */

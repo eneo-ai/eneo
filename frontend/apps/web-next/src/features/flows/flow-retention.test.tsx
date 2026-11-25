@@ -358,10 +358,15 @@ describe("flow retention", () => {
     });
     await waitFor(() => expect(toastError).toHaveBeenCalledTimes(1));
     expect(toastError.mock.calls[0]![0]).toBe(messages.eneo_error_9087);
-    // The draft stays, and the times are read again: 30 is now shorter than 60, so it warns.
-    await waitFor(() => expect(backend.GET.mock.calls.length).toBeGreaterThan(1));
-    await settle();
-    expect(days.value).toBe("30");
+    // The draft is dropped and the times are read again: the focused field shows the 60.
+    await waitFor(() => expect(days.value).toBe("60"));
+    expect(document.activeElement).toBe(days);
+    expect(
+      screen.getByText("Ytans tid är 90 dagar. Flödets tid kan inte vara längre.")
+    ).toBeTruthy();
+    // Typed again, 30 is shorter than the 60 that applies now, so it warns first.
+    fireEvent.change(days, { target: { value: "30" } });
+    fireEvent.blur(days);
     fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
     expect(await screen.findByText(/Spara igen för att använda den/)).toBeTruthy();
     expect(backend.PUT).toHaveBeenCalledTimes(1);
@@ -373,6 +378,23 @@ describe("flow retention", () => {
       expected_inherited_days: 90
     });
     expect(times.own).toEqual({ days: 30 });
+  });
+
+  it("saves nothing after a refusal until a time is typed again", async () => {
+    const times: SavedTimes = { own: { days: 7 }, space: { days: 90 } };
+    likeTheServer(times);
+    const days = (await openDialog()) as HTMLInputElement;
+    times.own = { days: 60 };
+    fireEvent.change(days, { target: { value: "30" } });
+    fireEvent.blur(days);
+    fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
+    await waitFor(() => expect(toastError).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(days.value).toBe("60"));
+    // Nothing typed since: Save closes the dialog and sends nothing.
+    fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
+    await waitFor(() => expect(screen.queryByRole("spinbutton")).toBeNull());
+    expect(backend.PUT).toHaveBeenCalledTimes(1);
+    expect(times.own).toEqual({ days: 60 });
   });
 
   it("does not save a shorter time without its warning when another administrator gave the space a time meanwhile", async () => {
@@ -397,11 +419,17 @@ describe("flow retention", () => {
       expected_inherited_days: null
     });
     await waitFor(() => expect(toastError).toHaveBeenCalledTimes(1));
-    // The draft stays, and the times are read again: under the space's 90, 30 shortens the 60
-    // that applies, so it warns.
-    await waitFor(() => expect(backend.GET.mock.calls.length).toBeGreaterThan(1));
-    await settle();
-    expect(days.value).toBe("30");
+    // The draft is dropped and the times are read again: the field shows the flow's 60, and
+    // the line under it names the space's new time.
+    await waitFor(() =>
+      expect(
+        screen.getByText("Ytans tid är 90 dagar. Flödets tid kan inte vara längre.")
+      ).toBeTruthy()
+    );
+    expect(days.value).toBe("60");
+    // Typed again, under the space's 90, 30 shortens the 60 that applies, so it warns.
+    fireEvent.change(days, { target: { value: "30" } });
+    fireEvent.blur(days);
     fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
     expect(await screen.findByText(/Spara igen för att använda den/)).toBeTruthy();
     expect(backend.PUT).toHaveBeenCalledTimes(1);
@@ -519,6 +547,16 @@ describe("flow retention", () => {
     }
   );
 
+  it("names the space's time beside a flow time of its own", async () => {
+    backend.GET.mockResolvedValue(settings({ days: 30 }, { days: 60 }));
+    const days = (await openDialog()) as HTMLInputElement;
+    expect(days.value).toBe("30");
+    expect(
+      screen.getByText("Ytans tid är 60 dagar. Flödets tid kan inte vara längre.")
+    ).toBeTruthy();
+    await expectNoAxeViolations(document.body);
+  });
+
   it("says the space has no time when nothing applies", async () => {
     backend.GET.mockResolvedValue(settings(null, null));
     await openDialog();
@@ -555,6 +593,8 @@ describe("flow retention", () => {
     expect(days.value).toBe("10");
     expect(days.getAttribute("aria-invalid")).toBe("true");
     expect(document.activeElement).toBe(days);
+    // The error names the cap; the line about the space's time does not say it twice.
+    expect(screen.queryByText(/Ytans tid är/)).toBeNull();
     await waitFor(() => expect(days.readOnly).toBe(false));
     // A new value clears the refusal. The live region may still speak it, on its own timer.
     fireEvent.change(days, { target: { value: "5" } });

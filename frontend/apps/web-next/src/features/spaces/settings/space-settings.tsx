@@ -434,8 +434,8 @@ function SecuritySection() {
  * `useAutosaveField`). That is decided on the time the page has, and each save sends
  * that time as `expected_data_retention_days`: the server refuses the save (409
  * `retention_time_changed`) when another administrator has changed the time since.
- * The page then reads the space again its usual way and keeps the draft, so the next
- * try is decided on the new time.
+ * The page then drops the draft and reads the space again its usual way, so the field
+ * shows the new time and a time typed again is decided on it.
  */
 function RetentionSection() {
   const t = useTranslations();
@@ -470,10 +470,12 @@ function RetentionSection() {
       update
         .mutateAsync({ data_retention_days: next, expected_data_retention_days: expected })
         .catch((error: unknown) => {
-          // Changed by someone else: nothing was saved. The space is read again its usual way
-          // and the draft stays, so the next try is decided on the time read.
+          // Changed by someone else: nothing was saved. The draft is dropped and the space is
+          // read again its usual way, so the field shows the time read and nothing is sent
+          // until a time is typed again, which is then decided on that time.
           if (error instanceof EneoApiError && error.reason === "retention_time_changed") {
             setAsked(null);
+            setDraft(null);
             void queryClient.invalidateQueries({ queryKey: ["spaces", routeId], exact: true });
           }
           throw error;

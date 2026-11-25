@@ -224,10 +224,12 @@ function RetentionForm({
     },
     onError: async (error) => {
       if (error instanceof EneoApiError && error.reason === "retention_time_changed") {
-        // Changed by someone else: nothing was saved. The times are read again and the
-        // draft stays, so the warning is decided again on what applies now.
+        // Changed by someone else: nothing was saved. The draft is dropped and the times are
+        // read again, so the field shows the time read and a time typed again is warned
+        // about against what applies now.
         toastApiError(error, t);
         setWarnedFor(null);
+        setDraft(null);
         void queryClient.invalidateQueries({ queryKey: policyKey(flow.id), exact: true });
         void queryClient.invalidateQueries({ queryKey: flowKeys.flow(flow.id), exact: true });
         field.current?.focus();
@@ -269,7 +271,10 @@ function RetentionForm({
         ? t("flows_retention_applies_space", { days: spaceDays })
         : days === savedDays && days > spaceDays
           ? t("flows_retention_longer_saved", { days })
-          : undefined;
+          : // The space's time caps the flow's; an error in the field already names the cap.
+            problem
+            ? undefined
+            : t("flows_retention_applies_space_cap", { days: spaceDays });
   // Only a space time removes runs, and never in a personal space, so a shorter time
   // matters only under one in a shared space.
   const applied = (flowDays: number | null) =>
