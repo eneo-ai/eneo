@@ -257,7 +257,7 @@ describe("the add-provider wizard's credentials", () => {
     // One line: for OpenAI the type note is followed by when vLLM fits better.
     expect(
       within(dialog).getByText(
-        "Typen kan inte ändras efteråt. Har en annan aktör modellen bakom ett OpenAI-kompatibelt API passar oftast vLLM bättre. Där är nyckeln valfri och utgående headers fungerar. OpenAI med egen Endpoint-URL fungerar också, men kräver en nyckel."
+        "Typen kan inte ändras efteråt. Har en annan aktör modellen bakom ett OpenAI-kompatibelt API passar oftast vLLM bättre. Där är nyckeln valfri. En leverantör med utgående headers kan inte transkribera eller bära livetext. OpenAI med egen Endpoint-URL fungerar också, men kräver en nyckel."
       )
     ).toBeTruthy();
     const endpoint = field(/^Endpoint-URL/);
