@@ -1,6 +1,6 @@
 ---
 title: Gallring
-translationSource: guides/data-retention.mdx@af3737f541ea
+translationSource: guides/data-retention.mdx@2999b281d813
 ---
 
 # Gallring
@@ -209,11 +209,15 @@ rensningen.
 Att ändra ett Flödes tid, eller en delad ytas tid, skriver granskningshändelsen
 `flow_run_retention_policy_changed` med den tidigare och den nya tiden, inte
 körningens innehåll. Ytans tid når inte innehåll som aldrig blev en del av en
-körning. I den här versionen tas ljud som laddades upp till en Flödeskörning som
-aldrig startade, och felsökningsunderlag, inte bort. Fönstret för uppladdningar
+körning. Fönstret för uppladdningar
 under **Administratör → Gallring av flöden** bestämmer när livetext som aldrig
 knöts till en körning går ut, och den uttryckliga rensningen tar bort sådan
-utgången livetext. Städningen av oanvända
+utgången livetext. Ingen schemalagd uppgift tar bort ljud som laddades upp till
+en Flödeskörning som aldrig startade, och inte heller den uttryckliga
+rensningen. Tiden för felsökningsunderlag på samma sida sparas, men i den här
+versionen tas inget bort när den har gått. När en Flödeskörning tas bort tas
+dess felsökningsunderlag (stegresultat med sparade prompter) bort med den, och
+likaså dess filer som inget annat använder. Städningen av oanvända
 uppladdningar behåller en fil som en uppladdning till ett Flöde hänvisar till. En
 chatt som redigerar ett Flöde är en vanlig konversation och följer
 konversationstiderna ovan.
