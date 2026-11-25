@@ -484,6 +484,11 @@ export function AddModelWizard({
                   ? `${t("provider_type_fixed_note")} ${t("provider_gateway_as_openai_note")}`
                   : t("provider_type_fixed_note")}
             </Text>
+            {providerType === "openai" && (
+              <Text type="supporting" display="block">
+                {t("provider_outbound_headers_note")}
+              </Text>
+            )}
           </div>
         </div>
         <form id={credentialsFormId} onSubmit={submitCredentials} noValidate>
