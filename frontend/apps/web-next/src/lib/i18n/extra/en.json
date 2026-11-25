@@ -1426,7 +1426,7 @@
   "model_usage_type_app_template": "App template",
   "endpoint_optional_generic": "Enter it if the provider is self-hosted or has its own endpoint.",
   "endpoint_required_azure": "The endpoint of your Azure OpenAI resource.",
-  "endpoint_required_vllm": "The address of your vLLM server.",
+  "endpoint_required_vllm": "The vLLM server's address, ending in /v1.",
   "api_version_required": "The Azure OpenAI API version to use.",
   "deployment_name_required": "The name of your deployment in Azure OpenAI.",
   "provider_form_name_required": "Enter a name for the provider.",

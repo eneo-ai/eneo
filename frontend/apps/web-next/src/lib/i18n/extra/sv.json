@@ -1426,7 +1426,7 @@
   "model_usage_type_app_template": "Appmall",
   "endpoint_optional_generic": "Ange den om leverantören är självhostad eller har en egen endpoint.",
   "endpoint_required_azure": "Endpointen för din Azure OpenAI-resurs.",
-  "endpoint_required_vllm": "Adressen till din vLLM-server.",
+  "endpoint_required_vllm": "Adressen till vLLM-servern, med /v1 på slutet.",
   "api_version_required": "Azure OpenAI API-versionen som ska användas.",
   "deployment_name_required": "Namnet på din distribution i Azure OpenAI.",
   "provider_form_name_required": "Ange ett namn på leverantören.",

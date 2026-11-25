@@ -2325,7 +2325,7 @@
   "provider_endpoint_change_requires_secret_headers": "Du ändrade endpointen. Ange värdet och eventuellt reservvärde för de här hemliga headers igen, eller ta bort dem: {names}. Lagrade hemligheter skickas inte till en annan destination.",
   "will_be_encrypted": "Kommer att krypteras före lagring",
   "endpoint_required_azure": "Endpointen för din Azure OpenAI-resurs.",
-  "endpoint_required_vllm": "Adressen till din vLLM-server.",
+  "endpoint_required_vllm": "Adressen till vLLM-servern, med /v1 på slutet.",
   "endpoint_optional_openai": "Valfritt. Lämna tomt för OpenAI (https://api.openai.com/v1) eller ange egen endpoint för självhostade modeller (vLLM, Ollama, llama.cpp, etc.)",
   "endpoint_optional_default": "Valfritt. Lämna tomt för att använda standardendpoint för denna leverantör",
   "api_version_required": "Azure OpenAI API-versionen som ska användas.",

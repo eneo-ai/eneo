@@ -2292,7 +2292,7 @@
   "provider_endpoint_change_requires_secret_headers": "You changed the endpoint. Enter the value and any fallback of these secret headers again, or remove them: {names}. Stored secrets are not sent to a different destination.",
   "will_be_encrypted": "Will be encrypted before storage",
   "endpoint_required_azure": "The endpoint of your Azure OpenAI resource.",
-  "endpoint_required_vllm": "The address of your vLLM server.",
+  "endpoint_required_vllm": "The vLLM server's address, ending in /v1.",
   "endpoint_optional_openai": "Optional. Leave empty for OpenAI (https://api.openai.com/v1) or enter custom endpoint for self-hosted models (vLLM, Ollama, llama.cpp, etc.)",
   "endpoint_optional_default": "Optional. Leave empty to use default endpoint for this provider",
   "api_version_required": "The Azure OpenAI API version to use.",

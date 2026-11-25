@@ -265,6 +265,31 @@ describe("the add-provider wizard's credentials", () => {
     expect(help).toContain("Livetext använder vLLM:s realtids-API (/v1/realtime) på servern.");
   });
 
+  it("asks for the vLLM server's address with /v1, and keeps the gateway note", async () => {
+    const { dialog } = renderWizard({
+      caps: {
+        providers: {
+          hosted_vllm: {
+            modes: ["transcription"],
+            models: {},
+            fields: [{ name: "endpoint", required: true, secret: false, in: "config" }]
+          }
+        },
+        default_fields: []
+      }
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till vLLM" }));
+    await waitFor(() => expect(field(/^Endpoint-URL/)).toBeTruthy());
+    expect(describedBy(field(/^Endpoint-URL/))).toContain(
+      "Adressen till vLLM-servern, med /v1 på slutet. Livetext använder vLLM:s realtids-API (/v1/realtime) på servern."
+    );
+    expect(
+      within(dialog).getByText(
+        "Typen kan inte ändras efteråt. Finns din gateway redan som OpenAI-leverantör kan du använda den för livetext."
+      )
+    ).toBeTruthy();
+  });
+
   it("creates the provider with its key expiry and moves on to its models", async () => {
     const dialog = await toCredentials();
     fireEvent.change(field(/^API-nyckel/), { target: { value: "sk-live-1234" } });
