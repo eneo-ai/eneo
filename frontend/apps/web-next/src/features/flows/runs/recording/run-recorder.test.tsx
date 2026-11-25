@@ -458,6 +458,98 @@ describe("RunRecorder in the start dialog", () => {
     expect(stored.mock.calls.map(([part]) => part.index)).toEqual([0, 1, 2]);
   });
 
+  /** Records part 1, which uploads, and part 2, which the core refuses for good; answers part 2's remove button. */
+  async function refuseSecondPart(dialog: HTMLElement) {
+    await recordAndStop(dialog);
+    await waitFor(() => expect(FakeUpload.sent).toHaveLength(1));
+    FakeUpload.refuseNext = true;
+    fireEvent.click(button(dialog, messages.flow_transcript_rec_continue));
+    fireEvent.click(
+      await within(dialog).findByRole("button", { name: messages.flow_transcript_rec_stop })
+    );
+    // Refused: no upload left to stop, only the row to take off.
+    return within(dialog).findByRole("button", { name: /^Ta bort Inspelning, del 2/ });
+  }
+
+  /** Closes the form with "Spara och fortsätt senare", opens it again and continues the recording. */
+  async function saveAndContinue(dialog: HTMLElement) {
+    fireEvent.click(button(dialog, messages.flow_transcript_save_later));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "Kör" }));
+    const again = await screen.findByRole("dialog", { name: "Kör Medborgarbrev" });
+    fireEvent.click(
+      await within(again).findByRole("button", { name: messages.flow_transcript_resume_continue })
+    );
+    return again;
+  }
+
+  const FILES_FULL = /alla platser är använda\. Ta bort en fil om du vill spela in mer\.$/;
+
+  it("keeps a part the core refused for good in its slot, so the saved recording can be continued", async () => {
+    installBrowser();
+    grantMicrophone();
+    const stored = vi.spyOn(device.db, "putPart");
+    const { dialog } = await openDialog(audioContract(false, 1_800, 2));
+    await refuseSecondPart(dialog);
+    await waitFor(() => expect(stored).toHaveBeenCalledTimes(2));
+
+    // Both parts are on the device: the step's two slots are used.
+    fireEvent.click(button(dialog, messages.flow_transcript_rec_continue));
+    expect(await within(dialog).findByText(FILES_FULL)).toBeTruthy();
+    expect(
+      within(dialog).queryByRole("button", { name: messages.flow_transcript_rec_stop })
+    ).toBeNull();
+    expect(microphone).toHaveBeenCalledTimes(2);
+    expect(stored).toHaveBeenCalledTimes(2);
+
+    const again = await saveAndContinue(dialog);
+    expect(await within(again).findByText(/^Inspelning, del 2/)).toBeTruthy();
+    expect(within(again).getByText(/^Inspelning, del 1/)).toBeTruthy();
+    expect(within(again).queryByText(messages.flow_transcript_resume_problem_title)).toBeNull();
+  });
+
+  it("records again once the refused part is taken off the form", async () => {
+    installBrowser();
+    grantMicrophone();
+    const { dialog } = await openDialog(audioContract(false, 1_800, 2));
+    const remove = await refuseSecondPart(dialog);
+    fireEvent.click(button(dialog, messages.flow_transcript_rec_continue));
+    await within(dialog).findByText(FILES_FULL);
+
+    fireEvent.click(remove);
+    fireEvent.click(button(dialog, messages.flow_transcript_rec_continue));
+    expect(
+      await within(dialog).findByRole("button", { name: messages.flow_transcript_rec_stop })
+    ).toBeTruthy();
+  });
+
+  it("records no part past the step's slots when a part is refused for good while the next records", async () => {
+    installBrowser();
+    grantMicrophone();
+    const stored = vi.spyOn(device.db, "putPart");
+    // One-second parts in a step that takes three files.
+    const { dialog } = await openDialog(audioContract(false, 1, 3));
+    fireEvent.click(button(dialog, messages.flow_transcript_rec_start));
+    await waitFor(() => expect(FakeUpload.sent).toHaveLength(1), { timeout: 3_000 });
+    // Part 2 is refused for good as it arrives, while part 3 records.
+    FakeUpload.refuseNext = true;
+    expect(
+      await within(dialog).findByText(
+        messages.flow_transcript_rec_ended_files,
+        {},
+        { timeout: 6_000 }
+      )
+    ).toBeTruthy();
+    await within(dialog).findByRole("button", { name: messages.flow_transcript_rec_continue });
+    await waitFor(() => expect(stored).toHaveBeenCalledTimes(3));
+    expect(stored.mock.calls.map(([part]) => part.index)).toEqual([0, 1, 2]);
+    expect(within(dialog).queryByText(/^Inspelning, del 4/)).toBeNull();
+
+    const again = await saveAndContinue(dialog);
+    expect(await within(again).findByText(/^Inspelning, del 3/)).toBeTruthy();
+    expect(within(again).queryByText(messages.flow_transcript_resume_problem_title)).toBeNull();
+  }, 12_000);
+
   it("asks to stop the recording before the run starts", async () => {
     installBrowser();
     grantMicrophone();

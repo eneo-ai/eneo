@@ -170,10 +170,15 @@ function refusalReason(error: unknown): string {
   return typeof reason === "string" ? reason : "unavailable";
 }
 
-/** Free file slots of a step: every file that stays takes one. */
+/**
+ * Free file slots of a step for recording: every file that stays takes one,
+ * and so does every recorded part, one the core refused for good included.
+ * Its copy on the device belongs to the recording, which must fit the step to
+ * be continued later; it frees its slot when its row is taken off the form.
+ */
 function filesLeft(input: RuntimeInput, entries: readonly UploadEntry[]): number {
   if (input.max_files == null) return Infinity;
-  return input.max_files - entries.filter(stays).length;
+  return input.max_files - entries.filter((entry) => entry.recording || stays(entry)).length;
 }
 
 /** The recording the step's last recorded part belongs to, which recording again continues. */
