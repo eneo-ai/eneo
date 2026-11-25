@@ -5117,7 +5117,7 @@ export interface paths {
     put?: never;
     /**
      * Upload File
-     * @description Upload a file; rejects unsupported media types and oversized files.
+     * @description Upload a file; rejects unsupported media types and oversized files. The optional form field `space_id` names the space the file is meant for: the file then belongs to that space from the start, and the caller must be able to read the space. Without it the file belongs to no space until it is attached to an assistant, an app, an app run or a question. A file belongs to one space and cannot be attached in another.
      */
     post: operations["upload_file_api_v1_files__post"];
     delete?: never;
@@ -12857,6 +12857,11 @@ export interface components {
     Body_upload_file_api_v1_files__post: {
       /** Upload File */
       upload_file: string;
+      /**
+       * Space Id
+       * @description The space the file is meant for. Optional.
+       */
+      space_id?: string | null;
     };
     /** Body_upload_file_api_v1_groups__id__info_blobs_upload__post */
     Body_upload_file_api_v1_groups__id__info_blobs_upload__post: {
@@ -15573,6 +15578,8 @@ export interface components {
       | 9082
       | 9085
       | 9086
+      | 9088
+      | 9089
       | 9090;
     /**
      * ExpiringKeySummaryItem
