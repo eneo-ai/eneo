@@ -174,7 +174,7 @@ started without one are never removed automatically. An explicit administrator
 purge can remove any due run. Both keep parent ownership and foreign-key
 safety, remove a run whole with the files only it uses, block on pending or
 dead-lettered audit delivery and on legal holds, and leave an audit record (the
-engine's pass events, or the purge receipt).
+engine's batch and run events, or the purge receipt).
 There is no classification policy plane or retention tombstone.
 
 ## Tenancy and audit invariants

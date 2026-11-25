@@ -566,10 +566,11 @@ WI-MKT-02.
   the Space's time or the Flow's shorter one, and only while the Space has a
   time. Runs that started without a Space time, and runs in personal Spaces, are
   never removed automatically. Each run is one unit under the retention lock,
-  rolled back whole when any part fails; legal holds and undelivered audit or
-  webhook rows keep it; a file still used elsewhere stays; the engine's audit
-  events record each pass. Operators switch the task off with
-  `RETENTION_FLOW_RUN_HISTORY_ENABLED`. The explicit purge remains for any due
+  rolled back whole when any part fails; legal holds, audit rows not yet
+  delivered and pending webhook deliveries keep it; a file still used elsewhere
+  stays; the engine's audit events record each pass that runs, and a
+  five-minute check with nothing due records nothing. Operators switch the task
+  off with `RETENTION_FLOW_RUN_HISTORY_ENABLED`. The explicit purge remains for any due
   run. The rest of this decision records the launch design.
 - **Decision:** An Organization administrator may set a complete `{mode, days}`
   policy at Organization, Space, or individual Flow scope. Resolution checks

@@ -2845,7 +2845,7 @@
   "flow_admin_permission_flows_trace": "Flöden: spårning",
   "flow_admin_permission_flows_trace_description": "Granska flödeskörningars spårning och felsökningsexporter vid driftfelsökning.",
   "permission_retention_manage": "Gallring – hantera regler",
-  "permission_retention_manage_description": "I ytor man administrerar: ändra ytans tid, som också är taket för körhistoriken i dess flöden och tar bort det som är äldre, och ett flödes egen tid. Gallra manuellt. Bara inloggade personer, aldrig API-nycklar.",
+  "permission_retention_manage_description": "I ytor man administrerar: ändra ytans tid, som också är taket för körhistoriken i dess flöden och tar bort körningar som startade medan ytan hade en tid, när de är äldre, och ett flödes egen tid. Gallra manuellt. Bara inloggade personer, aldrig API-nycklar.",
   "audit_action_flow_run_retention_policy_changed": "Gallringsinställning ändrad",
   "audit_action_flow_run_retention_policy_changed_description": "En administratör ändrade ett flödes tid för körhistoriken, en ytas tid, som är taket för dess flöden, eller hur långt fram en rättslig spärrs omprövningsdatum får sättas.",
   "audit_action_flow_run_history_purged_description": "Körningshistorik för flöden vars tid har gått ut, och utgångna livetranskriptioner som ingen körning använder, raderades av en rensning som en administratör körde. Ett kvitto registrerades.",

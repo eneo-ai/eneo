@@ -22,7 +22,7 @@ A Flow run that starts while its space has a time is due once it is older than t
 - Changing a shared space's time and a Flow's own time, and purging, need `retention_manage`; the two times also need the person's role in the space: its admin, or for a Flow in a personal space its owner if they may edit Flows; placing, reviewing and releasing holds need `retention_holds` (see [Who may change or stop retention](#who-may-change-or-stop-retention)).
 - A Flow's time can be changed after the Flow is published.
 
-Two database revisions bring this. Revision `202611231030` cleared every Flow's own time without an audit row, along with every organisation's run-history time and every retention mode, so the space's time applies to its Flows. Revision `202611241000` brings automatic removal and only adds a record, on each run, of whether its space had a time when the run started. The upgraded service writes that record when it starts a run, so a space that already has a time starts removing the runs the upgraded service starts; an administrator should check the spaces' times before upgrading. Runs that started before the upgrade are never removed automatically. During a rolling upgrade, a replica of the old version can still start runs after `202611241000`: they are recorded as started without a space time, are never removed automatically, and only [the explicit purge](#the-explicit-purge) removes them.
+Three database revisions bring this. Revision `202611231030` cleared every Flow's own time without an audit row, along with every organisation's run-history time and every retention mode, so the space's time applies to its Flows. Revision `202611241000` brings automatic removal and only adds a record, on each run, of whether its space had a time when the run started. The upgraded service writes that record when it starts a run, so a space that already has a time starts removing the runs the upgraded service starts; an administrator should check the spaces' times before upgrading. Runs that started before the upgrade are never removed automatically. During a rolling upgrade, a replica of the old version can still start runs after `202611241000`: they are recorded as started without a space time, are never removed automatically, and only [the explicit purge](#the-explicit-purge) removes them. Revision `202611241100` adds the index the removal reads, built `CONCURRENTLY` so that writes to runs go on.
 
 ### Before upgrading past `202611231030`: list the runs that become due or stop being due
 
@@ -125,7 +125,7 @@ A removed run cannot be restored. Removal takes:
 These stay:
 
 - a run under a legal hold, until the hold ends;
-- a run whose audit row is not yet delivered or whose webhook delivery is still pending, until the delivery is done;
+- a run whose audit row is not delivered, also one whose delivery has failed for good, or whose webhook delivery is still pending. Health does not report such a run;
 - a file that another remaining run still uses. A rerun, or a new run from a reviewed transcription, shares its source run's audio file. Each run counts from its own time, and the file goes with the last of them. A run that started while the space had no time is never removed automatically, so it keeps the shared file, and it has its own copy of the transcript;
 - audit rows, which can name a removed run's files. They follow the audit log's own retention.
 
@@ -133,11 +133,13 @@ The space's time does not reach content that never became part of a run. The upl
 
 Create-run idempotency is tied to the run row. Once a run is removed, a request with the same `Idempotency-Key` creates a new run; if the upload it names has been removed too, that request can be refused when its input is checked.
 
-Eneo records each pass with the retention engine's audit events (`data_retention_batch` and `data_retention_run`), with counts and without run content. No event is written per run.
+Eneo records each pass that runs with the retention engine's audit events (`data_retention_batch` and `data_retention_run`), with counts and without run content. No event is written per run. A five-minute check that finds no due run is not a pass: it writes no execution record and no event. The nightly run still records one execution of the task. Health shows whether removal keeps up: `flows.run_history` reads `degraded` once a run has been due for more than an hour.
 
 ### A run that cannot be removed
 
-A run that exceeds the task's limits, whose removal fails, or that someone else has locked is kept whole and tried again on every pass; the rest are removed. Health reports it: `GET /api/healthz` shows `flows.run_history` with `blocked_reasons` such as `runs.unit_exceeds_budget`, `runs.run_failed` or `runs.run_locked`, and reads `degraded` once such a run has been due for more than an hour. `limiting_settings` names the settings whose limits kept a run, for example `retention_max_family_rows` and `retention_max_files_per_run`. The health response never names the run. The log names a run whose removal fails, with the error type, and a run too large for the limits; a locked run is not logged, since the next pass tries it again. Runs under a legal hold or waiting for a delivery are not due, so they leave health green. See [Health](/docs/audit-logging#health).
+A run that cannot be removed is kept whole, and the pass goes on with the next run. This happens when the run exceeds the task's limits, when its removal fails on that run alone, or when someone else holds the run or a row its removal reaches. Each pass tries it again. Health reports it: `GET /api/healthz` shows `flows.run_history` with `blocked_reasons` such as `runs.unit_exceeds_budget`, `runs.run_failed` or `runs.run_locked`, and reads `degraded` once such a run has been due for more than an hour. `limiting_settings` names the settings whose limits kept a run, for example `retention_max_family_rows` and `retention_max_files_per_run`. The health response never names the run. The log names a run too large for the limits, and a run whose removal failed, with the error type. A locked run is not logged, since the next pass tries it again. Runs under a legal hold or waiting for a delivery are not due, so they leave health green. See [Health](/docs/audit-logging#health).
+
+Some errors end the pass early instead. A statement timeout or a deadlock ends it as `partial`, with `chunk_timeout` or `chunk_deadlock`. An error that would fail every run alike, such as a missing privilege or a lost connection, ends it as `failed`. The runs removed earlier in the same transaction come back, and the next pass starts again where that transaction began. Health does not name the run. The log names it by its id.
 
 ### The explicit purge
 
@@ -307,7 +309,7 @@ rows, and the audit events remain.
 
 Holds, time changes and deletions are serialized: a purge waits for a hold or
 time change that is being saved, and a hold or time change waits for an
-open purge batch or a removal pass in progress. Automatic removal waits only
+open purge batch or the removal transaction in progress. Automatic removal waits only
 briefly for a hold or time change being saved: its pass then ends early, and
 the next pass continues. Deleting a space waits the same way as a purge. Both
 recheck holds right before they delete.

@@ -34,6 +34,7 @@ from eneo.data_retention.domain.retention import (
 )
 from eneo.data_retention.infrastructure import gallring_lock
 from eneo.data_retention.infrastructure.gallring_lock import (
+    GallringLockBusy,
     GallringSubject,
     acquire_exclusive,
 )
@@ -44,10 +45,12 @@ from eneo.database.tables.flow_tables import (
     FlowLiveTranscripts,
     FlowOutboxDeliveryStatus,
     FlowRetentionHolds,
+    FlowRunReviewCheckpoints,
     FlowRuns,
     FlowRunStepInputFiles,
     FlowRunStepResultFiles,
     FlowRuntimeUploadedFiles,
+    FlowRunWebhookDeliveries,
     FlowStepAttempts,
     FlowStepResults,
     FlowTranscriptCorrectionRevisions,
@@ -75,7 +78,10 @@ from eneo.main.retention_tasks import retention_task_registrations
 from eneo.object_content.configuration import ObjectContentCoreSettings
 from eneo.object_content.content import ContentState
 from eneo.object_content.reconciliation import ObjectContentReconciler
-from tests.integration.data_retention.retention_support import run_registered_retention
+from tests.integration.data_retention.retention_support import (
+    run_registered_retention,
+    step_batches,
+)
 from tests.integration.test_flow_runtime_retention_cleanup import (
     FlowRuntimeRetentionFixture,
     _add_flow_audit_outbox_row,
@@ -266,6 +272,13 @@ class _Database(Exception):
     def __init__(self, sqlstate: str) -> None:
         super().__init__(sqlstate)
         self.sqlstate = sqlstate
+
+
+def _busy_gallring_lock() -> GallringLockBusy:
+    """A busy gallring lock, raised from the lock wait it timed out on."""
+    busy = GallringLockBusy(GallringSubject.FLOW_HISTORY)
+    busy.__cause__ = DBAPIError("SELECT", {}, _Database("55P03"))
+    return busy
 
 
 def _capture_task_log(
@@ -703,6 +716,11 @@ async def test_a_nearly_spent_pass_defers_a_run_instead_of_blocking_it(
             RetentionJobOutcome.FAILED,
             RetentionErrorCode.CHUNK_FAILED,
         ),
+        (
+            _busy_gallring_lock(),
+            RetentionJobOutcome.PARTIAL,
+            RetentionErrorCode.CHUNK_TIMEOUT,
+        ),
     ],
     ids=[
         "defect",
@@ -713,6 +731,7 @@ async def test_a_nearly_spent_pass_defers_a_run_instead_of_blocking_it(
         "privilege",
         "invalidated-connection",
         "compile",
+        "busy-gallring-lock",
     ],
 )
 async def test_a_run_that_raises_is_blocked_and_the_others_go(
@@ -722,6 +741,7 @@ async def test_a_run_that_raises_is_blocked_and_the_others_go(
     shared_space: Spaces,
     space_assistant: Assistants,
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
     error: Exception,
     outcome: RetentionJobOutcome,
     error_code: RetentionErrorCode | None,
@@ -730,10 +750,15 @@ async def test_a_run_that_raises_is_blocked_and_the_others_go(
     error from the database) blocks the run as run_failed; a transient
     database error ends the pass as partial; an error of the whole system (a
     missing privilege, an invalidated connection, a statement SQLAlchemy cannot
-    compile) and the engine's own errors fail the pass. Mutants: catching the
+    compile) and the engine's own errors fail the pass. A pass that ends rolls
+    back its open chunk, so the run removed before the failing one in that
+    chunk comes back; the log names the failing run by its id alone, and the
+    next pass starts again where the chunk began. Mutants: catching the
     transient error as a defect; catching the contract error; blocking every
-    run as failed for a system error."""
+    run as failed for a system error; a busy gallring lock kept as a locked
+    run; a pass that ends without naming the run."""
     session = retention_session
+    _capture_task_log(monkeypatch, caplog)
     failing = await _aged_run(
         session,
         tenant=test_tenant,
@@ -742,28 +767,46 @@ async def test_a_run_that_raises_is_blocked_and_the_others_go(
         assistant=space_assistant,
         days_old=SPACE_DAYS + 10,
     )
+    earlier = await _small_run(session, failing, days_old=SPACE_DAYS + 15)
     other = await _small_run(session, failing, days_old=SPACE_DAYS + 5)
     failing_id = failing.run.id
     original = FlowRunHistoryPurgeRepository._remove_run
+    fails = True
 
     async def _remove_run(self, run_id: UUID, *args: Any, **kwargs: Any):
-        if run_id == failing_id:
+        if fails and run_id == failing_id:
             raise error
         return await original(self, run_id, *args, **kwargs)
 
     monkeypatch.setattr(FlowRunHistoryPurgeRepository, "_remove_run", _remove_run)
+    # One chunk holds all three runs.
+    settings = get_settings().model_copy(
+        update={"retention_chunk_gather_seconds": 60.0}
+    )
 
-    report = await _run(session, error_code=error_code)
+    report = await _run(session, settings=settings, error_code=error_code)
 
     assert report.outcome is outcome, report
     assert await _exists(session, failing_id)
     if error_code is None:
         assert _blocked(report) == {"runs.run_failed": 1}, report
-        assert _counts(report)["runs.runs_deleted"] == 1, report
+        assert _counts(report)["runs.runs_deleted"] == 2, report
+        assert not await _exists(session, earlier)
         assert not await _exists(session, other)
-    else:
-        assert not _counts(report), report
-        assert await _exists(session, other)
+        return
+    assert not _counts(report), report
+    assert await _exists(session, earlier)
+    assert await _exists(session, other)
+    [warning] = _task_warnings(caplog)
+    assert str(failing_id) in warning
+    assert str(error) not in warning
+
+    fails = False
+    report = await _run(session, settings=settings)
+
+    assert _counts(report)["runs.runs_deleted"] == 3, report
+    for run_id in (earlier, failing_id, other):
+        assert not await _exists(session, run_id)
 
 
 async def test_a_statement_the_database_refuses_blocks_only_that_run(
@@ -888,6 +931,170 @@ async def test_a_run_another_transaction_holds_stays_as_run_locked(
 
     assert _counts(report)["runs.runs_deleted"] == 1, report
     assert not await _exists(session, run_id)
+
+
+@pytest.mark.parametrize(
+    ("held", "batches"),
+    [
+        ("cascade", [({"run_locked": 1}, 2)]),
+        ("file", [({"run_locked": 1}, 1), ({}, 1)]),
+    ],
+)
+async def test_a_lock_wait_keeps_that_run_whole_and_the_chunk_goes_on(
+    retention_session: AsyncSession,
+    test_tenant,
+    admin_user,
+    shared_space: Spaces,
+    space_assistant: Assistants,
+    held: str,
+    batches: list[tuple[dict[str, int], int]],
+):
+    """Another transaction holds a row the removal reaches without locking it
+    first: a step attempt the run's cascade deletes, or the stored content of
+    its input file, which the file owner marks after the run and its result
+    file are deleted. The wait reaches the lock timeout: that run comes back
+    whole, with its rows and files, as run_locked; the run before it in the
+    same chunk stays removed, and the run after it goes in this pass. A wait
+    in the file release is charged what the release could read, which fills
+    the chunk, so the run after it goes in the next chunk. The next pass takes
+    the kept run once the lock is gone. Mutants: a lock wait that ends the
+    pass, which rolls back the run before it and keeps the one after it; a run
+    kept without what its savepoint had already deleted."""
+    session = retention_session
+    locked = await _aged_run(
+        session,
+        tenant=test_tenant,
+        user=admin_user,
+        space=shared_space,
+        assistant=space_assistant,
+        days_old=SPACE_DAYS + 10,
+    )
+    before = await _small_run(session, locked, days_old=SPACE_DAYS + 15)
+    after = await _small_run(session, locked, days_old=SPACE_DAYS + 5)
+    run_id = locked.run.id
+    input_id = locked.runtime_input_file.id
+    file_ids = (locked.generated_file.id, input_id)
+    rows = (
+        (FlowStepResults, locked.step_result.id),
+        (FlowStepAttempts, locked.step_attempt.id),
+        (FlowRunReviewCheckpoints, locked.review_checkpoint.id),
+        (FlowRunWebhookDeliveries, locked.webhook_delivery.id),
+    )
+    contents = dict(
+        (
+            await session.execute(
+                select(
+                    FileContentReferences.file_id, FileContentReferences.content_id
+                ).where(FileContentReferences.file_id.in_(file_ids))
+            )
+        )
+        .tuples()
+        .all()
+    )
+    await session.commit()
+    held_row = (
+        select(FlowStepAttempts.id).where(FlowStepAttempts.id == locked.step_attempt.id)
+        if held == "cascade"
+        else select(ObjectContents.id).where(ObjectContents.id == contents[input_id])
+    )
+    # One chunk holds all three runs; the wait ends well within it.
+    settings = get_settings().model_copy(
+        update={
+            "retention_chunk_lock_timeout_ms": 200,
+            "retention_chunk_gather_seconds": 60.0,
+        }
+    )
+
+    async with sessionmanager.session() as holder, holder.begin():
+        await holder.execute(held_row.with_for_update())
+        report = await _run(session, settings=settings)
+
+    assert report.outcome is RetentionJobOutcome.SUCCEEDED, report
+    assert _blocked(report) == {"runs.run_locked": 1}, report
+    assert _counts(report)["runs.runs_deleted"] == 2, report
+    written = await step_batches(session, report.job_run_id, "runs")
+    assert [
+        (batch["blocked"], batch["counts"]["runs_deleted"]) for batch in written
+    ] == batches, written
+    assert not await _exists(session, before)
+    assert not await _exists(session, after)
+    assert await _exists(session, run_id)
+    for table, row_id in rows:
+        assert await session.scalar(select(table.id).where(table.id == row_id)), table
+    for file_id in file_ids:
+        assert await _file_exists(session, file_id)
+    assert await session.scalar(
+        select(func.count())
+        .select_from(FlowRuntimeUploadedFiles)
+        .where(FlowRuntimeUploadedFiles.file_id == input_id)
+    )
+    assert set(
+        await session.scalars(
+            select(FileContentReferences.content_id).where(
+                FileContentReferences.file_id.in_(file_ids)
+            )
+        )
+    ) == set(contents.values())
+    assert set(
+        await session.scalars(
+            select(ObjectContents.state).where(ObjectContents.id.in_(contents.values()))
+        )
+    ) == {ContentState.AVAILABLE.value}
+
+    report = await _run(session, settings=settings)
+
+    assert _counts(report)["runs.runs_deleted"] == 1, report
+    assert not await _exists(session, run_id)
+
+
+async def test_a_lock_wait_at_the_default_ratio_ends_the_chunk_and_the_pass_goes_on(
+    retention_session: AsyncSession,
+    test_tenant,
+    admin_user,
+    shared_space: Spaces,
+    space_assistant: Assistants,
+):
+    """The default gather window (one second) is shorter than the default lock
+    timeout (two seconds), so the chunk that waited admits no further run: it
+    commits the locked run, and the next chunk removes the run after it. One
+    wait per chunk. Mutant: a lock wait that ends the pass."""
+    session = retention_session
+    locked = await _aged_run(
+        session,
+        tenant=test_tenant,
+        user=admin_user,
+        space=shared_space,
+        assistant=space_assistant,
+        days_old=SPACE_DAYS + 10,
+    )
+    after = await _small_run(session, locked, days_old=SPACE_DAYS + 5)
+    run_id, attempt_id = locked.run.id, locked.step_attempt.id
+    await session.commit()
+    settings = get_settings().model_copy(
+        update={
+            "retention_chunk_lock_timeout_ms": 2_000,
+            "retention_chunk_gather_seconds": 1.0,
+        }
+    )
+
+    async with sessionmanager.session() as holder, holder.begin():
+        await holder.execute(
+            select(FlowStepAttempts.id)
+            .where(FlowStepAttempts.id == attempt_id)
+            .with_for_update()
+        )
+        report = await _run(session, settings=settings)
+
+    assert report.outcome is RetentionJobOutcome.SUCCEEDED, report
+    assert await _exists(session, run_id)
+    assert not await _exists(session, after)
+    batches = await step_batches(session, report.job_run_id, "runs")
+    assert [
+        (batch["blocked"], batch["counts"].get("runs_deleted")) for batch in batches
+    ] == [
+        ({"run_locked": 1}, None),
+        ({}, 1),
+    ], batches
 
 
 async def test_a_pdf_run_goes_whole_and_its_content_is_tombstoned(

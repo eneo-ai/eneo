@@ -75,10 +75,12 @@ def is_run_failure(error: BaseException) -> bool:
     is blocked as run_failed and the pass goes on.
 
     The run's own: a database error of class 22 or 23, and any other error the
-    removal raises itself. Everything else propagates to the runner, which
-    ends the chunk: its own errors; a statement or lock timeout, a deadlock or
-    a busy gallring lock (retried by the next execution); a connection the
-    driver invalidated, an operational or interface error; every other
+    removal raises itself. A lock wait on one of the run's rows never comes
+    here: the removal keeps that run as locked. Everything else propagates to
+    the runner, which ends the chunk: its own errors; a statement or lock
+    timeout, a deadlock or a busy gallring lock (retried by the next
+    execution); a connection the driver invalidated, an operational or
+    interface error; every other
     SQLSTATE, such as 08 (connection), 28 (sign-in), 42 (syntax or privilege,
     42501), 53 (resources), 57 (operator), 58 (system) and XX (internal);
     every SQLAlchemy error not from the database, such as a statement it
@@ -233,6 +235,11 @@ class FlowRunHistoryRetentionTask:
             case FlowRunRemovalOutcome.FAILED:
                 error = removal.error
                 if error is not None and not is_run_failure(error):
+                    # The id only: the runner reports how the pass ended.
+                    logger.warning(
+                        "Flow run %s could not be removed; the pass ends here.",
+                        run_id,
+                    )
                     raise error
                 self._failed(run_id, error, out)
         return usage
