@@ -28,7 +28,6 @@ import { KeyExpiryField } from "./key-expiry-field";
 import { hasOwnEndpoint } from "./model-catalog";
 import { ModelCatalogStep } from "./model-catalog-step";
 import {
-  checkProviderConnection,
   createProvider,
   outboundHeaderOptionsQueryOptions,
   isProviderUpdateRefused,
@@ -170,20 +169,6 @@ export function AddModelWizard({
   const noTrigger = useRef<HTMLElement>(null);
   useReturnFocus(open, noTrigger);
 
-  // The check the provider card's button runs. Its result goes to the card's
-  // cache entry, and to the model step's banner instead of a toast; a request
-  // that fails leaves the step to say what its model list found.
-  const checkConnectionMut = useMutation({
-    mutationFn: (id: string) => checkProviderConnection(browserApi, id),
-    onSuccess: (updated) => {
-      queryClient.setQueryData<ModelProvider[]>(PROVIDERS_KEY, (current) =>
-        current?.map((item) => (item.id === updated.id ? updated : item))
-      );
-      // The list fetched after the create may land later without the result.
-      void queryClient.invalidateQueries({ queryKey: PROVIDERS_KEY });
-    }
-  });
-
   function reset() {
     const preselect = initialProviderId ?? eligibleProviders[0]?.id ?? "";
     // Default to the provider gallery ("new"); the existing-provider path is a
@@ -203,7 +188,6 @@ export function AddModelWizard({
     setTakenName(null);
     setProviderId(initialProviderId ?? null);
     setNewProvider(null);
-    checkConnectionMut.reset();
     setCatalogBusy(false);
     const provider = providers.data?.find((item) => item.id === preselect);
     setModelKind(
@@ -246,8 +230,6 @@ export function AddModelWizard({
     },
     onSuccess: (provider) => {
       void queryClient.invalidateQueries({ queryKey: PROVIDERS_KEY });
-      // Once, for the provider just made: its model step says what came back.
-      if (provider.connection_check_supported) checkConnectionMut.mutate(provider.id);
       setFieldValues({});
       setHeaderRows([]);
       setFormRefusal(null);
@@ -624,16 +606,6 @@ export function AddModelWizard({
                   )}
                   realtimeEligibility={
                     mode === "existing" ? existingProvider?.realtime_eligibility : undefined
-                  }
-                  // Only the provider this session made and checked.
-                  justChecked={
-                    checkConnectionMut.variables === targetProviderId
-                      ? {
-                          checking: checkConnectionMut.isPending,
-                          check: checkConnectionMut.data?.connection_check ?? null,
-                          endpoint: String(existingProvider?.config.endpoint ?? "")
-                        }
-                      : undefined
                   }
                   mode={effectiveModelKind}
                   supportedModes={targetProviderModes}

@@ -33,8 +33,6 @@ import {
   staticCatalogModels
 } from "./model-catalog";
 import {
-  type ConnectionCheckError,
-  type ModelProvider,
   providerCapabilitiesQueryOptions,
   type RealtimeEligibility,
   realtimeRefusalKey
@@ -81,22 +79,6 @@ const NO_CAPABILITIES = {
   supports_function_calling: false,
   supports_reasoning: false
 };
-
-/**
- * What a failed connection check says about the server, from how the backend
- * classifies it (backend/src/eneo/model_providers/infrastructure/
- * provider_connection_probe.py): these come only from an HTTP status, so the
- * server answered; timeout and unreachable mean no answer came. Any other
- * category may have been decided before a request was sent (no key, a key
- * that cannot be sent), so it claims neither.
- */
-const ANSWERED: ReadonlySet<ConnectionCheckError> = new Set([
-  "not_found",
-  "rate_limited",
-  "rejected",
-  "provider_error"
-]);
-const NO_ANSWER: ReadonlySet<ConnectionCheckError> = new Set(["timeout", "unreachable"]);
 
 /** Vision, tools and reasoning in words, as the model table shows them. */
 function capabilityLabels(t: ReturnType<typeof useTranslations>, model: CatalogModel): string[] {
@@ -152,7 +134,6 @@ export function ModelCatalogStep({
   providerType,
   hasOwnEndpoint,
   realtimeEligibility,
-  justChecked,
   mode = "completion",
   supportedModes,
   onModeChange,
@@ -167,12 +148,6 @@ export function ModelCatalogStep({
   hasOwnEndpoint: boolean;
   /** The provider's answer to whether it can carry live text. */
   realtimeEligibility: RealtimeEligibility | undefined;
-  /** The connection check of a provider the wizard just made, and its address. */
-  justChecked?: {
-    checking: boolean;
-    check: ModelProvider["connection_check"];
-    endpoint: string;
-  };
   mode?: ModelKind;
   supportedModes?: ModelKind[];
   onModeChange?: (mode: ModelKind) => void;
@@ -224,64 +199,22 @@ export function ModelCatalogStep({
   // they are never offered for one (they came with the type's prices).
   const catalog = liveModels.length > 0 || hasOwnEndpoint ? liveModels : staticModels;
   const usedFallback = liveModels.length === 0 && Boolean(liveQuery.data?.error);
-  /**
-   * What the connection check of a provider just made says, when it failed:
-   * it says more than the list's error does. Null when there was none.
-   */
-  function checkNotice() {
-    const check = justChecked?.check;
-    if (check?.status !== "failed") return null;
-    const error = check.error ?? null;
-    if (error && NO_ANSWER.has(error)) {
-      return {
-        status: "warning" as const,
-        title: t("provider_check_no_answer", { endpoint: justChecked?.endpoint ?? "" }),
-        description: t("provider_check_edit_address")
-      };
-    }
-    if (error && ANSWERED.has(error)) {
-      return {
-        status: "warning" as const,
-        title: t("provider_check_answered_no_list"),
-        description: [
-          t("provider_check_answered_no_list_description"),
-          // A live text server may list nothing; only transcription models
-          // are added by id without the provider validating them.
-          mode === "transcription" ? t("provider_check_live_text_server_note") : null,
-          t("provider_check_wrong_address")
-        ]
-          .filter(Boolean)
-          .join(" ")
-      };
-    }
-    return {
-      status: "warning" as const,
-      title: t("provider_models_list_failed"),
-      description: t("provider_check_failed_description")
-    };
-  }
   /** Why a server of its own offers nothing: one banner instead of the count. */
   const listNotice =
     hasOwnEndpoint && liveModels.length === 0
-      ? (checkNotice() ??
-        (liveQuery.data?.error
-          ? {
-              status: "warning" as const,
-              title: t("provider_models_list_failed"),
-              description: t("provider_models_list_failed_description")
-            }
-          : {
-              status: "info" as const,
-              title: t("provider_models_none_of_type", { type: typeLabel(mode) }),
-              description: t("provider_models_none_of_type_description")
-            }))
+      ? liveQuery.data?.error
+        ? {
+            status: "warning" as const,
+            title: t("provider_models_list_failed"),
+            description: t("provider_models_list_failed_description")
+          }
+        : {
+            status: "info" as const,
+            title: t("provider_models_none_of_type", { type: typeLabel(mode) }),
+            description: t("provider_models_none_of_type_description")
+          }
       : null;
-  // The list waits for the check, so its banner appears, and is said, once.
-  const loading =
-    liveQuery.isLoading ||
-    capsQuery.isLoading ||
-    modelsQuery.isLoading ||
-    Boolean(justChecked?.checking);
+  const loading = liveQuery.isLoading || capsQuery.isLoading || modelsQuery.isLoading;
 
   const [selected, setSelected] = useState<Map<string, CatalogModel>>(new Map());
   const [search, setSearch] = useState("");
