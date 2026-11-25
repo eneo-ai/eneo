@@ -126,6 +126,64 @@ describe("FlowPage on a phone", () => {
     await expectNoAxeViolations(container);
   });
 
+  it.each([
+    [
+      "the space has a time",
+      { space: { days: 90 }, flow: null },
+      {},
+      "Gallring: körningar tas bort automatiskt 90 dagar efter att de avslutades."
+    ],
+    [
+      "the space has no time, though the flow has",
+      { space: null, flow: { days: 30 } },
+      {},
+      "Gallring: inga körningar tas bort automatiskt."
+    ],
+    [
+      "the space is personal",
+      { space: { days: 90 }, flow: { days: 30 } },
+      { personal: true },
+      "Gallring: inga körningar tas bort automatiskt."
+    ]
+  ])(
+    "says under the folded settings whether runs are removed when %s",
+    async (_, contributors, space, line) => {
+      const { container } = renderPhonePage(
+        {
+          run_history_retention: {
+            state: "configured",
+            source: contributors.flow ? "flow" : "space",
+            effective_days: (contributors.flow ?? contributors.space)!.days,
+            contributors
+          }
+        },
+        undefined,
+        space
+      );
+      const settings = await screen.findByRole("region", { name: "Inställningar" });
+      const toggle = within(settings).getByRole("button", { name: "Inställningar" });
+      const folded = within(settings).getByText(line);
+      // Beside the toggle, not part of its name.
+      expect(toggle.contains(folded)).toBe(false);
+      await expectNoAxeViolations(container);
+      // Open, the section says it in full and the line goes.
+      fireEvent.click(toggle);
+      expect(within(settings).queryByText(line)).toBeNull();
+      expect(within(settings).getByRole("region", { name: "Gallring" })).toBeTruthy();
+    }
+  );
+
+  it("puts the settings' sections a level under the page's title, as the toggle is no heading", async () => {
+    renderPhonePage({
+      input_type: "audio",
+      metadata_json: { wizard: { transcription_enabled: true } }
+    });
+    const settings = await screen.findByRole("region", { name: "Inställningar" });
+    fireEvent.click(within(settings).getByRole("button", { name: "Inställningar" }));
+    expect(within(settings).getByRole("heading", { level: 2, name: "Gallring" })).toBeTruthy();
+    expect(within(settings).queryByRole("heading", { level: 3 })).toBeNull();
+  });
+
   it("offers no editing, only where it is done", async () => {
     renderPhonePage();
     await screen.findByRole("heading", { level: 1, name: "Medborgarbrev" });

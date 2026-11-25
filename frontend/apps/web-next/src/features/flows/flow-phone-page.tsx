@@ -3,13 +3,14 @@ import { Button } from "@astryxdesign/core/Button";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { Play } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { useId } from "react";
+import { useId, useState } from "react";
 import { Collapsible } from "@/components/astryx/collapsible";
 import { DockedActions } from "@/components/shell/docked-actions";
 import { PageBar } from "@/components/shell/page-bar";
 import { browserApi } from "@/lib/api/browser";
 import { useSpace } from "@/features/spaces/use-space";
 import { flowQueryOptions } from "./flows-api";
+import { FlowRetentionFoldedLine } from "./flow-retention";
 import { SettingsSummary } from "./flow-settings";
 import { flowKindLine } from "./flow-labels";
 import { FlowStatusBadge } from "./flow-status";
@@ -29,6 +30,7 @@ export function FlowPhonePage({ flowId, onStart }: { flowId: string; onStart: ()
   const t = useTranslations();
   const { routeId, space } = useSpace();
   const settingsHeadingId = useId();
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const { data: flow } = useSuspenseQuery(flowQueryOptions(browserApi, flowId));
   const isPublished = flow.published_version != null;
   const canRun = isPublished && flow.permissions.can_run;
@@ -61,7 +63,8 @@ export function FlowPhonePage({ flowId, onStart }: { flowId: string; onStart: ()
         ) : null}
         <section aria-labelledby={settingsHeadingId}>
           <Collapsible
-            defaultIsOpen={false}
+            isOpen={settingsOpen}
+            onOpenChange={setSettingsOpen}
             chevronPosition="start"
             trigger={
               <span id={settingsHeadingId} className="text-ax-text py-1 text-lg font-semibold">
@@ -78,9 +81,20 @@ export function FlowPhonePage({ flowId, onStart }: { flowId: string; onStart: ()
                 }}
                 classification={space.security_classification}
                 personalSpace={space.personal}
+                // The toggle is a button, which a heading cannot hold, so its sections
+                // are the page's second level.
+                headingLevel={2}
               />
             </div>
           </Collapsible>
+          {/* Folded, the settings still say whether runs are removed, in line with the toggle's text. */}
+          {settingsOpen ? null : (
+            <FlowRetentionFoldedLine
+              flow={flow}
+              personalSpace={space.personal}
+              className="text-ax-text-secondary m-0 ps-7 text-sm"
+            />
+          )}
         </section>
         {flow.permissions.can_edit ? (
           <p className="text-ax-text-secondary m-0 text-sm">{t("flow_edit_on_desktop")}</p>

@@ -225,6 +225,30 @@ export function FlowRetentionSection({
 }
 
 /**
+ * The retention in a line, for a phone whose settings are folded: whether runs are
+ * removed, by the same rule as the section's status line.
+ */
+export function FlowRetentionFoldedLine({
+  flow,
+  personalSpace,
+  className
+}: {
+  flow: FlowPublic;
+  personalSpace: boolean;
+  className?: string;
+}) {
+  const t = useTranslations();
+  const removes = removalDaysOf(flow, personalSpace);
+  return (
+    <p className={className}>
+      {removes === null
+        ? t("flows_retention_collapsed_off")
+        : t("flows_retention_collapsed_on", { days: removes })}
+    </p>
+  );
+}
+
+/**
  * The flow's own time, or none to use the space's. It has an endpoint of its own and
  * stays open on a published flow: it changes when runs may be purged, not the
  * definition, so it is no part of the settings form. Saving deletes nothing itself, but

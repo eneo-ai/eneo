@@ -121,7 +121,8 @@ export function SettingsSummary({
   classification,
   personalSpace = false,
   retentionAction,
-  spaceRetentionHref
+  spaceRetentionHref,
+  headingLevel = 3
 }: {
   flow: FlowPublic;
   transcription?: TranscriptionResources;
@@ -131,6 +132,8 @@ export function SettingsSummary({
   retentionAction?: ReactNode;
   /** The space's settings, for the one who may set the space's time. */
   spaceRetentionHref?: string;
+  /** Its sections' heading level: 2 where the summary has no heading of its own above them. */
+  headingLevel?: 2 | 3;
   /** Leaves out the description and the step count, for a page whose header and step list say them. */
   hideIdentity?: boolean;
   /** The space's security classification, when it has one. */
@@ -209,7 +212,7 @@ export function SettingsSummary({
         <MetadataList
           label={label}
           title={
-            <Heading level={3} weight="semibold" className="text-base">
+            <Heading level={headingLevel} weight="semibold" className="text-base">
               {t("flow_editor_tools_transcription_heading")}
             </Heading>
           }
@@ -226,6 +229,7 @@ export function SettingsSummary({
         flow={flow}
         personalSpace={personalSpace}
         label={label}
+        headingLevel={headingLevel}
         action={retentionAction}
         spaceSettingsHref={spaceRetentionHref}
       />
