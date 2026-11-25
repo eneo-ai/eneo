@@ -905,6 +905,35 @@ describe("FlowStepEditor", () => {
     await expectNoAxeViolations(container);
   }, 20_000);
 
+  it("shows a tool's long argument in the preview as written, in a box that scrolls", async () => {
+    const sql = "SELECT x.pump\nFROM pumps x\nORDER BY x.pump";
+    renderEditor(
+      makeFlow({
+        steps: [
+          makeStep({
+            input_source: "tool",
+            output_mode: "compose_text",
+            input_config: {
+              tool: { mcp_server_id: "server-1", tool_id: "tool-1", arguments: { sql, limit: 5 } }
+            }
+          })
+        ]
+      })
+    );
+    await nameField();
+    fireEvent.click(
+      screen.getByRole("button", { name: messages.flow_editor_tools_preview_button })
+    );
+    const dialog = await screen.findByRole("dialog", {
+      name: messages.flow_editor_tools_preview_title
+    });
+    const value = within(dialog).getByRole("group", {
+      name: messages.flow_editor_tools_preview_argument_value.replace("{name}", "sql")
+    });
+    // Its own lines, kept by a preformatted block (a plain inline element folds them).
+    expect(value.querySelector("pre")?.textContent).toBe(sql);
+  }, 20_000);
+
   it("names a stored credential as stored in the preview, never its value", async () => {
     renderEditor(httpFlow({ mode: "bearer_token", token: { $secret: "stored" } }));
     await nameField();

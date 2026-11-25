@@ -1,6 +1,7 @@
 import { Button } from "@astryxdesign/core/Button";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Text } from "@astryxdesign/core/Text";
+import { TextArea } from "@astryxdesign/core/TextArea";
 import { useQuery } from "@tanstack/react-query";
 import { Trash2 } from "lucide-react";
 import { useTranslations } from "use-intl";
@@ -20,6 +21,13 @@ import {
 import { formFieldFitsArgument, templateBindingToken } from "./step-rules";
 import type { ToolOption } from "./step-types";
 import type { VariableGroup } from "./step-variables";
+
+/**
+ * How many lines a text argument's field grows to before it scrolls: about
+ * a screen's third on a laptop, so the fields under it stay in reach. The
+ * field's class caps its height at the same `15lh`.
+ */
+const MAX_ROWS = 15;
 
 function toolKey(tool: Pick<ToolConfig, "mcp_server_id" | "tool_id">): string {
   return `${tool.mcp_server_id}:${tool.tool_id}`;
@@ -97,32 +105,51 @@ function ArgumentField({
     field?.type === "field" && !formFieldFitsArgument(field.fieldType, { type, items })
       ? field.label
       : null;
+  const props = {
+    label: name,
+    description: [description, ...hints].filter(Boolean).join(" "),
+    value: text,
+    onChange: (next: string) => {
+      const result = argumentValue(next, type);
+      onChange(result.ok ? result.value : next);
+    },
+    isRequired: required,
+    isOptional: !required,
+    autoComplete: "off",
+    status: problemStatus(
+      composed
+        ? t("flow_step_editor_tool_argument_composed")
+        : !parsed.ok
+          ? t("flow_step_editor_tool_argument_not_json", { type: type ?? "" })
+          : mismatch !== null
+            ? t("flow_step_editor_tool_argument_field_mismatch", {
+                field: mismatch,
+                type: argumentTypeText({ type, items }) ?? ""
+              })
+            : null
+    )
+  };
   return (
     <div className="flex flex-col gap-2">
-      <TextInput
-        label={name}
-        description={[description, ...hints].filter(Boolean).join(" ")}
-        value={text}
-        onChange={(next) => {
-          const result = argumentValue(next, type);
-          onChange(result.ok ? result.value : next);
-        }}
-        isRequired={required}
-        isOptional={!required}
-        autoComplete="off"
-        status={problemStatus(
-          composed
-            ? t("flow_step_editor_tool_argument_composed")
-            : !parsed.ok
-              ? t("flow_step_editor_tool_argument_not_json", { type: type ?? "" })
-              : mismatch !== null
-                ? t("flow_step_editor_tool_argument_field_mismatch", {
-                    field: mismatch,
-                    type: argumentTypeText({ type, items }) ?? ""
-                  })
-                : null
-        )}
-      />
+      {/* A text (a query, a message) is kept as written, line breaks and all,
+          so it gets a field that grows with it up to MAX_ROWS lines and then
+          scrolls. Other types are stored as JSON and written back on one
+          line, so they keep the one-line field. */}
+      {type === null || type === "string" ? (
+        <TextArea
+          {...props}
+          // Fits the text where the browser can (`field-sizing`); elsewhere
+          // `rows` opens it on its own lines. A dragged height would stop it
+          // following the text, so it does not resize by hand.
+          rows={Math.min(MAX_ROWS, text.split("\n").length)}
+          controlClassName="[&_textarea]:resize-none [&_textarea]:[field-sizing:content] [&_textarea]:max-h-[min(15lh,50dvh)]"
+          // A value for a tool, not prose: no red marks under a query.
+          hasSpellCheck={false}
+          width="100%"
+        />
+      ) : (
+        <TextInput {...props} />
+      )}
       <div>
         <VariablePicker
           groups={groups}

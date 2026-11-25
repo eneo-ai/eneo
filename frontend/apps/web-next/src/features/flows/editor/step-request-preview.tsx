@@ -2,6 +2,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
+import { ScrollableArea } from "@astryxdesign/core/ScrollableArea";
 import { Text } from "@astryxdesign/core/Text";
 import { Token } from "@astryxdesign/core/Token";
 import { useQuery } from "@tanstack/react-query";
@@ -200,7 +201,16 @@ function RequestPreview({
                 {typeof value === "string" && value.includes("{{") ? (
                   <Template parts={previewParts(value, stepOrder, flow)} flow={flow} />
                 ) : (
-                  <code className="font-mono text-xs break-all">{argumentText(value)}</code>
+                  // A long value (a query) keeps its lines and scrolls in its box.
+                  <ScrollableArea
+                    axis="block"
+                    label={t("flow_editor_tools_preview_argument_value", { name })}
+                    className="bg-ax-sunken rounded-ax-element focus-visible:outline-ring max-h-60 min-w-0 focus-visible:outline-2 focus-visible:-outline-offset-2"
+                  >
+                    <pre className="text-ax-text m-0 px-3 py-2 font-mono text-xs [overflow-wrap:anywhere] whitespace-pre-wrap">
+                      {argumentText(value)}
+                    </pre>
+                  </ScrollableArea>
                 )}
               </MetadataListItem>
             ))}
