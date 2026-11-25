@@ -456,8 +456,9 @@ function RetentionSection() {
   const [daysVisited, setDaysVisited] = useState(false);
   // A time that removes content, waiting for its confirmation, and the time it was compared with.
   const [asked, setAsked] = useState<{ days: number; expected: number | null } | null>(null);
-  // What applies from now, after this page saved a time.
-  const [note, setNote] = useState<string | null>(null);
+  // What applies from now, after this page saved a time, and that time. The line shows only
+  // while the space has that time, so a read that brings another administrator's change hides it.
+  const [note, setNote] = useState<{ days: number | null; text: string } | null>(null);
   const fieldRef = useRef<HTMLInputElement>(null);
   useDirtySaveStatus("retention-days", days !== saved);
 
@@ -493,7 +494,8 @@ function RetentionSection() {
       : next === null
         ? t("space_retention_saved_off")
         : t("space_retention_saved_on", { days: next });
-    setNote(said);
+    // The space's cache already holds the saved answer (`useUpdateSpace`), so the line shows now.
+    setNote({ days: next, text: said });
     announce(said);
     return true;
   }
@@ -542,7 +544,9 @@ function RetentionSection() {
         <span className="text-muted-foreground text-sm">{t("days")}</span>
       </div>
       <FieldProblem id="retention-days" problem={daysProblem} />
-      {note ? <p className="text-muted-foreground text-sm">{note}</p> : null}
+      {note && note.days === saved ? (
+        <p className="text-muted-foreground text-sm">{note.text}</p>
+      ) : null}
       {!canEditRetention && (
         <p id={readOnlyHintId} className="text-muted-foreground text-sm">
           {editsSpace

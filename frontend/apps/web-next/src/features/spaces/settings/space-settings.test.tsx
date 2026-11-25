@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import type { QueryClient } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
@@ -352,6 +353,38 @@ it.each([
   await waitFor(() => expect(said).toContain(note));
   await expectNoAxeViolations(container);
 });
+
+/** Another administrator leaves the space at `days`, and the page reads it again its usual way. */
+async function readSpaceAgain(queryClient: QueryClient, days: number | null) {
+  state.space = { ...state.space, data_retention_days: days };
+  await act(() => queryClient.refetchQueries({ queryKey: ["spaces", "space-1"], exact: true }));
+}
+
+it("takes the line about the paused removal away when the space is read again with a time", async () => {
+  const { queryClient } = showSettings();
+  const section = document.getElementById("security")!;
+  enterRetention("");
+  expect(await within(section).findByText(messages.space_retention_saved_off)).toBeTruthy();
+  await readSpaceAgain(queryClient, 7);
+  await waitFor(() => expect(retentionField().value).toBe("7"));
+  expect(within(section).queryByText(messages.space_retention_saved_off)).toBeNull();
+});
+
+it.each([
+  ["without a time", null, ""],
+  ["with another time", 14, "14"]
+] as const)(
+  "takes the line about a saved time away when the space is read again %s",
+  async (_, days, shown) => {
+    const { queryClient } = showSettings();
+    const section = document.getElementById("security")!;
+    enterRetention("60");
+    expect(await within(section).findByText(/äldre än 60 dagar/)).toBeTruthy();
+    await readSpaceAgain(queryClient, days);
+    await waitFor(() => expect(retentionField().value).toBe(shown));
+    expect(within(section).queryByText(/äldre än 60 dagar/)).toBeNull();
+  }
+);
 
 // A time that removes content asks first: one set on a space without a time, or a shorter one.
 it.each([
