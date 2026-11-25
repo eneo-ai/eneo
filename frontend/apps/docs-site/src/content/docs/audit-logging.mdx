@@ -210,14 +210,23 @@ registered tasks remove due questions and App runs, the names and feedback texts
 conversations past their period, sessions that were created more
 than `RETENTION_EMPTY_SESSION_GRACE_HOURS` ago and have no question, unused upload
 families and expired retention execution records. Each removal has this one scheduled
-path. Audit-log purging remains governed by the separate audit retention policy above.
+path, and so does the removal of Flow runs (`flows.run_history`), which runs often. Audit-log purging remains governed by the separate audit retention policy above.
 
 The daily run runs every registered task. A task registered to run often also runs
 every five minutes, through the same engine and lease, but only when its due probe
 finds something due, or when the probe itself fails or times out (the failure is
 logged and the task runs); when the probe finds nothing due, that run writes no
-execution record and no audit event. No task in this release runs often, so the five-minute job
-`run_retention_frequent` ends without touching the database.
+execution record and no audit event. In this release `flows.run_history` is the task
+that runs often: it removes finished Flow runs that started while their space had a
+time, once they are older than the space's time or the Flow's shorter one. One run, its
+steps and the file families only it uses form its unit, rolled back whole when any part
+of it cannot be removed. A run that exceeds the limits, whose removal fails on that run
+alone, or that someone else has locked is kept and reported as `unit_exceeds_budget`,
+`run_failed` or `run_locked`, and the other runs proceed. A run whose removal waits
+past the lock timeout on a row it reaches is kept as `run_locked` too. A statement
+timeout, a deadlock or an error that would fail every run ends the execution instead,
+and the runs its open chunk removed come back. See
+[Flow run-history retention](/guides/flows/retention-policy#automatic-removal).
 
 Work runs in bounded chunks. Each chunk is one database transaction with durable
 progress. Within a chunk, one question or App run and the files its last use released
@@ -344,7 +353,7 @@ stops the process at start with the reason.
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `RETENTION_CRON_HOUR` / `RETENTION_CRON_MINUTE` | `3` / `30` | Start time of the daily run in the worker's time zone (UTC in the shipped image) |
-| `RETENTION_CONVERSATIONS_HISTORY_ENABLED` / `RETENTION_DERIVED_COPIES_ENABLED` / `RETENTION_EMPTY_SESSIONS_ENABLED` / `RETENTION_UNUSED_FILES_ENABLED` / `RETENTION_JOB_HISTORY_ENABLED` | `true` | Per-task switches; a task turned off records a skipped execution and an audit event |
+| `RETENTION_CONVERSATIONS_HISTORY_ENABLED` / `RETENTION_DERIVED_COPIES_ENABLED` / `RETENTION_EMPTY_SESSIONS_ENABLED` / `RETENTION_UNUSED_FILES_ENABLED` / `RETENTION_JOB_HISTORY_ENABLED` / `RETENTION_FLOW_RUN_HISTORY_ENABLED` | `true` | Per-task switches; a task turned off records a skipped execution and an audit event |
 | `RETENTION_MAX_ROWS_PER_RUN` | `50000` | Rows charged per execution of the session, file and job tasks; each task has its own budget |
 | `RETENTION_CONVERSATIONS_MAX_ROWS_PER_RUN` | `250000` | Rows charged per execution of the conversation task |
 | `RETENTION_MAX_FILES_PER_RUN` | `10000` | File rows deleted per execution, including derived files |
@@ -548,7 +557,8 @@ code 1 means it is not: the output names each task and reason, such as a missing
 report (the task raised; see the log), an execution held by another process (stop
 the workers), an outcome other than `succeeded` or `partial`, a blocked reason
 the task does not declare as not due (the tasks in this release declare "no longer
-due" and "not old enough"), a step that made no progress,
+due" and "not old enough"; a Flow run kept as `runs.unit_exceeds_budget`,
+`runs.run_failed` or `runs.run_locked` is therefore not complete), a step that made no progress,
 "still removing after 10000 rounds" (run the command again: it continues), or a
 storage line other than `confirmed` or `pending`. A task turned off by its setting
 also fails the readback, since nothing shows that its work is done. Resolve the
@@ -557,7 +567,7 @@ cause and run the command again.
 What the readback promises, what can still come back after a restore and what
 it leaves to you are in [After a restore](/guides/data-retention#after-a-restore).
 
-Flow run and step history is separate. The space's time, which caps every Flow in the space, and a Flow's shorter time do not authorize scheduled deletion of Flow history and only make it eligible for an explicit purge. See [Data retention and deletion](/guides/data-retention).
+Flow run and step history follows the space's time, which caps every Flow in the space, or a Flow's shorter time: `flows.run_history` removes the runs that started while their space had a time, and an administrator's explicit purge can remove any due run. See [Flow run-history retention](/guides/flows/retention-policy#automatic-removal).
 
 ## Export formats
 

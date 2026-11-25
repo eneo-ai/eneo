@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import cast
-from uuid import UUID
+from typing import Any, cast
 
-import pytest
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,20 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from eneo.flows.infrastructure.flow_retention_repo import FlowRetentionRepository
 
 
-class _EmptyScalarResult:
-    def all(self) -> list[UUID]:
-        return []
-
-
-class _RecordingSession:
-    statement: sa.Select[tuple[UUID]] | None = None
-
-    async def scalars(self, stmt: sa.Select[tuple[UUID]]) -> _EmptyScalarResult:
-        self.statement = stmt
-        return _EmptyScalarResult()
-
-
-def _compile(stmt: sa.Select[tuple[UUID]]) -> str:
+def _compile(stmt: sa.Select[Any]) -> str:
     return str(
         stmt.compile(
             dialect=postgresql.dialect(),
@@ -50,20 +35,15 @@ def test_due_flow_run_history_purge_query_reads_the_space_time_as_the_cap() -> N
     assert "retention_mode" not in compiled
 
 
-@pytest.mark.asyncio
-async def test_flow_run_history_purge_batch_orders_by_retention_anchor_then_run_id() -> (
-    None
-):
-    session = _RecordingSession()
-    service = FlowRetentionRepository(cast(AsyncSession, session))
+def test_flow_run_history_purge_batch_orders_by_retention_anchor_then_run_id() -> None:
+    service = FlowRetentionRepository(cast(AsyncSession, object()))
 
-    await service._select_flow_run_history_purge_batch(
-        now=datetime(2026, 6, 10, 12, 0, tzinfo=timezone.utc),
-        limit=5000,
+    compiled = _compile(
+        service._build_flow_run_history_purge_batch_query(
+            now=datetime(2026, 6, 10, 12, 0, tzinfo=timezone.utc),
+            limit=5000,
+        )
     )
-
-    assert session.statement is not None
-    compiled = _compile(session.statement)
     assert (
         "ORDER BY coalesce(flow_runs.finished_at, flow_runs.created_at), "
         "flow_runs.id" in compiled
@@ -73,3 +53,20 @@ async def test_flow_run_history_purge_batch_orders_by_retention_anchor_then_run_
     assert "flow_run_webhook_deliveries.claim_token" not in compiled
     assert "flow_run_webhook_deliveries.claimed_at" not in compiled
     assert "flow_run_webhook_deliveries.claim_expires_at" not in compiled
+
+
+def test_the_automatic_selection_adds_the_mark_and_the_space_time_now() -> None:
+    """Mutants: the automatic removal takes an unmarked run, a run of a space
+    whose time was removed, or one of a personal space."""
+    service = FlowRetentionRepository(cast(AsyncSession, object()))
+
+    compiled = _compile(
+        service._build_automatic_removal_candidates(
+            now=datetime(2026, 6, 10, 12, 0, tzinfo=timezone.utc)
+        )
+    )
+
+    assert "flow_runs.started_under_space_retention IS true" in compiled
+    assert "spaces.data_retention_days IS NOT NULL" in compiled
+    assert "spaces.user_id IS NULL" in compiled
+    assert "ORDER BY" not in compiled

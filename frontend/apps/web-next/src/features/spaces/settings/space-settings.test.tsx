@@ -1,17 +1,25 @@
 // @vitest-environment jsdom
+import type { QueryClient } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import type { Permission } from "@/lib/auth/permissions";
-import { renderInApp, testAppContext } from "@/test/render";
+import {
+  flushAnnouncements,
+  recordAnnouncements,
+  renderInApp,
+  testAppContext
+} from "@/test/render";
 import { router } from "@/test/navigation";
 import messages from "@/lib/i18n/messages/sv.json";
 import { setViewport } from "@/test/setup-dom";
-import type { Space } from "../space";
+import { TRANSCRIPTION_SERVICE_CATALOGUE_KEY } from "@/features/admin/models/transcription-services";
+import { spaceQueryOptions, type Space } from "../space";
 import { makeSpace } from "../testing/space-fixture";
 
 const state = vi.hoisted(() => ({ space: null as unknown as Space, routeId: "space-1" }));
 const api = vi.hoisted(() => ({ GET: vi.fn(), PATCH: vi.fn(), DELETE: vi.fn() }));
+const toastError = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 vi.mock("@/features/spaces/use-space", async () => {
@@ -22,6 +30,10 @@ vi.mock("@/features/api-keys/resource-api-keys-section", () => ({
   ResourceApiKeysSection: () => null
 }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
+vi.mock("@/lib/toast", async (importOriginal) => {
+  const { toast } = await importOriginal<typeof import("@/lib/toast")>();
+  return { toast: { ...toast, error: toastError } };
+});
 
 import { SpaceSettings } from "./space-settings";
 
@@ -79,6 +91,10 @@ function showSettings(
     if (path === "/api/v1/security-classifications/") {
       return ok({ security_enabled: false, security_classifications: [] });
     }
+    // The space as the server has it now: the retention field reads it before it decides.
+    if (path === "/api/v1/spaces/{id}/" || path.startsWith("/api/v1/spaces/type/")) {
+      return ok(state.space);
+    }
     if (path === "/api/v1/ai-models/") {
       return ok({
         completion_models: models,
@@ -100,6 +116,7 @@ afterEach(() => {
   api.GET.mockReset();
   api.PATCH.mockReset();
   api.DELETE.mockReset();
+  toastError.mockReset();
 });
 
 /** The strip of section links (a phone's index is another navigation of the same name). */
@@ -269,10 +286,9 @@ it("keeps an empty space name and explains the error at the field until correcte
 
 it("keeps invalid retention input, explains the allowed format and saves a correction", async () => {
   const { container, queryClient } = showSettings();
-  const retention = screen.getByRole("textbox", { name: "Gallring av konversationshistorik" });
-  // "yta", as the rest of the settings say.
-  expect(screen.getByText(/appar i denna yta som inte har/)).toBeTruthy();
-  expect(screen.getByText(/Tiden är också taket för körhistoriken i ytans flöden/)).toBeTruthy();
+  const retention = screen.getByRole("textbox", { name: "Gallringstid för ytan" });
+  // The time covers flows too, and says that what is older goes for good.
+  expect(screen.getByText(messages.space_retention_description)).toBeTruthy();
   queryClient.setQueryData(["flows", "detail", "flow-1"], { id: "flow-1" });
 
   fireEvent.change(retention, { target: { value: "1.5" } });
@@ -284,12 +300,12 @@ it("keeps invalid retention input, explains the allowed format and saves a corre
   expect(api.PATCH).not.toHaveBeenCalled();
   await expectNoAxeViolations(container);
 
-  fireEvent.change(retention, { target: { value: "14" } });
+  fireEvent.change(retention, { target: { value: "45" } });
   fireEvent.blur(retention);
   await waitFor(() =>
     expect(api.PATCH).toHaveBeenCalledWith("/api/v1/spaces/{id}/", {
       params: { path: { id: "space-1" } },
-      body: { data_retention_days: 14 }
+      body: { data_retention_days: 45, expected_data_retention_days: 30 }
     })
   );
   expect(retention.getAttribute("aria-invalid")).toBeNull();
@@ -299,9 +315,632 @@ it("keeps invalid retention input, explains the allowed format and saves a corre
   );
 });
 
+function retentionField() {
+  return screen.getByRole("textbox", { name: "Gallringstid för ytan" }) as HTMLInputElement;
+}
+
+function enterRetention(value: string) {
+  const field = retentionField();
+  fireEvent.change(field, { target: { value } });
+  fireEvent.blur(field);
+  return field;
+}
+
+it.each([
+  ["lengthens the time", 30, "60", 60],
+  ["clears the time", 30, "", null]
+])("%s without asking and says what applies from now", async (_, saved, typed, sent) => {
+  const { container } = showSettings(
+    undefined,
+    [],
+    [],
+    "space-1",
+    makeSpace({
+      overrides: { data_retention_days: saved, completion_models: [], embedding_models: [] }
+    })
+  );
+  const said = recordAnnouncements();
+  enterRetention(typed);
+  await waitFor(() =>
+    expect(api.PATCH).toHaveBeenCalledExactlyOnceWith("/api/v1/spaces/{id}/", {
+      params: { path: { id: "space-1" } },
+      body: { data_retention_days: sent, expected_data_retention_days: saved }
+    })
+  );
+  expect(screen.queryByRole("alertdialog")).toBeNull();
+  const note =
+    sent === null
+      ? "Sparat. Ytan har ingen tid, så den automatiska gallringen av körningar står still tills ytan har en tid."
+      : `Sparat. Körningar i ytans flöden som startar medan ytan har en tid tas bort när de är äldre än ${sent} dagar, eller flödets kortare tid. Kontrollen görs var femte minut. Andra körningar tas inte bort automatiskt.`;
+  // Shown under the field and said once, politely, without moving the focus.
+  const section = document.getElementById("security")!;
+  expect(await within(section).findByText(note)).toBeTruthy();
+  await waitFor(() => expect(said).toContain(note));
+  await expectNoAxeViolations(container);
+});
+
+/** Another administrator leaves the space at `days`, and the page reads it again its usual way. */
+async function readSpaceAgain(queryClient: QueryClient, days: number | null) {
+  state.space = { ...state.space, data_retention_days: days };
+  await act(() => queryClient.refetchQueries({ queryKey: ["spaces", "space-1"], exact: true }));
+}
+
+it("takes the line about the paused removal away when the space is read again with a time", async () => {
+  const { queryClient } = showSettings();
+  const section = document.getElementById("security")!;
+  enterRetention("");
+  expect(await within(section).findByText(messages.space_retention_saved_off)).toBeTruthy();
+  await readSpaceAgain(queryClient, 7);
+  await waitFor(() => expect(retentionField().value).toBe("7"));
+  expect(within(section).queryByText(messages.space_retention_saved_off)).toBeNull();
+});
+
+it.each([
+  ["without a time", null, ""],
+  ["with another time", 14, "14"]
+] as const)(
+  "takes the line about a saved time away when the space is read again %s",
+  async (_, days, shown) => {
+    const { queryClient } = showSettings();
+    const section = document.getElementById("security")!;
+    enterRetention("60");
+    expect(await within(section).findByText(/äldre än 60 dagar/)).toBeTruthy();
+    await readSpaceAgain(queryClient, days);
+    await waitFor(() => expect(retentionField().value).toBe(shown));
+    expect(within(section).queryByText(/äldre än 60 dagar/)).toBeNull();
+  }
+);
+
+it("reads the space again after a save, so a time set while the save's answer was on its way is shown", async () => {
+  const { queryClient } = showSettings();
+  const section = document.getElementById("security")!;
+  // The clear is saved; its answer is on its way.
+  const patch = deferredPatch();
+  api.PATCH.mockReturnValueOnce(patch.promise);
+  enterRetention("");
+  await waitFor(() => expect(api.PATCH).toHaveBeenCalledTimes(1));
+  const cleared = { ...state.space, data_retention_days: null };
+  // Then another administrator sets 7 days, and a read of the space that has read 7 is on its way.
+  state.space = { ...cleared, data_retention_days: 7 };
+  const counted = countSpaceReads();
+  let answer!: (value: unknown) => void;
+  counted.hold = { answer: new Promise((resolve) => (answer = resolve)) };
+  void queryClient
+    .query({ ...spaceQueryOptions(api as never, "space-1"), staleTime: 0 })
+    .catch(() => {});
+  await waitFor(() => expect(counted.reads).toBe(1));
+  // The save's answer stops that read (`useUpdateSpace`), and the read's answer comes too late.
+  await act(async () => patch.resolve(cleared));
+  await act(async () => answer({ data: state.space, response: new Response("{}") }));
+  await waitFor(() => expect(retentionField().value).toBe("7"));
+  expect(within(section).queryByText(messages.space_retention_saved_off)).toBeNull();
+});
+
+/**
+ * Saves 60 days while a read of the space is on its way, and holds the read the page makes
+ * after the save. Another administrator has set 90 by then; `land` answers the held read.
+ * The read on its way leaves the API reader on the space's query, so the next read goes
+ * through `api.GET` and can be held.
+ */
+async function saveWhileTheNextReadIsHeld(queryClient: QueryClient) {
+  const patch = deferredPatch();
+  api.PATCH.mockReturnValueOnce(patch.promise);
+  enterRetention("60");
+  await waitFor(() => expect(api.PATCH).toHaveBeenCalledTimes(1));
+  const saved = { ...state.space, data_retention_days: 60 };
+  state.space = { ...saved, data_retention_days: 90 };
+  const counted = countSpaceReads();
+  counted.hold = { answer: new Promise(() => {}) };
+  void queryClient
+    .query({ ...spaceQueryOptions(api as never, "space-1"), staleTime: 0 })
+    .catch(() => {});
+  await waitFor(() => expect(counted.reads).toBe(1));
+  let answer!: (value: unknown) => void;
+  counted.hold = { answer: new Promise((resolve) => (answer = resolve)) };
+  await act(async () => patch.resolve(saved));
+  // The page's read after the save is on its way, and the field can be edited again.
+  await waitFor(() => expect(counted.reads).toBe(2));
+  await waitFor(() => expect(retentionField().readOnly).toBe(false));
+  return {
+    land: () => act(async () => answer({ data: state.space, response: new Response("{}") }))
+  };
+}
+
+it("keeps a time typed while the space is read again after a save", async () => {
+  const { queryClient } = showSettings();
+  const section = document.getElementById("security")!;
+  const { land } = await saveWhileTheNextReadIsHeld(queryClient);
+  expect(within(section).getByText(/äldre än 60 dagar/)).toBeTruthy();
+  fireEvent.change(retentionField(), { target: { value: "45" } });
+  await land();
+  // The read has landed (the line about 60 days goes), and the typed time stays.
+  await waitFor(() => expect(within(section).queryByText(/äldre än 60 dagar/)).toBeNull());
+  expect(retentionField().value).toBe("45");
+});
+
+it("keeps a confirmation open while the space is read again after a save", async () => {
+  const { queryClient } = showSettings();
+  const section = document.getElementById("security")!;
+  const { land } = await saveWhileTheNextReadIsHeld(queryClient);
+  enterRetention("7");
+  const title = { name: "Ta bort innehåll som är äldre än 7 dagar?" };
+  const dialog = await screen.findByRole("alertdialog", title);
+  await land();
+  await waitFor(() => expect(within(section).queryByText(/äldre än 60 dagar/)).toBeNull());
+  expect(screen.getByRole("alertdialog", title)).toBe(dialog);
+  expect(retentionField().value).toBe("7");
+});
+
+// A time that removes content asks first: one set on a space without a time, or a shorter one.
+it.each([
+  ["a time on a space without one", null, "7", "asks"],
+  ["a shorter time", 30, "7", "asks"],
+  ["a longer time", 30, "60", "saves"],
+  ["a cleared time", 30, "", "saves"],
+  ["the same time", 30, "30", "nothing"]
+] as const)("decides on %s against the server's time", async (_, saved, typed, outcome) => {
+  showSettings(
+    undefined,
+    [],
+    [],
+    "space-1",
+    makeSpace({
+      overrides: { data_retention_days: saved, completion_models: [], embedding_models: [] }
+    })
+  );
+  const sent = typed === "" ? null : Number(typed);
+  const body = {
+    params: { path: { id: "space-1" } },
+    body: { data_retention_days: sent, expected_data_retention_days: saved }
+  };
+  if (outcome === "nothing") {
+    // The field shows this time already: another value first, so the typed one is a change.
+    fireEvent.change(retentionField(), { target: { value: "45" } });
+    enterRetention(typed);
+    expect(retentionField().value).toBe(typed);
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(api.PATCH).not.toHaveBeenCalled();
+    return;
+  }
+  if (outcome === "saves") {
+    enterRetention(typed);
+    await waitFor(() =>
+      expect(api.PATCH).toHaveBeenCalledExactlyOnceWith("/api/v1/spaces/{id}/", body)
+    );
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    return;
+  }
+  enterRetention(typed);
+  const title = { name: "Ta bort innehåll som är äldre än 7 dagar?" };
+  fireEvent.click(
+    within(await screen.findByRole("alertdialog", title)).getByRole("button", { name: "Avbryt" })
+  );
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  expect(api.PATCH).not.toHaveBeenCalled();
+  expect(retentionField().value).toBe(saved === null ? "" : String(saved));
+  enterRetention(typed);
+  const dialog = await screen.findByRole("alertdialog", title);
+  expect(api.PATCH).not.toHaveBeenCalled();
+  fireEvent.click(
+    within(dialog).getByRole("button", { name: messages.space_retention_shorten_confirm })
+  );
+  await waitFor(() =>
+    expect(api.PATCH).toHaveBeenCalledExactlyOnceWith("/api/v1/spaces/{id}/", body)
+  );
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  expect(retentionField().value).toBe(typed);
+});
+
+it("promises nothing about flow runs in a personal space", async () => {
+  showSettings(
+    undefined,
+    [],
+    [],
+    "personal",
+    makeSpace({
+      permissions: ["read", "edit"],
+      overrides: {
+        personal: true,
+        data_retention_days: 30,
+        completion_models: [],
+        embedding_models: []
+      }
+    })
+  );
+  const section = document.getElementById("security")!;
+  expect(
+    within(section).getByText(
+      "Gäller assistenter och appar i ytan utan egen tid. Innehåll som är äldre än tiden tas bort automatiskt, normalt vid nästa dagliga kontroll, och går inte att återställa."
+    )
+  ).toBeTruthy();
+  // A shorter time asks first, and says nothing of runs or the five-minute check.
+  enterRetention("7");
+  const dialog = await screen.findByRole("alertdialog", {
+    name: "Ta bort innehåll som är äldre än 7 dagar?"
+  });
+  expect(
+    within(dialog).getByText(
+      "Det gäller innehåll som följer ytans tid. Det går inte att återställa. Kontrollen görs en gång per dygn."
+    )
+  ).toBeTruthy();
+  expect(within(dialog).queryByText(/körningar|femte minut/)).toBeNull();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Avbryt" }));
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  enterRetention("45");
+  expect(
+    await within(section).findByText(
+      "Sparat. Assistenter och appar i ytan utan egen tid följer nu 45 dagar."
+    )
+  ).toBeTruthy();
+  expect(within(section).queryByText(/flöden/)).toBeNull();
+});
+
+it("asks before a shorter time is saved and saves it once confirmed", async () => {
+  showSettings();
+  enterRetention("7");
+  // The question names what goes, and the answer both saves and removes.
+  const dialog = await screen.findByRole("alertdialog", {
+    name: "Ta bort innehåll som är äldre än 7 dagar?"
+  });
+  expect(api.PATCH).not.toHaveBeenCalled();
+  expect(
+    within(dialog).getByText(
+      "Det gäller innehåll som följer ytans tid. Det går inte att återställa. Kontrollen görs var femte minut för körningar och en gång per dygn för annat innehåll."
+    )
+  ).toBeTruthy();
+  // The least destructive choice has the focus.
+  expect(
+    within(dialog).getByRole("button", { name: "Avbryt" }).hasAttribute("data-autofocus")
+  ).toBe(true);
+  await expectNoAxeViolations(dialog);
+
+  fireEvent.click(within(dialog).getByRole("button", { name: "Spara och ta bort" }));
+  await waitFor(() =>
+    expect(api.PATCH).toHaveBeenCalledExactlyOnceWith("/api/v1/spaces/{id}/", {
+      params: { path: { id: "space-1" } },
+      body: { data_retention_days: 7, expected_data_retention_days: 30 }
+    })
+  );
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  expect(retentionField().value).toBe("7");
+  expect(
+    await within(document.getElementById("security")!).findByText(
+      /äldre än 7 dagar, eller flödets kortare tid/
+    )
+  ).toBeTruthy();
+});
+
+it.each([
+  [
+    "Cancel",
+    (dialog: HTMLElement) => fireEvent.click(within(dialog).getByRole("button", { name: "Avbryt" }))
+  ],
+  ["Escape", (dialog: HTMLElement) => fireEvent.keyDown(dialog, { key: "Escape" })]
+])("restores the saved time when a shorter one is not confirmed (%s)", async (_, dismiss) => {
+  showSettings();
+  enterRetention("7");
+  dismiss(await screen.findByRole("alertdialog"));
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  expect(retentionField().value).toBe("30");
+  expect(api.PATCH).not.toHaveBeenCalled();
+  // The closed dialog stays in the page: its title keeps the days it asked about.
+  expect(screen.queryByText(/äldre än 0 dagar/)).toBeNull();
+});
+
+/** Answers a space save as the server does: refused while the time it carries is out of date. */
+function answerSavesAsServer() {
+  api.PATCH.mockImplementation((_path: string, request: { body: Record<string, unknown> }) => {
+    const { expected_data_retention_days: expected, ...change } = request.body;
+    if (
+      "data_retention_days" in change &&
+      expected !== undefined &&
+      expected !== state.space.data_retention_days
+    ) {
+      return Promise.resolve({
+        error: {
+          message: "The retention time has changed.",
+          code: "retention_time_changed",
+          eneo_error_code: 9087,
+          context: { current_days: state.space.data_retention_days }
+        },
+        response: new Response("{}", { status: 409 })
+      });
+    }
+    state.space = { ...state.space, ...change } as Space;
+    return ok(state.space);
+  });
+}
+
+/** Whether the browser would ask before the page is left (`useBeforeUnloadWarning`). */
+function asksBeforeLeaving() {
+  return !window.dispatchEvent(new Event("beforeunload", { cancelable: true }));
+}
+
+it("saves nothing when another administrator changed the time, shows the time read, and asks before a shorter retry", async () => {
+  showSettings();
+  answerSavesAsServer();
+  const said = recordAnnouncements();
+  const section = document.getElementById("security")!;
+  // Another administrator lengthened the time after this page read 30.
+  state.space = { ...state.space, data_retention_days: 90 };
+  // Longer than the 30 the page has: saved at once, with the time it was compared with.
+  const field = enterRetention("60");
+  await waitFor(() =>
+    expect(api.PATCH).toHaveBeenCalledExactlyOnceWith("/api/v1/spaces/{id}/", {
+      params: { path: { id: "space-1" } },
+      body: { data_retention_days: 60, expected_data_retention_days: 30 }
+    })
+  );
+  // Said once, in a short line: the time changed, nothing was saved, it is read again.
+  await waitFor(() => expect(toastError).toHaveBeenCalledTimes(1));
+  expect(toastError.mock.calls[0]![0]).toBe(messages.eneo_error_9087);
+  expect(state.space.data_retention_days).toBe(90);
+  // The draft is dropped: once the space is read again, the field shows the time saved now.
+  await waitFor(() => expect(field.value).toBe("90"));
+  expect(field.readOnly).toBe(false);
+  expect(within(section).queryByText(/äldre än 60 dagar/)).toBeNull();
+  // Nothing is left unsaved: the header neither says the save failed nor that it landed,
+  // and the page can be left without a question.
+  expect(screen.queryByRole("link", { name: messages.save_failed })).toBeNull();
+  expect(asksBeforeLeaving()).toBe(false);
+  await flushAnnouncements();
+  expect(said.some((text) => text.includes(messages.all_changes_saved))).toBe(false);
+  // Leaving the field again sends nothing: no time the person has not typed since.
+  fireEvent.blur(field);
+  expect(screen.queryByRole("alertdialog")).toBeNull();
+  expect(api.PATCH).toHaveBeenCalledTimes(1);
+
+  // A time typed again is unsaved again, as any edit is.
+  fireEvent.change(field, { target: { value: "60" } });
+  expect(await screen.findByText("1 osparad ändring")).toBeTruthy();
+  expect(asksBeforeLeaving()).toBe(true);
+  // 60 is shorter than the 90 read, so it asks first.
+  fireEvent.blur(field);
+  const dialog = await screen.findByRole("alertdialog", {
+    name: "Ta bort innehåll som är äldre än 60 dagar?"
+  });
+  expect(api.PATCH).toHaveBeenCalledTimes(1);
+  fireEvent.click(
+    within(dialog).getByRole("button", { name: messages.space_retention_shorten_confirm })
+  );
+  await waitFor(() => expect(api.PATCH).toHaveBeenCalledTimes(2));
+  expect(api.PATCH.mock.calls[1]![1].body).toEqual({
+    data_retention_days: 60,
+    expected_data_retention_days: 90
+  });
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  expect(state.space.data_retention_days).toBe(60);
+  expect(screen.queryByRole("link", { name: messages.save_failed })).toBeNull();
+  // The refusal was said once, by the toast.
+  expect(toastError).toHaveBeenCalledTimes(1);
+});
+
+it("closes the confirmation and shows the time read when the time changed before it was confirmed", async () => {
+  showSettings();
+  answerSavesAsServer();
+  const field = enterRetention("7");
+  const title = { name: "Ta bort innehåll som är äldre än 7 dagar?" };
+  const dialog = await screen.findByRole("alertdialog", title);
+  // Another administrator shortened the time while the dialog was open.
+  state.space = { ...state.space, data_retention_days: 10 };
+  fireEvent.click(
+    within(dialog).getByRole("button", { name: messages.space_retention_shorten_confirm })
+  );
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  expect(api.PATCH.mock.calls[0]![1].body).toEqual({
+    data_retention_days: 7,
+    expected_data_retention_days: 30
+  });
+  expect(state.space.data_retention_days).toBe(10);
+  // The field shows the 10 read, not the 7 that was refused, and a blur asks nothing.
+  await waitFor(() => expect(field.value).toBe("10"));
+  expect(field.readOnly).toBe(false);
+  expect(screen.queryByRole("link", { name: messages.save_failed })).toBeNull();
+  expect(asksBeforeLeaving()).toBe(false);
+  fireEvent.blur(field);
+  expect(screen.queryByRole("alertdialog")).toBeNull();
+  // Typed again, 7 is decided on the 10 read, not sent with the 30 it was compared with.
+  enterRetention("7");
+  const again = await screen.findByRole("alertdialog", title);
+  expect(api.PATCH).toHaveBeenCalledTimes(1);
+  fireEvent.click(
+    within(again).getByRole("button", { name: messages.space_retention_shorten_confirm })
+  );
+  await waitFor(() => expect(api.PATCH).toHaveBeenCalledTimes(2));
+  expect(api.PATCH.mock.calls[1]![1].body).toEqual({
+    data_retention_days: 7,
+    expected_data_retention_days: 10
+  });
+  expect(state.space.data_retention_days).toBe(7);
+});
+
+it("keeps the header's link to the field when the time was not saved for another reason", async () => {
+  showSettings();
+  api.PATCH.mockResolvedValueOnce({
+    error: { message: "Temporary failure" },
+    response: new Response("{}", { status: 503 })
+  });
+  enterRetention("60");
+  await waitFor(() => expect(toastError).toHaveBeenCalledTimes(1));
+  // The typed time is still the person's and still unsaved: the header leads back to it.
+  expect(
+    (await screen.findByRole("link", { name: messages.save_failed })).getAttribute("href")
+  ).toBe("#retention-days");
+  expect(retentionField().value).toBe("60");
+});
+
+/** Space reads from here on, and a hook to hold the next one. */
+function countSpaceReads() {
+  const reads = api.GET.getMockImplementation()!;
+  const counted = { reads: 0, hold: null as null | { answer: Promise<unknown> } };
+  api.GET.mockImplementation((path: string, init: unknown) => {
+    if (path !== "/api/v1/spaces/{id}/") return reads(path, init);
+    counted.reads += 1;
+    const held = counted.hold;
+    counted.hold = null;
+    return held ? held.answer : reads(path, init);
+  });
+  return counted;
+}
+
+/** The page with speaker service A granted and A, B and C to choose from. */
+async function showSettingsWithGrants() {
+  const grant = (id: string) => ({
+    id,
+    name: id,
+    meets_security_classification: true,
+    available: true,
+    is_default: false
+  });
+  const shown = showSettings(
+    undefined,
+    [],
+    [],
+    "space-1",
+    makeSpace({
+      overrides: {
+        data_retention_days: 30,
+        completion_models: [],
+        embedding_models: [],
+        transcription_services: [grant("A")]
+      }
+    })
+  );
+  const reads = api.GET.getMockImplementation()!;
+  api.GET.mockImplementation((path: string, init: unknown) =>
+    path === "/api/v1/transcription-services/"
+      ? ok({
+          items: ["A", "B", "C"].map((id) => ({
+            id,
+            name: id,
+            is_enabled: true,
+            is_default: false,
+            security_classification: null
+          }))
+        })
+      : reads(path, init)
+  );
+  await screen.findByText(messages.speaker_service_empty_title);
+  await act(() =>
+    shown.queryClient.refetchQueries({ queryKey: TRANSCRIPTION_SERVICE_CATALOGUE_KEY })
+  );
+  api.PATCH.mockImplementation((_path: string, request: { body: Record<string, unknown> }) => {
+    const { transcription_services, ...change } = request.body as {
+      transcription_services?: { id: string }[];
+    } & Record<string, unknown>;
+    delete change.expected_data_retention_days;
+    state.space = {
+      ...state.space,
+      ...change,
+      ...(transcription_services
+        ? { transcription_services: transcription_services.map(({ id }) => grant(id)) }
+        : {})
+    } as Space;
+    return ok(state.space);
+  });
+  return { ...shown, grant };
+}
+
+it("keeps a grant saved on the page before and while the time is saved, so the next save sends it too", async () => {
+  await showSettingsWithGrants();
+  // B's save is on its way when the time is changed; the time's save waits for it.
+  const patch = deferredPatch();
+  const saveB = api.PATCH.getMockImplementation()!;
+  api.PATCH.mockImplementationOnce((path: string, request: unknown) =>
+    saveB(path, request).then(() => patch.promise)
+  );
+  fireEvent.click(await screen.findByRole("switch", { name: "B" }));
+  await waitFor(() => expect(api.PATCH).toHaveBeenCalledTimes(1));
+  enterRetention("60");
+  await act(async () => patch.resolve(state.space));
+  await waitFor(() => expect(api.PATCH).toHaveBeenCalledTimes(2));
+  expect(api.PATCH.mock.calls[1]![1].body).toEqual({
+    data_retention_days: 60,
+    expected_data_retention_days: 30
+  });
+  await waitFor(() => expect(retentionField().readOnly).toBe(false));
+  // After the time: C, built from the space the last save returned.
+  fireEvent.click(screen.getByRole("switch", { name: "C" }));
+  await waitFor(() => expect(api.PATCH).toHaveBeenCalledTimes(3));
+  expect(api.PATCH.mock.calls[2]![1].body).toEqual({
+    transcription_services: [{ id: "A" }, { id: "B" }, { id: "C" }]
+  });
+});
+
+it("keeps a grant another tab saved, which a refresh on its way brings, so the next save sends it too", async () => {
+  const { queryClient, grant } = await showSettingsWithGrants();
+  // Another tab granted B; the page's ordinary refresh that brings it is on its way.
+  state.space = { ...state.space, transcription_services: [grant("A"), grant("B")] };
+  const counted = countSpaceReads();
+  let answer!: (value: unknown) => void;
+  counted.hold = { answer: new Promise((resolve) => (answer = resolve)) };
+  void queryClient
+    .query({ ...spaceQueryOptions(api as never, "space-1"), staleTime: 0 })
+    .catch(() => {});
+  await waitFor(() => expect(counted.reads).toBe(1));
+  enterRetention("7");
+  const dialog = await screen.findByRole("alertdialog", {
+    name: "Ta bort innehåll som är äldre än 7 dagar?"
+  });
+  await act(async () => answer({ data: state.space, response: new Response("{}") }));
+  fireEvent.click(within(dialog).getByRole("button", { name: "Avbryt" }));
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  // The field neither read the space nor stopped the page's own read.
+  expect(counted.reads).toBe(1);
+  fireEvent.click(await screen.findByRole("switch", { name: "C" }));
+  await waitFor(() => expect(api.PATCH).toHaveBeenCalledTimes(1));
+  expect(api.PATCH.mock.calls[0]![1].body).toEqual({
+    transcription_services: [{ id: "A" }, { id: "B" }, { id: "C" }]
+  });
+});
+
+it("keeps the field read-only while a time is saved, so a clear made after it is not lost", async () => {
+  showSettings();
+  const patch = deferredPatch();
+  api.PATCH.mockReturnValueOnce(patch.promise);
+  const field = enterRetention("45");
+  await waitFor(() => expect(api.PATCH).toHaveBeenCalledTimes(1));
+  // A second change cannot be typed while the first is on its way.
+  expect(field.readOnly).toBe(true);
+  await act(async () => {
+    state.space = { ...state.space, data_retention_days: 45 };
+    patch.resolve(state.space);
+  });
+  await waitFor(() => expect(field.readOnly).toBe(false));
+  enterRetention("");
+  await waitFor(() => expect(api.PATCH).toHaveBeenCalledTimes(2));
+  expect(api.PATCH.mock.calls[1]![1].body).toEqual({
+    data_retention_days: null,
+    expected_data_retention_days: 45
+  });
+});
+
+it("puts the focus back on the field when a shorter time is not confirmed, also after a click elsewhere", async () => {
+  showSettings();
+  const field = retentionField();
+  field.focus();
+  fireEvent.change(field, { target: { value: "7" } });
+  // A click on nothing focusable: the focus leaves the field for the page.
+  field.blur();
+  expect(document.activeElement).toBe(document.body);
+  fireEvent.blur(field);
+  const dialog = await screen.findByRole("alertdialog");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Avbryt" }));
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  await waitFor(() => expect(document.activeElement).toBe(field));
+});
+
+it("never sends an unconfirmed shorter time when the page is left", async () => {
+  const { unmount } = showSettings();
+  fireEvent.change(retentionField(), { target: { value: "7" } });
+  unmount();
+  await act(async () => {});
+  expect(api.PATCH).not.toHaveBeenCalled();
+});
+
 it("asks a space admin without retention_manage for the permission and keeps the time read-only", async () => {
   const { container } = showSettings(undefined, [], [], "space-1", undefined, []);
-  const retention = screen.getByRole("textbox", { name: "Gallring av konversationshistorik" });
+  const retention = screen.getByRole("textbox", { name: "Gallringstid för ytan" });
   expect(retention.hasAttribute("disabled")).toBe(true);
   const hint = screen.getByText(
     "För att ändra tiden krävs behörigheten Gallring – hantera regler. En administratör ger den till en roll."
@@ -323,7 +962,7 @@ it("shows the retention policy read-only to someone who may not edit the space",
       overrides: { data_retention_days: 30, completion_models: [], embedding_models: [] }
     })
   );
-  const retention = screen.getByRole("textbox", { name: "Gallring av konversationshistorik" });
+  const retention = screen.getByRole("textbox", { name: "Gallringstid för ytan" });
 
   expect((retention as HTMLInputElement).value).toBe("30");
   expect(retention.hasAttribute("disabled")).toBe(true);

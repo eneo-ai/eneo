@@ -167,10 +167,14 @@ was lowered gives way to the shorter one. The organisation sets no time for
 Flows. One rule declaration (`RetentionRule.FLOW_RUN_HISTORY`) holds the levels
 and caps for both the Python resolver and the purge selector's SQL.
 
-A time only makes aged history eligible for an explicit administrator purge.
-It never schedules deletion, and saving or reading a time never deletes data.
-The purge keeps parent ownership and foreign-key safety, blocks on pending or
-dead-lettered audit delivery and on legal holds, and writes an audit receipt.
+A run records when it is inserted whether its space then had a time. The
+shared retention engine's task `flows.run_history` removes those runs every
+five minutes once they are due, and only while the space has a time; runs that
+started without one are never removed automatically. An explicit administrator
+purge can remove any due run. Both keep parent ownership and foreign-key
+safety, remove a run whole with the files only it uses, block on pending or
+dead-lettered audit delivery and on legal holds, and leave an audit record (the
+engine's batch and run events, or the purge receipt).
 There is no classification policy plane or retention tombstone.
 
 ## Tenancy and audit invariants

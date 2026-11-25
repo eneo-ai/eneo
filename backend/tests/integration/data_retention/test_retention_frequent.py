@@ -304,13 +304,24 @@ async def _frequent_cron() -> list[object]:
 
 
 async def test_without_frequent_tasks_the_cron_takes_no_connection(
-    setup_database,
+    setup_database, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Develop registers no frequent task: every five minutes the cron starts,
-    finds none and ends before it touches the database.
+    """With the one frequent task, Flow run history, switched off, every five
+    minutes the cron starts, finds no task and ends before it touches the
+    database.
 
     Mutant: the cron reads the database clock before it knows it has work."""
     from eneo.worker.arq import worker
+
+    switched_off = get_settings().model_copy(
+        update={"retention_flow_run_history_enabled": False}
+    )
+    monkeypatch.setattr(retention_worker, "get_settings", lambda: switched_off)
+    assert not [
+        registration
+        for registration in retention_tasks.retention_task_registrations(switched_off)
+        if registration.every == "frequent" and registration.enabled
+    ]
 
     [cron] = [
         job

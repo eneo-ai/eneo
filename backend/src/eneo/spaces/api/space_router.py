@@ -51,7 +51,7 @@ from eneo.integration.presentation.models import (
 )
 from eneo.jobs.job_models import JobPublic
 from eneo.main.container.container import Container
-from eneo.main.exceptions import NotFoundException
+from eneo.main.exceptions import ErrorCodes, NotFoundException
 from eneo.main.models import (
     NOT_PROVIDED,
     GeneralError,
@@ -304,9 +304,48 @@ async def get_space(
         "`retention_manage` permission and a signed-in person (an API key gets "
         "403 `retention_person_required`), and it waits for an open Flow history "
         "deletion (409 `flow_retention_lock_busy` when that takes too long). "
-        "Sending the stored value is no change."
+        "Sending the stored value is no change. A change sent with "
+        "`expected_data_retention_days` is refused when the stored time is "
+        "another (409 `retention_time_changed`), and nothing in the request "
+        "is saved."
     ),
-    responses=responses.get_responses([400, 403, 404, 409]),
+    responses={
+        **responses.get_responses([400, 403, 404]),
+        409: {
+            "model": GeneralError,
+            "description": (
+                "The retention lock was busy too long, or the space's time is no "
+                "longer the one the request names. Nothing changed."
+            ),
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "flow_retention_lock_busy": {
+                            "summary": "Another retention change held the lock",
+                            "value": {
+                                "message": "Flow history retention is busy with "
+                                "another change or deletion.",
+                                "eneo_error_code": int(ErrorCodes.CONFLICT),
+                                "code": "flow_retention_lock_busy",
+                            },
+                        },
+                        "retention_time_changed": {
+                            "summary": "The time was changed by someone else",
+                            "value": {
+                                "message": "The retention time was changed by "
+                                "someone else. Check it and save again.",
+                                "eneo_error_code": int(
+                                    ErrorCodes.RETENTION_TIME_CHANGED
+                                ),
+                                "code": "retention_time_changed",
+                                "context": {"current_days": 30},
+                            },
+                        },
+                    }
+                }
+            },
+        },
+    },
 )
 @endpoint_access(
     authentication=Authentication.USER,
@@ -350,6 +389,12 @@ async def update_space(
     else:
         data_retention_days = update_space_req.data_retention_days
 
+    expected_data_retention_days = (
+        update_space_req.expected_data_retention_days
+        if "expected_data_retention_days" in original_request
+        else NOT_PROVIDED
+    )
+
     # Handle icon_id: check if it was provided in the request
     icon_id = NOT_PROVIDED
     if "icon_id" in original_request:
@@ -373,6 +418,7 @@ async def update_space(
         security_classification=security_classification,
         data_retention_days=data_retention_days,
         icon_id=icon_id,
+        expected_data_retention_days=expected_data_retention_days,
     )
 
     # Track changes

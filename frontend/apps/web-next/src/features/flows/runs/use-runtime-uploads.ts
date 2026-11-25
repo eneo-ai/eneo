@@ -7,7 +7,6 @@ import { useLocale, useTranslations } from "use-intl";
 import { useEffect, useRef, useState } from "react";
 import { API_BASE, onBrowserApiRequest, onRawRefusal } from "@/lib/api/base";
 import { apiErrorFromResponse, EneoApiError } from "@/lib/api/errors";
-import { checkBrowserSession, getSessionSnapshot } from "@/lib/api/refusal";
 import { formatBytes } from "@/lib/format";
 import type { Schema } from "@/lib/api/models";
 import { UploadRetries } from "./recording/upload-retry";
@@ -52,19 +51,17 @@ async function sendFile(
     headers: { accept: "application/json" },
     signal: abort.signal
   });
-  // A failed session check (no network, a busy server) holds every request until a check
-  // succeeds. The server may be back without the browser saying it is online, so an attempt
-  // checks again first; when that fails too, the preparation below reports the failure.
-  const session = getSessionSnapshot();
-  if (session.status === "bound" && session.checkError !== undefined) {
-    await checkBrowserSession().catch(() => {});
-  }
   let request: Request;
   try {
     request = await onBrowserApiRequest({ request: prepared });
   } catch (error) {
-    // Fetch's network error from the session check: the file may be sent again.
-    throw error instanceof TypeError ? new UploadNetworkError() : error;
+    // The session check did not get through (fetch's network error, its time limit, a busy
+    // server): the file did not reach the server and may be sent again. The session gate checks
+    // again when it is next sent with the browser online. A refusal (4xx) and the page's end stay
+    // as they are.
+    const onTheWay =
+      error instanceof TypeError || (error instanceof EneoApiError && error.status >= 500);
+    throw onTheWay ? new UploadNetworkError() : error;
   }
   request.signal.throwIfAborted();
   return new Promise((resolve, reject) => {

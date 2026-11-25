@@ -156,9 +156,12 @@ async def test_flow_retention_envelope_matrix_controls_purge_and_effective_reads
             )
         ).all()
     )
-    candidates = await retention_service._select_flow_run_history_purge_batch(
-        now=anchor,
-        limit=100,
+    candidates = list(
+        await async_session.scalars(
+            retention_service._build_flow_run_history_purge_batch_query(
+                now=anchor, limit=100
+            )
+        )
     )
     projected_flow = await FlowRepository(
         session=async_session,

@@ -109,9 +109,11 @@ async def load_retention_health(
     """Read a bounded number of indexed observations per configured task.
 
     The caller supplies database/time limits and handles failures. A missing
-    first run is initializing while no registered task has run; once one has,
-    the scheduled run reached every task, so a task without a row (its claim
-    raised before writing one) is unknown, as is missing evidence after a run.
+    first run is initializing while no daily task has run; once one has, the
+    nightly run reached every task, so a task without a row (its claim raised
+    before writing one) is unknown, as is missing evidence after a run. A
+    frequent task's pass says nothing about the night: it runs every five
+    minutes from the start.
     A run that failed is degraded; one that was superseded, abandoned or could
     not claim its task proves nothing about the due work, so it is unknown.
     A task turned off is disabled and does not count towards the overall
@@ -125,7 +127,7 @@ async def load_retention_health(
     runs in a savepoint, so the other tasks still read.
     Any other failed read is the caller's.
     """
-    names = [registered.name for registered in tasks]
+    names = [registered.name for registered in tasks if registered.every == "daily"]
     # Read once, and only when a task has no row.
     any_ran: list[bool] = []
 

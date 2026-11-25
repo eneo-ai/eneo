@@ -72,6 +72,32 @@ def test_a_space_edit_declares_the_busy_flow_retention_lock(openapi_spec):
     assert "409" in operation["responses"]
 
 
+def test_both_retention_time_writers_can_name_the_time_they_replace(openapi_spec):
+    """A space's and a Flow's time take the time the caller saw beside the new
+    one, and answer 409 `retention_time_changed` when it has been replaced."""
+    schemas = openapi_spec["components"]["schemas"]
+    for schema, field in (
+        ("PartialUpdateSpaceRequest", "expected_data_retention_days"),
+        ("FlowRunRetentionPolicyReplaceRequest", "expected_effective_days"),
+        ("FlowRunRetentionPolicyReplaceRequest", "expected_inherited_days"),
+    ):
+        assert _schema_allows_null(schemas[schema]["properties"][field])
+        assert field not in schemas[schema].get("required", [])
+    for path, method in (
+        ("/api/v1/spaces/{id}/", "patch"),
+        ("/api/v1/settings/flow-run-retention-policy/flows/{flow_id}", "put"),
+    ):
+        response = openapi_spec["paths"][path][method]["responses"]["409"]
+        examples = response["content"]["application/json"]["examples"]
+        assert {
+            (example["value"]["code"], example["value"]["eneo_error_code"])
+            for example in examples.values()
+        } == {
+            ("flow_retention_lock_busy", int(ErrorCodes.CONFLICT)),
+            ("retention_time_changed", 9087),
+        }
+
+
 def test_text_processing_contract_fields_are_typed(openapi_spec):
     schemas = openapi_spec["components"]["schemas"]
     config = schemas["FlowStepUpdateRequest"]["properties"]["input_config"]["anyOf"][0]

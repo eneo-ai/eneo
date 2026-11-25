@@ -97,16 +97,17 @@ Run-history retention reads two columns:
 The shorter of the two applies; a null Flow time uses the space's. One rule
 declaration (`RetentionRule.FLOW_RUN_HISTORY`) holds the levels and caps, and
 both the Python resolver and the SQL in the purge selector read it. A run is
-eligible when its anchor (`finished_at`, else `created_at`) plus the days, in
-calendar time, has passed. No time at either level means there is no run-history
-age threshold.
+due when its anchor (`finished_at`, else `created_at`) plus the days, in
+calendar time in the database session's `TimeZone`, has passed. No time at
+either level means there is no run-history age threshold.
 
-These values do not authorize scheduled deletion of Flow history: the shared retention worker
-does not mutate Flow-owned data. The existing administrator settings API
-previews or explicitly purges eligible history while respecting legal holds
-and delivery blockers. See
-[Flow run-history retention](/guides/flows/retention-policy) for the purge and
-audit contract.
+Each run also records, when it is inserted, whether its space then had a time.
+The shared retention engine's task `flows.run_history` removes only those runs,
+and only while the space has a time; the record is never updated. The
+administrator settings API previews or explicitly purges any due history while
+respecting legal holds and delivery blockers. See
+[Flow run-history retention](/guides/flows/retention-policy#automatic-removal)
+for the removal and audit contract.
 
 ## JSONB columns
 

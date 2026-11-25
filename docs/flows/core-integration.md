@@ -95,14 +95,41 @@ an upgrade changes:
   and the three review-queue routes are gone. The Flow route, the targets,
   the holds and the three purges with `dry_run` stay.
 - A space's existing time now also decides what an explicit purge may remove
-  from its Flows. Nothing is removed automatically. Runs that
-  `review_required` kept out of a purge are no longer kept: an explicit
-  purge removes them once they pass the space's time, so run it with
-  `dry_run` (the default) first. Before upgrading, run the listing query in
-  the guide ("Before upgrading: list the runs whose eligibility changes" in
-  `guides/flows/retention-policy.mdx`) on the old version: it lists every run
-  the upgrade makes purgeable or no longer purgeable, since the old times and
-  modes are gone afterwards.
+  from its Flows. Runs that `review_required` kept out of a purge are no
+  longer kept: an explicit purge removes them once they pass the space's
+  time, so run it with `dry_run` (the default) first. Before upgrading, run
+  the listing query in the guide ("Before upgrading past `202611231030`: list
+  the runs that become due or stop being due" in `guides/flows/retention-policy.mdx`) on
+  the old version, in the application's `TimeZone`: it lists every run that
+  becomes due or stops being due, since the old times and modes are gone
+  afterwards.
+
+### Runs are removed by the space's time
+
+From `202611241000`, a space's time also removes its Flows' runs
+automatically. The revision only adds, on each run, whether its space had a
+time when the run started; the cleared times and modes above belong to
+`202611231030`. What an upgrade changes:
+
+- A space that already has a time starts removing the Flow runs that start
+  after the upgrade, once they are older than the space's time or the Flow's
+  shorter one. The retention task `flows.run_history` checks every five
+  minutes and removes each run with its steps, transcripts and files; it
+  cannot be restored.
+- Runs that started before the upgrade are never removed automatically,
+  whatever their age. The explicit purge can still remove them once due.
+- Each run records at its start whether its space had a time. An API process
+  of the earlier version that still takes starts after the migration records
+  that it had none, so removal covers the runs started once the updated
+  processes have taken over. The direction is safe: such a run is kept.
+- Before upgrading, an administrator checks each shared space's time
+  (`data_retention_days`): it is now the time after which new Flow runs are
+  removed, not only a cap for the purge. Where runs must be kept longer,
+  lengthen the space's time (its conversations follow it too) or place a
+  legal hold.
+- An operator can switch the task off with `RETENTION_FLOW_RUN_HISTORY_ENABLED`
+  (on by default). A task switched off keeps the runs and fails the readback
+  after a restore.
 - A Flow time longer than its space's is refused with 400 and code 9086
   (`retention_exceeds_space`), naming the cap.
 - Changing a shared space's time needs `retention_manage` as well as the

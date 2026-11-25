@@ -118,10 +118,13 @@ export function SettingsSummary({
   flow,
   transcription,
   hideIdentity = false,
-  classification
+  classification,
+  personalSpace = false
 }: {
   flow: FlowPublic;
   transcription?: TranscriptionResources;
+  /** Whether the flow's space is personal, where runs are not removed automatically. */
+  personalSpace?: boolean;
   /** Leaves out the description and the step count, for a page whose header and step list say them. */
   hideIdentity?: boolean;
   /** The space's security classification, when it has one. */
@@ -182,7 +185,7 @@ export function SettingsSummary({
         )}
       </MetadataListItem>
       <MetadataListItem label={t("flows_retention_heading")}>
-        <FlowRetentionSummary flow={flow} />
+        <FlowRetentionSummary flow={flow} personalSpace={personalSpace} />
       </MetadataListItem>
       {classification ? (
         <MetadataListItem label={t("flows_classification_heading")}>
@@ -404,6 +407,7 @@ export function FlowSettings({
   flow,
   canEdit,
   setsSpaceRetention = false,
+  personalSpace = false,
   transcription,
   onSave,
   onEditingChange,
@@ -419,6 +423,8 @@ export function FlowSettings({
    * everyone else a flow time.
    */
   setsSpaceRetention?: boolean;
+  /** Whether the flow's space is personal, where runs are not removed automatically. */
+  personalSpace?: boolean;
   /** The space's transcription models and services. */
   transcription: TranscriptionResources;
   /** Saves the definition change; resolves true when it was saved. */
@@ -692,6 +698,7 @@ export function FlowSettings({
           transcription={transcription}
           hideIdentity
           classification={classification}
+          personalSpace={personalSpace}
         />
       ) : (
         <form
@@ -833,7 +840,12 @@ export function FlowSettings({
         </form>
       )}
       {editing ? <LeaveConfirmation active={dirty} /> : null}
-      <FlowRetentionDialog flow={flow} open={retentionOpen} onOpenChange={setRetentionOpen} />
+      <FlowRetentionDialog
+        flow={flow}
+        open={retentionOpen}
+        onOpenChange={setRetentionOpen}
+        personalSpace={personalSpace}
+      />
     </section>
   );
 }

@@ -71,15 +71,18 @@ export function spaceRouteId(space: Pick<Space, "id" | "personal" | "organizatio
   return space.id;
 }
 
-/** Fetch one space by route id (resolves the personal/organization aliases). */
+/** Read one space by route id (resolves the personal/organization aliases). */
+export function readSpace(api: EneoClient, routeId: SpaceRouteId): Promise<Space> {
+  if (routeId === "personal") return unwrap(api.GET("/api/v1/spaces/type/personal/"));
+  if (routeId === "organization") return unwrap(api.GET("/api/v1/spaces/type/organization/"));
+  return unwrap(api.GET("/api/v1/spaces/{id}/", { params: { path: { id: routeId } } }));
+}
+
+/** Fetch one space by route id, cached under `["spaces", routeId]`. */
 export function spaceQueryOptions(api: EneoClient, routeId: SpaceRouteId) {
   return queryOptions({
     queryKey: ["spaces", routeId],
-    queryFn: (): Promise<Space> => {
-      if (routeId === "personal") return unwrap(api.GET("/api/v1/spaces/type/personal/"));
-      if (routeId === "organization") return unwrap(api.GET("/api/v1/spaces/type/organization/"));
-      return unwrap(api.GET("/api/v1/spaces/{id}/", { params: { path: { id: routeId } } }));
-    }
+    queryFn: () => readSpace(api, routeId)
   });
 }
 

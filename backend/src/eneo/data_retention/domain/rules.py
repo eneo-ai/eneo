@@ -63,11 +63,11 @@ RETENTION_RULES: Mapping[str, RuleTask | RuleExemption] = MappingProxyType(
         # setting makes a run removable without a space administrator's
         # choice. A personal space has no writer for its time, so its flows in
         # practice have only the flow level; a value stored outside the API
-        # caps them, as it caps conversations. Nothing removes a run
-        # automatically yet.
-        RetentionRule.FLOW_RUN_HISTORY: RuleExemption(
-            "No task removes Flow run history; an administrator's explicit "
-            "purge selects runs by this period.",
+        # caps them, as it caps conversations. The task removes only runs that
+        # started while their shared space had a time, and only while it has
+        # one; an administrator's explicit purge selects by the period alone.
+        RetentionRule.FLOW_RUN_HISTORY: RuleTask(
+            task="flows.run_history",
             levels=(PolicyLevel.SPACE, PolicyLevel.FLOW),
             bounding=frozenset({PolicyLevel.SPACE, PolicyLevel.FLOW}),
         ),
@@ -114,6 +114,24 @@ class RetentionExceedsSpaceError(Exception):
             "cap_days": cap_days,
             "cap_origin": cap_origin.value,
         }
+
+
+class RetentionTimeChangedError(Exception):
+    """A change of a retention time made against a time no longer stored.
+
+    The caller sent the time it saw beside the new one, and another change has
+    replaced it since, so nothing is written. The context carries the time
+    stored now in days, or None when none is set, so the caller can decide
+    again against it.
+    """
+
+    code = "retention_time_changed"
+
+    def __init__(self, *, current_days: int | None) -> None:
+        super().__init__(
+            "The retention time was changed by someone else. Check it and save again."
+        )
+        self.context: dict[str, object] = {"current_days": current_days}
 
 
 def fewer_days(candidate: int, current: int) -> bool:

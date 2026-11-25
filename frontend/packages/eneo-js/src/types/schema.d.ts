@@ -8846,13 +8846,13 @@ export interface paths {
     };
     /**
      * List legal holds on Flow run history
-     * @description List the Organization's legal holds, newest first: active ones by default, or all including released and expired ones, optionally for one Flow. Each hold names who placed and released it as recorded at that time. Until the hold is released or its end date passes, whatever the space's time or the Flow's time says, the explicit purge and the debug-evidence redaction skip held runs, and the Space cannot be deleted (space_contains_legal_hold).
+     * @description List the Organization's legal holds, newest first: active ones by default, or all including released and expired ones, optionally for one Flow. Each hold names who placed and released it as recorded at that time. Until the hold is released or its end date passes, whatever the space's time or the Flow's time says, the automatic removal and the explicit purge skip held runs, and the Space cannot be deleted (space_contains_legal_hold).
      */
     get: operations["list_flow_retention_holds"];
     put?: never;
     /**
      * Place a legal hold on Flow run history
-     * @description Hold a whole Flow (every run, including runs created later) or named runs of it, with a reason, a review date and an optional end date. The review date never ends the hold: past it, the hold is flagged review overdue (also in Flow runtime health) until the review is extended or the hold is released. A deleted Flow can be held. Until the hold is released or its end date passes, whatever the space's time or the Flow's time says, the explicit purge and the debug-evidence redaction skip held runs, and the Space cannot be deleted (space_contains_legal_hold). The hold and its required audit event commit together; the request waits for an open history deletion to finish first.
+     * @description Hold a whole Flow (every run, including runs created later) or named runs of it, with a reason, a review date and an optional end date. The review date never ends the hold: past it, the hold is flagged review overdue (also in Flow runtime health) until the review is extended or the hold is released. A deleted Flow can be held. Until the hold is released or its end date passes, whatever the space's time or the Flow's time says, the automatic removal and the explicit purge skip held runs, and the Space cannot be deleted (space_contains_legal_hold). The hold and its required audit event commit together; the request waits for an open history deletion to finish first.
      */
     post: operations["place_flow_retention_hold"];
     delete?: never;
@@ -8939,7 +8939,7 @@ export interface paths {
     get: operations["get_flow_run_retention_policy"];
     /**
      * Replace a Flow run-history retention policy
-     * @description Replace the Flow's own time, or clear it to follow the Space. Operational retention remains editable after a Flow definition is published because it does not mutate the published definition. Only an explicit administrator purge removes runs; saving this policy never schedules deletion. A deleted Flow is accepted. The change waits for an open history deletion to finish.
+     * @description Replace the Flow's own time, or clear it to follow the Space. Operational retention remains editable after a Flow definition is published because it does not mutate the published definition. A run that started while its shared Space had a time is removed automatically once the shorter of the Space's and the Flow's time has passed, as long as the Space keeps its time. Without a Space time, only an explicit administrator purge removes runs. A deleted Flow is accepted. The change waits for an open history deletion to finish. A change sent with `expected_effective_days` is refused when the time that applies is another, and one sent with `expected_inherited_days` when the Space's time is another (409 `retention_time_changed`).
      */
     put: operations["replace_flow_run_retention_policy"];
     post?: never;
@@ -9004,7 +9004,7 @@ export interface paths {
     put?: never;
     /**
      * Preview or purge due Organization Flow run history
-     * @description Administrators can preview or explicitly purge one bounded batch of due terminal runs past the time that applies to their Flow, plus expired unbound live transcripts in the authenticated tenant. The limit applies separately to runs and transcripts, with separate candidate and deletion counts. Dry runs select candidates but delete nothing and emit no audit event. Real purges require an audit row in the same transaction. Runs with unresolved deliveries and runs under a legal hold are excluded.
+     * @description Administrators can preview or explicitly purge one bounded batch of due terminal runs past the time that applies to their Flow, plus expired unbound live transcripts in the authenticated tenant. The limit applies separately to runs and transcripts, with separate candidate and deletion counts. Dry runs select candidates but delete nothing and emit no audit event. Real purges require an audit row in the same transaction. Runs with unresolved deliveries and runs under a legal hold are excluded. Runs that started while their shared Space had a time are also removed automatically; this purge also reaches the runs that removal leaves, such as runs from before the Space had a time.
      */
     post: operations["purge_organization_flow_run_history"];
     delete?: never;
@@ -9808,7 +9808,7 @@ export interface paths {
     head?: never;
     /**
      * Update Space
-     * @description Update a space's settings (name, description, models, MCP servers, security classification, data retention). The space's time is also the cap on its Flows' run history: in a shared space, changing it needs the `retention_manage` permission and a signed-in person (an API key gets 403 `retention_person_required`), and it waits for an open Flow history deletion (409 `flow_retention_lock_busy` when that takes too long). Sending the stored value is no change.
+     * @description Update a space's settings (name, description, models, MCP servers, security classification, data retention). The space's time is also the cap on its Flows' run history: in a shared space, changing it needs the `retention_manage` permission and a signed-in person (an API key gets 403 `retention_person_required`), and it waits for an open Flow history deletion (409 `flow_retention_lock_busy` when that takes too long). Sending the stored value is no change. A change sent with `expected_data_retention_days` is refused when the stored time is another (409 `retention_time_changed`), and nothing in the request is saved.
      */
     patch: operations["update_space_api_v1_spaces__id___patch"];
     trace?: never;
@@ -18218,6 +18218,7 @@ export interface components {
       | 9082
       | 9085
       | 9086
+      | 9087
       | 9090;
     /** EvidenceArtifactAvailabilitySummary */
     EvidenceArtifactAvailabilitySummary: {
@@ -25544,6 +25545,16 @@ export interface components {
      *     }
      */
     FlowRunRetentionPolicyReplaceRequest: {
+      /**
+       * Expected Effective Days
+       * @description The time that applied to the Flow when the caller chose `policy` (`effective.effective_days`: the shorter of the Flow's and its Space's time), or null when none applied. When `policy` changes the Flow's time, it is compared with the time that applies now, under the lock the change takes; if they differ, nothing changes and the answer is 409 `retention_time_changed`, with the time that applies in `context.current_days`. Omit to save without the comparison. Ignored when `policy` is the stored one.
+       */
+      expected_effective_days?: number | null;
+      /**
+       * Expected Inherited Days
+       * @description The Space's time when the caller chose `policy` (`inherited_policy.days`), or null when the Space had none. When `policy` changes the Flow's time, it is compared with the Space's time now, under the lock the change takes; if they differ, nothing changes and the answer is 409 `retention_time_changed`, with the time that applies in `context.current_days`. Compared on its own, beside `expected_effective_days`. Omit to save without the comparison. Ignored when `policy` is the stored one.
+       */
+      expected_inherited_days?: number | null;
       /** @description The Flow's own time, at most its Space's, or null to follow the Space. */
       policy: components["schemas"]["FlowRunRetentionPolicy"] | null;
     };
@@ -36027,7 +36038,7 @@ export interface components {
       completion_models?: components["schemas"]["ModelId"][] | null;
       /**
        * Data Retention Days
-       * @description Number of days to retain conversation history for this space. Applies to all assistants and apps in the space that don't have their own retention policy. It also caps the run history of every Flow in the space: a Flow may choose a shorter time, never a longer one. In a shared space, changing it needs the `retention_manage` permission and a signed-in person. Sending the stored value is no change. Set to null to disable the space-level policy. Omit to keep the current retention policy unchanged. Valid range: 1-2555 days (1 day to 7 years).
+       * @description Number of days to retain conversation history for this space. Applies to all assistants and apps in the space that don't have their own retention policy. It also caps the run history of every Flow in the space: a Flow may choose a shorter time, never a longer one. In a shared space it also turns on the automatic removal of Flow runs: a run that starts while the space has a time is removed, with its files, once that time or its Flow's shorter time has passed. Removing the time stops it; runs that started before the space had a time stay. In a shared space, changing it needs the `retention_manage` permission and a signed-in person. Sending the stored value is no change. Set to null to disable the space-level policy. Omit to keep the current retention policy unchanged. Valid range: 1-2555 days (1 day to 7 years).
        */
       data_retention_days?: number | null;
       /** Description */
@@ -36048,6 +36059,11 @@ export interface components {
             | "compute"
           )[]
         | null;
+      /**
+       * Expected Data Retention Days
+       * @description The space's time the caller saw when it chose `data_retention_days`, or null when it saw none set. When the request changes the time, it is compared with the stored time under the lock the change takes; if they differ, nothing in the request is saved and the answer is 409 `retention_time_changed`, with the stored time in `context.current_days`. Omit to save without the comparison. Ignored when the request does not change the time.
+       */
+      expected_data_retention_days?: number | null;
       /**
        * Icon Id
        * @description Icon ID referencing an uploaded icon. Set to null to remove.
@@ -77686,7 +77702,7 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Caller lacks retention_manage (`retention_permission_required`), or used an API key: retention is changed or stopped by signed-in people only (`retention_person_required`). */
+      /** @description Caller lacks retention_manage (`retention_permission_required`), or used an API key: retention is changed or stopped by signed-in people only (`retention_person_required`). A Flow's time also needs the role that sets retention in its Space: a space admin in a shared space, or in a personal space its owner with the right to edit Flows (`forbidden_action`). */
       403: {
         headers: {
           [name: string]: unknown;
@@ -77718,19 +77734,12 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Another retention change or history deletion held the retention lock too long (`flow_retention_lock_busy`). Nothing changed; retry. */
+      /** @description Another retention change or history deletion held the retention lock too long (`flow_retention_lock_busy`); retry. Or the time that applies to the Flow is no longer `expected_effective_days`, or the Space's time is no longer `expected_inherited_days` (`retention_time_changed`); `context.current_days` names the time that applies. Nothing changed. */
       409: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          /**
-           * @example {
-           *       "code": "flow_retention_lock_busy",
-           *       "eneo_error_code": 9073,
-           *       "message": "Flow history retention is busy with another change or deletion."
-           *     }
-           */
           "application/json": components["schemas"]["GeneralError"];
         };
       };
@@ -80178,7 +80187,7 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Conflict */
+      /** @description The retention lock was busy too long, or the space's time is no longer the one the request names. Nothing changed. */
       409: {
         headers: {
           [name: string]: unknown;
