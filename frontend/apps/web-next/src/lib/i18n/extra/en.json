@@ -2671,6 +2671,7 @@
   "flow_editor_tools_preview_read_no_previous": "No step before this one",
   "flow_editor_tools_preview_read_removed": "A removed step",
   "flow_editor_tools_preview_read_unknown": "Unknown: {token}",
+  "flow_editor_tools_preview_argument_value": "Value of {name}",
   "flow_editor_tools_preview_http_address": "Address",
   "flow_editor_tools_preview_http_destination": "Sent to",
   "flow_editor_tools_preview_http_headers": "Custom headers",
