@@ -80,7 +80,7 @@ const FIELD = "Flödets gallringstid";
 const SAVE = "Spara";
 const SAVE_AND_REMOVE = "Spara och ta bort";
 /** The warning's title, which names a date that changes by the day. */
-const WARNING_TITLE = /^Körningar avslutade den .+ eller tidigare kan tas bort$/;
+const WARNING_TITLE = /^Körningar avslutade omkring den .+ eller tidigare kan tas bort$/;
 const warningShown = () =>
   screen.queryByText(WARNING_TITLE, { ignore: "[aria-live], [aria-live] *" }) !== null;
 const PERSONAL =
@@ -309,7 +309,7 @@ describe("the retention section", () => {
       "Alla flödets körningar som startar medan ytan har en gallringstid. Varje körning räknas från när den avslutades, också om den misslyckades eller avbröts."
     );
     expect(rowValue(section, "Tas bort")).toBe(
-      "Körningen med steg, transkript och filer. Det går inte att återställa."
+      "Körningen med steg, transkript och de filer som ingen kvarvarande körning använder. Det går inte att återställa."
     );
     expect(rowValue(section, "Står kvar")).toBe(
       "Bland annat körningar som inte har avslutats, körningar med rättslig spärr och körningar som startade medan ytan saknade gallringstid."
@@ -569,7 +569,7 @@ describe("flow retention", () => {
     fireEvent.change(days, { target: { value: "30" } });
     // Shown as it is typed, before any press, with the date the new time reaches back to.
     const title = screen.getByText(
-      "Körningar avslutade den 26 oktober 2026 eller tidigare kan tas bort",
+      "Körningar avslutade omkring den 26 oktober 2026 eller tidigare kan tas bort",
       { ignore: "[aria-live], [aria-live] *" }
     );
     // The date stays on one line.
@@ -577,7 +577,7 @@ describe("flow retention", () => {
     const banner = title.closest("[id]")!;
     expect(
       within(banner as HTMLElement).getByText(
-        "Gallringstiden kortas från 60 dagar till 30 dagar. Kontrollen görs var femte minut. Körningen med steg, transkript och filer tas bort och går inte att återställa. Körningar med rättslig spärr och körningar som startade medan ytan saknade gallringstid står kvar."
+        "Gallringstiden kortas från 60 dagar till 30 dagar. Kontrollen görs var femte minut. Körningen med steg, transkript och de filer som ingen kvarvarande körning använder tas bort och går inte att återställa. Datumet är ungefärligt: servern räknar från klockslaget då körningen avslutades, och körningen kan tas bort när den nya gallringstiden har gått sedan dess. Körningar med rättslig spärr och körningar som startade medan ytan saknade gallringstid står kvar."
       )
     ).toBeTruthy();
     expect(days.getAttribute("aria-describedby")).toContain(banner.getAttribute("id"));
@@ -590,7 +590,7 @@ describe("flow retention", () => {
     await waitFor(async () => {
       await flushAnnouncements();
       expect(said.filter((text) => WARNING_TITLE.test(text))).toEqual([
-        "Körningar avslutade den 26 oktober 2026 eller tidigare kan tas bort"
+        "Körningar avslutade omkring den 26 oktober 2026 eller tidigare kan tas bort"
       ]);
     });
     await expectNoAxeViolations(document.body);
@@ -603,6 +603,24 @@ describe("flow retention", () => {
       expected_effective_days: 60,
       expected_inherited_days: 60
     });
+  });
+
+  it("calls the warning's date approximate, as a run that finished late that day may not be due yet", async () => {
+    // At 23:30, a run that finished at 23:45 on the date shown is due only in a quarter of an
+    // hour: the server counts from the time the run finished, not from the date.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-25T23:30:00"));
+    backend.GET.mockResolvedValue(settings(null, { days: 60 }));
+    const days = await openDialog();
+    fireEvent.change(days, { target: { value: "30" } });
+    const title = screen.getByText(
+      "Körningar avslutade omkring den 26 oktober 2026 eller tidigare kan tas bort",
+      { ignore: "[aria-live], [aria-live] *" }
+    );
+    const banner = title.closest("[id]") as HTMLElement;
+    expect(
+      within(banner).getByText(/Datumet är ungefärligt: servern räknar från klockslaget/)
+    ).toBeTruthy();
   });
 
   it("drops the warning and its button when the time is no longer shorter", () => {
