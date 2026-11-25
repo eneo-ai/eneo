@@ -199,6 +199,24 @@ describe("SpaceModelSelect", () => {
     expect(screen.queryByText("kb-whisper-large")).toBeNull();
   });
 
+  it("keeps a long provider name whole, so two names with the same start stay apart", () => {
+    // On a phone the heading wraps to two lines; the title carries the rest.
+    const first = "Talserver hos Regionförbundet Norra (vLLM) r2";
+    const second = "Talserver hos Regionförbundet Norra (vLLM) EN";
+    renderModels([
+      { id: "r2", name: "whisper-r2", provider_type: "hosted_vllm", provider_name: first },
+      { id: "en", name: "whisper-en", provider_type: "hosted_vllm", provider_name: second }
+    ]);
+    openCard();
+
+    for (const name of [first, second]) {
+      const heading = screen.getByText(name);
+      expect(heading.getAttribute("title")).toBe(name);
+      expect(heading.className).toContain("line-clamp-2");
+      expect(heading.className).not.toContain("truncate");
+    }
+  });
+
   it("finds a provider, explains no matches and returns focus when search is cleared", async () => {
     const { container } = renderModels(models);
     openCard();
