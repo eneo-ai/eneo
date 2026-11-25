@@ -164,7 +164,45 @@ class ModelProviderRepository:
         return ModelProvider.create_from_db(provider_db)
 
     async def delete(self, provider_id: UUID) -> None:
-        """Delete a provider."""
+        """Delete a provider.
+
+        Its deleted and migrated models stay, without a provider, for the
+        history that still points at them.
+        """
+        from eneo.database.tables.ai_models_table import (
+            CompletionModels,
+            EmbeddingModels,
+            ImageModels,
+            RerankModels,
+            TranscriptionModels,
+        )
+
+        await self.get_by_id(provider_id, for_update=True)
+        for table, hidden in (
+            (
+                CompletionModels,
+                sa.or_(
+                    CompletionModels.deleted_at.is_not(None),
+                    CompletionModels.migrated_to_model_id.is_not(None),
+                ),
+            ),
+            (
+                TranscriptionModels,
+                sa.or_(
+                    TranscriptionModels.deleted_at.is_not(None),
+                    TranscriptionModels.migrated_to_model_id.is_not(None),
+                ),
+            ),
+            (EmbeddingModels, EmbeddingModels.deleted_at.is_not(None)),
+            (ImageModels, ImageModels.deleted_at.is_not(None)),
+            (RerankModels, RerankModels.deleted_at.is_not(None)),
+        ):
+            await self.session.execute(
+                sa.update(table)
+                .where(table.provider_id == provider_id, hidden)
+                .values(provider_id=None)
+            )
+
         stmt = sa.delete(ModelProviders).where(
             ModelProviders.id == provider_id, ModelProviders.tenant_id == self.tenant_id
         )
