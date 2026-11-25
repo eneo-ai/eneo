@@ -144,6 +144,7 @@ flowchart TB
 | A new Prompt Guide no longer sets 30 days; existing guides keep their period | Administrators who want a period | [Set it](/guides/data-retention#change-the-rules) explicitly |
 | Copies of removed conversations answer `410`. Nothing produces copies yet, so no `410` appears today. On PostgreSQL 13 conversation reads cost more | API consumers; PostgreSQL 13 installations | Treat `410` as gone. Before a downgrade, drain the job queue. On PostgreSQL 13, plan a move to 16 |
 | [Question logs are emptied](#question-logs-emptied) | Everyone | Back up, stop old writers |
+| [Files get a column for their home space](#file-home) | Operators; anyone who deletes rows from `spaces` directly | Count it into the downtime for `files` |
 | [File names leave the audit log](#audit-names-removed) | Audit log kept as evidence | Export first if you need names |
 | [Object storage must not keep old versions](#object-storage-versioning) | Object storage installations | Grant permissions; no versioning |
 | Bundled SeaweedFS image is `4.40-eneo.8` | Bundled SeaweedFS | Set `ENEO_SEAWEEDFS_IMAGE` to the digest in `IMAGE-DIGESTS.txt` ([Pin the release image](/guides/object-content-storage#pin-the-release-image)) |
@@ -395,6 +396,23 @@ Migration `202611251000` changes `assistants`, `services`, `apps`, `input_fields
 **Rollback:** `alembic downgrade 202611241200`. It is refused while any row of the changed tables has no person: a resource a service key created, a job or an app run a service key or a space started, or a resource whose creator was removed after the upgrade. Remove those rows first, or restore the backup.
 
 ## Details: retention, logs and storage [#details-retention]
+
+### Files get a column for their home space [#file-home]
+
+A file has an owner and an organization but no space, so nothing a space requires can reach its files. Migration `202611261000` adds `files.home_space_id`: the one space a file belongs in, shared by the file and the files derived from it.
+
+Nothing writes the column in this release. Every file has an empty home, and files are created, attached, read and cleaned up as before. The release prepares the two operations that must handle a home before the first one is written:
+
+- Deleting a space, or removing a person and with them their own space, first removes the files that live in the space. If one of them is still used in another space, the deletion is refused and nothing is changed. A file without a home is left alone, as before.
+- Moving an assistant to another space moves the home of the files that only the assistant and its conversations use. If one of them is also used by something else, the move is refused with `400` and the reason.
+
+Neither refusal can happen yet, since no file has a home.
+
+The key from `files.home_space_id` to `spaces` takes no action on delete. The migration rewrites no row, but it checks the key and builds an index while `files` is locked.
+
+**Do:** count this migration into the downtime you plan for `files`. SQL of your own that deletes a row from `spaces` will fail once files live in that space; delete spaces through the API.
+
+**Rollback:** `alembic downgrade 202611251300`. It is refused once a file has a home.
 
 ### One retention engine [#retention-engine]
 

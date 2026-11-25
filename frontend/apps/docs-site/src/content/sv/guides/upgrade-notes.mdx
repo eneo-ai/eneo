@@ -1,6 +1,6 @@
 ---
 title: Uppgraderingsanteckningar
-translationSource: guides/upgrade-notes.mdx@e66619dc838a
+translationSource: guides/upgrade-notes.mdx@659444ba1c57
 ---
 
 import { Callout } from "nextra/components";
@@ -149,6 +149,7 @@ flowchart TB
 | En ny Promptguide sätter inte längre 30 dagar; befintliga guider behåller sin period | Administratörer som vill ha en gallringstid | [Sätt den](/guides/data-retention#change-the-rules) uttryckligen |
 | Kopior av borttagna konversationer svarar `410`. Inget skapar kopior ännu, så inget `410` förekommer i dag. På PostgreSQL 13 kostar läsningar av konversationer mer | API-konsumenter; installationer på PostgreSQL 13 | Behandla `410` som borta. Töm jobbkön före en nedgradering. På PostgreSQL 13, planera en övergång till 16 |
 | [Frågeloggar töms](#question-logs-emptied) | Alla | Säkerhetskopiera, stoppa gamla skrivare |
+| [Filer får en kolumn för sitt hem-space](#file-home) | Driftansvariga; alla som tar bort rader direkt ur `spaces` | Räkna in den i driftstoppet för `files` |
 | [Filnamn försvinner ur granskningsloggen](#audit-names-removed) | Granskningslogg som sparas som bevis | Exportera först om du behöver namnen |
 | [Objektlagringen får inte behålla gamla versioner](#object-storage-versioning) | Installationer med objektlagring | Ge behörigheter; ingen versionshantering |
 | Den medföljande SeaweedFS-avbilden är `4.40-eneo.8` | Medföljande SeaweedFS | Sätt `ENEO_SEAWEEDFS_IMAGE` till digesten i `IMAGE-DIGESTS.txt` ([Lås versionens avbild](/guides/object-content-storage#pin-the-release-image)) |
@@ -400,6 +401,23 @@ Migreringen `202611251000` ändrar `assistants`, `services`, `apps`, `input_fiel
 **Återställning:** `alembic downgrade 202611241200`. Den nekas så länge någon rad i de ändrade tabellerna saknar person: en resurs som en tjänstenyckel har skapat, ett jobb eller en appkörning som en tjänstenyckel eller ett space har startat, eller en resurs vars skapare togs bort efter uppgraderingen. Ta bort de raderna först, eller återställ säkerhetskopian.
 
 ## Detaljer: gallring, loggar och lagring [#details-retention]
+
+### Filer får en kolumn för sitt hem-space [#file-home]
+
+En fil har en ägare och en organisation men inget space, så det ett space kräver når aldrig dess filer. Migreringen `202611261000` lägger till `files.home_space_id`: det enda space en fil hör hemma i, gemensamt för filen och de filer som har skapats ur den.
+
+Ingenting skriver kolumnen i den här versionen. Varje fil har ett tomt hem, och filer skapas, bifogas, läses och städas som förut. Versionen förbereder de två åtgärder som måste klara ett hem innan det första skrivs:
+
+- När ett space tas bort, eller en person tas bort och med den personens eget space, tas först de filer bort som hör hemma i spacet. Om någon av dem fortfarande används i ett annat space nekas borttagningen och ingenting ändras. En fil utan hem lämnas i fred, som förut.
+- När en assistent flyttas till ett annat space flyttas hemmet för de filer som bara assistenten och dess konversationer använder. Om någon av dem också används av något annat nekas flytten med `400` och skälet.
+
+Ingen av vägrarna kan inträffa ännu, eftersom ingen fil har ett hem.
+
+Nyckeln från `files.home_space_id` till `spaces` gör ingenting vid borttagning. Migreringen skriver inte om någon rad, men den kontrollerar nyckeln och bygger ett index medan `files` är låst.
+
+**Gör:** räkna in den här migreringen i driftstoppet du planerar för `files`. Egen SQL som tar bort en rad ur `spaces` kommer att misslyckas när filer hör hemma i det spacet; ta bort space genom API:t.
+
+**Återställning:** `alembic downgrade 202611251300`. Den nekas när en fil har fått ett hem.
 
 ### En gallringsmotor [#retention-engine]
 
