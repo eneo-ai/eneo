@@ -301,14 +301,24 @@ class JobRepository:
         await self.announce(*(id for id, _task in failed))
         return failed
 
-    async def get_running_jobs(self, user_id: UUID):
+    async def get_running_jobs(
+        self, *, user_id: UUID | None, service_principal_id: UUID | None
+    ):
+        """The owner's recent jobs. An owner is a person or a service
+        principal; a caller that is neither has none."""
+        if user_id is not None:
+            owned = Jobs.user_id == user_id
+        elif service_principal_id is not None:
+            owned = Jobs.service_principal_id == service_principal_id
+        else:
+            owned = sa.false()
         one_week_ago = datetime.now(timezone.utc) - timedelta(weeks=1)
         twenty_four_hours_ago = datetime.now(timezone.utc) - timedelta(hours=24)
         five_minutes_ago = datetime.now(timezone.utc) - timedelta(minutes=5)
 
         stmt = (
             sa.select(Jobs)
-            .where(Jobs.user_id == user_id)
+            .where(owned)
             .where(Jobs.created_at >= one_week_ago)
             .where(
                 # Include running, queued, recently failed, OR recently completed jobs

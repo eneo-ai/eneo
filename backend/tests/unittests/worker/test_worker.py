@@ -315,7 +315,7 @@ async def test_commit_failure_records_the_job_failure_in_a_fresh_session(
     recovery_container.job_service.return_value = AsyncMock()
     containers = [task_container, recovery_container]
 
-    async def create_container(session, user_id=None):
+    async def create_container(session, actor=None):
         return containers.pop(0)
 
     worker = worker_module.Worker()
@@ -388,7 +388,7 @@ async def test_cancelled_task_records_cancelled_in_fresh_session_after_rollback(
     recovery_container.job_service.return_value = AsyncMock()
     containers = [task_container, recovery_container]
 
-    async def create_container(session, user_id=None):
+    async def create_container(session, actor=None):
         return containers.pop(0)
 
     worker = worker_module.Worker()
@@ -436,7 +436,7 @@ def _recovery_worker(monkeypatch, job_service: AsyncMock):
     container.job_service.return_value = job_service
     worker = worker_module.Worker()
 
-    async def create_container(session, user_id=None):
+    async def create_container(session, actor=None):
         return container
 
     monkeypatch.setattr(worker, "_create_container", create_container)

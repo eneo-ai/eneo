@@ -162,6 +162,7 @@ async def test_queue_app_run_dispatches_only_after_commit(monkeypatch) -> None:
         AppRunParams(
             id=app_run.id,
             user_id=TEST_USER.id,
+            tenant_id=TEST_USER.tenant_id,
             file_ids=file_ids,
             app_id=app.id,
         ),

@@ -75,6 +75,7 @@ from eneo.worker.crawl_context import (
     CrawlContext,
     EmbeddingModelSpec,
 )
+from eneo.worker.job_actor import JobActor, load_job_user
 from eneo.worker.redis.client import record_crawl_scheduler_run
 
 logger = get_logger(__name__)
@@ -603,7 +604,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
     try:
         async with Container.session_scope():
-            user = await container.user_repo().get_user_by_id(params.user_id)
+            user = await load_job_user(container, JobActor.of(params))
         if user is None:
             raise ValueError("The crawl attempt user no longer exists")
 

@@ -1,6 +1,7 @@
 from uuid import UUID
 
 from eneo.apps.app_runs.api.app_run_models import AppRunParams
+from eneo.jobs.task_models import task_actor
 from eneo.main.logging import get_logger
 
 logger = get_logger(__name__)
@@ -68,7 +69,7 @@ class AppRunService:
             name=app.name,
             task_params=AppRunParams(
                 id=app_run_in_db.id,
-                user_id=self.user.id,
+                **task_actor(self.user),
                 file_ids=file_ids,
                 app_id=app.id,
             ),

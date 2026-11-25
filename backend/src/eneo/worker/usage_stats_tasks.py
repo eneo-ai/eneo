@@ -36,6 +36,7 @@ async def update_model_usage_stats_task(
 
     async with task_manager.set_status_on_exception():
         tenant_id = params.tenant_id
+        assert tenant_id is not None  # required by the params model
         model_id = params.model_id
         full_recalc = params.full_recalc
 

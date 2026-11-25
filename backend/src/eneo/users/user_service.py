@@ -1173,9 +1173,22 @@ class UserService:
         guardrails do not apply here, the loopback caller is Eneo itself, and
         no usage is recorded: the API call that minted the token already was.
         """
-        key = await self.api_key_v2_repo.get(
+        return await self.get_service_key_user(
             key_id=payload.user_id, tenant_id=payload.tenant_id
         )
+
+    async def get_service_key_user(
+        self, *, key_id: UUID, tenant_id: UUID
+    ) -> "UserInDB | None":
+        """The made-up user a service key signs in as, rebuilt from the key
+        without its secret: for Eneo's own callers that act on the key's
+        behalf later, a loopback tool call or a queued job in the worker.
+
+        None when the key is not a service key of this organisation, is no
+        longer active, or its service principal is disabled: whoever ended the
+        key's access ended this too.
+        """
+        key = await self.api_key_v2_repo.get(key_id=key_id, tenant_id=tenant_id)
         if key is None or key.ownership != ApiKeyOwnership.SERVICE:
             return None
         effective_state = compute_effective_state(

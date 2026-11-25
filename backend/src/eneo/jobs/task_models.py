@@ -1,14 +1,78 @@
-from typing import Literal, Optional
+from typing import TYPE_CHECKING, Literal, Optional, TypedDict
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
 from eneo.jobs.job_models import Task
 from eneo.object_content.content import StorageKind
 
+if TYPE_CHECKING:
+    from eneo.users.user import UserInDB
+
+
+class TaskActor(TypedDict):
+    """Who a job runs as, in the fields ``TaskParams`` carries."""
+
+    user_id: UUID | None
+    service_principal_id: UUID | None
+    api_key_id: UUID | None
+    tenant_id: UUID | None
+
+
+def task_actor(user: "UserInDB") -> TaskActor:
+    """The caller as a job's actor.
+
+    A person is named by ``user_id``. A service key has no person behind it:
+    the job belongs to the key's service principal, and the key's own id lets
+    the worker sign the caller in again with the same rights.
+    """
+    key = getattr(user, "active_api_key", None)
+    if key is not None and str(getattr(key.ownership, "value", key.ownership)) == (
+        "service"
+    ):
+        if key.service_principal_id is None:
+            raise ValueError("A service key without a service principal owns no job")
+        return {
+            "user_id": None,
+            "service_principal_id": key.service_principal_id,
+            "api_key_id": key.id,
+            "tenant_id": user.tenant_id,
+        }
+    return {
+        "user_id": user.id,
+        "service_principal_id": None,
+        "api_key_id": None,
+        "tenant_id": user.tenant_id,
+    }
+
 
 class TaskParams(BaseModel):
-    user_id: UUID
+    # Who the job runs as: a person (user_id), or a service key
+    # (service_principal_id owns the job, api_key_id signs the caller in again
+    # in the worker). tenant_id says where, when there is no person to ask.
+    user_id: UUID | None = None
+    service_principal_id: UUID | None = None
+    api_key_id: UUID | None = None
+    tenant_id: UUID | None = None
+
+    @model_validator(mode="after")
+    def one_actor(self) -> "TaskParams":
+        if self.user_id is not None and self.service_principal_id is not None:
+            raise ValueError("A job runs as a person or a service, not both")
+        if self.service_principal_id is not None and (
+            self.api_key_id is None or self.tenant_id is None
+        ):
+            raise ValueError("A service job names its key and its organisation")
+        return self
+
+    def same_actor(
+        self, user_id: UUID | None, service_principal_id: UUID | None
+    ) -> bool:
+        """Whether these params run as exactly this owner."""
+        return (
+            self.user_id == user_id
+            and self.service_principal_id == service_principal_id
+        )
 
 
 class ResourceTaskParams(TaskParams):
@@ -44,7 +108,12 @@ class UploadTask(InfoBlobTask):
 class UpdateUsageStatsTaskParams(TaskParams):
     """Parameters for updating completion model usage statistics."""
 
-    tenant_id: UUID
+    @model_validator(mode="after")
+    def names_its_organisation(self) -> "UpdateUsageStatsTaskParams":
+        if self.tenant_id is None:
+            raise ValueError("A usage statistics job names its organisation")
+        return self
+
     model_id: Optional[UUID] = None
     full_recalc: bool = False
 

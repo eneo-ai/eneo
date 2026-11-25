@@ -24,6 +24,7 @@ from eneo.integration.infrastructure.content_service.types import (
 )
 from eneo.integration.infrastructure.detached_tasks import run_after_commit
 from eneo.jobs.job_models import JobInDb, Task
+from eneo.jobs.task_models import task_actor
 from eneo.main.exceptions import (
     BadRequestException,
     NotFoundException,
@@ -426,7 +427,7 @@ class IntegrationKnowledgeService:
                 raise BadRequestException("Confluence token ID is required")
             task = Task.PULL_CONFLUENCE_CONTENT
             params: TaskParams = ConfluenceContentTaskParam(
-                user_id=self.user.id,
+                **task_actor(self.user),
                 id=user_integration_id,
                 token_id=context.token_id,
                 space_key=key,
@@ -435,7 +436,7 @@ class IntegrationKnowledgeService:
         else:
             task = Task.PULL_SHAREPOINT_CONTENT
             params = SharepointContentTaskParam(
-                user_id=self.user.id,
+                **task_actor(self.user),
                 id=user_integration_id,
                 token_id=context.token_id,
                 tenant_app_id=context.tenant_app_id,
@@ -861,7 +862,7 @@ class IntegrationKnowledgeService:
             task=Task.PULL_SHAREPOINT_CONTENT,
             name=knowledge.name,
             task_params=SharepointContentTaskParam(
-                user_id=self.user.id,
+                **task_actor(self.user),
                 id=user_integration.id,
                 token_id=token_id,
                 tenant_app_id=tenant_app_id,

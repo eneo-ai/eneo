@@ -121,7 +121,20 @@ class JobBase(BaseModel):
 
 
 class Job(JobBase):
-    user_id: UUID
+    # The owner: a person, or the service principal of the service key that
+    # queued the job (api_key_id). See Jobs in the table module.
+    user_id: UUID | None = None
+    service_principal_id: UUID | None = None
+    api_key_id: UUID | None = None
+
+    def owned_by(self, user_id: UUID | None, service_principal_id: UUID | None) -> bool:
+        """Whether the job belongs to exactly this owner; a job with no owner
+        belongs to nobody."""
+        if self.user_id is not None:
+            return self.user_id == user_id
+        if self.service_principal_id is not None:
+            return self.service_principal_id == service_principal_id
+        return False
 
 
 class JobUpdate(BaseModel):
