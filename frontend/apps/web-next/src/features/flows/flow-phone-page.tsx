@@ -1,10 +1,10 @@
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
-import { Heading } from "@astryxdesign/core/Text";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { ChevronRight, Play } from "lucide-react";
+import { Play } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useId, useState } from "react";
+import { Collapsible } from "@/components/astryx/collapsible";
 import { DockedActions } from "@/components/shell/docked-actions";
 import { PageBar } from "@/components/shell/page-bar";
 import { browserApi } from "@/lib/api/browser";
@@ -35,7 +35,6 @@ export function FlowPhonePage({ flowId, onStart }: { flowId: string; onStart: ()
   const t = useTranslations();
   const { routeId, space } = useSpace();
   const settingsHeadingId = useId();
-  const settingsPanelId = useId();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [retentionOpen, setRetentionOpen] = useState(false);
   const { data: flow } = useSuspenseQuery(flowQueryOptions(browserApi, flowId));
@@ -70,57 +69,48 @@ export function FlowPhonePage({ flowId, onStart }: { flowId: string; onStart: ()
           />
         ) : null}
         <section aria-labelledby={settingsHeadingId}>
-          {/* The heading holds the toggle, so the settings are in the page's outline at the
-              second level and their sections at the third. The toggle is pulled out by its
-              padding, so its chevron lines up with the page's edge. */}
-          <Heading level={2} id={settingsHeadingId} className="m-0">
-            <Button
-              label={t("flows_settings_heading")}
-              variant="ghost"
-              icon={
-                <ChevronRight
-                  aria-hidden="true"
-                  className={settingsOpen ? "rotate-90" : undefined}
-                />
-              }
-              aria-expanded={settingsOpen}
-              aria-controls={settingsPanelId}
-              onClick={() => setSettingsOpen(!settingsOpen)}
-              className="-ms-[var(--spacing-3)]"
-            >
-              <span className="text-ax-text text-lg font-semibold">
+          <Collapsible
+            isOpen={settingsOpen}
+            onOpenChange={setSettingsOpen}
+            chevronPosition="start"
+            trigger={
+              <span id={settingsHeadingId} className="text-ax-text py-1 text-lg font-semibold">
                 {t("flows_settings_heading")}
               </span>
-            </Button>
-          </Heading>
-          <div id={settingsPanelId} hidden={!settingsOpen} className="pt-3">
-            <SettingsSummary
-              flow={flow}
-              transcription={{
-                models: space.transcription_models,
-                services: space.transcription_services ?? []
-              }}
-              classification={space.security_classification}
-              personalSpace={space.personal}
-              retentionAction={
-                retention.mayChange ? (
-                  <Button
-                    label={t("flows_retention_change")}
-                    width="100%"
-                    onClick={() => setRetentionOpen(true)}
-                  />
-                ) : undefined
-              }
-              spaceRetentionHref={retention.spaceSettingsHref}
-            />
-          </div>
+            }
+          >
+            <div className="pt-3">
+              <SettingsSummary
+                flow={flow}
+                transcription={{
+                  models: space.transcription_models,
+                  services: space.transcription_services ?? []
+                }}
+                classification={space.security_classification}
+                personalSpace={space.personal}
+                // The toggle is a button, which a heading cannot hold, so its sections
+                // are the page's second level.
+                headingLevel={2}
+                retentionAction={
+                  retention.mayChange ? (
+                    <Button
+                      label={t("flows_retention_change")}
+                      width="100%"
+                      onClick={() => setRetentionOpen(true)}
+                    />
+                  ) : undefined
+                }
+                spaceRetentionHref={retention.spaceSettingsHref}
+              />
+            </div>
+          </Collapsible>
           {/* Folded, the settings still say whether runs are removed, in line with the toggle's text:
-              the indent is the chevron's box (a button's small icon, 1rem) plus its gap. */}
+              the indent is the leading chevron's box plus its gap, as the Collapsible sizes them. */}
           {settingsOpen ? null : (
             <FlowRetentionFoldedLine
               flow={flow}
               personalSpace={space.personal}
-              className="text-ax-text-secondary m-0 ps-[calc(1rem_+_var(--spacing-2))] text-sm"
+              className="text-ax-text-secondary m-0 ps-[calc(var(--text-large-size)_+_var(--spacing-2))] text-sm"
             />
           )}
         </section>

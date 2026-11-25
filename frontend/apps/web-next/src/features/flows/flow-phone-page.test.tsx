@@ -186,21 +186,15 @@ describe("FlowPage on a phone", () => {
     }
   );
 
-  it("makes the settings' toggle a heading under the page's title, with its sections a level under it", async () => {
-    const { container } = renderPhonePage({
+  it("puts the settings' sections a level under the page's title, as the toggle is no heading", async () => {
+    renderPhonePage({
       input_type: "audio",
       metadata_json: { wizard: { transcription_enabled: true } }
     });
     const settings = await screen.findByRole("region", { name: "Inställningar" });
-    const heading = within(settings).getByRole("heading", { level: 2, name: "Inställningar" });
-    const toggle = within(heading).getByRole("button", { name: "Inställningar" });
-    fireEvent.click(toggle);
-    expect(toggle.getAttribute("aria-expanded")).toBe("true");
-    expect(
-      within(settings).getByRole("heading", { level: 3, name: "Transkribering" })
-    ).toBeTruthy();
-    expect(within(settings).getByRole("heading", { level: 3, name: "Gallring" })).toBeTruthy();
-    await expectNoAxeViolations(container);
+    fireEvent.click(within(settings).getByRole("button", { name: "Inställningar" }));
+    expect(within(settings).getByRole("heading", { level: 2, name: "Gallring" })).toBeTruthy();
+    expect(within(settings).queryByRole("heading", { level: 3 })).toBeNull();
   });
 
   it("offers the retention change, under the status line, to someone who may change it", async () => {

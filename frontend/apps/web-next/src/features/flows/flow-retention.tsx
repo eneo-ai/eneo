@@ -118,6 +118,7 @@ export function FlowRetentionSection({
   flow,
   personalSpace,
   label,
+  headingLevel = 3,
   action,
   spaceSettingsHref
 }: {
@@ -125,6 +126,7 @@ export function FlowRetentionSection({
   personalSpace: boolean;
   /** The flow read views' label column. */
   label: MetadataListProps["label"];
+  headingLevel?: 2 | 3;
   action?: ReactNode;
   spaceSettingsHref?: string;
 }) {
@@ -158,7 +160,7 @@ export function FlowRetentionSection({
       className="border-ax-border flex min-w-0 flex-col gap-3 border-t pt-5"
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <Heading level={3} id={headingId} weight="semibold" className="text-base">
+        <Heading level={headingLevel} id={headingId} weight="semibold" className="text-base">
           {t("flows_retention_section_heading")}
         </Heading>
         {phone ? null : action}
