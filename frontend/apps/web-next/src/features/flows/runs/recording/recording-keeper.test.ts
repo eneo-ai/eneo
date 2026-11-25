@@ -531,14 +531,19 @@ describe("RecordingKeeper", () => {
     journal.begin(part(0));
     journal.append(part(0), new Blob(["AA"], { type: "audio/webm" }), 500);
     await settle();
-    // The full write of the finished part waits until the other tab has scanned.
+    // The full write of the finished part waits until the other tab has scanned; a rebuild that
+    // scan may begin waits until the full write is done.
     let write = () => {};
     const written = new Promise<void>((resolve) => {
       write = resolve;
     });
+    let rebuild = () => {};
+    const rebuilt = new Promise<void>((resolve) => {
+      rebuild = resolve;
+    });
     const putPart = db.putPart.bind(db);
     vi.spyOn(db, "putPart").mockImplementation(async (stored) => {
-      if (!stored.interrupted) await written;
+      await (stored.interrupted ? rebuilt : written);
       return putPart(stored);
     });
     const kept = tabA.keepPart("step-1", {
@@ -553,13 +558,18 @@ describe("RecordingKeeper", () => {
     });
     await settle();
     // The form goes while the part is still being written: its hold goes, the part's journal stays.
-    await tabA.close();
-    await as("user-a").scan("step-1");
+    const closed = tabA.close();
+    await settle();
+    const scanned = as("user-a").scan("step-1");
+    await settle();
     write();
     expect(await kept).toBe("device");
+    rebuild();
+    await scanned;
+    await closed;
     await as("user-a").scan("step-1");
     const stored = await as("user-a").readSession("step-1", "rec-1");
-    expect(await Promise.all(stored.map((kept) => kept.blob.text()))).toEqual(["AAAA-full"]);
+    expect(await Promise.all(stored.map((part) => part.blob.text()))).toEqual(["AAAA-full"]);
     expect(db.journals.size).toBe(0);
   });
 
