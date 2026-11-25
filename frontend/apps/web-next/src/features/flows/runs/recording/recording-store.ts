@@ -44,6 +44,8 @@ export type StoredPart = PartAddress & {
   streamed: boolean;
   /** The live transcript that stands for this part and the rest of its recording's parts. */
   liveTranscript?: LiveTranscriptRef;
+  /** Who recorded it: only they are offered it. Absent on parts kept before it was stored. */
+  userId?: string;
 };
 
 /** The part being recorded, as its journal knows it without reading audio. */
@@ -54,6 +56,8 @@ export type JournalMeta = PartAddress & {
   streamed: boolean;
   /** Wall-clock time of the last chunk written, for expiry. */
   lastChunkAt: number;
+  /** Who records it: only they rebuild it. Absent on journals begun before it was stored. */
+  userId?: string;
 };
 
 /** One chunk of a journal: its audio and the part's recorded time when it came. */

@@ -10,7 +10,12 @@ import { apiErrorFromResponse, EneoApiError } from "@/lib/api/errors";
 import { formatBytes } from "@/lib/format";
 import type { Schema } from "@/lib/api/models";
 import { UploadRetries } from "./recording/upload-retry";
-import type { RecordingPartInfo, UploadEntry, UploadsByStep } from "./run-contract";
+import {
+  stays,
+  type RecordingPartInfo,
+  type UploadEntry,
+  type UploadsByStep
+} from "./run-contract";
 import { refusalText, type Translator } from "./run-messages";
 import { deleteRuntimeFile, type RuntimeInput, type UploadedFile } from "./runs-api";
 
@@ -41,13 +46,23 @@ async function sendFile(
   abort: AbortController
 ): Promise<UploadedFile> {
   const url = `${API_BASE}/api/v1/flows/${encodeURIComponent(flowId)}/steps/${encodeURIComponent(stepId)}/runtime-files/`;
-  const request = await onBrowserApiRequest({
-    request: new Request(new URL(url, window.location.href), {
-      method: "POST",
-      headers: { accept: "application/json" },
-      signal: abort.signal
-    })
+  const prepared = new Request(new URL(url, window.location.href), {
+    method: "POST",
+    headers: { accept: "application/json" },
+    signal: abort.signal
   });
+  let request: Request;
+  try {
+    request = await onBrowserApiRequest({ request: prepared });
+  } catch (error) {
+    // The session check did not get through (fetch's network error, its time limit, a busy
+    // server): the file did not reach the server and may be sent again. The session gate checks
+    // again when it is next sent with the browser online. A refusal (4xx) and the page's end stay
+    // as they are.
+    const onTheWay =
+      error instanceof TypeError || (error instanceof EneoApiError && error.status >= 500);
+    throw onTheWay ? new UploadNetworkError() : error;
+  }
   request.signal.throwIfAborted();
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -320,9 +335,7 @@ export function useRuntimeUploads(flowId: string, policy: UploadPolicy | undefin
     }
     const existing = current.current[input.step_id] ?? [];
     let slots =
-      input.max_files == null
-        ? Infinity
-        : input.max_files - existing.filter((entry) => entry.state !== "failed").length;
+      input.max_files == null ? Infinity : input.max_files - existing.filter(stays).length;
     const started: { entry: UploadEntry; file: File }[] = [];
     const added = picked.map((file): UploadEntry => {
       const base = {
@@ -382,8 +395,9 @@ export function useRuntimeUploads(flowId: string, policy: UploadPolicy | undefin
     const kept = files.current.get(key);
     if (!entry || entry.state !== "failed" || !kept) return;
     const { input, file } = kept;
+    // The same rule as adding: the other rows' slots; this row may use its own.
     const taken = (current.current[stepId] ?? []).filter(
-      (candidate) => candidate.state !== "failed"
+      (candidate) => candidate.key !== key && stays(candidate)
     ).length;
     if (input.max_files != null && taken >= input.max_files) {
       retries.reset(key);
@@ -413,7 +427,8 @@ export function useRuntimeUploads(flowId: string, policy: UploadPolicy | undefin
     return files.current.get(key)?.file ?? null;
   }
 
-  // Back online: a recording's parts waiting for their next attempt go now.
+  // Back online: a recording's parts waiting for their next attempt go now, and so do those whose
+  // timed attempts were spent.
   useEffect(() => {
     const resend = () => retries.online();
     window.addEventListener("online", resend);

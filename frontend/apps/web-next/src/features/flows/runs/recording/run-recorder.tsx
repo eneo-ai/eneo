@@ -23,7 +23,7 @@ import { Banner } from "@astryxdesign/core/Banner";
 import { EneoApiError } from "@/lib/api/errors";
 import { formatBytes } from "@/lib/format";
 import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
-import type { RecordingPartInfo, UploadEntry } from "../run-contract";
+import { stays, type RecordingPartInfo, type UploadEntry } from "../run-contract";
 import {
   liveSocketUrl,
   openLiveTranscription,
@@ -37,6 +37,7 @@ import {
   contractSnapshot,
   resumeRefusal,
   storedPartFile,
+  type PartKeeping,
   type RecordingKeeper,
   type SavedRecording
 } from "./recording-keeper";
@@ -145,11 +146,20 @@ function restartingText(ended: RecordingEnd | null, t: Translator): string {
   }
 }
 
-/** The step's recorded parts not uploaded yet, a failed part that will be sent again included. */
-function awaitingUpload(entries: readonly UploadEntry[]): number {
+/**
+ * The step's recorded parts not uploaded yet that only this tab holds, a
+ * failed part that will be sent again included. A part kept on the device
+ * is safe if the tab goes, so it does not hold the recording back; one still
+ * being stored counts until it is.
+ */
+function awaitingUpload(
+  entries: readonly UploadEntry[],
+  keptWhere: (part: RecordingPartInfo) => PartKeeping | undefined
+): number {
   return entries.filter(
     (entry) =>
       entry.recording &&
+      keptWhere(entry.recording) !== "device" &&
       (entry.state === "uploading" || (entry.state === "failed" && entry.retryable))
   ).length;
 }
@@ -161,17 +171,14 @@ function refusalReason(error: unknown): string {
 }
 
 /**
- * Whether a file stays on the form: one that did not fail, or a recorded
- * part whose upload will be sent again (it exists nowhere else).
+ * Free file slots of a step for recording: every file that stays takes one,
+ * and so does every recorded part, one the core refused for good included.
+ * Its copy on the device belongs to the recording, which must fit the step to
+ * be continued later; it frees its slot when its row is taken off the form.
  */
-function stays(entry: UploadEntry): boolean {
-  return entry.state !== "failed" || Boolean(entry.recording && entry.retryable);
-}
-
-/** Free file slots of a step: every file that stays takes one. */
 function filesLeft(input: RuntimeInput, entries: readonly UploadEntry[]): number {
   if (input.max_files == null) return Infinity;
-  return input.max_files - entries.filter(stays).length;
+  return input.max_files - entries.filter((entry) => entry.recording || stays(entry)).length;
 }
 
 /** The recording the step's last recorded part belongs to, which recording again continues. */
@@ -184,6 +191,19 @@ function partsOf(sessionId: string | null, entries: readonly UploadEntry[]) {
   if (!sessionId) return [];
   return entries.flatMap((entry) =>
     entry.recording?.sessionId === sessionId && stays(entry) ? [entry.recording] : []
+  );
+}
+
+/**
+ * The parts a recording keeps, in order: every recorded row of it on the form,
+ * one the core refused for good included. Its copy on the device belongs to
+ * the recording, so it counts in the recording's numbering and length until
+ * its row is taken off the form. More of them than `partsOf` means a refused part.
+ */
+function keptPartsOf(sessionId: string | null, entries: readonly UploadEntry[]) {
+  if (!sessionId) return [];
+  return entries.flatMap((entry) =>
+    entry.recording?.sessionId === sessionId ? [entry.recording] : []
   );
 }
 
@@ -403,6 +423,7 @@ export function RunRecorder({
   );
 
   const stepId = input.step_id;
+  const keptWhere = (part: RecordingPartInfo) => keeper.keeping(stepId, part.sessionId, part.index);
   const snapshotOfContract = () => contractSnapshot(input, publishedFlowVersion);
   const partLabel = (index: number, durationMs: number) =>
     t("flow_transcript_rec_part_name", { part: index + 1, length: clockText(durationMs) });
@@ -465,6 +486,11 @@ export function RunRecorder({
     recorder.getSnapshot
   );
   const text = useSyncExternalStore(live.subscribe, live.getSnapshot, live.getSnapshot);
+  // Once the microphone is given, not while the browser asks for it: one question at a time.
+  const capturing = snapshot.phase === "recording";
+  useEffect(() => {
+    if (capturing) keeper.askToKeepStorage();
+  }, [capturing, keeper]);
 
   useEffect(
     () => () => {
@@ -659,8 +685,9 @@ export function RunRecorder({
 
   /**
    * Starts recording, continuing the recording whose parts are on the form;
-   * null when the step refuses another part now (no file slot, parts
-   * waiting for their upload, or, for an automatic start, no time left).
+   * null when the step refuses another part now (no file slot, parts only
+   * this tab holds waiting for their upload, or, for an automatic start, no
+   * time left).
    */
   function start({ automatic: byItself = false } = {}): Promise<void> | null {
     if (recorder.getSnapshot().phase !== "idle") return null;
@@ -671,7 +698,7 @@ export function RunRecorder({
       return null;
     }
     setFilesFull(false);
-    if (awaitingUpload(now) >= MAX_PARTS_AWAITING_UPLOAD) {
+    if (awaitingUpload(now, keptWhere) >= MAX_PARTS_AWAITING_UPLOAD) {
       setBacklogFull(true);
       return null;
     }
@@ -680,11 +707,14 @@ export function RunRecorder({
     const before = partsOf(current, now);
     // Recording again while the last recording's parts are on the form goes on with it.
     const sessionId = before.length > 0 && current ? current : crypto.randomUUID();
-    const firstIndex = before.reduce((next, part) => Math.max(next, part.index + 1), 0);
-    const recordedBeforeMs = before.reduce((sum, part) => sum + part.durationMs, 0);
+    // Numbered after, and timed with, every part the recording keeps: a refused part's copy on
+    // the device keeps its own place.
+    const kept = keptPartsOf(sessionId, now);
+    const firstIndex = kept.reduce((next, part) => Math.max(next, part.index + 1), 0);
+    const recordedBeforeMs = kept.reduce((sum, part) => sum + part.durationMs, 0);
     if (
       byItself &&
-      recordingTimeLeftMs(limits.maxRecordingMs, before.length + 1, recordedBeforeMs) <= 0
+      recordingTimeLeftMs(limits.maxRecordingMs, kept.length + 1, recordedBeforeMs) <= 0
     ) {
       return null;
     }
@@ -698,9 +728,9 @@ export function RunRecorder({
       limits: (): RecorderLimits => ({
         ...limits,
         recordedBeforeMs,
-        partsBefore: before.length,
+        partsBefore: kept.length,
         filesLeft: filesLeft(input, latestEntries.current),
-        awaitingUpload: awaitingUpload(latestEntries.current)
+        awaitingUpload: awaitingUpload(latestEntries.current, keptWhere)
       })
     });
   }
@@ -791,18 +821,29 @@ export function RunRecorder({
   }
 
   const { phase, problem, ended } = snapshot;
-  const formParts = partsOf(session ?? latestSession(entries), entries);
+  const recordingId = session ?? latestSession(entries);
+  const formParts = partsOf(recordingId, entries);
+  const keptParts = keptPartsOf(recordingId, entries);
   const continues = formParts.length > 0;
   const running = phase === "recording" || phase === "paused";
-  // What recording more may still hold, said once a recording has parts on the form.
+  // What recording more may still hold, said once a recording has parts on the form: counted
+  // as the recorder counts it, from every part the recording keeps.
   const roomMs =
     continues && limits.maxRecordingMs
       ? recordingTimeLeftMs(
           limits.maxRecordingMs,
-          formParts.length + 1,
-          formParts.reduce((sum, part) => sum + part.durationMs, 0)
+          keptParts.length + 1,
+          keptParts.reduce((sum, part) => sum + part.durationMs, 0)
         )
       : null;
+  // A part the core refused for good holds its slot (filesLeft) while the field does not count
+  // it (stays): when the slots are used, say which row to take off.
+  const slotHeld = entries.some((entry) => entry.recording && !stays(entry))
+    ? t("flow_transcript_rec_refused_part_holds_slot")
+    : null;
+  // Likewise its length counts in the recording's: when the time is used, say which row to take off.
+  const timeHeld =
+    keptParts.length > formParts.length ? t("flow_transcript_rec_refused_part_holds_time") : null;
 
   /** What the step lets a recording hold, as the form says it under its heading. */
   function limitHint(): string | null {
@@ -913,7 +954,12 @@ export function RunRecorder({
         <Banner
           status="warning"
           title={t("flow_transcript_rec_problem_title")}
-          description={t("flow_transcript_rec_files_full", { count: input.max_files ?? 0 })}
+          description={[
+            t("flow_transcript_rec_files_full", { count: input.max_files ?? 0 }),
+            slotHeld
+          ]
+            .filter(Boolean)
+            .join(" ")}
           collapsible={false}
         />
       ) : null}
@@ -943,7 +989,12 @@ export function RunRecorder({
         <Banner
           status="warning"
           title={t("flow_transcript_rec_ended_title")}
-          description={endedText(ended, t)}
+          description={[
+            endedText(ended, t),
+            ended === "files" ? slotHeld : ended === "length" ? timeHeld : null
+          ]
+            .filter(Boolean)
+            .join(" ")}
           collapsible={false}
         />
       ) : null}

@@ -64,6 +64,15 @@ export type RecordingPartInfo = {
 
 export type UploadsByStep = Record<string, readonly UploadEntry[]>;
 
+/**
+ * Whether a file stays on the form and takes one of the step's slots: one
+ * that did not fail, or a recorded part whose upload will be sent again (it
+ * exists nowhere else).
+ */
+export function stays(entry: UploadEntry): boolean {
+  return entry.state !== "failed" || Boolean(entry.recording && entry.retryable);
+}
+
 const MULTI_VALUE = new Set(["multiselect", "list"]);
 const NUMBER = /^[-+]?(\d+(\.\d*)?|\.\d+)([eE][-+]?\d+)?$/;
 
