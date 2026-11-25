@@ -790,6 +790,154 @@ describe("RecordingKeeper", () => {
     });
   });
 
+  describe("Fortsätt numbers the next part over every number on the device", () => {
+    /**
+     * Tab A keeps parts 0 and 1 and journals part 2 ("AAAA"), then closes: the browser lets
+     * go of its locks, nothing commits or leaves. A's own lock manager stands for its tab;
+     * in the shared one its part's lock is held elsewhere until the tab closes.
+     */
+    async function tabClosesMidPart({ locks = true } = {}) {
+      const { db, lockManager, as } = setup({ locks });
+      const tabA = new RecordingKeeper("flow-1", "user-a", db, fakeLocks().locks, () => START);
+      for (const index of [0, 1]) {
+        await tabA.keepPart("step-1", {
+          sessionId: "rec-1",
+          index,
+          blob: new Blob([`part${index}`], { type: "audio/webm" }),
+          mimeType: "audio/webm",
+          durationMs: 1_000,
+          capturedAt: START + index * 60_000,
+          contract: CONTRACT,
+          streamed: false
+        });
+      }
+      const journalA = tabA.journalFor(
+        "step-1",
+        () => CONTRACT,
+        () => false
+      );
+      journalA.begin(part(2));
+      journalA.append(part(2), new Blob(["AAAA"], { type: "audio/webm" }), 1_000);
+      await settle();
+      const lockA = "eneo-flow-recording:flow-1::step-1::rec-1::0002";
+      lockManager.holdElsewhere(lockA);
+      return { db, as, lockManager, closeA: () => lockManager.releaseElsewhere(lockA) };
+    }
+
+    /** Fortsätt as the form does it, then the next part recorded ("BBBB") and finished. */
+    async function continueAndRecord(tab: RecordingKeeper): Promise<number> {
+      const outcome = await tab.resume("step-1", "rec-1", CONTRACT);
+      if (outcome.kind !== "continued") throw new Error(`not continued: ${outcome.kind}`);
+      const index = outcome.parts.reduce(
+        (next, kept) => Math.max(next, kept.index + 1),
+        tab.nextIndex("step-1", "rec-1")
+      );
+      const journal = tab.journalFor(
+        "step-1",
+        () => CONTRACT,
+        () => false
+      );
+      journal.begin(part(index));
+      journal.append(part(index), new Blob(["BBBB"], { type: "audio/webm" }), 1_000);
+      await settle();
+      await tab.keepPart("step-1", {
+        sessionId: "rec-1",
+        index,
+        blob: new Blob(["BBBB"], { type: "audio/webm" }),
+        mimeType: "audio/webm",
+        durationMs: 1_000,
+        capturedAt: START + index * 60_000,
+        contract: CONTRACT,
+        streamed: false
+      });
+      return index;
+    }
+
+    /** The device's parts in order: their numbers, whether rebuilt, and their audio. */
+    async function partsInOrder(db: ReturnType<typeof memoryRecordings>) {
+      const parts = [...db.parts.values()].sort((a, b) => a.index - b.index);
+      return Promise.all(
+        parts.map(async (kept) => [kept.index, kept.interrupted, await kept.blob.text()])
+      );
+    }
+
+    /** The journal chunks on the device, by key, as text. */
+    async function chunks(db: ReturnType<typeof memoryRecordings>) {
+      return Promise.all(
+        [...db.chunks].map(async ([key, chunk]) => [key, await chunk.blob.text()] as const)
+      );
+    }
+
+    it("keeps the closed tab's audio when the other tab continues from an earlier scan", async () => {
+      const { db, as, closeA } = await tabClosesMidPart();
+      const tabB = as("user-a");
+      // B's form was open already: its scan ran while A still held the part's lock.
+      expect((await tabB.scan("step-1")).saved).toMatchObject([{ sessionId: "rec-1", parts: 2 }]);
+      closeA();
+      const journalChunks = await chunks(db);
+
+      // The next part takes the number over A's unfinished part, which is left as it is.
+      expect(await continueAndRecord(tabB)).toBe(3);
+      expect(await chunks(db)).toEqual(journalChunks);
+      expect([...db.journals.values()].map((meta) => meta.index)).toEqual([2]);
+      // Removed from the form, a part's row no longer counts; the number over the journal still does.
+      await tabB.forgetPart("step-1", "rec-1", 3);
+      expect(tabB.nextIndex("step-1", "rec-1")).toBe(3);
+
+      // Its form goes; the next form that continues it numbers over the journal too.
+      await tabB.close();
+      expect(await continueAndRecord(as("user-a"))).toBe(3);
+      // The journal is rebuilt as before, the next time a form opens.
+      await as("user-a").scan("step-1");
+      expect(await partsInOrder(db)).toEqual([
+        [0, false, "part0"],
+        [1, false, "part1"],
+        [2, true, "AAAA"],
+        [3, false, "BBBB"]
+      ]);
+      expect(db.journals.size).toBe(0);
+    });
+
+    it("keeps the closed tab's audio when the other tab scans again before it continues", async () => {
+      const { db, as, closeA } = await tabClosesMidPart();
+      const tabB = as("user-a");
+      closeA();
+      // The form opened anew in B: its scan rebuilds what A left.
+      expect((await tabB.scan("step-1")).saved).toMatchObject([{ sessionId: "rec-1", parts: 3 }]);
+
+      expect(await continueAndRecord(tabB)).toBe(3);
+      await as("user-a").scan("step-1");
+      expect(await partsInOrder(db)).toEqual([
+        [0, false, "part0"],
+        [1, false, "part1"],
+        [2, true, "AAAA"],
+        [3, false, "BBBB"]
+      ]);
+    });
+
+    it("numbers over a journal also without Web Locks", async () => {
+      const { db, as } = await tabClosesMidPart({ locks: false });
+      const tabB = as("user-a");
+      expect((await tabB.resume("step-1", "rec-1", CONTRACT)).kind).toBe("continued");
+      expect(tabB.nextIndex("step-1", "rec-1")).toBe(3);
+      expect(db.journals.size).toBe(1);
+    });
+
+    it("refuses with the read error when the recording's journals cannot be read, and holds nothing", async () => {
+      const { db, as, closeA, lockManager } = await tabClosesMidPart();
+      closeA();
+      const tabB = as("user-a");
+      vi.spyOn(db, "listJournals").mockRejectedValueOnce(new Error("blocked"));
+      expect(await tabB.resume("step-1", "rec-1", CONTRACT)).toEqual({
+        kind: "refused",
+        refusal: "read_failed"
+      });
+      expect(lockManager.isHeld("eneo-flow-recording-holder:flow-1::step-1::rec-1")).toBe(false);
+      expect(tabB.keeping("step-1", "rec-1", 0)).toBeUndefined();
+      expect(tabB.nextIndex("step-1", "rec-1")).toBe(0);
+    });
+  });
+
   it("says when kept recordings could not be read", async () => {
     const { keeper, db } = setup();
     vi.spyOn(db, "listParts").mockRejectedValue(new Error("blocked"));

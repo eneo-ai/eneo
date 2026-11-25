@@ -202,6 +202,8 @@ export class RecordingKeeper {
    */
   #holds = new Map<string, Hold>();
   #resuming = new Set<string>();
+  /** For each recording continued here, the lowest number its next part may take. */
+  #floors = new Map<string, number>();
   #closed = false;
 
   /** `userId`: the signed-in person, whose recordings are kept and offered; null while not known. */
@@ -551,8 +553,11 @@ export class RecordingKeeper {
     if (answer === "taken") return { kind: "refused", refusal: "open_elsewhere" };
     if (answer === "failed") return { kind: "refused", refusal: "read_failed" };
     if (answer === "closed") return { kind: "closed" };
+    // Journals before parts: a journal another tab rebuilds meanwhile is seen as one or the other.
+    let journals: JournalMeta[];
     let parts: StoredPart[];
     try {
+      journals = this.#db ? await this.#db.listJournals(this.#flowId, stepId) : [];
       parts = await this.readSession(stepId, sessionId);
     } catch {
       return { kind: "refused", refusal: "read_failed" };
@@ -563,7 +568,18 @@ export class RecordingKeeper {
     const refusal = resumeRefusal(contract, parts);
     if (refusal) return { kind: "refused", refusal };
     this.#adopt(stepId, parts);
+    // A part left unfinished keeps its number: the next part is numbered over it, which stays.
+    const numbers = [
+      ...parts.map((part) => part.index),
+      ...journals.filter((meta) => meta.sessionId === sessionId).map((meta) => meta.index)
+    ];
+    this.#floors.set(holdKey(stepId, sessionId), Math.max(-1, ...numbers) + 1);
     return { kind: "continued", parts };
+  }
+
+  /** The lowest number the next part of a recording continued here may take. */
+  nextIndex(stepId: string, sessionId: string): number {
+    return this.#floors.get(holdKey(stepId, sessionId)) ?? 0;
   }
 
   /** A kept recording goes on in this form: its parts count as kept on the device. */
