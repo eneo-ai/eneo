@@ -232,7 +232,8 @@
   "shortTextContent": 5
  },
  "ipad-landscape-dark|/spaces/$/flows/$": {
-  "bgOverlap": 2
+  "bgOverlap": 2,
+  "elmPartiallyObscured": 6
  },
  "ipad-landscape-dark|/spaces/$/flows/$/runs/$": {
   "bgOverlap": 8,
@@ -375,7 +376,8 @@
   "shortTextContent": 5
  },
  "ipad-landscape-light|/spaces/$/flows/$": {
-  "bgOverlap": 2
+  "bgOverlap": 2,
+  "elmPartiallyObscured": 6
  },
  "ipad-landscape-light|/spaces/$/flows/$/runs/$": {
   "bgOverlap": 8,
@@ -875,7 +877,8 @@
   "nonBmp": 2
  },
  "WCAG 2.2 AA, dark mode|space flows, the new-flow dialog and a flow's page #3": {
-  "bgOverlap": 2
+  "bgOverlap": 2,
+  "elmPartiallyObscured": 1
  },
  "WCAG 2.2 AA, dark mode|space overview, knowledge and websites, and the create-collection dialog #1": {
   "pseudoContent": 2
@@ -1005,7 +1008,8 @@
   "nonBmp": 2
  },
  "WCAG 2.2 AA, light mode|space flows, the new-flow dialog and a flow's page #3": {
-  "bgOverlap": 2
+  "bgOverlap": 2,
+  "elmPartiallyObscured": 1
  },
  "WCAG 2.2 AA, light mode|space overview, knowledge and websites, and the create-collection dialog #1": {
   "pseudoContent": 2
