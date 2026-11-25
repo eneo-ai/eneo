@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 from eneo.database.database import sessionmanager
 from eneo.database.tables.app_table import AppRuns, AppRunsFiles, AppsFiles
-from eneo.database.tables.assistant_table import AssistantsFiles
+from eneo.database.tables.assistant_table import Assistants, AssistantsFiles
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.questions_table import Questions, QuestionsFiles
 from eneo.database.tables.service_table import Services
@@ -517,3 +517,103 @@ async def test_moving_a_service_takes_along_the_files_only_its_questions_use(
 
         assert moved == 1
         assert await homes.homes_of([own, shared]) == {own: target, shared: source}
+
+
+async def test_a_question_whose_assistant_moves_meanwhile_is_held_in_the_new_space(
+    db_container, admin_user, assistant_factory, completion_model_factory
+) -> None:
+    """The space is read, locked and read again, so an attach that waited for
+    a move places its file where the assistant now is, not where it was."""
+    async with db_container() as container:
+        session = container.session()
+        source = await _space(container, "Source")
+        target = await _space(container, "Target")
+        model = await completion_model_factory(session, f"Hold model {uuid4()}")
+        assistant = await assistant_factory(
+            session, "Minute taker", model.id, space_id=source
+        )
+        conversation = Sessions(
+            user_id=admin_user.id, name="Meeting", assistant_id=assistant.id
+        )
+        session.add(conversation)
+        await session.flush()
+        question = Questions(
+            question="Summarise",
+            answer="",
+            num_tokens_question=0,
+            num_tokens_answer=0,
+            tenant_id=admin_user.tenant_id,
+            session_id=conversation.id,
+        )
+        session.add(question)
+        await session.flush()
+        draft_id = await _file(session, admin_user)
+        assistant_id, question_id = assistant.id, question.id
+
+    async def move() -> None:
+        async with sessionmanager.session() as session, session.begin():
+            for space_id in sorted((source, target), key=str):
+                await session.execute(
+                    sa.select(Spaces.id).where(Spaces.id == space_id).with_for_update()
+                )
+            await session.execute(
+                sa.update(Assistants)
+                .where(Assistants.id == assistant_id)
+                .values(space_id=target)
+            )
+            # Long enough for the attach to read the old space and queue up.
+            await asyncio.sleep(0.4)
+
+    async def attach() -> UUID | None:
+        await asyncio.sleep(0.1)
+        async with sessionmanager.session() as session, session.begin():
+            homes = FileHomes(session)
+            held = await homes.hold_space_of_question(question_id)
+            assert held is not None
+            await homes.attach([draft_id], space_id=held)
+            return held
+
+    _, held = await asyncio.gather(move(), attach())
+
+    assert held == target
+    async with db_container() as container:
+        assert await _home(container.session(), draft_id) == target
+
+
+async def test_the_space_of_a_question_is_known_before_the_question_exists(
+    db_container, admin_user, assistant_factory, completion_model_factory
+) -> None:
+    async with db_container() as container:
+        session = container.session()
+        of_assistant = await _space(container, "Assistants")
+        of_service = await _space(container, "Services")
+        model = await completion_model_factory(session, f"Where model {uuid4()}")
+        assistant = await assistant_factory(
+            session, "Minute taker", model.id, space_id=of_assistant
+        )
+        service = Services(
+            name="Classifier",
+            prompt="Classify",
+            user_id=admin_user.id,
+            space_id=of_service,
+        )
+        with_assistant = Sessions(
+            user_id=admin_user.id, name="Meeting", assistant_id=assistant.id
+        )
+        with_nothing = Sessions(user_id=admin_user.id, name="Loose")
+        session.add_all([service, with_assistant, with_nothing])
+        await session.flush()
+        homes = FileHomes(session)
+
+        async def held(session_id: UUID | None, service_id: UUID | None) -> UUID | None:
+            return await homes.hold_space_of_conversation(
+                session_id=session_id, service_id=service_id
+            )
+
+        assert await held(with_assistant.id, None) == of_assistant
+        assert await held(None, service.id) == of_service
+        # The conversation's assistant decides before a service named beside it.
+        assert await held(with_assistant.id, service.id) == of_assistant
+        assert await held(with_nothing.id, service.id) == of_service
+        assert await held(with_nothing.id, None) is None
+        assert await held(None, None) is None

@@ -601,6 +601,11 @@ class FileService:
             max_size=get_settings().mcp_tool_file_max_bytes,
         ) as prepared:
             async with self._write_transaction():
+                if revises_file_id is not None:
+                    # The space is taken before the file rows: see FileHomes.
+                    await self._homes.hold_home_of(revises_file_id)
+                elif for_question_id is not None:
+                    await self._homes.hold_space_of_question(for_question_id)
                 file_id = await self._persist_prepared_file(
                     replace(prepared, derivatives=()),
                     revises_file_id=revises_file_id,

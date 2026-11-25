@@ -55,6 +55,7 @@ from eneo.files.attachment_budget import (
     assert_prompt_and_files_fit_context,
     attachment_token_ceiling,
 )
+from eneo.files.file_home import FileHomes
 from eneo.files.file_models import File, FileType
 from eneo.files.file_reference import (
     inline_file_text_for_model,
@@ -1924,6 +1925,11 @@ class AssistantService:
         # matching governance lock order, and hold both until the request commits.
         await self._acquire_personal_default_fit_lock(shared=True)
         assert space.id is not None
+        if attachments is not None:
+            # Attaching a file places it in the space, and whoever does that
+            # takes the space before the assistant, as a move and a deleted
+            # space do.
+            await FileHomes(self.space_repo.session).hold_space(space.id)
         await self.repo.lock(assistant_id, space.id)
         space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
         actor = self.actor_manager.get_space_actor_from_space(space=space)

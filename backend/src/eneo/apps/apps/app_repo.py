@@ -378,6 +378,9 @@ class AppRepository:
         return await self._get(id, for_update=True)
 
     async def update(self, app: App) -> App:
+        # An update may attach files, and whoever places a file takes the
+        # space before the app row: see FileHomes.
+        await FileHomes(self.session).hold_space(app.space_id)
         # See `add` — same reason: never write NULL back to the column.
         model_kwargs = app.completion_model_kwargs.model_dump()
 

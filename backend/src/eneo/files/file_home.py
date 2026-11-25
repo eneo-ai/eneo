@@ -82,6 +82,12 @@ class FileHomeFill:
     next_after: UUID | None
 
 
+class FileHomeChangedError(FileHomeError):
+    """What the File is being attached to moved to another space meanwhile."""
+
+    code = "file_home_changed"
+
+
 class FileUsePathUndeclaredError(RuntimeError):
     """A table keeps Files in use without saying which space that use is in."""
 
@@ -141,6 +147,35 @@ def _uses_with_their_space() -> dict[tuple[str, str], Select[Any]]:
     }
 
 
+def space_of_conversation(
+    *, session_id: UUID | None, service_id: UUID | None
+) -> Select[Any]:
+    """The space a question will be asked in, before the question exists:
+    that of the conversation's assistant or service, or of the service it is
+    asked of directly. The same order ``space_of_question`` reads it in."""
+    places: list[sa.ScalarSelect[Any]] = []
+    if session_id is not None:
+        assistant = aliased(Assistants)
+        service = aliased(Services)
+        places.append(
+            sa.select(sa.func.coalesce(assistant.space_id, service.space_id))
+            .select_from(Sessions)
+            .outerjoin(assistant, assistant.id == Sessions.assistant_id)
+            .outerjoin(service, service.id == Sessions.service_id)
+            .where(Sessions.id == session_id)
+            .scalar_subquery()
+        )
+    if service_id is not None:
+        places.append(
+            sa.select(Services.space_id)
+            .where(Services.id == service_id)
+            .scalar_subquery()
+        )
+    if not places:
+        return sa.select(sa.null())
+    return sa.select(sa.func.coalesce(*places, sa.null()))
+
+
 def space_of_question(question_id: UUID) -> Select[Any]:
     """The space a question is asked in: that of its conversation's assistant
     or service, or of the service it was asked of directly. Empty when the
@@ -182,35 +217,82 @@ def _ids(
     return sa.bindparam(name, value=value, type_=ARRAY(PostgreSQLUUID(as_uuid=True)))
 
 
-def _uses_in_space(space_id: UUID, *, of_files: Select[Any]) -> dict[str, sa.Delete]:
-    """Per table, the statement that removes the uses some Files have in one space."""
+@dataclass(frozen=True, slots=True)
+class _OwnersInSpace:
+    """What can keep a File in use inside one space, each as a select of ids.
+
+    Built from the space outward, so each step follows an index: the fill-in
+    asks this once per space and must not read every use of every File.
+    """
+
+    assistants: Select[Any]
+    apps: Select[Any]
+    runs: Select[Any]
+    questions: Select[Any]
+
+
+def _owners_in_space(space_id: UUID) -> _OwnersInSpace:
     assistants = sa.select(Assistants.id).where(Assistants.space_id == space_id)
     apps = sa.select(Apps.id).where(Apps.space_id == space_id)
     services = sa.select(Services.id).where(Services.space_id == space_id)
-    runs = sa.select(AppRuns.id).where(AppRuns.app_id.in_(apps))
-    conversations = sa.select(Sessions.id).where(
-        sa.or_(Sessions.assistant_id.in_(assistants), Sessions.service_id.in_(services))
+    conversations = sa.union(
+        sa.select(Sessions.id).where(Sessions.assistant_id.in_(assistants)),
+        sa.select(Sessions.id).where(Sessions.service_id.in_(services)),
+    ).subquery("conversations_in_space")
+    questions = sa.union(
+        sa.select(Questions.id).where(
+            Questions.session_id.in_(sa.select(conversations.c.id))
+        ),
+        sa.select(Questions.id).where(Questions.service_id.in_(services)),
+    ).subquery("questions_in_space")
+    return _OwnersInSpace(
+        assistants=assistants,
+        apps=apps,
+        runs=sa.select(AppRuns.id).where(AppRuns.app_id.in_(apps)),
+        questions=sa.select(questions.c.id),
     )
-    questions = sa.select(Questions.id).where(
-        sa.or_(
-            Questions.session_id.in_(conversations),
-            Questions.service_id.in_(services),
-        )
-    )
+
+
+def _files_used_in_space(space_id: UUID) -> sa.Subquery:
+    """Every File with a use that an assistant, app, run or question of the
+    space holds, in ``file_id``. A File used through a conversation whose
+    assistant is elsewhere may be among them; where a family is really in use
+    is decided by ``use_of_families``."""
+    owners = _owners_in_space(space_id)
+    return sa.union_all(
+        sa.select(AssistantsFiles.file_id.label("file_id")).where(
+            AssistantsFiles.assistant_id.in_(owners.assistants)
+        ),
+        sa.select(AppsFiles.file_id.label("file_id")).where(
+            AppsFiles.app_id.in_(owners.apps)
+        ),
+        sa.select(AppRunsFiles.file_id.label("file_id")).where(
+            AppRunsFiles.app_run_id.in_(owners.runs)
+        ),
+        sa.select(QuestionsFiles.file_id.label("file_id")).where(
+            QuestionsFiles.question_id.in_(owners.questions)
+        ),
+    ).subquery("files_used_in_space")
+
+
+def _uses_in_space(space_id: UUID, *, of_files: Select[Any]) -> dict[str, sa.Delete]:
+    """Per table, the statement that removes the uses some Files have in one space."""
+    owners = _owners_in_space(space_id)
     return {
         "assistants_files": sa.delete(AssistantsFiles).where(
             AssistantsFiles.file_id.in_(of_files),
-            AssistantsFiles.assistant_id.in_(assistants),
+            AssistantsFiles.assistant_id.in_(owners.assistants),
         ),
         "apps_files": sa.delete(AppsFiles).where(
-            AppsFiles.file_id.in_(of_files), AppsFiles.app_id.in_(apps)
+            AppsFiles.file_id.in_(of_files), AppsFiles.app_id.in_(owners.apps)
         ),
         "app_runs_files": sa.delete(AppRunsFiles).where(
-            AppRunsFiles.file_id.in_(of_files), AppRunsFiles.app_run_id.in_(runs)
+            AppRunsFiles.file_id.in_(of_files),
+            AppRunsFiles.app_run_id.in_(owners.runs),
         ),
         "questions_files": sa.delete(QuestionsFiles).where(
             QuestionsFiles.file_id.in_(of_files),
-            QuestionsFiles.question_id.in_(questions),
+            QuestionsFiles.question_id.in_(owners.questions),
         ),
     }
 
@@ -291,6 +373,64 @@ class FileHomes:
             )
             for root_id in spaces
         }
+
+    # --- holding the space ----------------------------------------------
+    #
+    # Whoever places or attaches a File takes the space before any other row
+    # the same work will lock: the assistant, the app, the question, the File
+    # itself. A deleted space and a moved assistant or service take the space
+    # first too, so the two wait for each other. Taking it after another row
+    # would let each hold what the other waits for.
+
+    async def hold_space(self, space_id: UUID) -> None:
+        """Keep a space where it is until this transaction ends."""
+        held = await self._session.scalar(
+            sa.select(Spaces.id)
+            .where(Spaces.id == space_id)
+            .with_for_update(read=True, key_share=True)
+        )
+        if held is None:
+            raise FileHomeSpaceNotFoundError("The space does not exist.")
+
+    async def hold_space_of_question(self, question_id: UUID) -> UUID | None:
+        """Hold the space a question is asked in; ``None`` when it has none."""
+        return await self._hold_settled(space_of_question(question_id))
+
+    async def hold_space_of_conversation(
+        self, *, session_id: UUID | None, service_id: UUID | None
+    ) -> UUID | None:
+        """Hold the space a question is about to be asked in."""
+        return await self._hold_settled(
+            space_of_conversation(session_id=session_id, service_id=service_id)
+        )
+
+    async def hold_home_of(self, file_id: UUID) -> UUID | None:
+        """Hold the space a File lives in; ``None`` for one without a home."""
+        return await self._hold_settled(
+            sa.select(Files.home_space_id).where(Files.id == file_id)
+        )
+
+    async def _hold_settled(self, where_it_is: Select[Any]) -> UUID | None:
+        """Hold the space ``where_it_is`` names, and know it still names it.
+
+        The space is read, then locked, then read again: an assistant or a
+        service that moved while this waited for the lock is seen, and the
+        space it moved to is held instead.
+        """
+        for _attempt in range(3):
+            space_id = await self._session.scalar(where_it_is)
+            if space_id is None:
+                return None
+            held = await self._session.scalar(
+                sa.select(Spaces.id)
+                .where(Spaces.id == space_id)
+                .with_for_update(read=True, key_share=True)
+            )
+            if held is not None and await self._session.scalar(where_it_is) == space_id:
+                return space_id
+        raise FileHomeChangedError(
+            "What the file belongs to moved to another space meanwhile. Try again."
+        )
 
     # --- writing ---------------------------------------------------------
 
@@ -412,21 +552,17 @@ class FileHomes:
         )
         if tenant_id is None:
             return FileHomeFill(placed=0, unresolved={}, next_after=None)
-        uses = sa.union_all(*_USES_WITH_THEIR_SPACE.values()).subquery("file_uses")
+        used = _files_used_in_space(space_id)
         candidates = (
-            sa.select(uses.c.file_id)
-            .join(Files, Files.id == uses.c.file_id)
-            .where(
-                uses.c.space_id == space_id,
-                Files.home_space_id.is_(None),
-                Files.tenant_id == tenant_id,
-            )
+            sa.select(used.c.file_id)
+            .join(Files, Files.id == used.c.file_id)
+            .where(Files.home_space_id.is_(None), Files.tenant_id == tenant_id)
             .distinct()
-            .order_by(uses.c.file_id)
+            .order_by(used.c.file_id)
             .limit(limit)
         )
         if after is not None:
-            candidates = candidates.where(uses.c.file_id > after)
+            candidates = candidates.where(used.c.file_id > after)
         used_here = (await self._session.scalars(candidates)).all()
         if not used_here:
             return FileHomeFill(placed=0, unresolved={}, next_after=None)
@@ -442,6 +578,7 @@ class FileHomes:
                         Files.id
                         == sa.any_(_ids("roots", sorted(set(root_of.values())))),
                         Files.home_space_id.is_(None),
+                        Files.tenant_id == tenant_id,
                     )
                 )
             ).all()
