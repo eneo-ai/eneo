@@ -574,6 +574,49 @@ class FileUsageRepository:
         kept.update(root_of[file_id] for file_id in used_ids)
         return [root_id for root_id in root_tenant if root_id not in kept]
 
+    async def lock_families(
+        self,
+        root_file_ids: Iterable[UUID],
+    ) -> dict[UUID, UUID]:
+        """Lock whole File families and map each member to its root.
+
+        For a decision about several families at once, such as where they
+        belong. Rows are locked root first and then level by level, in the
+        order ``lock_family`` and ``lock_unused_root_families`` use, so a
+        concurrent attach or delete either commits first and is seen here or
+        waits. A candidate that is not a root File is left out.
+        """
+        candidates = sorted(set(root_file_ids))
+        if not candidates:
+            return {}
+        roots = (
+            await self._session.scalars(
+                sa.select(Files.id)
+                .where(
+                    Files.id == sa.any_(self._file_ids_parameter("candidate_ids")),
+                    Files.parent_file_id.is_(None),
+                )
+                .order_by(Files.id)
+                .with_for_update(of=Files),
+                {"candidate_ids": candidates},
+            )
+        ).all()
+        root_of = {root_id: root_id for root_id in roots}
+        frontier: list[UUID] = list(roots)
+        while frontier:
+            rows = await self._lock_children(frontier)
+            frontier = []
+            for row in rows:
+                if row.id in root_of:
+                    continue
+                if row.parent_file_id is None:
+                    raise FileFamilyChangedUnderLockError(
+                        "A selected child lost its parent."
+                    )
+                root_of[row.id] = root_of[row.parent_file_id]
+                frontier.append(row.id)
+        return root_of
+
     async def count_product_usage(
         self,
         file_ids: list[UUID],

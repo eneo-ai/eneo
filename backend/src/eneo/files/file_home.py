@@ -1,0 +1,491 @@
+"""The home of a File: the one space it belongs in.
+
+A File is reached through what it is attached to, and that can change. Its
+home does not: it is set once, shared by the whole family (the root File and
+the Files derived from it), and never emptied. What a space requires of its
+content can then be asked of the File itself, wherever it is read.
+
+This module is the only writer of ``files.home_space_id``. Code that creates
+or attaches a File passes its context here; it never writes the column.
+
+A File without a home is a draft (uploaded, not used anywhere yet) or a File
+from before homes existed. An empty home never means "may be deleted".
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
+from typing import Any
+from uuid import UUID
+
+import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import UUID as PostgreSQLUUID
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
+from sqlalchemy.sql.selectable import Select
+
+from eneo.database.affected_rows import affected_row_count
+from eneo.database.tables.app_table import AppRuns, AppRunsFiles, Apps, AppsFiles
+from eneo.database.tables.assistant_table import Assistants, AssistantsFiles
+from eneo.database.tables.files_table import Files
+from eneo.database.tables.questions_table import Questions, QuestionsFiles
+from eneo.database.tables.service_table import Services
+from eneo.database.tables.sessions_table import Sessions
+from eneo.database.tables.spaces_table import Spaces
+from eneo.files.file_usage import FILE_USAGE_COLUMNS, FileUsageRepository
+
+
+class FileHomeError(Exception):
+    """A File cannot be given, or keep, the home that was asked for."""
+
+    code = "file_home_error"
+
+
+class FileHomeConflictError(FileHomeError):
+    """The File already lives in another space."""
+
+    code = "file_home_conflict"
+
+
+class FileInUseElsewhereError(FileHomeError):
+    """The File is used outside the space, or by more than what is moving."""
+
+    code = "file_in_use_elsewhere"
+
+
+class FileHomeSpaceNotFoundError(FileHomeError):
+    """The space is not one of the File's organisation."""
+
+    code = "file_home_space_not_found"
+
+
+class FileUsePathUndeclaredError(RuntimeError):
+    """A table keeps Files in use without saying which space that use is in."""
+
+
+@dataclass(frozen=True, slots=True)
+class FileFamilyUse:
+    """Where a File family is in use."""
+
+    space_ids: frozenset[UUID]
+    # Uses that lead to no space, such as a conversation whose assistant is
+    # gone. The family cannot be placed by its use while there is one.
+    unplaced: int = 0
+
+    @property
+    def in_use(self) -> bool:
+        return bool(self.space_ids) or self.unplaced > 0
+
+    def only_in(self, space_id: UUID) -> bool:
+        return self.unplaced == 0 and self.space_ids <= {space_id}
+
+
+def _uses_with_their_space() -> dict[tuple[str, str], Select[Any]]:
+    """For each column that keeps a File in use: the File and the space of that use."""
+    session_assistant = aliased(Assistants)
+    session_service = aliased(Services)
+    question_service = aliased(Services)
+    return {
+        ("assistants_files", "file_id"): sa.select(
+            AssistantsFiles.file_id.label("file_id"),
+            Assistants.space_id.label("space_id"),
+        ).join(Assistants, Assistants.id == AssistantsFiles.assistant_id),
+        ("apps_files", "file_id"): sa.select(
+            AppsFiles.file_id.label("file_id"),
+            Apps.space_id.label("space_id"),
+        ).join(Apps, Apps.id == AppsFiles.app_id),
+        ("app_runs_files", "file_id"): sa.select(
+            AppRunsFiles.file_id.label("file_id"),
+            Apps.space_id.label("space_id"),
+        )
+        .join(AppRuns, AppRuns.id == AppRunsFiles.app_run_id)
+        .join(Apps, Apps.id == AppRuns.app_id),
+        # A question is asked in a conversation with an assistant or a
+        # service, or of a service directly.
+        ("questions_files", "file_id"): sa.select(
+            QuestionsFiles.file_id.label("file_id"),
+            sa.func.coalesce(
+                session_assistant.space_id,
+                session_service.space_id,
+                question_service.space_id,
+            ).label("space_id"),
+        )
+        .join(Questions, Questions.id == QuestionsFiles.question_id)
+        .outerjoin(Sessions, Sessions.id == Questions.session_id)
+        .outerjoin(session_assistant, session_assistant.id == Sessions.assistant_id)
+        .outerjoin(session_service, session_service.id == Sessions.service_id)
+        .outerjoin(question_service, question_service.id == Questions.service_id),
+    }
+
+
+_USES_WITH_THEIR_SPACE = _uses_with_their_space()
+_DECLARED_USES = {(column.table.name, column.name) for _, column in FILE_USAGE_COLUMNS}
+if _DECLARED_USES != set(_USES_WITH_THEIR_SPACE):
+    # A new way to keep a File in use must also say where that use is, or the
+    # home code would not see it and could move or remove a File still in use.
+    raise FileUsePathUndeclaredError(
+        "Every column that keeps a File in use needs a path to its space in "
+        f"eneo.files.file_home: {sorted(_DECLARED_USES ^ set(_USES_WITH_THEIR_SPACE))}"
+    )
+
+
+def _ids(
+    name: str, value: Sequence[UUID] | None = None
+) -> sa.BindParameter[Sequence[UUID]]:
+    return sa.bindparam(name, value=value, type_=ARRAY(PostgreSQLUUID(as_uuid=True)))
+
+
+class FileHomes:
+    """Set, take, inherit, check and move the home of File families."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+        self._usage = FileUsageRepository(session)
+
+    # --- reading ---------------------------------------------------------
+
+    async def homes_of(self, file_ids: Iterable[UUID]) -> dict[UUID, UUID | None]:
+        """The home of each File that exists; ``None`` for one without a home."""
+        ids = sorted(set(file_ids))
+        if not ids:
+            return {}
+        rows = await self._session.execute(
+            sa.select(Files.id, Files.home_space_id).where(
+                Files.id == sa.any_(_ids("file_ids", ids))
+            )
+        )
+        return {file_id: home for file_id, home in rows.tuples()}
+
+    async def require_no_other_home(
+        self, file_ids: Iterable[UUID], *, space_id: UUID
+    ) -> None:
+        """Refuse Files that live in another space than ``space_id``."""
+        homes = await self.homes_of(file_ids)
+        elsewhere = sorted(
+            file_id
+            for file_id, home in homes.items()
+            if home is not None and home != space_id
+        )
+        if elsewhere:
+            raise FileHomeConflictError(
+                f"{len(elsewhere)} file(s) belong to another space and cannot be "
+                "used in this one."
+            )
+
+    async def use_of_families(
+        self, root_of: dict[UUID, UUID]
+    ) -> dict[UUID, FileFamilyUse]:
+        """Where each family is in use, given every member mapped to its root.
+
+        Pass the result of ``FileUsageRepository.lock_families`` when the
+        answer decides a write.
+        """
+        if not root_of:
+            return {}
+        uses = sa.union_all(*_USES_WITH_THEIR_SPACE.values()).subquery("file_uses")
+        rows = await self._session.execute(
+            sa.select(uses.c.file_id, uses.c.space_id).where(
+                uses.c.file_id == sa.any_(_ids("member_ids", sorted(root_of)))
+            )
+        )
+        spaces: dict[UUID, set[UUID]] = {root: set() for root in root_of.values()}
+        unplaced: dict[UUID, int] = dict.fromkeys(root_of.values(), 0)
+        for file_id, space_id in rows.tuples():
+            root_id = root_of[file_id]
+            if space_id is None:
+                unplaced[root_id] += 1
+            else:
+                spaces[root_id].add(space_id)
+        return {
+            root_id: FileFamilyUse(
+                space_ids=frozenset(spaces[root_id]), unplaced=unplaced[root_id]
+            )
+            for root_id in spaces
+        }
+
+    # --- writing ---------------------------------------------------------
+
+    async def set_home(self, file_id: UUID, *, space_id: UUID, tenant_id: UUID) -> None:
+        """Give a File's family its home at the moment the File is created.
+
+        Nothing happens when the family already lives in the space. A family
+        that lives in another space keeps its home and the call is refused.
+        """
+        root_of = await self._lock_family_of(file_id, tenant_id=tenant_id)
+        await self._require_space(space_id, tenant_id=tenant_id)
+        await self._write_home(root_of, space_id=space_id)
+
+    async def take(self, file_id: UUID, *, space_id: UUID, tenant_id: UUID) -> None:
+        """Give a File its home when it is attached in a space.
+
+        A draft takes the space as its home. A File without a home that is
+        already in use can be taken only by the space where all its uses are,
+        so another space cannot claim it first. When two spaces take the same
+        draft at once, the family lock lets one through and the other is
+        refused.
+        """
+        root_of = await self._lock_family_of(file_id, tenant_id=tenant_id)
+        await self._require_space(space_id, tenant_id=tenant_id)
+        homes = await self._homes_of_members(root_of)
+        if homes == {None}:
+            use = next(iter((await self.use_of_families(root_of)).values()))
+            if not use.only_in(space_id):
+                raise FileInUseElsewhereError(
+                    "The file is already used outside this space and cannot be "
+                    "attached here."
+                )
+        await self._write_home(root_of, space_id=space_id)
+
+    async def inherit(self, file_id: UUID, *, from_file_id: UUID) -> None:
+        """Give a new File the home of the File it was made from.
+
+        For a File derived from another, and for a new version of a document,
+        which is a File of its own from then on.
+        """
+        source = aliased(Files)
+        await self._session.execute(
+            sa.update(Files)
+            .where(
+                Files.id == file_id,
+                Files.home_space_id.is_(None),
+                source.id == from_file_id,
+                source.tenant_id == Files.tenant_id,
+                source.home_space_id.is_not(None),
+            )
+            .values(home_space_id=source.home_space_id)
+        )
+
+    async def delete_families_living_in(
+        self, space_id: UUID, *, tenant_id: UUID
+    ) -> int:
+        """Remove the Files whose home is a space that is being deleted.
+
+        Called after what used the Files in the space is gone and before the
+        space itself. Each family is locked and its use checked again. A
+        family still in use somewhere stops the deletion: its home cannot be
+        emptied, and removing it would break what uses it.
+        """
+        roots = (
+            await self._session.scalars(
+                sa.select(Files.id)
+                .where(
+                    Files.home_space_id == space_id,
+                    Files.tenant_id == tenant_id,
+                    Files.parent_file_id.is_(None),
+                )
+                .order_by(Files.id)
+            )
+        ).all()
+        deleted = 0
+        if roots:
+            unused = await self._usage.lock_unused_root_families(roots)
+            if len(unused) != len(roots):
+                raise FileInUseElsewhereError(
+                    f"{len(roots) - len(unused)} file(s) that belong to the space "
+                    "are still used elsewhere. Remove those uses first."
+                )
+            result = await self._session.execute(
+                sa.delete(Files).where(Files.id == sa.any_(_ids("unused", unused)))
+            )
+            deleted = affected_row_count(result)
+        left = await self._session.scalar(
+            sa.select(sa.func.count())
+            .select_from(Files)
+            .where(Files.home_space_id == space_id)
+        )
+        if left:
+            raise FileInUseElsewhereError(
+                f"{left} file(s) that belong to the space could not be removed."
+            )
+        return deleted
+
+    async def move_with_assistant(
+        self,
+        assistant_id: UUID,
+        *,
+        source_space_id: UUID,
+        target_space_id: UUID,
+        tenant_id: UUID,
+    ) -> int:
+        """Move the home of the Files an assistant takes along to another space.
+
+        The families that live in the source space and are used by the
+        assistant or its conversations move. A family that something else
+        uses too cannot follow, and cannot be left behind either while the
+        assistant still uses it, so the move is refused. No copy is made.
+        """
+        await self._require_space(target_space_id, tenant_id=tenant_id)
+        attached = sa.select(AssistantsFiles.file_id.label("file_id")).where(
+            AssistantsFiles.assistant_id == assistant_id
+        )
+        asked = (
+            sa.select(QuestionsFiles.file_id.label("file_id"))
+            .join(Questions, Questions.id == QuestionsFiles.question_id)
+            .join(Sessions, Sessions.id == Questions.session_id)
+            .where(Sessions.assistant_id == assistant_id)
+        )
+        used_by_assistant = sorted(
+            (await self._session.scalars(sa.union(attached, asked))).all()
+        )
+        if not used_by_assistant:
+            return 0
+        root_ids = set((await self._roots_of(used_by_assistant)).values())
+        root_of = await self._usage.lock_families(root_ids)
+        living_in_source = set(
+            (
+                await self._session.scalars(
+                    sa.select(Files.id).where(
+                        Files.id
+                        == sa.any_(_ids("roots", sorted(set(root_of.values())))),
+                        Files.home_space_id == source_space_id,
+                        Files.tenant_id == tenant_id,
+                    )
+                )
+            ).all()
+        )
+        moving = {
+            member: root for member, root in root_of.items() if root in living_in_source
+        }
+        if not moving:
+            return 0
+        # Counted under the family locks, so an attach that committed while
+        # the families were being locked is seen.
+        own_uses = await self._count_assistant_uses(moving, assistant_id)
+        all_uses = await self._count_all_uses(moving)
+        shared = sorted(
+            root for root in set(moving.values()) if all_uses[root] != own_uses[root]
+        )
+        if shared:
+            raise FileInUseElsewhereError(
+                f"{len(shared)} file(s) of the assistant are also used by "
+                "something else in the space. Remove those uses, or the files "
+                "from the assistant, before moving it."
+            )
+        result = await self._session.execute(
+            sa.update(Files)
+            .where(Files.id == sa.any_(_ids("moving", sorted(moving))))
+            .values(home_space_id=target_space_id)
+        )
+        return affected_row_count(result)
+
+    # --- helpers ---------------------------------------------------------
+
+    async def _count_all_uses(self, root_of: dict[UUID, UUID]) -> dict[UUID, int]:
+        uses = sa.union_all(*_USES_WITH_THEIR_SPACE.values()).subquery("file_uses")
+        rows = await self._session.execute(
+            sa.select(uses.c.file_id, sa.func.count())
+            .where(uses.c.file_id == sa.any_(_ids("member_ids", sorted(root_of))))
+            .group_by(uses.c.file_id)
+        )
+        counts: dict[UUID, int] = dict.fromkeys(root_of.values(), 0)
+        for file_id, count in rows.tuples():
+            counts[root_of[file_id]] += count
+        return counts
+
+    async def _count_assistant_uses(
+        self, root_of: dict[UUID, UUID], assistant_id: UUID
+    ) -> dict[UUID, int]:
+        """The uses of each family by one assistant and its conversations."""
+        members = _ids("member_ids", sorted(root_of))
+        attached = sa.select(AssistantsFiles.file_id.label("file_id")).where(
+            AssistantsFiles.assistant_id == assistant_id,
+            AssistantsFiles.file_id == sa.any_(members),
+        )
+        asked = (
+            sa.select(QuestionsFiles.file_id.label("file_id"))
+            .join(Questions, Questions.id == QuestionsFiles.question_id)
+            .join(Sessions, Sessions.id == Questions.session_id)
+            .where(
+                Sessions.assistant_id == assistant_id,
+                QuestionsFiles.file_id == sa.any_(members),
+            )
+        )
+        own = sa.union_all(attached, asked).subquery("assistant_uses")
+        rows = await self._session.execute(
+            sa.select(own.c.file_id, sa.func.count()).group_by(own.c.file_id)
+        )
+        counts: dict[UUID, int] = dict.fromkeys(root_of.values(), 0)
+        for file_id, count in rows.tuples():
+            counts[root_of[file_id]] += count
+        return counts
+
+    async def _lock_family_of(
+        self, file_id: UUID, *, tenant_id: UUID
+    ) -> dict[UUID, UUID]:
+        roots = await self._roots_of([file_id])
+        root_id = roots.get(file_id)
+        if root_id is None:
+            raise FileHomeError("The file does not exist.")
+        root_of = await self._usage.lock_families([root_id])
+        tenants = set(
+            (
+                await self._session.scalars(
+                    sa.select(Files.tenant_id).where(
+                        Files.id == sa.any_(_ids("members", sorted(root_of)))
+                    )
+                )
+            ).all()
+        )
+        if tenants != {tenant_id}:
+            raise FileHomeError("The file does not exist.")
+        return root_of
+
+    async def _roots_of(self, file_ids: Sequence[UUID]) -> dict[UUID, UUID]:
+        """Each File mapped to the root of its family."""
+        up = (
+            sa.select(
+                Files.id.label("start_id"),
+                Files.id.label("id"),
+                Files.parent_file_id.label("parent_file_id"),
+            )
+            .where(Files.id == sa.any_(_ids("start_ids", sorted(set(file_ids)))))
+            .cte("file_ancestors", recursive=True)
+        )
+        up = up.union_all(
+            sa.select(up.c.start_id, Files.id, Files.parent_file_id).join(
+                up, Files.id == up.c.parent_file_id
+            )
+        )
+        rows = await self._session.execute(
+            sa.select(up.c.start_id, up.c.id).where(up.c.parent_file_id.is_(None))
+        )
+        return {start_id: root_id for start_id, root_id in rows.tuples()}
+
+    async def _homes_of_members(self, root_of: dict[UUID, UUID]) -> set[UUID | None]:
+        return set(
+            (
+                await self._session.scalars(
+                    sa.select(Files.home_space_id).where(
+                        Files.id == sa.any_(_ids("members", sorted(root_of)))
+                    )
+                )
+            ).all()
+        )
+
+    async def _write_home(self, root_of: dict[UUID, UUID], *, space_id: UUID) -> None:
+        homes = await self._homes_of_members(root_of)
+        if homes - {None, space_id}:
+            raise FileHomeConflictError(
+                "The file belongs to another space and cannot be used in this one."
+            )
+        if None not in homes:
+            return
+        await self._session.execute(
+            sa.update(Files)
+            .where(
+                Files.id == sa.any_(_ids("members", sorted(root_of))),
+                Files.home_space_id.is_(None),
+            )
+            .values(home_space_id=space_id)
+        )
+
+    async def _require_space(self, space_id: UUID, *, tenant_id: UUID) -> None:
+        found = await self._session.scalar(
+            sa.select(Spaces.id).where(
+                Spaces.id == space_id, Spaces.tenant_id == tenant_id
+            )
+        )
+        if found is None:
+            raise FileHomeSpaceNotFoundError("The space does not exist.")
