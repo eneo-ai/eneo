@@ -739,6 +739,69 @@ describe("flow retention", () => {
     });
   });
 
+  it("holds a press when the time that applies changes and comes back to the time typed against, and saves on a new press", async () => {
+    backend.GET.mockResolvedValue(settings({ days: 10 }, { days: 60 }));
+    backend.PUT.mockResolvedValue(settings({ days: 5 }, { days: 60 }));
+    const { queryClient } = renderSettings(["retention_manage"]);
+    fireEvent.click(screen.getByRole("button", { name: "Ändra gallring" }));
+    const days = (await screen.findByRole("textbox", { name: FIELD })) as HTMLInputElement;
+    fireEvent.change(days, { target: { value: "5" } });
+    expect(warningShown()).toBe(true);
+    // A read gives the flow 3 days: 5 is no longer shorter.
+    backend.GET.mockResolvedValue(settings({ days: 3 }, { days: 60 }));
+    await act(() => queryClient.refetchQueries({ queryKey: policyKey, exact: true }));
+    await settle();
+    expect(warningShown()).toBe(false);
+    const button = screen.getByRole("button", { name: SAVE });
+    fireEvent.pointerDown(button);
+    // While the button is down, a read gives the flow 10 days again.
+    backend.GET.mockResolvedValue(settings({ days: 10 }, { days: 60 }));
+    await act(() => queryClient.refetchQueries({ queryKey: policyKey, exact: true }));
+    await settle();
+    fireEvent.pointerUp(button);
+    fireEvent.click(button);
+    await settle();
+    // The warning was not on screen when the press began: nothing is sent.
+    expect(backend.PUT).not.toHaveBeenCalled();
+    expect(warningShown()).toBe(true);
+    press(screen.getByRole("button", { name: SAVE_AND_REMOVE }));
+    await waitFor(() => expect(backend.PUT).toHaveBeenCalledTimes(1));
+    expect(backend.PUT.mock.calls[0]![1].body).toEqual({
+      policy: { days: 5 },
+      expected_effective_days: 10,
+      expected_inherited_days: 60
+    });
+  });
+
+  it("holds an Enter again when the time that applies changes and comes back after a held one", async () => {
+    backend.GET.mockResolvedValue(settings({ days: 10 }, { days: 60 }));
+    backend.PUT.mockResolvedValue(settings({ days: 5 }, { days: 60 }));
+    const { queryClient } = renderSettings(["retention_manage"]);
+    fireEvent.click(screen.getByRole("button", { name: "Ändra gallring" }));
+    const days = (await screen.findByRole("textbox", { name: FIELD })) as HTMLInputElement;
+    fireEvent.change(days, { target: { value: "5" } });
+    pressEnter(days);
+    await settle();
+    expect(backend.PUT).not.toHaveBeenCalled();
+    backend.GET.mockResolvedValue(settings({ days: 3 }, { days: 60 }));
+    await act(() => queryClient.refetchQueries({ queryKey: policyKey, exact: true }));
+    await settle();
+    backend.GET.mockResolvedValue(settings({ days: 10 }, { days: 60 }));
+    await act(() => queryClient.refetchQueries({ queryKey: policyKey, exact: true }));
+    await settle();
+    pressEnter(days);
+    await settle();
+    expect(backend.PUT).not.toHaveBeenCalled();
+    expect(warningShown()).toBe(true);
+    pressEnter(days);
+    await waitFor(() => expect(backend.PUT).toHaveBeenCalledTimes(1));
+    expect(backend.PUT.mock.calls[0]![1].body).toEqual({
+      policy: { days: 5 },
+      expected_effective_days: 10,
+      expected_inherited_days: 60
+    });
+  });
+
   it("gives the field's description and error the dialog's width, and keeps the box for the number narrow", async () => {
     backend.GET.mockResolvedValue(settings(null, { days: 60 }));
     const days = await openDialog();

@@ -490,6 +490,16 @@ function RetentionForm({
   const applied = (flowDays: number | null) =>
     automaticRemovalDays({ personalSpace, spaceDays, flowDays });
   const current = applied(savedDays);
+  // Every change of the time that applies takes back the draft's right to save at once and a
+  // held press, also when the time comes back to an earlier value: the draft is marked typed
+  // against the time before the change, which is never the time now. Adjusted while rendering,
+  // so no press sees a render before it.
+  const [seen, setSeen] = useState(current);
+  if (seen !== current) {
+    setSeen(current);
+    setHeldAgainst(null);
+    if (draft) setDraft({ ...draft, against: seen });
+  }
   const next = days === undefined ? null : applied(days);
   const shortens = draft !== null && current !== null && next !== null && next < current;
   // The date the new time reaches back to: a run that finished then or earlier is due.
