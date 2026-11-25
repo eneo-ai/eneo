@@ -883,9 +883,10 @@ class ApiKeyLifecycleService:
         key: ApiKeyV2InDB | None = None
         try:
             # The strong lock makes a new row that points to the key wait from
-            # this read on, and fail once the key is gone. Under the weaker one
-            # it could commit before the delete, and a conversation the key
-            # owns would then make the delete fail: it keeps exactly one owner.
+            # this read on, and fail once the key is gone, so nothing starts to
+            # name a key that is being removed. Rows that already name it lose
+            # the reference and keep their owner: a conversation belongs to the
+            # key's service principal, which stays.
             key = await self._get_key_or_404(
                 key_id=key_id, tenant_id=user.tenant_id, for_update=True
             )

@@ -290,3 +290,45 @@ def test_downgrade_gives_the_person_column_back_and_upgrade_renames_it_again(
     command.upgrade(config, REVISION)
 
     assert _owner(connection, file_id) == ("user", user_id, None)
+
+
+def test_an_organisation_is_still_deleted_with_everything_it_owns(migration_db) -> None:
+    connection, config = migration_db
+    tenant_id, user_id = _tenant_with_user(connection)
+    persons_file = _file_before_upgrade(
+        connection, tenant_id=tenant_id, user_id=user_id
+    )
+    command.upgrade(config, REVISION)
+    principal_id = _service_principal(connection, tenant_id=tenant_id)
+    services_file = _file_after_upgrade(
+        connection,
+        tenant_id=tenant_id,
+        owner_type="service_key",
+        owner_service_id=principal_id,
+    )
+
+    key_id = str(uuid4())
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "INSERT INTO api_keys_v2 (id, tenant_id, ownership, service_principal_id,"
+            " scope_type, permission, key_type, key_hash, hash_version, key_prefix,"
+            " key_suffix, name, state) VALUES (%s, %s, 'service', %s, 'tenant',"
+            " 'read', 'sk_', %s, 'hmac_sha256', 'sk_', 'abcd', 'Invoice reader',"
+            " 'active')",
+            (key_id, tenant_id, principal_id, f"hash-{key_id}"),
+        )
+
+    with connection.cursor() as cursor:
+        cursor.execute("DELETE FROM tenants WHERE id = %s", (tenant_id,))
+
+    assert not _file_exists(connection, persons_file)
+    assert not _file_exists(connection, services_file)
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT count(*) FROM users WHERE id = %s", (user_id,))
+        assert cursor.fetchone()[0] == 0
+        cursor.execute(
+            "SELECT count(*) FROM service_principals WHERE id = %s", (principal_id,)
+        )
+        assert cursor.fetchone()[0] == 0
+        cursor.execute("SELECT count(*) FROM api_keys_v2 WHERE id = %s", (key_id,))
+        assert cursor.fetchone()[0] == 0

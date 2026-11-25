@@ -17,7 +17,6 @@ from eneo.data_retention.derivations import (
 )
 from eneo.database.database import AsyncSession
 from eneo.database.repositories.base import BaseRepositoryDelegate
-from eneo.database.tables.api_keys_v2_table import ApiKeysV2
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.help_assistant_runs_table import HelpAssistantRuns
 from eneo.database.tables.info_blobs_table import InfoBlobs
@@ -27,6 +26,7 @@ from eneo.database.tables.questions_table import (
     Questions,
     QuestionsFiles,
 )
+from eneo.database.tables.service_principals_table import ServicePrincipals
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import Spaces, SpacesUserGroups, SpacesUsers
 from eneo.database.tables.user_groups_table import UserGroups
@@ -62,6 +62,7 @@ class SessionOwnership(NamedTuple):
     widget_id: UUID | None
     visitor_id: UUID | None
     assistant_id: UUID | None
+    service_principal_id: UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -187,15 +188,21 @@ class SessionRepository:
     def _filter_by_tenant(query: sa.Select[Any], tenant_id: UUID) -> sa.Select[Any]:
         """Restrict a sessions query to a single tenant.
 
-        Sessions.user_id is NULL for service-key sessions (the principal is on
-        api_key_id instead), so an INNER JOIN on Users would silently drop
-        them. We LEFT JOIN both principal tables and match against whichever
-        tenant_id is present.
+        Sessions.user_id is NULL for a service principal's sessions, so an
+        INNER JOIN on Users would silently drop them. We LEFT JOIN both
+        principal tables and match against whichever tenant_id is present.
+        The principal, not the key: a key can be removed, its principal stays.
         """
         return (
             query.outerjoin(Users, Sessions.user_id == Users.id)
-            .outerjoin(ApiKeysV2, Sessions.api_key_id == ApiKeysV2.id)
-            .where(sa.func.coalesce(Users.tenant_id, ApiKeysV2.tenant_id) == tenant_id)
+            .outerjoin(
+                ServicePrincipals,
+                Sessions.service_principal_id == ServicePrincipals.id,
+            )
+            .where(
+                sa.func.coalesce(Users.tenant_id, ServicePrincipals.tenant_id)
+                == tenant_id
+            )
         )
 
     # IMPORTANT: every method in this repo that returns session or question
@@ -324,6 +331,7 @@ class SessionRepository:
                 Sessions.widget_id,
                 Sessions.visitor_id,
                 Sessions.assistant_id,
+                Sessions.service_principal_id,
             ).where(Sessions.id == id)
         )
         row = (await self.session.execute(query)).one_or_none()
@@ -506,17 +514,18 @@ class SessionRepository:
 
     @staticmethod
     def _owned_by(
-        user_id: UUID | None, api_key_id: UUID | None
+        user_id: UUID | None, service_principal_id: UUID | None
     ) -> sa.ColumnElement[bool]:
-        """Sessions of exactly this principal: a user, or a service API key.
+        """Sessions of exactly this principal: a user, or the service principal
+        behind a service key (not the key, which changes on rotation).
 
         Never matches NULL against NULL, so a request without either principal
         owns nothing.
         """
         if user_id is not None:
             return Sessions.user_id == user_id
-        if api_key_id is not None:
-            return Sessions.api_key_id == api_key_id
+        if service_principal_id is not None:
+            return Sessions.service_principal_id == service_principal_id
         return sa.false()
 
     def _owned_message(
@@ -526,7 +535,7 @@ class SessionRepository:
         message_id: UUID,
         tenant_id: UUID,
         user_id: UUID | None,
-        api_key_id: UUID | None,
+        service_principal_id: UUID | None,
     ) -> sa.Select[Any]:
         """A message in one of the principal's assistant conversations."""
         query = (
@@ -536,7 +545,7 @@ class SessionRepository:
             .where(Questions.id == message_id)
             .where(Questions.session_id == session_id)
             .where(Questions.tenant_id == tenant_id)
-            .where(self._owned_by(user_id, api_key_id))
+            .where(self._owned_by(user_id, service_principal_id))
             .where(Sessions.assistant_id.is_not(None))
         )
         return self._exclude_helper_run_sessions(query)
@@ -548,7 +557,7 @@ class SessionRepository:
         message_id: UUID,
         tenant_id: UUID,
         user_id: UUID | None,
-        api_key_id: UUID | None,
+        service_principal_id: UUID | None,
     ) -> OwnedChatPartner | None:
         """The chat partner of a message in one of the principal's conversations.
 
@@ -561,7 +570,7 @@ class SessionRepository:
             message_id=message_id,
             tenant_id=tenant_id,
             user_id=user_id,
-            api_key_id=api_key_id,
+            service_principal_id=service_principal_id,
         )
         row = (await self.session.execute(query)).one_or_none()
         if row is None:
@@ -575,6 +584,7 @@ class SessionRepository:
         message_id: UUID,
         tenant_id: UUID,
         user_id: UUID | None,
+        service_principal_id: UUID | None,
         api_key_id: UUID | None,
         feedback: MessageFeedback,
     ) -> MessageFeedback | None:
@@ -593,7 +603,7 @@ class SessionRepository:
             message_id=message_id,
             tenant_id=tenant_id,
             user_id=user_id,
-            api_key_id=api_key_id,
+            service_principal_id=service_principal_id,
         )
         insert = pg_insert(QuestionFeedback).from_select(
             ["question_id", "value", "text", "user_id", "api_key_id"], source
@@ -620,7 +630,7 @@ class SessionRepository:
         message_id: UUID,
         tenant_id: UUID,
         user_id: UUID | None,
-        api_key_id: UUID | None,
+        service_principal_id: UUID | None,
     ) -> None:
         """Remove the rating of a message in one of the principal's conversations.
 
@@ -632,7 +642,7 @@ class SessionRepository:
             message_id=message_id,
             tenant_id=tenant_id,
             user_id=user_id,
-            api_key_id=api_key_id,
+            service_principal_id=service_principal_id,
         )
         await self.session.execute(
             sa.delete(QuestionFeedback).where(QuestionFeedback.question_id.in_(owned))
@@ -663,7 +673,7 @@ class SessionRepository:
         self,
         assistant_id: UUID | None = None,
         user_id: UUID | None = None,
-        api_key_id: UUID | None = None,
+        service_principal_id: UUID | None = None,
         widget_id: UUID | None = None,
         visitor_id: UUID | None = None,
         name_filter: str | None = None,
@@ -682,12 +692,12 @@ class SessionRepository:
         if assistant_id is not None:
             query = query.where(Sessions.assistant_id == assistant_id)
 
-        # Principal scoping: user_id and api_key_id are mutually exclusive in
-        # session_service callers (exactly one is non-None per request).
+        # Principal scoping: session_service callers pass exactly one principal
+        # per request.
         if user_id is not None:
             query = query.where(Sessions.user_id == user_id)
-        if api_key_id is not None:
-            query = query.where(Sessions.api_key_id == api_key_id)
+        if service_principal_id is not None:
+            query = query.where(Sessions.service_principal_id == service_principal_id)
         if widget_id is not None:
             query = query.where(
                 Sessions.widget_id == widget_id, Sessions.visitor_id == visitor_id
@@ -723,7 +733,7 @@ class SessionRepository:
         self,
         assistant_id: UUID,
         user_id: UUID | None = None,
-        api_key_id: UUID | None = None,
+        service_principal_id: UUID | None = None,
         widget_id: UUID | None = None,
         visitor_id: UUID | None = None,
         limit: int | None = None,
@@ -747,8 +757,8 @@ class SessionRepository:
 
         if user_id is not None:
             query = query.where(Sessions.user_id == user_id)
-        if api_key_id is not None:
-            query = query.where(Sessions.api_key_id == api_key_id)
+        if service_principal_id is not None:
+            query = query.where(Sessions.service_principal_id == service_principal_id)
         if widget_id is not None:
             query = query.where(
                 Sessions.widget_id == widget_id, Sessions.visitor_id == visitor_id
@@ -766,7 +776,7 @@ class SessionRepository:
         total_count = await self._get_total_count(
             assistant_id=assistant_id,
             user_id=user_id,
-            api_key_id=api_key_id,
+            service_principal_id=service_principal_id,
             widget_id=widget_id,
             visitor_id=visitor_id,
             name_filter=normalized_name_filter,

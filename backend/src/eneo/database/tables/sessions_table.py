@@ -3,12 +3,13 @@ from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
 import sqlalchemy as sa
-from sqlalchemy import TIMESTAMP, CheckConstraint, ForeignKey, Index, func
+from sqlalchemy import TIMESTAMP, CheckConstraint, ForeignKey, Index, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from eneo.database.tables.api_keys_v2_table import ApiKeysV2
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.base_class import BasePublic
+from eneo.database.tables.service_principals_table import ServicePrincipals
 from eneo.database.tables.service_table import Services
 from eneo.database.tables.users_table import Users
 from eneo.database.tables.widgets_table import Widgets
@@ -18,12 +19,22 @@ if TYPE_CHECKING:
 
 
 class Sessions(BasePublic):
-    # user_id is nullable so service-key sessions (which authenticate via an
-    # API key, not a real user) can be persisted. api_key_id carries the
-    # owning principal in that case. Exactly one of the two is set per row.
+    # A session belongs to exactly one principal: a person (user_id), the
+    # service principal behind a service key (service_principal_id), or a
+    # widget visitor (widget_id + visitor_id).
     user_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(Users.id, ondelete="CASCADE"), nullable=True
     )
+    service_principal_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(
+            ServicePrincipals.id,
+            ondelete="RESTRICT",
+            name="fk_sessions_service_principal",
+        ),
+        nullable=True,
+    )
+    # The key that started a service principal's session. A trace, not the
+    # owner: the key changes on rotation and may be removed.
     api_key_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(ApiKeysV2.id, ondelete="SET NULL"), nullable=True
     )
@@ -65,9 +76,18 @@ class Sessions(BasePublic):
     __table_args__ = (
         Index("ix_sessions_created_id", "created_at", "id"),
         CheckConstraint(
-            "(user_id IS NOT NULL)::int + (api_key_id IS NOT NULL)::int"
+            "(user_id IS NOT NULL)::int + (service_principal_id IS NOT NULL)::int"
             " + (widget_id IS NOT NULL)::int = 1",
             name="ck_sessions_single_principal",
+        ),
+        CheckConstraint(
+            "api_key_id IS NULL OR service_principal_id IS NOT NULL",
+            name="ck_sessions_api_key_requires_service_principal",
+        ),
+        Index(
+            "ix_sessions_service_principal_id",
+            "service_principal_id",
+            postgresql_where=text("service_principal_id IS NOT NULL"),
         ),
         CheckConstraint(
             "(visitor_id IS NULL) = (widget_id IS NULL)",

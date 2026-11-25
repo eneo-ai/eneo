@@ -1179,21 +1179,39 @@ async def test_a_revocation_taking_the_keys_in_the_other_order_does_not_deadlock
 async def create_conversation(
     db_container, key_id: UUID, pid: asyncio.Future[int]
 ) -> SessionInDB:
-    """Create and commit a conversation the service key owns, as the session
-    service does for the key's request."""
+    """Create and commit a conversation started with the service key, as the
+    session service does for the key's request: its service principal owns the
+    conversation, and the row names the key that started it."""
     async with db_container() as container:
         pid.set_result(
             await container.session().scalar(sa.text("SELECT pg_backend_pid()"))
         )
+        service_principal_id = await container.session().scalar(
+            sa.select(ApiKeysV2.service_principal_id).where(ApiKeysV2.id == key_id)
+        )
         return await container.session_repo().add(
-            SessionAdd(name="conversation", api_key_id=key_id)
+            SessionAdd(
+                name="conversation",
+                service_principal_id=service_principal_id,
+                api_key_id=key_id,
+            )
+        )
+
+
+async def conversation_key(db_container, conversation_id: UUID) -> UUID | None:
+    """The key the conversation names as the one that started it."""
+    async with db_container() as container:
+        return await container.session().scalar(
+            sa.select(Sessions.api_key_id).where(Sessions.id == conversation_id)
         )
 
 
 async def conversation_owner(db_container, conversation_id: UUID) -> UUID | None:
     async with db_container() as container:
         return await container.session().scalar(
-            sa.select(Sessions.api_key_id).where(Sessions.id == conversation_id)
+            sa.select(Sessions.service_principal_id).where(
+                Sessions.id == conversation_id
+            )
         )
 
 
@@ -1222,7 +1240,7 @@ async def test_a_conversation_is_created_while_its_key_is_renamed(
                 "the conversation waits for the rename"
             )
             conversation = creating.result()
-            assert await conversation_owner(db_container, conversation.id) == key_id
+            assert await conversation_key(db_container, conversation.id) == key_id
     finally:
         # A failure releases the rename first, so the conversation can finish.
         if creating is not None:
@@ -1280,9 +1298,7 @@ async def test_a_conversation_waits_for_its_key_being_deleted(
 ):
     """A conversation for the key, started after the deletion has read the
     key and before it deletes it, waits for the deletion: it fails once the
-    key is gone and goes ahead when the deletion rolls back. (A service key
-    that already owns a conversation cannot be deleted: the conversation
-    would be left without an owner.)"""
+    key is gone and goes ahead when the deletion rolls back."""
     key_id = await insert_key(
         db_container,
         admin_user.tenant_id,
@@ -1319,6 +1335,31 @@ async def test_a_conversation_waits_for_its_key_being_deleted(
                 assert await container.session().get(ApiKeysV2, key_id) is None
         else:
             created = await asyncio.wait_for(conversation, timeout=10)
-            assert await conversation_owner(db_container, created.id) == key_id
+            assert await conversation_key(db_container, created.id) == key_id
     finally:
         await settle(*creating)
+
+
+async def test_a_key_that_started_a_conversation_is_deleted_and_the_conversation_stays(
+    db_container, admin_user
+):
+    """The conversation belongs to the key's service principal, so removing the
+    key only empties the trace of which key started it."""
+    key_id = await insert_key(
+        db_container,
+        admin_user.tenant_id,
+        name="revoked",
+        created_at=datetime.now(timezone.utc),
+        revoked_at=datetime.now(timezone.utc),
+    )
+    principal_id = (await read_key(db_container, key_id)).service_principal_id
+    pid = asyncio.get_running_loop().create_future()
+    conversation = await create_conversation(db_container, key_id, pid)
+
+    async with db_container() as deleting:
+        await deleting.api_key_lifecycle_service().purge_key(key_id=key_id)
+
+    async with db_container() as container:
+        assert await container.session().get(ApiKeysV2, key_id) is None
+    assert await conversation_key(db_container, conversation.id) is None
+    assert await conversation_owner(db_container, conversation.id) == principal_id

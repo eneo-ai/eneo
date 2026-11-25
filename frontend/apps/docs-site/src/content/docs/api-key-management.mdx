@@ -90,6 +90,7 @@ A key's id changes when the key is rotated, so the key is a poor identity for wh
 
 - It is created together with the service key and carries the key's name, description and scope. Renaming the key renames the principal.
 - A rotated key points at the same principal as the key it replaces, so the whole rotation chain is one principal.
+- What a service key creates belongs to its principal, not to the key: the files it uploads and the conversations it starts. A rotated key keeps them. A revoked or expired key that started conversations can be deleted; the conversations stay with the principal.
 - User keys have no service principal.
 - A principal is `active` or `disabled`. While it is disabled, every key that belongs to it is refused with `403` and `code: "service_principal_disabled"`. A principal is never deleted while a key points at it.
 

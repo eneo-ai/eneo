@@ -27,7 +27,7 @@ Each item can stop the backend from starting, stop sign-in or lose data:
 11. Export the audit log first if you need file names: the upgrade removes them for good. See [Exporting audit logs](/guides/audit-logging#exporting-audit-logs).
 12. Run the sessions check against the 2.3 database: a session with both or neither of a user and an API key stops `db-init`. See [Web widgets](#widgets).
 13. Replace API keys that integrations or modules still use but that are listed as Expired, or that the unused-key policy will expire: they stop signing in at the first nightly run. See [API keys that should have expired](#api-keys-expire).
-14. Plan downtime for `db-init` in proportion to the size of `files`: migration `202611241100` locks the table while it checks every row. See [Service keys own their files](#service-key-files).
+14. Plan downtime for `db-init` in proportion to the size of `files` and `sessions`: migrations `202611241100` and `202611241200` lock each table while they check every row. See [Service keys own their files and conversations](#service-key-files).
 
 **Rolling back to 2.3:** restore the `pg_dump` backup taken before `db-init`, with a matching object storage snapshot. A schema downgrade stops at migration `202610291900` ("Cannot discard approved Skill reference history") once an approved Skill revision references another Skill. A downgrade never brings back emptied or deleted logs, cleared names or rewritten audit entries.
 
@@ -132,7 +132,7 @@ flowchart TB
 | [Icons](#icons) | Icon API consumers, multi-tenant administrators | Deploy backend and both frontends together |
 | The audit action `user_access_token_issued` records each token the operator takes for a user with the super API key, always and before the token is issued | Clients with a fixed list of audit actions | Accept the new value |
 | [API keys that should have expired stop working](#api-keys-expire) | Integrations and modules with API keys; tenants with the unused-key policy | Replace the keys; check the policy's days |
-| [Service keys own their files](#service-key-files) | Integrations with service API keys; operators; anyone who writes to `api_keys_v2` or `files` directly | Plan downtime; expect `200` where file upload and delete answered `403` |
+| [Service keys own their files and conversations](#service-key-files) | Integrations with service API keys; operators; anyone who writes to `api_keys_v2`, `files` or `sessions` directly | Plan downtime; expect `200` where file upload and delete answered `403` |
 
 ### Retention, logs and storage [#retention-logs-storage]
 
@@ -349,20 +349,21 @@ One run takes at most 500 keys from each selection: keys past their end date, ke
 
 **Do:** before the upgrade, find in **Admin > API keys** the keys listed as Expired that an integration or module still uses, and the keys the policy will expire. Create a new key and put it in the integration, or in the module's configuration for a module's service key. Set the policy's days longer than the longest pause of any service that uses a key. A key that has expired does not come back when the policy is turned off. See [Nightly maintenance](/docs/api-key-management#nightly-maintenance).
 
-### Service keys own their files [#service-key-files]
+### Service keys own their files and conversations [#service-key-files]
 
 A service API key could not upload or delete files, because a file had to be owned by a person. Every service key now belongs to a service principal, and a file is owned by a person or by a service principal. See [The service principal behind a service key](/docs/api-key-management#the-service-principal-behind-a-service-key).
 
 - `POST /api/v1/files/` with a service key answers `200` instead of `403 service_key_cannot_create_resources`. The file is owned by the key's service principal.
 - `DELETE /api/v1/files/{id}/` with a service key deletes a file that principal owns. It no longer answers `403 service_key_cannot_delete_files`; that code is gone. A file with another owner answers `404`.
 - A service key reads only the files its own principal owns. A rotated key keeps the files of the key it replaced.
+- A conversation started with a service key belongs to the key's service principal. Before, it belonged to the key, so a rotated key could not read the conversations of the key it replaced, and a key that had started a conversation could not be deleted. Both now work.
 - A new refusal: `403 service_principal_disabled` when the key's service principal is disabled. Nothing disables a principal today.
 
-Migration `202611241000` creates `service_principals` and gives each existing service key a principal, one per rotation chain. Migration `202611241100` renames `files.user_id` to `files.owner_user_id` and adds `files.owner_type` and `files.owner_service_id`. No row is rewritten, but the migration checks every row of `files` while the table is locked.
+Migration `202611241000` creates `service_principals` and gives each existing service key a principal, one per rotation chain. Migration `202611241100` renames `files.user_id` to `files.owner_user_id` and adds `files.owner_type` and `files.owner_service_id`. No row is rewritten, but the migration checks every row of `files` while the table is locked. Migration `202611241200` adds `sessions.service_principal_id`, fills it in for the conversations a service key started, and checks every row of `sessions` while that table is locked. `sessions.api_key_id` stays as the key that started the conversation and becomes empty when the key is deleted.
 
-**Do:** stop every backend and worker before `db-init`, and plan downtime in proportion to the size of `files`. SQL of your own that reads `files.user_id` must read `files.owner_user_id`; SQL that inserts a service key into `api_keys_v2` must set `service_principal_id`.
+**Do:** stop every backend and worker before `db-init`, and plan downtime in proportion to the size of `files` and `sessions`. SQL of your own that reads `files.user_id` must read `files.owner_user_id`; SQL that inserts a service key into `api_keys_v2` must set `service_principal_id`; SQL that finds a service key's conversations must use `sessions.service_principal_id`.
 
-**Rollback:** `alembic downgrade 202611201305`. It is refused while a service principal owns a file; delete those files first.
+**Rollback:** `alembic downgrade 202611201305`. It is refused while a service principal owns a file, or owns a conversation whose key has been deleted; delete those files and conversations first.
 
 ## Details: retention, logs and storage [#details-retention]
 
