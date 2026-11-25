@@ -971,7 +971,7 @@ describe("the add-model wizard's catalog", () => {
     const live = within(dialog).getByRole("group", { name: "Livetext" });
     expect(
       within(dialog).getByText(
-        "Markera bara modeller som visar texten medan någon spelar in. En modell för ljudfiler ska inte ha livetext. Modellens server behöver stödja vLLM:s realtids-API."
+        "Markera bara modeller som visar texten medan någon spelar in. En modell bara för ljudfiler ska inte ha livetext. Modellens server behöver stödja vLLM:s realtids-API."
       )
     ).toBeTruthy();
     const pianissimo = within(live).getByRole("checkbox", { name: "pianissimo-sv" });

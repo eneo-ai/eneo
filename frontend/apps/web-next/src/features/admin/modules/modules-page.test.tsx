@@ -134,7 +134,7 @@ it("shows the speech-to-text module's own values as examples, and where the key 
   expect(key.placeholder).toBe("speech-to-text");
   expect(key.getAttribute("aria-describedby")).toContain("module-key-help");
   expect(document.getElementById("module-key-help")?.textContent).toBe(
-    "Samma värde som MODULE_KEY i modulens inställningar, till exempel speech-to-text. Använd gemener, siffror och bindestreck. Nyckeln kan inte ändras efter installationen."
+    "Samma värde som MODULE_KEY i modulens inställningar, till exempel speech-to-text. Kopiera det exakt. Nyckeln kan inte ändras efter installationen."
   );
   expect((screen.getByLabelText("Callback-URL:er") as HTMLTextAreaElement).placeholder).toBe(
     "https://tal.example.se/api/auth/callback"
