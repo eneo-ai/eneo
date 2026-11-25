@@ -1,7 +1,7 @@
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import ForeignKey, Index, text
+from sqlalchemy import CheckConstraint, ForeignKey, Index, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -92,7 +92,20 @@ class AppRuns(BasePublic):
 
     # Foreign keys
     tenant_id: Mapped[UUID] = mapped_column(ForeignKey(Tenants.id, ondelete="CASCADE"))
-    user_id: Mapped[UUID] = mapped_column(ForeignKey(Users.id, ondelete="SET NULL"))
+    # A run belongs to whoever started it: a person (user_id), or the service
+    # principal behind a service key. Only that owner reads it.
+    user_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Users.id, ondelete="SET NULL", name="fk_app_runs_user_id"),
+        nullable=True,
+    )
+    service_principal_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(
+            "service_principals.id",
+            ondelete="RESTRICT",
+            name="fk_app_runs_service_principal",
+        ),
+        nullable=True,
+    )
     app_id: Mapped[UUID] = mapped_column(ForeignKey(Apps.id, ondelete="CASCADE"))
     job_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(Jobs.id, ondelete="SET NULL")
@@ -103,10 +116,14 @@ class AppRuns(BasePublic):
 
     # Relationships
     input_files: Mapped[list["AppRunsFiles"]] = relationship(viewonly=True)
-    user: Mapped[Users] = relationship()
+    user: Mapped[Optional[Users]] = relationship()
     job: Mapped[Jobs] = relationship()
 
     __table_args__ = (
+        CheckConstraint(
+            "user_id IS NULL OR service_principal_id IS NULL",
+            name="ck_app_runs_single_owner",
+        ),
         Index("ix_app_runs_retention_owner_created_id", "app_id", "created_at", "id"),
         Index(
             "ix_app_runs_skill_provenance_gin",

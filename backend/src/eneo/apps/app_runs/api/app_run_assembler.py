@@ -27,8 +27,6 @@ class AppRunAssembler:
         finished_at, status = self._get_job_fields(app_run.job)
         if app_run.id is None:
             raise ValueError("App run must have an id before assembly")
-        if app_run.user is None:
-            raise ValueError("App run must have a user before assembly")
         if status is None:
             status = Status.QUEUED
 
@@ -52,8 +50,6 @@ class AppRunAssembler:
         finished_at, status = self._get_job_fields(app_run.job)
         if app_run.id is None:
             raise ValueError("App run must have an id before assembly")
-        if app_run.user is None:
-            raise ValueError("App run must have a user before assembly")
         if status is None:
             status = Status.QUEUED
 

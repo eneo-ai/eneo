@@ -123,7 +123,14 @@ async def _submission_params(session: AsyncSession, job: Jobs) -> AppRunParams:
     envelope = AppDispatchEnvelope.model_validate(job.dispatch_envelope)
     rows = (
         await session.execute(
-            sa.select(AppRuns.id, AppRuns.app_id, AppRuns.user_id, AppRunsFiles.file_id)
+            sa.select(
+                AppRuns.id,
+                AppRuns.app_id,
+                AppRuns.user_id,
+                AppRuns.service_principal_id,
+                AppRuns.tenant_id,
+                AppRunsFiles.file_id,
+            )
             .outerjoin(AppRunsFiles, AppRunsFiles.app_run_id == AppRuns.id)
             .where(AppRuns.job_id == job.id)
         )
@@ -131,6 +138,7 @@ async def _submission_params(session: AsyncSession, job: Jobs) -> AppRunParams:
     if (
         len({row.id for row in rows}) != 1
         or rows[0].user_id != job.user_id
+        or rows[0].service_principal_id != job.service_principal_id
         or {row.file_id for row in rows if row.file_id is not None}
         != set(envelope.file_ids)
     ):
@@ -138,7 +146,12 @@ async def _submission_params(session: AsyncSession, job: Jobs) -> AppRunParams:
     return AppRunParams(
         id=rows[0].id,
         app_id=rows[0].app_id,
+        # The run's owner, as the job recorded it. A service job whose key is
+        # gone names no key, fails validation here and is failed with it.
         user_id=job.user_id,
+        service_principal_id=job.service_principal_id,
+        api_key_id=job.api_key_id,
+        tenant_id=rows[0].tenant_id,
         file_ids=envelope.file_ids,
         text=None,
     )

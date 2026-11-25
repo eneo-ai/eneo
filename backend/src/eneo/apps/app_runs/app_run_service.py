@@ -48,11 +48,15 @@ class AppRunService:
         if not app.is_valid_input(files, text=text):
             raise BadRequestException()
 
+        # The run belongs to the caller: a person, or the service principal
+        # behind a service key.
+        actor = task_actor(self.user)
         app_run = self.factory.create_app_run(
             app=app,
             files=files,
             text=text,
-            user_id=self.user.id,
+            user_id=actor["user_id"],
+            service_principal_id=actor["service_principal_id"],
             tenant_id=self.user.tenant_id,
             skill_provenance=execution_plan.skill_provenance,
         )
@@ -69,7 +73,7 @@ class AppRunService:
             name=app.name,
             task_params=AppRunParams(
                 id=app_run_in_db.id,
-                **task_actor(self.user),
+                **actor,
                 file_ids=file_ids,
                 app_id=app.id,
             ),
@@ -87,7 +91,8 @@ class AppRunService:
         if app_run is None:
             raise NotFoundException()
 
-        if app_run.user_id != self.user.id:
+        actor = task_actor(self.user)
+        if not app_run.owned_by(actor["user_id"], actor["service_principal_id"]):
             raise UnauthorizedException(
                 "You do not have permission to read this app run.",
                 code="forbidden_action",
@@ -104,7 +109,12 @@ class AppRunService:
         # Check that we can access the app
         await self.app_service.get_app(app_id)
 
-        return await self.repo.get_for_app(app_id=app_id, user_id=self.user.id)
+        actor = task_actor(self.user)
+        return await self.repo.get_for_app(
+            app_id=app_id,
+            user_id=actor["user_id"],
+            service_principal_id=actor["service_principal_id"],
+        )
 
     async def delete_app_run(self, id: UUID):
         # Check that we can access the run

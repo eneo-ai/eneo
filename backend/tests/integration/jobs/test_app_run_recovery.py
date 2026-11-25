@@ -21,6 +21,7 @@ from eneo.apps.app_runs.api import app_run_worker
 from eneo.apps.app_runs.api.app_run_models import AppRunParams
 from eneo.apps.app_runs.app_run_dispatch import (
     APP_RUN_QUEUE_TIMEOUT,
+    _submission_params,
     claim_app_job,
     fail_expired_or_interrupted_app_runs,
     retry_app_submissions,
@@ -29,12 +30,15 @@ from eneo.apps.app_runs.app_run_service import AppRunService
 from eneo.apps.apps.app_service import AppService
 from eneo.completion_models.infrastructure.completion_service import CompletionService
 from eneo.database.database import sessionmanager
+from eneo.database.tables.api_keys_v2_table import ApiKeysV2
 from eneo.database.tables.app_table import AppRuns
 from eneo.database.tables.job_table import Jobs
+from eneo.database.tables.service_principals_table import ServicePrincipals
 from eneo.files.transcriber import Transcriber
 from eneo.jobs.job_manager import DURABLE_APP_FUNCTION, job_manager
 from eneo.jobs.job_models import JobFailureCode, Task
 from eneo.jobs.job_repo import JobRepository
+from eneo.jobs.task_models import AppDispatchEnvelope
 from eneo.main.models import Channel, ChannelType, RedisMessage, Status
 from eneo.worker import task_manager
 
@@ -1188,3 +1192,150 @@ async def test_app_delivery_returns_its_connection_after_a_broker_stall(
         )
     finally:
         await manager.close()
+
+
+async def _service_key(session, *, tenant_id, creator_id):
+    """A service principal and a key of it, as rows."""
+    principal_id = await session.scalar(
+        sa.insert(ServicePrincipals)
+        .values(
+            tenant_id=tenant_id,
+            display_name="Invoice reader",
+            scope_type="tenant",
+            created_by_user_id=creator_id,
+        )
+        .returning(ServicePrincipals.id)
+    )
+    key_id = uuid4()
+    await session.execute(
+        sa.insert(ApiKeysV2).values(
+            id=key_id,
+            tenant_id=tenant_id,
+            ownership="service",
+            service_principal_id=principal_id,
+            scope_type="tenant",
+            permission="read",
+            key_type="sk_",
+            key_hash=f"hash-{uuid4().hex}",
+            hash_version="hmac_sha256",
+            key_prefix="sk_",
+            key_suffix="abcd",
+            name="Invoice reader",
+            state="active",
+            created_by_user_id=creator_id,
+        )
+    )
+    return principal_id, key_id
+
+
+async def _service_run(session, *, app_id, model_id, tenant_id, principal_id, key_id):
+    run_id, job_id = uuid4(), uuid4()
+    session.add(
+        Jobs(
+            id=job_id,
+            service_principal_id=principal_id,
+            api_key_id=key_id,
+            task=Task.RUN_APP.value,
+            status=Status.QUEUED.value,
+            dispatch_envelope=AppDispatchEnvelope(version=1, file_ids=[]).model_dump(
+                mode="json"
+            ),
+        )
+    )
+    await session.flush()
+    session.add(
+        AppRuns(
+            id=run_id,
+            job_id=job_id,
+            app_id=app_id,
+            completion_model_id=model_id,
+            tenant_id=tenant_id,
+            service_principal_id=principal_id,
+        )
+    )
+    await session.flush()
+    return run_id, job_id
+
+
+async def test_recovery_resubmits_a_service_keys_run_as_that_key(
+    db_session, admin_user, app_factory, completion_model_factory
+):
+    async with db_session() as session:
+        model = await completion_model_factory(session, "gpt-4")
+        app = await app_factory(session, "Invoice reader", model.id)
+        principal_id, key_id = await _service_key(
+            session, tenant_id=admin_user.tenant_id, creator_id=admin_user.id
+        )
+        run_id, job_id = await _service_run(
+            session,
+            app_id=app.id,
+            model_id=model.id,
+            tenant_id=admin_user.tenant_id,
+            principal_id=principal_id,
+            key_id=key_id,
+        )
+        job = await session.get(Jobs, job_id)
+
+        params = await _submission_params(session, job)
+
+    assert params.id == run_id
+    assert params.user_id is None
+    assert params.service_principal_id == principal_id
+    assert params.api_key_id == key_id
+    assert params.tenant_id == admin_user.tenant_id
+
+
+async def test_recovery_refuses_a_run_whose_owner_is_not_the_jobs(
+    db_session, admin_user, app_factory, completion_model_factory
+):
+    async with db_session() as session:
+        model = await completion_model_factory(session, "gpt-4")
+        app = await app_factory(session, "Invoice reader", model.id)
+        principal_id, key_id = await _service_key(
+            session, tenant_id=admin_user.tenant_id, creator_id=admin_user.id
+        )
+        other_principal_id, _ = await _service_key(
+            session, tenant_id=admin_user.tenant_id, creator_id=admin_user.id
+        )
+        run_id, job_id = await _service_run(
+            session,
+            app_id=app.id,
+            model_id=model.id,
+            tenant_id=admin_user.tenant_id,
+            principal_id=principal_id,
+            key_id=key_id,
+        )
+        await session.execute(
+            sa.update(AppRuns)
+            .where(AppRuns.id == run_id)
+            .values(service_principal_id=other_principal_id)
+        )
+        job = await session.get(Jobs, job_id)
+
+        with pytest.raises(ValueError, match="no longer match the submission"):
+            await _submission_params(session, job)
+
+
+async def test_recovery_cannot_resubmit_a_service_run_whose_key_is_gone(
+    db_session, admin_user, app_factory, completion_model_factory
+):
+    async with db_session() as session:
+        model = await completion_model_factory(session, "gpt-4")
+        app = await app_factory(session, "Invoice reader", model.id)
+        principal_id, key_id = await _service_key(
+            session, tenant_id=admin_user.tenant_id, creator_id=admin_user.id
+        )
+        _, job_id = await _service_run(
+            session,
+            app_id=app.id,
+            model_id=model.id,
+            tenant_id=admin_user.tenant_id,
+            principal_id=principal_id,
+            key_id=key_id,
+        )
+        await session.execute(sa.delete(ApiKeysV2).where(ApiKeysV2.id == key_id))
+        job = await session.get(Jobs, job_id, populate_existing=True)
+        assert job.api_key_id is None
+
+        with pytest.raises(ValueError):
+            await _submission_params(session, job)

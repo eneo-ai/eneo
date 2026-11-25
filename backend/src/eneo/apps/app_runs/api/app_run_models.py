@@ -24,7 +24,8 @@ class AppRunSparse(InDB):
     input: AppRunInput
     status: Status
     finished_at: datetime | None
-    user: UserSparse
+    # The person who started the run; empty when a service key did.
+    user: UserSparse | None = None
     skill_provenance: list[SkillExecutionReference]
 
 
