@@ -1038,6 +1038,22 @@ describe("FlowPage", () => {
     expect(change()).toBeTruthy();
   });
 
+  it("says a personal space's runs are not removed automatically", () => {
+    const personal = makeSpace({ permissions: ["read"], overrides: { personal: true } });
+    const flow = makeFlow({
+      steps,
+      run_history_retention: {
+        state: "configured",
+        source: "flow",
+        effective_days: 30,
+        contributors: { space: null, flow: { days: 30 } }
+      }
+    });
+    renderPage(flow, ["flows_view", "flows_manage", "retention_manage"], personal);
+    expect(screen.getByText(messages.flows_retention_personal)).toBeTruthy();
+    expect(screen.queryByText(messages.flows_retention_applies_none)).toBeNull();
+  });
+
   it("lists the flow's runs in their own tab and remembers it in the address", async () => {
     const { container } = renderPage(makeFlow({ steps, published_version: 3 }));
 

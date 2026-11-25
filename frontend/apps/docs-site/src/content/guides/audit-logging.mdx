@@ -122,7 +122,7 @@ Conversation data (questions and app runs) has its own retention hierarchy, set 
 
 A flow authoring chat is an ordinary conversation and follows the same Space/conversation retention. This is separate from Flow run-history policy.
 
-Flow run and step history is never deleted by that scheduled worker. The space's time, which caps every Flow in the space, and a Flow's shorter time do not authorize scheduled deletion of Flow history and only make it eligible for an explicit purge. See [Data retention and deletion](/guides/data-retention).
+Flow run and step history follows the space's time, which caps every Flow in the space, or a Flow's shorter time. Runs that start while their space has a time are removed automatically once they are older than it, checked every five minutes; an administrator's explicit purge can remove any due run. See [Flow run-history retention](/guides/flows/retention-policy#automatic-removal).
 
 ## Exporting audit logs
 

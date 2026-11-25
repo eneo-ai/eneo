@@ -2,6 +2,7 @@ import { Badge } from "@astryxdesign/core/Badge";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { Switch as SettingSwitch } from "@astryxdesign/core/Switch";
 import { Banner } from "@astryxdesign/core/Banner";
+import { useAnnounce } from "@astryxdesign/core/hooks";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "@/lib/link";
 import { useRouter } from "@/lib/navigation";
@@ -27,13 +28,21 @@ import {
   QueryStateBoundary,
   RefreshError
 } from "@/components/composites/query-state";
-import { SaveStatusIndicator, SaveStatusProvider } from "@/components/composites/save-status";
+import {
+  SaveStatusIndicator,
+  SaveStatusProvider,
+  useSetSaveStatus
+} from "@/components/composites/save-status";
 import {
   SectionedSettings,
   type SettingsSection
 } from "@/components/composites/sectioned-settings";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
-import { useAutosave, useAutosaveField } from "@/components/composites/use-autosave";
+import {
+  useAutosave,
+  useAutosaveField,
+  useDirtySaveStatus
+} from "@/components/composites/use-autosave";
 import { useAppContext } from "@/components/providers/app-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -48,7 +57,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { browserApi } from "@/lib/api/browser";
-import { unwrap } from "@/lib/api/errors";
+import { EneoApiError, unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import { toastApiError } from "@/lib/api/toast";
 import { formatBytes } from "@/lib/format";
@@ -418,54 +427,132 @@ function SecuritySection() {
 }
 
 /**
- * The space's time, which is also the cap on its flows' run history. Changing it
- * takes the right to edit the space and the permission to manage retention (the
- * backend refuses everyone else); the rest read the value.
+ * The space's time: assistants and apps without their own time follow it, and it
+ * caps its flows' run history, whose runs started under a time are removed by it.
+ * Changing it takes the right to edit the space and the permission to manage
+ * retention (the backend refuses everyone else); the rest read the value.
+ *
+ * It saves on blur like the other fields, but a time set where there was none, or a
+ * shorter one, removes content for good, so it waits for a confirmation instead, and
+ * a draft is never sent when the page is left (no unmount flush, unlike
+ * `useAutosaveField`). That is decided on the time the page has, and each save sends
+ * that time as `expected_data_retention_days`: the server refuses the save (409
+ * `retention_time_changed`) when another administrator has changed the time since.
+ * The page then drops the draft and reads the space again its usual way, so the field
+ * shows the new time and a time typed again is decided on it.
  */
 function RetentionSection() {
   const t = useTranslations();
-  const { space, can } = useSpace();
+  const { space, routeId, can } = useSpace();
   const managesRetention = useAppContext().can("retention_manage");
   const queryClient = useQueryClient();
   const update = useUpdateSpace();
+  const autosave = useAutosave("retention-days");
+  const setStatus = useSetSaveStatus();
+  const announce = useAnnounce();
   const readOnlyHintId = useId();
   const editsSpace = can("edit", "space");
   const canEditRetention = editsSpace && managesRetention;
+  const saved = space.data_retention_days ?? null;
+  // Until the person edits it, the field shows the saved time.
+  const [draft, setDraft] = useState<string | null>(null);
+  const value = draft ?? saved?.toString() ?? "";
+  const days = parseRetentionDays(value);
   const [daysVisited, setDaysVisited] = useState(false);
+  // A time that removes content, waiting for its confirmation, and the time it was compared with.
+  const [asked, setAsked] = useState<{ days: number; expected: number | null } | null>(null);
+  // The dialog stays in the page after it closes, so its title keeps the days it asked about.
+  const [askedDays, setAskedDays] = useState(0);
+  if (asked !== null && asked.days !== askedDays) setAskedDays(asked.days);
+  // What applies from now, after this page saved a time, and that time. The line shows only
+  // while the space has that time, so a read that brings another administrator's change hides it.
+  const [note, setNote] = useState<{ days: number | null; text: string } | null>(null);
+  const fieldRef = useRef<HTMLInputElement>(null);
+  useDirtySaveStatus("retention-days", days !== saved);
 
-  const days = useAutosaveField({
-    key: "retention-days",
-    value: space.data_retention_days?.toString() ?? "",
-    save: (value) => update.mutateAsync({ data_retention_days: parseRetentionDays(value) }),
-    // Empty means "keep forever".
-    validate: (value) => parseRetentionDays(value) !== undefined,
+  const daysProblem = daysVisited && days === undefined ? t("space_retention_invalid") : null;
+
+  /** Saves `next` in place of `expected`, the time it was compared with. */
+  async function save(next: number | null, expected: number | null) {
+    let changed = false;
+    const result = await autosave(() =>
+      update
+        .mutateAsync({ data_retention_days: next, expected_data_retention_days: expected })
+        .catch((error: unknown) => {
+          // Changed by someone else: nothing was saved. The draft is dropped and the space is
+          // read again its usual way, so the field shows the time read and nothing is sent
+          // until a time is typed again, which is then decided on that time.
+          if (error instanceof EneoApiError && error.reason === "retention_time_changed") {
+            changed = true;
+            setAsked(null);
+            setDraft(null);
+            void queryClient.invalidateQueries({ queryKey: ["spaces", routeId], exact: true });
+          }
+          throw error;
+        })
+    );
+    // With the draft dropped nothing is left unsaved, so the header has no failure to link to
+    // and leaving the page asks nothing; the toast said what happened. Cleared here, after
+    // `autosave` has marked the field failed.
+    if (changed) setStatus?.("retention-days", null);
+    if (result === undefined) return false;
+    // A value typed while the save ran stays the draft.
+    setDraft((current) =>
+      current !== null && parseRetentionDays(current) === next ? null : current
+    );
     // The flows' effective times follow the new cap.
-    onSaved: () => void queryClient.invalidateQueries({ queryKey: ["flows"] })
-  });
-  const daysProblem =
-    daysVisited && parseRetentionDays(days.value) === undefined
-      ? t("space_retention_invalid")
-      : null;
+    void queryClient.invalidateQueries({ queryKey: ["flows"] });
+    // The save stopped any read of the space on its way (`useUpdateSpace`), and such a read
+    // can carry a time another administrator set after this one: read the space again.
+    void queryClient.invalidateQueries({ queryKey: ["spaces", routeId], exact: true });
+    // Runs in a personal space are not removed automatically: it says nothing of flows.
+    const said = space.personal
+      ? next === null
+        ? t("space_retention_saved_personal_off")
+        : t("space_retention_saved_personal_on", { days: next })
+      : next === null
+        ? t("space_retention_saved_off")
+        : t("space_retention_saved_on", { days: next });
+    // The space's cache already holds the saved answer (`useUpdateSpace`), so the line shows now.
+    setNote({ days: next, text: said });
+    announce(said);
+    return true;
+  }
+
+  function commit() {
+    if (draft === null || days === undefined || update.isPending) return;
+    // Decided on the time the server last gave the page; the save carries it, and the
+    // server refuses the save if it has changed since.
+    if (days === saved) setDraft(null);
+    else if (days !== null && (saved === null || days < saved)) setAsked({ days, expected: saved });
+    else void save(days, saved);
+  }
 
   return (
     <SettingsRow
-      title={t("conversation_retention_title")}
-      description={t("conversation_retention_space_description")}
+      title={t("space_retention_title")}
+      description={t(
+        space.personal ? "space_retention_description_personal" : "space_retention_description"
+      )}
       htmlFor="retention-days"
     >
       <div className="flex flex-wrap items-center gap-2">
         <Input
           id="retention-days"
+          ref={fieldRef}
           type="text"
           inputMode="numeric"
           className="w-32"
-          value={days.value}
+          value={value}
           placeholder={t("space_retention_no_limit_placeholder")}
-          onChange={(event) => days.setValue(event.target.value)}
+          onChange={(event) => setDraft(event.target.value)}
           onBlur={() => {
             setDaysVisited(true);
-            void days.commit();
+            commit();
           }}
+          // Read-only, not disabled: it keeps focus, and a change typed while the time is
+          // saved would otherwise be left unsaved.
+          readOnly={update.isPending}
           disabled={!canEditRetention}
           {...fieldProblemProps(
             "retention-days",
@@ -476,7 +563,9 @@ function RetentionSection() {
         <span className="text-muted-foreground text-sm">{t("days")}</span>
       </div>
       <FieldProblem id="retention-days" problem={daysProblem} />
-      <p className="text-muted-foreground text-sm">{t("space_retention_flows_cap")}</p>
+      {note && note.days === saved ? (
+        <p className="text-muted-foreground text-sm">{note.text}</p>
+      ) : null}
       {!canEditRetention && (
         <p id={readOnlyHintId} className="text-muted-foreground text-sm">
           {editsSpace
@@ -486,6 +575,32 @@ function RetentionSection() {
             : t("conversation_retention_space_admin_only")}
         </p>
       )}
+      <ConfirmDialogControlled
+        open={asked !== null}
+        onOpenChange={(open) => {
+          if (open) return;
+          // Not confirmed: the saved time stays, in the field too.
+          setAsked(null);
+          setDraft(null);
+        }}
+        title={t("space_retention_shorten_title", { days: askedDays })}
+        // Runs in a personal space are not removed automatically: it says nothing of runs.
+        description={t(
+          space.personal
+            ? "space_retention_shorten_description_personal"
+            : "space_retention_shorten_description"
+        )}
+        confirmLabel={t("space_retention_shorten_confirm")}
+        pending={update.isPending}
+        // Its blur asked: after a click elsewhere nothing focused opened it.
+        returnFocusRef={fieldRef}
+        onConfirm={() => {
+          if (asked === null) return;
+          // A failed save keeps the dialog, so the same time can be tried again; one refused
+          // because the time changed closes it (`save`).
+          void save(asked.days, asked.expected).then((done) => done && setAsked(null));
+        }}
+      />
     </SettingsRow>
   );
 }

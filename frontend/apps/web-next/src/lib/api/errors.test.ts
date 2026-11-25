@@ -183,7 +183,8 @@ describe("getErrorMessage", () => {
     [9064, 409],
     [9071, 409],
     [9074, 409],
-    [9086, 400]
+    [9086, 400],
+    [9087, 409]
   ])("localizes backend refusal %i in both supported languages", (code, status) => {
     const error = apiErrorFromResponse(errorResponse(status), {
       message: "Backend English refusal",

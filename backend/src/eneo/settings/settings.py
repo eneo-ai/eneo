@@ -902,6 +902,37 @@ class FlowRunRetentionPolicyReplaceRequest(BaseModel):
             "The Flow's own time, at most its Space's, or null to follow the Space."
         )
     )
+    # Omitted and null differ: the router passes an omitted field on as not
+    # provided, so `null` can mean "no time applied".
+    expected_effective_days: int | None = Field(
+        default=None,
+        description=(
+            "The time that applied to the Flow when the caller chose `policy` "
+            "(`effective.effective_days`: the shorter of the Flow's and its "
+            "Space's time), or null when none applied. When `policy` changes "
+            "the Flow's time, it is compared with the time that applies now, "
+            "under the lock the change takes; if they differ, nothing changes "
+            "and the answer is 409 `retention_time_changed`, with the time that "
+            "applies in `context.current_days`. Omit to save without the "
+            "comparison. Ignored when `policy` is the stored one."
+        ),
+    )
+    # The Space's time decides whether runs are removed at all, which the time
+    # that applies does not show: 60 days under a Space without a time and
+    # under one of 90 apply alike.
+    expected_inherited_days: int | None = Field(
+        default=None,
+        description=(
+            "The Space's time when the caller chose `policy` "
+            "(`inherited_policy.days`), or null when the Space had none. When "
+            "`policy` changes the Flow's time, it is compared with the Space's "
+            "time now, under the lock the change takes; if they differ, nothing "
+            "changes and the answer is 409 `retention_time_changed`, with the "
+            "time that applies in `context.current_days`. Compared on its own, "
+            "beside `expected_effective_days`. Omit to save without the "
+            "comparison. Ignored when `policy` is the stored one."
+        ),
+    )
 
 
 class SkillExecutionBlockUpdate(BaseModel):

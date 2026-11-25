@@ -43,6 +43,9 @@ from eneo.data_retention.domain.rules import (
 from eneo.database import database
 from eneo.database.database import DatabaseSessionManager
 from eneo.files.unused_file_retention_task import UNUSED_FILES_TASK
+from eneo.flows.application.flow_run_history_retention_task import (
+    FLOW_RUN_HISTORY_TASK,
+)
 from eneo.main.config import Settings, get_settings
 from eneo.main.retention_tasks import (
     EXISTING_WITHOUT_CHOICE,
@@ -85,6 +88,7 @@ def test_registered_tasks_replace_the_removal_crons():
         "sessions.empty",
         "files.unused",
         "retention.jobs",
+        "flows.run_history",
     }
 
 
@@ -100,13 +104,18 @@ def test_only_listed_removals_run_without_a_choice():
     }
 
     # Conversation history removes only what an assistant, app, space or
-    # organisation period selects; with none set it keeps everything.
-    assert on_by_default == {
-        "conversations.history",
-        *EXISTING_WITHOUT_CHOICE,
-        *FOLLOWS_A_REMOVAL,
+    # organisation period selects; with none set it keeps everything. Flow run
+    # history removes only runs started while their space had a time.
+    chosen = {
+        "conversations.history": "retention_conversations_history_enabled",
+        "flows.run_history": "retention_flow_run_history_enabled",
     }
-    for task, switch in {**EXISTING_WITHOUT_CHOICE, **FOLLOWS_A_REMOVAL}.items():
+    assert on_by_default == {*chosen, *EXISTING_WITHOUT_CHOICE, *FOLLOWS_A_REMOVAL}
+    for task, switch in {
+        **chosen,
+        **EXISTING_WITHOUT_CHOICE,
+        **FOLLOWS_A_REMOVAL,
+    }.items():
         assert defaults[switch].default is True
         switched_off = get_settings().model_copy(update={switch: False})
         assert [
@@ -276,9 +285,60 @@ def test_a_unit_kept_for_its_size_names_the_settings_that_can_hold_it(
             Settings.model_validate(values)
         )
         if "unit_exceeds_budget" in registration.limited_by
+        and registration.name != FLOW_RUN_HISTORY_TASK
     }
 
     assert named == {limits}
+
+
+_FAMILY = "retention_max_family_rows"
+_CHUNK = "retention_chunk_rows"
+
+
+@pytest.mark.parametrize(
+    "changes,limits",
+    [
+        pytest.param({}, (_FAMILY, _FILES), id="defaults: a family is the room"),
+        pytest.param(
+            {_CHUNK: 2000, _FAMILY: 3},
+            (_FAMILY, _FILES, _CHUNK),
+            id="the chunk is the room",
+        ),
+        pytest.param(
+            {_CHUNK: 2000, _FAMILY: 3, "retention_max_rows_per_run": 5},
+            (_FAMILY, _FILES, _CHUNK, "retention_max_rows_per_run"),
+            id="the execution's rows are the room",
+        ),
+        pytest.param(
+            {_CHUNK: 2000, _FAMILY: 3, "retention_max_rows_per_run": 2000},
+            (_FAMILY, _FILES, _CHUNK, "retention_max_rows_per_run"),
+            id="the execution's rows equal the chunk",
+        ),
+        pytest.param(
+            {_FAMILY: 4999, "retention_max_rows_per_run": 5000},
+            (_FAMILY, _FILES, "retention_max_rows_per_run"),
+            id="the execution's rows equal a family plus discovery",
+        ),
+    ],
+)
+def test_a_run_kept_for_its_size_names_the_settings_that_can_hold_it(
+    changes: dict[str, int], limits: tuple[str, ...]
+):
+    """A Flow run must fit one call of its step: the larger of the chunk and
+    one family plus discovery, within the execution's rows and files. Mutant:
+    health names a setting that does not change that room, or misses one."""
+    values = get_settings().model_dump()
+    values.update(changes)
+
+    [registration] = [
+        registration
+        for registration in retention_task_registrations(
+            Settings.model_validate(values)
+        )
+        if registration.name == FLOW_RUN_HISTORY_TASK
+    ]
+
+    assert registration.limited_by == {"unit_exceeds_budget": limits}
 
 
 @pytest.mark.parametrize(
@@ -436,6 +496,9 @@ def test_a_registration_runs_daily_unless_it_says_otherwise():
     assert {name: cadences[name] for name in _CORE_TASKS} == dict.fromkeys(
         _CORE_TASKS, "daily"
     )
+    # Run history is checked every five minutes, so a run goes soon after its
+    # time instead of up to a day later.
+    assert cadences["flows.run_history"] == "frequent"
 
 
 def test_a_frequent_task_needs_a_due_probe_and_reports_no_overdue_work():

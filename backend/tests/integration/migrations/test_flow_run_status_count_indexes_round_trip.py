@@ -35,7 +35,12 @@ NEW_INDEXES = (
     "ix_flow_runs_flow_service_status",
 )
 # Held at REVISION: indexes later revisions add.
-_LATER_INDEX_NAMES = frozenset({"ix_flow_live_transcripts_bound_file_ids"})
+_LATER_INDEX_NAMES = frozenset(
+    {
+        "ix_flow_live_transcripts_bound_file_ids",
+        "ix_flow_runs_marked_flow_retention_anchor",
+    }
+)
 
 
 def _alembic_cfg(database_url: str) -> Config:

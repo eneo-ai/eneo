@@ -17,9 +17,11 @@ type Windows = Schema<"FlowRetentionPolicyPublic">;
 const keys = { windows: ["flow-retention", "windows"] as const };
 
 /**
- * The organisation's windows for flow uploads and debug evidence. Run history has no
+ * The organisation's windows for live text and debug evidence. Run history has no
  * setting here: each space's time caps its flows, set in the space, and a flow may
- * choose a shorter one. Saving makes data eligible at most; a purge is a separate act.
+ * choose a shorter one. Saving removes nothing: the live-text window dates new live text,
+ * which the explicit purge removes once expired, and the debug-evidence window is stored
+ * but nothing uses it yet.
  */
 export function FlowRetentionPage() {
   const t = useTranslations();

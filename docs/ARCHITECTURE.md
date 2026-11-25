@@ -739,8 +739,9 @@ Eneo implements security at every layer to protect sensitive public sector data 
 - **Password Security**: Bcrypt hashing with secure salts
 - **Audit Trails**: All actions logged for compliance
 - **Data Retention**: Data-class-specific policy and cleanup. Configured
-  conversation and audit retention can run automatically; Flow run-history
-  policy does not authorize automatic deletion in the current release.
+  conversation and audit retention can run automatically, and so can Flow
+  run history: runs that start while their space has a time are removed once
+  they pass it.
 
 **Multi-Tenant Security:**
 - Tenant isolation in the application layer, covered by adversarial isolation tests
