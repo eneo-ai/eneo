@@ -368,6 +368,10 @@ export function ProviderEditDialog({
     onSuccess: (saved) => {
       void queryClient.invalidateQueries({ queryKey: PROVIDERS_KEY });
       void queryClient.invalidateQueries({ queryKey: MODELS_KEY });
+      // The model lists came from the address before the save. Removed, not
+      // invalidated, so the model step waits for the new server's list
+      // instead of showing the old one while it loads.
+      queryClient.removeQueries({ queryKey: ["provider-models", provider.id] });
       // The provider's models may stream live text now, or no longer.
       if (saved.realtime_eligibility !== provider.realtime_eligibility) {
         void invalidateSpaceLiveText(queryClient);
