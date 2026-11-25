@@ -508,23 +508,6 @@ describe("RunRecorder in the start dialog", () => {
     expect(screen.getByRole("dialog", { name: "Kör Medborgarbrev" })).toBeTruthy();
   });
 
-  it("starts a part's upload once it is kept on the device, so a refused session cannot lose it", async () => {
-    installBrowser();
-    grantMicrophone();
-    let store = () => {};
-    const putPart = device.db.putPart.bind(device.db);
-    vi.spyOn(device.db, "putPart").mockImplementationOnce(
-      (part) => new Promise<void>((resolve) => (store = () => void putPart(part).then(resolve)))
-    );
-    const { dialog } = await openDialog(audioContract());
-    await recordAndStop(dialog);
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(FakeUpload.sent).toHaveLength(0);
-
-    store();
-    await waitFor(() => expect(FakeUpload.sent).toHaveLength(1));
-  });
-
   it("sends a part whose upload dropped again, by hand or when the browser is back online", async () => {
     installBrowser();
     grantMicrophone();

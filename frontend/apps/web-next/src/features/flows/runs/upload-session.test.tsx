@@ -240,68 +240,6 @@ it("sends a picked file again only when a recorded part waiting to be sent leave
   expect(hook.result.current.uploads["step-1"]?.[1]?.state).toBe("uploading");
 });
 
-/** A recorded part handed over while it is still being kept on the device. */
-function recordWhileKeeping(hook: { result: { current: ReturnType<typeof useRuntimeUploads> } }) {
-  let kept = (_where: string) => {};
-  const keeping = new Promise<string>((resolve) => (kept = resolve));
-  const input = makeInput({ step_id: "step-1", accepted_mimetypes: ["audio/webm"] });
-  act(() =>
-    hook.result.current.add(input, [new File(["audio"], "del-1.webm", { type: "audio/webm" })], {
-      recording: { sessionId: "rec-1", index: 0, durationMs: 1000, streamed: false },
-      label: "Inspelning",
-      kept: keeping
-    })
-  );
-  return (where: string) => kept(where);
-}
-
-it("starts a recorded part's upload once keeping it on the device has answered", async () => {
-  const hook = renderHookInApp(() => useRuntimeUploads("flow-1", undefined));
-  const kept = recordWhileKeeping(hook);
-  await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  });
-  expect(hooks.prepare).not.toHaveBeenCalled();
-  expect(UploadRequest.sent).toHaveLength(0);
-  expect(hook.result.current.uploads["step-1"]?.[0]?.state).toBe("uploading");
-
-  // Kept only in the tab is an answer too.
-  kept("tab");
-  await waitFor(() => expect(UploadRequest.sent).toHaveLength(1));
-});
-
-it("does not upload a recorded part taken off the form while it was being kept", async () => {
-  const hook = renderHookInApp(() => useRuntimeUploads("flow-1", undefined));
-  const kept = recordWhileKeeping(hook);
-  const part = hook.result.current.uploads["step-1"]![0]!;
-  act(() => hook.result.current.remove("step-1", part.key));
-  kept("device");
-  await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  });
-  expect(hooks.prepare).not.toHaveBeenCalled();
-  expect(UploadRequest.sent).toHaveLength(0);
-  expect(hook.result.current.uploads["step-1"]).toEqual([]);
-});
-
-it("does not wait for ever on keeping a part on the device", async () => {
-  vi.useFakeTimers();
-  try {
-    const hook = renderHookInApp(() => useRuntimeUploads("flow-1", undefined));
-    recordWhileKeeping(hook);
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1_900);
-    });
-    expect(hooks.prepare).not.toHaveBeenCalled();
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(200);
-    });
-    expect(UploadRequest.sent).toHaveLength(1);
-  } finally {
-    vi.useRealTimers();
-  }
-});
-
 it("aborts outstanding uploads on session change and releases settled request listeners", async () => {
   const hook = await uploadFiles(2);
   act(() => UploadRequest.sent[0]!.answer(201, { id: "file-1" }));

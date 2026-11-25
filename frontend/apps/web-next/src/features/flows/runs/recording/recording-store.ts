@@ -129,7 +129,7 @@ export async function readsBack(blob: Blob, size?: number): Promise<boolean> {
 }
 
 /** The answer, or null when it did not come in time: slow is not the same as gone. */
-export function withinTime<T>(work: Promise<T>, ms = READ_BACK_TIMEOUT_MS): Promise<T | null> {
+function withinTime<T>(work: Promise<T>, ms = READ_BACK_TIMEOUT_MS): Promise<T | null> {
   return new Promise((resolve) => {
     const timer = setTimeout(() => resolve(null), ms);
     work.then(
