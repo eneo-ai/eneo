@@ -24,6 +24,7 @@ import { browserApi } from "@/lib/api/browser";
 import { EneoApiError, unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import { toastApiError } from "@/lib/api/toast";
+import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
 import { usePhoneScreen } from "@/lib/hooks/use-media-match";
 import { toast } from "@/lib/toast";
 import { flowKeys, type FlowPublic } from "./flows-api";
@@ -356,11 +357,13 @@ function RetentionForm({
   const announce = useAnnounce();
   const formId = useId();
   const warningId = useId();
+  const unitId = useId();
   const queryClient = useQueryClient();
   const savedDays = settings.local_policy?.days ?? null;
   // Until the person edits it, the field shows the Flow's time as last read, so a
   // read that brings another admin's change replaces it. A clear is an edit too.
-  const [draft, setDraft] = useState<{ text: string } | null>(null);
+  // `against` is the time that applied when it was typed (`current` below).
+  const [draft, setDraft] = useState<{ text: string; against: number | null } | null>(null);
   const text = draft ? draft.text : (savedDays?.toString() ?? "");
   // Read at every key, as the space's field is, so the warning and the button's words
   // change while the person types and nothing moves under a click. Undefined is invalid.
@@ -370,8 +373,9 @@ function RetentionForm({
   const spaceDays = settings.inherited_policy?.days ?? null;
   // The field's value is over the space's time; a new value clears it.
   const [overCap, setOverCap] = useState(false);
-  // The shorter time whose first Enter was held, so its warning is read before it saves.
-  const [enterHeldFor, setEnterHeldFor] = useState<number | null>(null);
+  // The time that applied when a press on the value typed was held, so the next one saves;
+  // typing again clears it.
+  const [heldAgainst, setHeldAgainst] = useState<number | null>(null);
   const field = useRef<HTMLInputElement>(null);
 
   /** Writes what the server just said; an older read still in flight must not replace it. */
@@ -423,7 +427,7 @@ function RetentionForm({
         // read again, so the field shows the time read and a time typed again is warned
         // about against what applies now.
         toastApiError(error, t);
-        setEnterHeldFor(null);
+        setHeldAgainst(null);
         setDraft(null);
         void queryClient.invalidateQueries({ queryKey: policyKey(flow.id), exact: true });
         void queryClient.invalidateQueries({ queryKey: flowKeys.flow(flow.id), exact: true });
@@ -485,26 +489,30 @@ function RetentionForm({
         }
       : null;
 
-  // Said once as the time becomes shorter; the field's description carries it after that.
-  const announceWarning = useEffectEvent(() => {
-    if (warning) announce(warning.title);
-  });
-  const warns = warning !== null;
+  // Said once for the value left in the field when the typing pauses, not for a digit on the
+  // way; the field's description carries it after that.
+  const settledTitle = useDebouncedValue(warning?.title ?? null);
+  const announceWarning = useEffectEvent((title: string) => announce(title));
   useEffect(() => {
-    if (warns) announceWarning();
-  }, [warns]);
+    if (settledTitle) announceWarning(settledTitle);
+  }, [settledTitle]);
 
   /**
-   * Saves what the field holds. A click or a tap on "Spara och ta bort" saves, its warning
-   * already on screen; the first Enter for a shorter time does not, since it may follow the
-   * last digit before the warning has been read, and the next one does.
+   * Saves what the field holds. The warning is decided by the value and the time that applies
+   * (`current`) together, so a press that removes saves only when its warning stood for both
+   * before the press. A click or a tap on "Spara och ta bort" saves, its warning on screen since
+   * the value was typed. A press is held, its warning left on screen and nothing sent, when a
+   * read has changed the time that applies since the typing (also between pointerdown and
+   * click), and on the first Enter, which may follow the last digit before the warning has been
+   * read. The next press saves.
    */
   function submit(byEnter: boolean) {
     if (save.isPending) return;
     // Nothing edited is nothing to save: resending the time as read could overwrite a newer one.
     if (!draft) onClose();
     else if (days === undefined) setRefused(true);
-    else if (byEnter && warning && enterHeldFor !== days) setEnterHeldFor(days);
+    else if (warning && heldAgainst !== current && (byEnter || draft.against !== current))
+      setHeldAgainst(current);
     else
       save.mutate({
         sent: days,
@@ -552,14 +560,16 @@ function RetentionForm({
                   description={applies}
                   value={text}
                   onChange={(value) => {
-                    setDraft({ text: value });
+                    setDraft({ text: value, against: current });
                     setOverCap(false);
+                    setHeldAgainst(null);
                   }}
                   onKeyDown={(event) => {
                     // Enter is decided here, so a browser's implicit submit never bypasses it.
                     if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
                     event.preventDefault();
-                    submit(true);
+                    // A held key repeats: one press, not one per repeat.
+                    if (!event.repeat) submit(true);
                   }}
                   inputMode="numeric"
                   autoComplete="off"
@@ -572,15 +582,20 @@ function RetentionForm({
                   hasClear
                   // Read-only, not disabled: it keeps focus, and a refusal marks the value sent.
                   isReadOnly={save.isPending}
-                  aria-describedby={warning ? warningId : undefined}
+                  // The unit, as the visible one is hidden from a screen reader, then the warning.
+                  aria-describedby={warning ? `${unitId} ${warningId}` : unitId}
                   status={problem ? { type: "error", message: problem } : undefined}
                 />
-                {/* After the field only with a value, so the placeholder reads on its own. */}
-                {text.trim() === "" ? null : (
-                  <span aria-hidden="true" className="text-ax-text-secondary mt-auto py-1.5">
-                    {t("days")}
-                  </span>
-                )}
+                {/* After the field only with a value, so the placeholder reads on its own. It is
+                    the field's description in every state, by its id, so never removed. */}
+                <span
+                  id={unitId}
+                  aria-hidden="true"
+                  hidden={text.trim() === ""}
+                  className="text-ax-text-secondary mt-auto py-1.5"
+                >
+                  {t("days")}
+                </span>
               </div>
               {spaceDays === null && spaceSettingsHref ? (
                 <SpaceLink href={spaceSettingsHref}>

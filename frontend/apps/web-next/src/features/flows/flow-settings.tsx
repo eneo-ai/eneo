@@ -16,7 +16,6 @@ import { Collapsible } from "@/components/astryx/collapsible";
 import { TextInput } from "@/components/astryx/text-input";
 import { EmptyState } from "@/components/composites/empty-state";
 import { LeaveConfirmation } from "@/components/composites/leave-confirmation";
-import { useAppContext } from "@/components/providers/app-context";
 import { EditorSection } from "./editor/editor-fields";
 import { useFlowReadLabel } from "./flow-read-layout";
 import { FlowRetentionDialog, FlowRetentionSection } from "./flow-retention";
@@ -420,7 +419,7 @@ function FormFieldRow({
 export function FlowSettings({
   flow,
   canEdit,
-  setsSpaceRetention = false,
+  mayChangeRetention = false,
   personalSpace = false,
   transcription,
   onSave,
@@ -432,12 +431,8 @@ export function FlowSettings({
 }: {
   flow: FlowPublic;
   canEdit: boolean;
-  /**
-   * Whether the person sets retention in the flow's space: its admin, or a
-   * personal space's owner who may edit the flow. The backend refuses
-   * everyone else a flow time.
-   */
-  setsSpaceRetention?: boolean;
+  /** Whether the person may change the flow's retention, as `useFlowRetentionAccess` decides. */
+  mayChangeRetention?: boolean;
   /** Whether the flow's space is personal, where runs are not removed automatically. */
   personalSpace?: boolean;
   /** The space's transcription models and services. */
@@ -459,9 +454,7 @@ export function FlowSettings({
   spaceRetentionHref?: string;
 }) {
   const t = useTranslations();
-  const { can } = useAppContext();
   const [retentionOpen, setRetentionOpen] = useState(false);
-  const mayChangeRetention = setsSpaceRetention && can("retention_manage");
   const announce = useAnnounce();
   const headingId = useId();
   const formId = useId();

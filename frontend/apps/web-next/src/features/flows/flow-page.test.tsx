@@ -1039,19 +1039,34 @@ describe("FlowPage", () => {
   });
 
   it.each([
-    ["edits the space and manages retention", ["read", "edit"], ["retention_manage"], {}, true],
-    ["edits the space without the permission", ["read", "edit"], [], {}, false],
-    ["manages retention without editing the space", ["read"], ["retention_manage"], {}, false],
+    [
+      "edits the space and manages retention",
+      ["read", "edit"],
+      ["retention_manage"],
+      {},
+      true,
+      true
+    ],
+    ["edits the space without the permission", ["read", "edit"], [], {}, false, false],
+    [
+      "manages retention without editing the space",
+      ["read"],
+      ["retention_manage"],
+      {},
+      false,
+      false
+    ],
     [
       "edits the organization's space and manages retention",
       ["read", "edit"],
       ["retention_manage"],
       { organization: true },
-      false
+      false,
+      true
     ]
   ] as const)(
-    "links to the space's retention time only for someone who %s",
-    (_, spacePermissions, extra, overrides, linked) => {
+    "links to the space's retention time, and offers the change, only as the access allows for someone who %s",
+    (_, spacePermissions, extra, overrides, linked, changes) => {
       const space = makeSpace({ permissions: [...spacePermissions], overrides });
       const flow = makeFlow({
         steps,
@@ -1072,6 +1087,10 @@ describe("FlowPage", () => {
       expect(link?.getAttribute("href") ?? null).toBe(
         linked ? "/spaces/space-1/settings?section=security#security" : null
       );
+      // The page decides who may change it, once; the settings show what it decided.
+      expect(
+        within(section).queryByRole("button", { name: messages.flows_retention_change }) !== null
+      ).toBe(changes);
     }
   );
 

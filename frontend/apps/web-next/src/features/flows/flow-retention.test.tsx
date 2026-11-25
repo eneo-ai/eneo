@@ -143,12 +143,12 @@ afterEach(() => {
   toastError.mockReset();
 });
 
-function renderSettings(permissions: Permission[], setsSpaceRetention = true) {
+function renderSettings(permissions: Permission[], mayChangeRetention = true) {
   return renderInApp(
     <FlowSettings
       flow={makeFlow({ run_history_retention: configured })}
       canEdit
-      setsSpaceRetention={setsSpaceRetention}
+      mayChangeRetention={mayChangeRetention}
       transcription={resources}
       onSave={vi.fn()}
     />,
@@ -163,7 +163,7 @@ function CachedFlowSettings() {
     <FlowSettings
       flow={flow}
       canEdit
-      setsSpaceRetention
+      mayChangeRetention
       transcription={resources}
       onSave={vi.fn()}
     />
@@ -182,9 +182,19 @@ function pressSave() {
   fireEvent.click(button);
 }
 
-/** Enter in the field, as a keyboard or a phone's Go key sends it. */
-function pressEnter(field: HTMLElement) {
-  fireEvent.keyDown(field, { key: "Enter", code: "Enter" });
+/**
+ * Enter in the field, as a keyboard or a phone's Go key sends it, `repeat` while the key is
+ * held. The dialog decides every Enter itself: the browser's own submit is always prevented.
+ */
+function pressEnter(field: HTMLElement, repeat = false) {
+  expect(fireEvent.keyDown(field, { key: "Enter", code: "Enter", repeat })).toBe(false);
+}
+
+/** A press on the button as a pointer makes it, down, up and the click. */
+function press(button: HTMLElement) {
+  fireEvent.pointerDown(button);
+  fireEvent.pointerUp(button);
+  fireEvent.click(button);
 }
 
 async function openDialog() {
@@ -395,7 +405,7 @@ describe("the retention section", () => {
       <FlowSettings
         flow={flow}
         canEdit
-        setsSpaceRetention
+        mayChangeRetention
         transcription={resources}
         onSave={vi.fn()}
         spaceRetentionHref={SPACE_HREF}
@@ -427,17 +437,12 @@ describe("the retention section", () => {
 });
 
 describe("flow retention", () => {
-  it("offers the change only to someone who manages retention", () => {
-    renderSettings(["flows"]);
+  it("offers the change only as the page decided, which is who may change it", () => {
+    renderSettings(["retention_manage"], false);
     expect(screen.queryByRole("button", { name: "Ändra gallring" })).toBeNull();
     cleanup();
     renderSettings(["retention_manage"]);
     expect(screen.getByRole("button", { name: "Ändra gallring" })).toBeTruthy();
-  });
-
-  it("does not offer the change without the right to set retention in the flow's space", () => {
-    renderSettings(["retention_manage"], false);
-    expect(screen.queryByRole("button", { name: "Ändra gallring" })).toBeNull();
   });
 
   it("says what an empty field means, and saves a flow time", async () => {
@@ -454,7 +459,8 @@ describe("flow retention", () => {
     ).toBeTruthy();
     expect(days.placeholder).toBe("Följer ytan");
     // The unit stands after the field only with a value, so the placeholder reads alone.
-    expect(within(dialog).queryByText("dagar", { exact: true })).toBeNull();
+    // It stays in the document as the field's description, hidden.
+    expect(within(dialog).queryByText("dagar", { exact: true, ignore: "[hidden]" })).toBeNull();
     expect(within(dialog).getByRole("button", { name: SAVE })).toBeTruthy();
     await expectNoAxeViolations(document.body);
 
@@ -511,6 +517,13 @@ describe("flow retention", () => {
     await queryClient.refetchQueries({ queryKey: policyKey, exact: true });
     await settle();
     expect(days.value).toBe("5");
+    // 5 is shorter than the 10 read: the warning shows, though nothing was typed.
+    expect(warningShown()).toBe(true);
+    // The time that applies changed since the 5 was typed: the press is held.
+    pressSave();
+    await settle();
+    expect(backend.PUT).not.toHaveBeenCalled();
+    expect(warningShown()).toBe(true);
     pressSave();
     await waitFor(() => expect(backend.PUT).toHaveBeenCalledTimes(1));
     expect(backend.PUT.mock.calls[0]![1].body).toEqual({
@@ -570,9 +583,13 @@ describe("flow retention", () => {
     expect(screen.queryByRole("button", { name: SAVE })).toBeNull();
     const button = screen.getByRole("button", { name: SAVE_AND_REMOVE });
     expect(button.getAttribute("data-variant")).toBe("destructive");
-    // Said once as the time became shorter, not again for each key.
-    await flushAnnouncements();
-    expect(said.filter((text) => WARNING_TITLE.test(text))).toHaveLength(1);
+    // Said once, for the value left when the typing stopped, not for the 3 on the way.
+    await waitFor(async () => {
+      await flushAnnouncements();
+      expect(said.filter((text) => WARNING_TITLE.test(text))).toEqual([
+        "Körningar avslutade den 26 oktober 2026 eller tidigare kan tas bort"
+      ]);
+    });
     await expectNoAxeViolations(document.body);
 
     // The warning is on screen: one click saves.
@@ -630,6 +647,126 @@ describe("flow retention", () => {
       expected_effective_days: 60,
       expected_inherited_days: 60
     });
+  });
+
+  it("does nothing on the repeats of a held Enter, which still keep the browser from submitting", async () => {
+    backend.GET.mockResolvedValue(settings(null, { days: 60 }));
+    backend.PUT.mockResolvedValue(settings({ days: 30 }, { days: 60 }));
+    const days = await openDialog();
+    fireEvent.change(days, { target: { value: "30" } });
+    pressEnter(days);
+    pressEnter(days, true);
+    pressEnter(days, true);
+    await settle();
+    expect(backend.PUT).not.toHaveBeenCalled();
+    expect(warningShown()).toBe(true);
+    // A new press saves.
+    pressEnter(days);
+    await waitFor(() => expect(backend.PUT).toHaveBeenCalledTimes(1));
+  });
+
+  it("holds the first Enter again once the value is typed again, also the same value", async () => {
+    backend.GET.mockResolvedValue(settings(null, { days: 60 }));
+    backend.PUT.mockResolvedValue(settings({ days: 30 }, { days: 60 }));
+    const days = await openDialog();
+    fireEvent.change(days, { target: { value: "30" } });
+    pressEnter(days);
+    fireEvent.change(days, { target: { value: "" } });
+    fireEvent.change(days, { target: { value: "30" } });
+    pressEnter(days);
+    await settle();
+    expect(backend.PUT).not.toHaveBeenCalled();
+    pressEnter(days);
+    await waitFor(() => expect(backend.PUT).toHaveBeenCalledTimes(1));
+  });
+
+  it("holds an Enter again when a read changes the time that applies after a held one", async () => {
+    backend.GET.mockResolvedValue(settings(null, { days: 60 }));
+    backend.PUT.mockResolvedValue(settings({ days: 30 }, { days: 60 }));
+    const { queryClient } = renderSettings(["retention_manage"]);
+    fireEvent.click(screen.getByRole("button", { name: "Ändra gallring" }));
+    const days = (await screen.findByRole("textbox", { name: FIELD })) as HTMLInputElement;
+    fireEvent.change(days, { target: { value: "30" } });
+    pressEnter(days);
+    // Another administrator gave the flow 45 days; the dialog reads it.
+    backend.GET.mockResolvedValue(settings({ days: 45 }, { days: 60 }));
+    await act(() => queryClient.refetchQueries({ queryKey: policyKey, exact: true }));
+    await settle();
+    expect(days.value).toBe("30");
+    pressEnter(days);
+    await settle();
+    expect(backend.PUT).not.toHaveBeenCalled();
+    expect(warningShown()).toBe(true);
+    pressEnter(days);
+    await waitFor(() => expect(backend.PUT).toHaveBeenCalledTimes(1));
+    expect(backend.PUT.mock.calls[0]![1].body).toEqual({
+      policy: { days: 30 },
+      expected_effective_days: 45,
+      expected_inherited_days: 60
+    });
+  });
+
+  it("holds a press when a read between its pointerdown and click makes the time shorter, and saves on a new press", async () => {
+    backend.GET.mockResolvedValue(settings({ days: 3 }, { days: 60 }));
+    backend.PUT.mockResolvedValue(settings({ days: 5 }, { days: 60 }));
+    const { queryClient } = renderSettings(["retention_manage"]);
+    fireEvent.click(screen.getByRole("button", { name: "Ändra gallring" }));
+    const days = (await screen.findByRole("textbox", { name: FIELD })) as HTMLInputElement;
+    fireEvent.change(days, { target: { value: "5" } });
+    expect(warningShown()).toBe(false);
+    const button = screen.getByRole("button", { name: SAVE });
+    fireEvent.pointerDown(button);
+    // Another administrator gave the flow 10 days; the read lands while the button is down.
+    backend.GET.mockResolvedValue(settings({ days: 10 }, { days: 60 }));
+    await act(() => queryClient.refetchQueries({ queryKey: policyKey, exact: true }));
+    await settle();
+    fireEvent.pointerUp(button);
+    fireEvent.click(button);
+    await settle();
+    // Nothing is sent: the warning shows now, and the button says what a press does.
+    expect(backend.PUT).not.toHaveBeenCalled();
+    expect(warningShown()).toBe(true);
+    expect(screen.getByRole("button", { name: SAVE_AND_REMOVE })).toBe(button);
+    press(button);
+    await waitFor(() => expect(backend.PUT).toHaveBeenCalledTimes(1));
+    expect(backend.PUT.mock.calls[0]![1].body).toEqual({
+      policy: { days: 5 },
+      expected_effective_days: 10,
+      expected_inherited_days: 60
+    });
+  });
+
+  it.each([
+    ["in a personal space, empty", { personal: true, typed: null }],
+    ["in a personal space, with a value", { personal: true, typed: "30" }],
+    ["while the space has no time, empty", { personal: false, typed: null }],
+    ["while the space has no time, with a value", { personal: false, typed: "5" }]
+  ])("tells a screen reader the field's unit %s", async (_, { personal, typed }) => {
+    backend.GET.mockResolvedValue(settings({ days: 45 }, personal ? { days: 60 } : null));
+    renderInApp(
+      <FlowSettings
+        flow={makeFlow({ run_history_retention: retentionOf(personal ? 60 : null, 45) })}
+        canEdit
+        mayChangeRetention
+        personalSpace={personal}
+        transcription={resources}
+        onSave={vi.fn()}
+      />,
+      { appContext: testAppContext({ permissions: ["retention_manage"] }) }
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Ändra gallring" }));
+    const days = await screen.findByRole("textbox", { name: FIELD });
+    fireEvent.change(days, { target: { value: typed ?? "" } });
+    expect(screen.getByRole("textbox", { name: FIELD, description: /\bdagar\b/ })).toBe(days);
+  });
+
+  it("tells a screen reader the field's unit beside an error", async () => {
+    backend.GET.mockResolvedValue(settings(null, { days: 60 }));
+    const days = await openDialog();
+    fireEvent.change(days, { target: { value: "tre" } });
+    pressSave();
+    expect(await screen.findByText("Ange ett heltal från 1 till 2555.")).toBeTruthy();
+    expect(screen.getByRole("textbox", { name: FIELD, description: /\bdagar\b/ })).toBe(days);
   });
 
   it("saves a time that removes nothing sooner on the first Enter", async () => {
@@ -794,7 +931,7 @@ describe("flow retention", () => {
       <FlowSettings
         flow={makeFlow({ run_history_retention: retentionOf(null, 30) })}
         canEdit
-        setsSpaceRetention
+        mayChangeRetention
         transcription={resources}
         onSave={vi.fn()}
         spaceRetentionHref={SPACE_HREF}
@@ -839,7 +976,7 @@ describe("flow retention", () => {
             }
           })}
           canEdit
-          setsSpaceRetention
+          mayChangeRetention
           personalSpace
           transcription={resources}
           onSave={vi.fn()}
