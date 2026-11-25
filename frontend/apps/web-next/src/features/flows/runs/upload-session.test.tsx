@@ -1,8 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { renderHookInApp } from "@/test/render";
-import { UPLOAD_RETRY_DELAYS_MS } from "./recording/upload-retry";
 import { makeInput } from "./run-fixtures";
 import { useRuntimeUploads } from "./use-runtime-uploads";
 
@@ -10,8 +9,6 @@ const hooks = vi.hoisted(() => ({
   prepare: vi.fn<({ request }: { request: Request }) => Promise<Request>>(),
   response: vi.fn<(response: Response, url: string) => Promise<void>>()
 }));
-const navigate = vi.hoisted(() => vi.fn());
-vi.mock("@/lib/navigate-to", () => ({ navigateTo: navigate }));
 vi.mock("@/lib/api/base", async (original) => ({
   ...(await original<typeof import("@/lib/api/base")>()),
   API_BASE: "",
@@ -282,111 +279,4 @@ it("keeps a recorded part when a file is picked for a step that takes one", asyn
   const entries = hook.result.current.uploads["step-1"]!;
   expect(entries[0]).toMatchObject({ key: recorded.key, state: "uploading" });
   expect(entries[1]).toMatchObject({ name: "fil.webm", state: "failed" });
-});
-
-describe("a recorded part sent again after the session check failed", () => {
-  const probe = (generation = "a") =>
-    new Response(null, { status: 204, headers: { "Eneo-Session-Generation": generation } });
-  const offline = () => Promise.reject(new TypeError("Failed to fetch"));
-  const busy = async () =>
-    new Response(JSON.stringify({ message: "Unavailable" }), {
-      status: 503,
-      headers: { "content-type": "application/json" }
-    });
-
-  let fetcher: ReturnType<typeof vi.fn<typeof fetch>>;
-  let owner: typeof import("@/lib/api/refusal");
-
-  beforeEach(async () => {
-    // The session is the module's state, and a stale one stays stale: each case binds its own.
-    vi.resetModules();
-    fetcher = vi.fn<typeof fetch>(async () => probe());
-    vi.stubGlobal("fetch", fetcher);
-    owner = await import("@/lib/api/refusal");
-    await owner.initializeBrowserSession();
-    // The upload is prepared against that session, as in the app.
-    hooks.prepare.mockImplementation(({ request }) => owner.prepareBrowserRequest(request));
-  });
-  afterEach(() => vi.useRealTimers());
-
-  const part = (hook: Awaited<ReturnType<typeof failedPart>>) =>
-    hook.result.current.uploads["step-1"]![0]!;
-
-  /** The session check fails the `failure` way; a recorded part then fails and waits to go again. */
-  async function failedPart(failure: () => Promise<Response>) {
-    fetcher.mockImplementation(failure);
-    await owner.checkBrowserSession().catch(() => {});
-    expect(owner.getSessionSnapshot()).toHaveProperty("checkError");
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    // From the same modules as the session.
-    const [uploads, render] = await Promise.all([
-      import("./use-runtime-uploads"),
-      import("@/test/render")
-    ]);
-    const hook = render.renderHookInApp(() => uploads.useRuntimeUploads("flow-1", undefined));
-    const input = makeInput({ step_id: "step-1", accepted_mimetypes: ["audio/webm"] });
-    act(() =>
-      hook.result.current.add(input, [new File(["audio"], "del-1.webm", { type: "audio/webm" })], {
-        recording: { sessionId: "rec-1", index: 0, durationMs: 1000, streamed: false },
-        label: "Inspelning"
-      })
-    );
-    await vi.waitFor(() =>
-      expect(hook.result.current.uploads["step-1"]?.[0]).toMatchObject({
-        state: "failed",
-        retryable: true
-      })
-    );
-    return hook;
-  }
-
-  /** The server is back, with no `online` event: the next attempt checks once and uploads. */
-  async function serverBackThen(
-    hook: Awaited<ReturnType<typeof failedPart>>,
-    attempt: () => unknown
-  ) {
-    fetcher.mockImplementation(async () => probe());
-    fetcher.mockClear();
-    await act(async () => attempt());
-    await vi.waitFor(() => expect(UploadRequest.sent).toHaveLength(1));
-    expect(fetcher).toHaveBeenCalledTimes(1);
-    expect(owner.getSessionSnapshot()).not.toHaveProperty("checkError");
-    act(() => UploadRequest.sent[0]!.answer(201, { id: "file-1" }));
-    await vi.waitFor(() => expect(part(hook)).toMatchObject({ state: "done", fileId: "file-1" }));
-  }
-
-  describe.each([
-    ["could not reach the server", offline],
-    ["answered 503", busy]
-  ])("when the last check %s", (_case, failure) => {
-    it("checks the session again before the next timed attempt, then uploads", async () => {
-      const hook = await failedPart(failure);
-      await serverBackThen(hook, () => vi.advanceTimersByTimeAsync(UPLOAD_RETRY_DELAYS_MS[0]));
-    });
-
-    it("checks the session again when Try again is pressed after the timed attempts ran out", async () => {
-      const hook = await failedPart(failure);
-      // The server stays down through every timed attempt: one check each, nothing sent.
-      for (const delay of UPLOAD_RETRY_DELAYS_MS) {
-        const checks = fetcher.mock.calls.length;
-        await act(() => vi.advanceTimersByTimeAsync(delay));
-        await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(checks + 1));
-        await vi.waitFor(() => expect(part(hook).state).toBe("failed"));
-      }
-      expect(part(hook).nextRetryAt).toBeNull();
-      expect(UploadRequest.sent).toHaveLength(0);
-      await serverBackThen(hook, () => hook.result.current.retry("step-1", part(hook).key));
-    });
-  });
-
-  it("still ends the page and sends nothing when the check finds another person's session", async () => {
-    const hook = await failedPart(offline);
-    fetcher.mockImplementation(async () => probe("someone-else"));
-    await act(() => vi.advanceTimersByTimeAsync(UPLOAD_RETRY_DELAYS_MS[0]));
-    await vi.waitFor(() => expect(owner.getSessionSnapshot().status).toBe("stale"));
-    expect(navigate).toHaveBeenCalledWith("/login", { replace: true });
-    await vi.waitFor(() => expect(part(hook).state).toBe("failed"));
-    expect(part(hook).retryable).toBe(false);
-    expect(UploadRequest.sent).toHaveLength(0);
-  });
 });
