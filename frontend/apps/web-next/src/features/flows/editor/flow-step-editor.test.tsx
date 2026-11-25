@@ -905,6 +905,39 @@ describe("FlowStepEditor", () => {
     await expectNoAxeViolations(container);
   }, 20_000);
 
+  it("shows a tool's long argument in the preview as written, in a box that scrolls", async () => {
+    const sql = "SELECT x.pump\nFROM pumps x\nORDER BY x.pump";
+    renderEditor(
+      makeFlow({
+        steps: [
+          makeStep({
+            input_source: "tool",
+            output_mode: "compose_text",
+            input_config: {
+              tool: { mcp_server_id: "server-1", tool_id: "tool-1", arguments: { sql, limit: 5 } }
+            }
+          })
+        ]
+      })
+    );
+    await nameField();
+    fireEvent.click(
+      screen.getByRole("button", { name: messages.flow_editor_tools_preview_button })
+    );
+    const dialog = await screen.findByRole("dialog", {
+      name: messages.flow_editor_tools_preview_title
+    });
+    const valueName = (name: string) =>
+      messages.flow_editor_tools_preview_argument_value.replace("{name}", name);
+    const value = within(dialog).getByRole("region", { name: valueName("sql") });
+    // Its own lines, kept by a preformatted block (a plain inline element folds them).
+    expect(value.querySelector("pre")?.textContent).toBe(sql);
+    // A number stays inline: it never scrolls, so it gets no named box.
+    expect(within(dialog).queryByRole("region", { name: valueName("limit") })).toBeNull();
+    expect(within(dialog).queryByRole("group", { name: valueName("limit") })).toBeNull();
+    expect(within(dialog).getByText("5", { selector: "code" })).toBeTruthy();
+  }, 20_000);
+
   it("names a stored credential as stored in the preview, never its value", async () => {
     renderEditor(httpFlow({ mode: "bearer_token", token: { $secret: "stored" } }));
     await nameField();
