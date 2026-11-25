@@ -5,7 +5,7 @@ import { ToggleButton } from "@astryxdesign/core/ToggleButton";
 import { Token } from "@astryxdesign/core/Token";
 import { Search, Server, Star } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import { ProviderLogo } from "@/components/ai-elements/provider-logo";
 import { matchesSearch } from "@/lib/search";
 import type { ProviderOption } from "./model-providers";
@@ -18,7 +18,7 @@ type CapabilityFilter = "all" | "embedding" | "transcription" | "image" | "reran
  * vLLM is the type for any OpenAI-compatible server, its name says neither.
  */
 const SEARCH_ALIASES: Record<string, string> = {
-  hosted_vllm: "openai compatible kompatibel gateway"
+  hosted_vllm: "openai-compatible openai-kompatibel openai compatible kompatibel gateway"
 };
 
 const CAPABILITY_FILTERS: CapabilityFilter[] = [
@@ -75,6 +75,7 @@ function ProviderTile({
   onToggleFavorite: (type: string) => void;
 }) {
   const t = useTranslations();
+  const noteId = useId();
   return (
     <li className="bg-ax-card border-ax-border hover:border-ax-border-strong hover:bg-ax-hover rounded-ax-container relative border transition-colors">
       {/* Full-card selectable surface; the favorite toggle sits above it (z-20). */}
@@ -82,6 +83,7 @@ function ProviderTile({
         type="button"
         onClick={() => onSelect(option.type)}
         aria-label={t("add_provider_named", { name: option.name })}
+        aria-describedby={option.type === "hosted_vllm" ? noteId : undefined}
         className="focus-visible:outline-ring rounded-ax-container absolute inset-0 z-0 focus-visible:outline-2 focus-visible:outline-offset-2"
       />
       <div className="pointer-events-none relative z-10 flex flex-col gap-2 p-3">
@@ -93,7 +95,7 @@ function ProviderTile({
           {/* vLLM is also the type for a server another host runs, which a
               "self-hosted" label would steer away from. */}
           {option.type === "hosted_vllm" ? (
-            <Text type="supporting" display="block">
+            <Text id={noteId} type="supporting" display="block">
               {t("provider_vllm_tile_note")}
             </Text>
           ) : option.selfHosted ? (

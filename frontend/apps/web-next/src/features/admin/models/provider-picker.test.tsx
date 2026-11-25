@@ -75,19 +75,29 @@ it("says what vLLM is for on its tile instead of calling it self-hosted", () => 
     within(vllm).getByText("För en OpenAI-kompatibel server, hos er eller hos en annan aktör.")
   ).toBeTruthy();
   expect(within(vllm).queryByText("Självhostad")).toBeNull();
+  // Said in focus too, not only when reading on past the button.
+  const button = screen.getByRole("button", { name: "Lägg till vLLM" });
+  expect(document.getElementById(button.getAttribute("aria-describedby") ?? "")?.textContent).toBe(
+    "För en OpenAI-kompatibel server, hos er eller hos en annan aktör."
+  );
 });
 
-it.each(["openai", "kompatibel", "compatible", "gateway"])(
-  "finds vLLM when searching for %s",
-  (query) => {
-    renderPicker(new Set());
-    fireEvent.change(screen.getByRole("textbox", { name: "Sök leverantörer" }), {
-      target: { value: query }
-    });
-    expect(screen.getByRole("button", { name: "Lägg till vLLM" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Lägg till Anthropic" })).toBeNull();
-  }
-);
+it.each([
+  "openai",
+  "kompatibel",
+  "compatible",
+  "gateway",
+  "OpenAI-kompatibel",
+  "OpenAI-compatible",
+  "openai compatible"
+])("finds vLLM when searching for %s", (query) => {
+  renderPicker(new Set());
+  fireEvent.change(screen.getByRole("textbox", { name: "Sök leverantörer" }), {
+    target: { value: query }
+  });
+  expect(screen.getByRole("button", { name: "Lägg till vLLM" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Lägg till Anthropic" })).toBeNull();
+});
 
 it("filters by capability, self-hosting and search", () => {
   renderPicker(new Set());
