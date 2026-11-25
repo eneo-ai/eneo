@@ -202,6 +202,11 @@ function applyRefusal(response: Response, error: EneoApiError): void {
   }
 }
 
+/** A check that failed on the way (network, time limit, 5xx), not by a refusal (4xx). */
+const failedOnTheWay = (error: unknown): boolean =>
+  error !== undefined &&
+  !(error instanceof EneoApiError && error.status >= 400 && error.status < 500);
+
 /** Cookie requests and cache-only route gates share this document's session check. */
 export async function requireBrowserSession(): Promise<string> {
   // Wait for the check or renewal holding requests, and for a renewal that
@@ -209,6 +214,17 @@ export async function requireBrowserSession(): Promise<string> {
   // holder clears `pendingProbe` in a callback attached before anyone can wait
   // for it, so that runs before a waiter resumes.
   while (pendingProbe) await pendingProbe;
+  if (
+    snapshot.status === "bound" &&
+    failedOnTheWay(snapshot.checkError) &&
+    navigator.onLine !== false
+  ) {
+    // The server may be back: check again rather than refuse until something
+    // else does. One check per request, shared by requests at the same time;
+    // its failure is the request's. The checks below decide as for any check.
+    await checkBrowserSession();
+    while (pendingProbe) await pendingProbe;
+  }
   assertCurrent();
   if (snapshot.status === "unbound") {
     throw new EneoApiError("The browser session has not been checked.", { status: 503 });
