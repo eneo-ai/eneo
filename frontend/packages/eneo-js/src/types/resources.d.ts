@@ -241,12 +241,8 @@ export type ConversationMessage = components["schemas"]["Message"];
 export type ConversationTools = components["schemas"]["UseTools"];
 export type ChatTurnDiagnostics = components["schemas"]["ChatTurnDiagnostics"];
 export type PreflightResponse = components["schemas"]["PreflightResponse"];
-export type GroupChat = components["schemas"]["GroupChatPublic"];
-export type GroupChatSparse = Omit<components["schemas"]["GroupChatSparse"], "user_id">;
 export type ChatPartner =
-  | { id: string; type: "assistant" }
-  | { id: string; type: "group-chat" }
-  | { id: string; type: "default-assistant" };
+  { id: string; type: "assistant" } | { id: string; type: "default-assistant" };
 
 export type Paginated<T> = {
   items: T[];
@@ -288,6 +284,7 @@ export namespace SSE {
       result_status?: string;
     }>;
   };
+  export type Consultation = Omit<components["schemas"]["SSEConsultation"], "$defs">;
   export type TokenUsage = Omit<components["schemas"]["SSETokenUsage"], "$defs">;
   export type Error = Omit<components["schemas"]["SSEError"], "$defs">;
   export type Event =
@@ -299,6 +296,7 @@ export namespace SSE {
     | ToolApprovalRequired
     | ToolApprovalTimeout
     | TokenUsage
+    | Consultation
     | Error;
 }
 

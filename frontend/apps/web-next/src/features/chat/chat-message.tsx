@@ -33,6 +33,7 @@ import { deriveActivity, modelName, type ActivitySource } from "./activity";
 import type { ActivityTab } from "./activity-panel";
 import type { DocumentDraft } from "./side-panel/document-draft";
 import { ActivityPill } from "./activity-pill";
+import { ConsultationTrace } from "./consultation-trace";
 import { sourceMeta } from "./activity-sources";
 import type { TurnDurations } from "./activity-timings";
 import {
@@ -65,7 +66,13 @@ import {
   mcpReferencesFromParts,
   ToolApprovalCard
 } from "./message-parts";
-import { MessageFiles, PendingMessageFiles, type PendingUpload } from "./message-files";
+import { approvalForPart } from "./tool-approvals";
+import {
+  MessageFiles,
+  PendingMessageFiles,
+  PictureThumbnails,
+  type PendingUpload
+} from "./message-files";
 
 /** Who answers: the chat partner's name and tile. */
 export type AssistantIdentity = { id: string; name: string; iconId?: string | null };
@@ -178,9 +185,10 @@ function Question({
       className="w-full"
     >
       {(text || quote) && (
-        <ChatMessageBubble className="bg-ax-muted rounded-ax-page flex max-w-[min(100%,32.5rem)] flex-col gap-2 px-[15px] py-2.5 text-[14.5px] leading-normal whitespace-pre-wrap">
+        <ChatMessageBubble className="bg-ax-muted rounded-ax-page flex max-w-[min(100%,32.5rem)] flex-col gap-2 px-[15px] py-2.5 text-[14.5px] leading-normal">
           {quote && <QuestionQuote quote={quote} conversationFiles={conversationFiles} />}
-          {text}
+          {/* Pasted text arrives as Markdown; a line break typed in a paragraph stays one. */}
+          {text && <MessageResponse className="[&_p]:whitespace-pre-wrap">{text}</MessageResponse>}
         </ChatMessageBubble>
       )}
       {children}
@@ -228,7 +236,8 @@ export function PendingQuestion({
 }
 
 /**
- * What an answer produced, under its text: images inline, and one line per
+ * What an answer produced, under its text: the pictures it took out of a
+ * file as a row of thumbnails, generated images inline, and one line per
  * document that names it and opens it in the side panel. A chart exported
  * only as part of a report is left out. A version a reader saved belongs to
  * the document it revises: it gets no line of its own, and the document's
@@ -257,9 +266,19 @@ function GeneratedFiles({
     if (call?.purpose !== "file_creation") return "exported";
     return revisedFileId(call.input) ? "updated" : "created";
   };
+  const extractedIds = new Set(
+    calls
+      .filter((call) => call.purpose === "file_analysis")
+      .flatMap((call) => call.generatedFileIds)
+  );
+  const extracted = files.filter(
+    (file) => extractedIds.has(file.id) && file.mimetype?.startsWith("image/")
+  );
+  const others = files.filter((file) => !extracted.includes(file));
   return (
     <div className="flex flex-col gap-2">
-      {files.map((file) =>
+      <PictureThumbnails pictures={extracted} />
+      {others.map((file) =>
         // An empty mimetype is the placeholder of an image still being generated.
         !file.mimetype || file.mimetype.startsWith("image/") ? (
           <InlineImage key={file.id} file={file} />
@@ -576,7 +595,6 @@ function AssistantMessage({
   message,
   assistant,
   isStreaming,
-  showResponseLabel,
   liveAnswering,
   knowledge,
   durations,
@@ -591,7 +609,6 @@ function AssistantMessage({
   message: EneoUIMessage;
   assistant: AssistantIdentity;
   isStreaming: boolean;
-  showResponseLabel: boolean;
   liveAnswering: { id: string; handle: string } | null;
   knowledge: KnowledgeOrigin[];
   durations: TurnDurations | null;
@@ -667,7 +684,7 @@ function AssistantMessage({
         <AssistantName
           assistant={assistant}
           model={modelName(message)}
-          handle={showResponseLabel && answering ? answering.handle : null}
+          handle={answering && answering.id !== assistant.id ? answering.handle : null}
         />
       }
       className="w-full"
@@ -710,12 +727,19 @@ function AssistantMessage({
               </CitationSourcesProvider>
             );
           }
-          if (part.type === "data-tool-approval") {
-            return <ToolApprovalCard key={part.id ?? index} data={part.data} />;
+          if (part.type === "data-consultation" && !isStreaming) return null;
+          const approval = approvalForPart(part);
+          if (approval) {
+            return <ToolApprovalCard key={approval.approval_id} data={approval} />;
           }
           return null;
         })}
         <McpImageStrip references={mcpReferences} />
+        <ConsultationTrace
+          parts={message.parts}
+          streaming={isStreaming}
+          sessionId={sessionId ?? null}
+        />
         <McpAppFrames message={message} live={isStreaming} sessionId={sessionId} />
         {draft && <DraftLine draft={draft} />}
         <GeneratedFiles message={message} documents={documents} />
@@ -753,7 +777,6 @@ export function ChatMessage({
   message,
   assistant,
   isStreaming = false,
-  showResponseLabel = false,
   liveAnswering = null,
   knowledge = NO_KNOWLEDGE,
   durations = null,
@@ -769,7 +792,6 @@ export function ChatMessage({
   message: EneoUIMessage;
   assistant: AssistantIdentity;
   isStreaming?: boolean;
-  showResponseLabel?: boolean;
   liveAnswering?: { id: string; handle: string } | null;
   knowledge?: KnowledgeOrigin[];
   durations?: TurnDurations | null;
@@ -796,7 +818,6 @@ export function ChatMessage({
       message={message}
       assistant={assistant}
       isStreaming={isStreaming}
-      showResponseLabel={showResponseLabel}
       liveAnswering={liveAnswering}
       knowledge={knowledge}
       durations={durations}

@@ -136,6 +136,8 @@ class ProviderToolCall:
     call_id: str
     name: str
     arguments: str
+    # Activation validates the original batch before applying any prompt changes.
+    provider_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -795,7 +797,10 @@ class SkillActivationRuntime:
 
     @staticmethod
     def _validate_provider_calls(calls: tuple[ProviderToolCall, ...]) -> None:
-        call_ids = [call.call_id for call in calls]
+        call_ids = [
+            call.provider_id if call.provider_id is not None else call.call_id
+            for call in calls
+        ]
         if any(not call_id for call_id in call_ids) or len(call_ids) != len(
             set(call_ids)
         ):

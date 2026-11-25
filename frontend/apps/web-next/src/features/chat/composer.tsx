@@ -17,6 +17,7 @@ import {
   TriangleAlert,
   X
 } from "lucide-react";
+import { clipboardHasFormattedText, clipboardMarkdown } from "@eneo/rich-paste";
 import { useTranslations } from "use-intl";
 import {
   useId,
@@ -48,8 +49,9 @@ const PILL_ACTIVE_CLASS = "bg-ax-accent-muted text-ax-text-accent";
  * (`returnSends`) Return sends and Shift+Return adds a line, as in other
  * chats; on a touch screen Return adds a line, as in any text field. ⌘ or
  * Ctrl+Return sends everywhere; the hint is in its description. Return that
- * commits an input method's word never sends, pasted files become attachments
- * and Backspace in an empty field removes the last attachment.
+ * commits an input method's word never sends, pasted files become attachments,
+ * pasted formatted text becomes Markdown and Backspace in an empty field
+ * removes the last attachment.
  */
 function ComposerTextarea({
   label,
@@ -76,8 +78,12 @@ function ComposerTextarea({
 }) {
   const composer = useChatComposerContext();
   const [composing, setComposing] = useState(false);
+  // Shift held at the paste is the browser's "paste as plain text" shortcut;
+  // Shift+Insert is an ordinary paste.
+  const plainPaste = useRef(false);
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    plainPaste.current = event.shiftKey && event.key !== "Insert";
     if (
       event.key === "Enter" &&
       (event.metaKey || event.ctrlKey || (returnSends && !event.shiftKey))
@@ -101,9 +107,22 @@ function ComposerTextarea({
         if (file) files.push(file);
       }
     }
-    if (files.length > 0) {
+    // A word processor adds a picture of the copied text; the text is the paste.
+    if (files.length > 0 && !clipboardHasFormattedText(event.clipboardData)) {
       event.preventDefault();
       onPasteFiles(files);
+      return;
+    }
+    const markdown = plainPaste.current ? null : clipboardMarkdown(event.clipboardData);
+    if (markdown === null) return;
+    event.preventDefault();
+    const field = event.currentTarget;
+    // execCommand is the one way to insert text that the field's own undo
+    // takes back; where an engine lacks it the text is set directly.
+    // eslint-disable-next-line @typescript-eslint/no-deprecated -- no replacement keeps undo
+    if (!document.execCommand?.("insertText", false, markdown)) {
+      field.setRangeText(markdown, field.selectionStart, field.selectionEnd, "end");
+      composer?.onChange(field.value);
     }
   };
 
@@ -115,6 +134,9 @@ function ComposerTextarea({
       value={composer?.value ?? ""}
       onChange={(event) => composer?.onChange(event.currentTarget.value)}
       onKeyDown={onKeyDown}
+      onKeyUp={(event) => {
+        plainPaste.current = event.shiftKey;
+      }}
       onPaste={onPaste}
       onCompositionStart={() => setComposing(true)}
       onCompositionEnd={() => setComposing(false)}
@@ -227,8 +249,6 @@ export type ComposerProps = {
   knowledgeMode?: ChatPartner["knowledgeMode"];
   /** Verktyg pill: a switch per capability and MCP server, and the personal chat's Skills. */
   tools?: ReactNode;
-  /** Group chats: @-mention picker. */
-  mention?: ReactNode;
   /** Personal assistant: model picker on the right. */
   modelSelector?: ReactNode;
   /** Start state for the personal assistant: the assistant selector as a token. */
@@ -318,7 +338,6 @@ export function Composer({
   knowledge = [],
   knowledgeMode,
   tools,
-  mention,
   modelSelector,
   partnerToken,
   contextBar,
@@ -439,7 +458,6 @@ export function Composer({
               )}
               <KnowledgePill knowledge={knowledge} mode={knowledgeMode} />
               {tools}
-              {mention}
             </div>
           }
           sendActions={modelSelector}

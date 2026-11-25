@@ -4,6 +4,7 @@ import asyncio
 import base64
 import json
 import logging
+import time
 from contextlib import suppress
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
@@ -17,6 +18,7 @@ from eneo.ai_models.completion_models.completion_model import (
     GeneratedFile,
     ResponseType,
 )
+from eneo.audit.domain.action_types import ActionType
 from eneo.completion_models.infrastructure.adapters import tenant_model_adapter
 from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import (
     MCP_IMAGE_PLACEHOLDER_TEMPLATE,
@@ -32,6 +34,8 @@ from eneo.main import stream_lifecycle
 from eneo.main.config import get_settings
 from eneo.main.exceptions import OpenAIException
 from eneo.mcp_apps.domain.mcp_app_view import McpAppViewInfo
+from eneo.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
+from eneo.mcp_servers.infrastructure.proxy import mcp_proxy_session
 from eneo.mcp_servers.infrastructure.tool_approval import (
     ToolApprovalDecision,
     ToolApprovalWaitResult,
@@ -39,6 +43,8 @@ from eneo.mcp_servers.infrastructure.tool_approval import (
 from eneo.model_providers.infrastructure.litellm_transport import (
     PROVIDER_UNREACHABLE,
 )
+from eneo.widgets.application import widget_ask_service
+from eneo.widgets.domain.widget import Widget, WidgetPrivacy
 from tests.log_capture import CHAIN, SENTINEL, chained_error, emitted, logged_errors
 
 
@@ -133,6 +139,8 @@ def _response_tool_call(tool_call_id: str, arguments: str, name: str = "server__
 
 
 class _FakeMCPProxy:
+    tool_context_without_uploads = True
+
     def model_result_text(self, text):
         return text
 
@@ -683,9 +691,11 @@ async def test_prepare_streaming_returns_explicit_context_wrapper():
 
 
 @pytest.mark.asyncio
-async def test_non_streaming_supports_multiple_tool_rounds():
+@pytest.mark.parametrize("upload_free", [False, True])
+async def test_non_streaming_supports_multiple_tool_rounds(upload_free):
     adapter = _make_completion_adapter()
     mcp_proxy = _ResourceMCPProxy()
+    mcp_proxy.tool_context_without_uploads = upload_free
     responses = [
         _response(
             tool_calls=[_response_tool_call("call_1", '{"q":"first"}')],
@@ -721,6 +731,10 @@ async def test_non_streaming_supports_multiple_tool_rounds():
         "call_1",
         "call_2",
     }
+    for step, source in zip(
+        completion.tool_calls_metadata, completion.mcp_tool_references, strict=True
+    ):
+        assert step.upload_free_reference_ids == ((source.id,) if upload_free else None)
     assert {ref.uri for ref in completion.mcp_tool_references} == {
         "https://example.test/shared"
     }
@@ -1129,7 +1143,8 @@ async def test_iterate_stream_forwards_the_arguments_of_a_pending_call_in_pieces
 
 
 @pytest.mark.asyncio
-async def test_iterate_stream_emits_pending_per_parallel_tool_call():
+@pytest.mark.parametrize("second_id", ["call_2", "call_1"], ids=["distinct", "reused"])
+async def test_iterate_stream_tracks_each_parallel_tool_call(second_id):
     adapter = _make_adapter()
     mcp_proxy = _FakeMCPProxy()
     follow_up_stream = _AsyncChunkStream([_text_chunk("done", finish_reason="stop")])
@@ -1142,10 +1157,10 @@ async def test_iterate_stream_emits_pending_per_parallel_tool_call():
             ),
             _tool_call_delta_chunk(index=0, arguments='{"q":"a"}'),
             _tool_call_delta_chunk(
-                index=1, tool_call_id="call_2", tool_name="server__tool"
+                index=1, tool_call_id=second_id, tool_name="server__tool"
             ),
             _tool_call_delta_chunk(
-                index=1, arguments='{"q":"b"}', finish_reason="tool_calls"
+                index=1, arguments='{"other":"b"}', finish_reason="tool_calls"
             ),
         ],
         eneo_context={
@@ -1174,10 +1189,108 @@ async def test_iterate_stream_emits_pending_per_parallel_tool_call():
         for e in _tool_call_events(completions)
         if e.tool_calls_metadata[0].result_status == "pending"
     ]
-    assert pending_ids == ["call_1", "call_2"]
+    assert len(pending_ids) == len(set(pending_ids)) == 2
+    assert pending_ids[0] == "call_1"
+    if second_id != "call_1":
+        assert pending_ids[1] == second_id
     assert mcp_proxy.calls == [
-        [("server__tool", {"q": "a"}), ("server__tool", {"q": "b"})]
+        [("server__tool", {"q": "a"}), ("server__tool", {"other": "b"})]
     ]
+    results = [
+        call
+        for event in _tool_call_events(completions)
+        for call in event.tool_calls_metadata
+        if call.result_status == "succeeded"
+    ]
+    assert [(call.tool_call_id, call.arguments) for call in results] == [
+        ("call_1", {"q": "a"}),
+        (pending_ids[1], {"other": "b"}),
+    ]
+
+
+async def test_open_circuit_records_one_failed_widget_attempt_without_sending(
+    monkeypatch,
+):
+    widget = Widget.create(
+        tenant_id=uuid4(), space_id=uuid4(), target_id=uuid4(), name="Test"
+    )
+    widget.id = uuid4()
+    widget.privacy = WidgetPrivacy(retention_days=0)
+    server_id = uuid4()
+    server = MCPServer(
+        id=server_id,
+        tenant_id=widget.tenant_id,
+        name="server",
+        http_url="https://server.invalid/mcp",
+        tools=[
+            MCPServerTool(
+                mcp_server_id=server_id,
+                name="tool",
+                description="Test tool",
+                input_schema={
+                    "type": "object",
+                    "properties": {"lookup_topic": {"type": "string"}},
+                },
+            )
+        ],
+    )
+    proxy = mcp_proxy_session.MCPProxySession([server])
+    monkeypatch.setitem(
+        mcp_proxy_session._CIRCUIT_BREAKER_STATE,
+        server_id,
+        {"failures": 1, "open_until": time.time() + 60},
+    )
+    client = AsyncMock()
+    monkeypatch.setattr(proxy, "_get_or_create_client", AsyncMock(return_value=client))
+    monkeypatch.setattr(
+        tenant_model_adapter,
+        "_acompletion_call",
+        AsyncMock(
+            return_value=_AsyncChunkStream([_text_chunk("done", finish_reason="stop")])
+        ),
+    )
+    sink = AsyncMock()
+    # A failed enqueue exercises the audit payload and its fallback in the same turn.
+    sink.log_async.return_value = None
+    audit = widget_ask_service.ExternalToolCallAudit(
+        sink,
+        widget,
+        visitor_id=uuid4(),
+        session_id=uuid4(),
+        question_id=None,
+        preview=False,
+    )
+    arguments = {"lookup_topic": "synthetic-visitor-value", SENTINEL: "extra"}
+    stream = PreparedModelStream(
+        stream=_AsyncChunkStream([_tool_call_chunk(arguments=json.dumps(arguments))]),
+        messages=[],
+        kwargs={},
+        mcp_proxy=proxy,
+        has_tools=True,
+    )
+    with emitted(widget_ask_service.logger) as records:
+        async for event in _make_adapter().iterate_stream(stream):
+            await audit.observe(event)
+        await audit.settle()
+
+    client.call_tool.assert_not_awaited()
+    sink.log_async.assert_awaited_once()
+    entry = sink.log_async.await_args.kwargs
+    assert entry["action"] == ActionType.WIDGET_EXTERNAL_TOOL_CALLED
+    assert "attempted" in entry["description"]
+    assert (entry["metadata"]["tool_call_id"], entry["metadata"]["result_status"]) == (
+        "call_1",
+        "failed",
+    )
+    [fallback] = [record for record in records if "not enqueued" in record.getMessage()]
+    assert vars(fallback)["result_status"] == "failed"
+    for logged in (repr(entry), fallback.getMessage(), repr(vars(fallback))):
+        assert "lookup_topic" not in logged
+        assert SENTINEL not in logged
+        assert "synthetic-visitor-value" not in logged
+    assert "temporarily unavailable" in next(
+        msg["content"] for msg in stream.messages if msg["role"] == "tool"
+    )
 
 
 @pytest.mark.asyncio
@@ -1609,9 +1722,13 @@ async def test_iterate_stream_timeout_yields_timeout_event_and_auto_denies():
 
 
 @pytest.mark.asyncio
-async def test_iterate_stream_denied_tools_produce_structured_denial_payload():
+@pytest.mark.parametrize("upload_free", [False, True])
+async def test_iterate_stream_denied_tools_produce_structured_denial_payload(
+    upload_free,
+):
     adapter = _make_adapter()
     mcp_proxy = _FakeMCPProxy()
+    mcp_proxy.tool_context_without_uploads = upload_free
     approval_manager = AsyncMock()
     messages = []
 
@@ -1642,7 +1759,7 @@ async def test_iterate_stream_denied_tools_produce_structured_denial_payload():
         "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
         mocked_acompletion,
     ):
-        await _collect(
+        chunks = await _collect(
             adapter,
             stream,
             require_tool_approval=True,
@@ -1656,6 +1773,14 @@ async def test_iterate_stream_denied_tools_produce_structured_denial_payload():
             pending_approval_ids=set(),
         )
 
+    completed = [
+        step
+        for chunk in chunks
+        for step in chunk.tool_calls_metadata or ()
+        if step.result is not None
+    ]
+    assert len(completed) == 1
+    assert completed[0].upload_free_reference_ids == (() if upload_free else None)
     denied_tool_messages = [m for m in messages if m.get("role") == "tool"]
     assert denied_tool_messages
     denied_payload = json.loads(denied_tool_messages[0]["content"])
@@ -1768,8 +1893,10 @@ async def test_non_streaming_round_cap_refuses_calls_and_forces_final_answer(
     assert refusals[0]["tool_call_id"] == f"call_{max_rounds}"
 
 
+@pytest.mark.parametrize("last_tool", ["server__tool", "unregistered"])
 async def test_iterate_stream_round_cap_refuses_calls_and_forces_final_answer(
     monkeypatch: pytest.MonkeyPatch,
+    last_tool: str,
 ):
     adapter = _make_adapter()
     mcp_proxy = _FakeMCPProxy()
@@ -1777,8 +1904,13 @@ async def test_iterate_stream_round_cap_refuses_calls_and_forces_final_answer(
     max_rounds = _cap_tool_rounds(monkeypatch, 3)
     follow_ups = [
         _AsyncChunkStream([_tool_call_chunk(tool_call_id=f"call_{i}")])
-        for i in range(1, max_rounds + 1)
+        for i in range(1, max_rounds)
     ]
+    follow_ups.append(
+        _AsyncChunkStream(
+            [_tool_call_chunk(tool_call_id=f"call_{max_rounds}", tool_name=last_tool)]
+        )
+    )
     follow_ups.append(
         _AsyncChunkStream([_text_chunk("partial answer", finish_reason="stop")])
     )
@@ -1834,7 +1966,10 @@ async def test_iterate_stream_round_cap_refuses_calls_and_forces_final_answer(
         for tm in (c.tool_calls_metadata or [])
         if tm.result_status == "failed" and tm.tool_call_id == f"call_{max_rounds}"
     ]
-    assert refused_events
+    assert len(refused_events) == 1
+    assert refused_events[0].mcp_tool_name == (
+        last_tool if last_tool == "server__tool" else "unknown_tool"
+    )
 
 
 async def test_forced_final_drops_ignored_tool_calls_without_pending_events(

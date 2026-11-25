@@ -10,7 +10,7 @@ from collections.abc import Sequence
 
 import sqlalchemy as sa
 
-from alembic import op
+from alembic import context, op
 
 revision: str = "202611190900"
 down_revision: str | None = "202611091200"
@@ -47,6 +47,11 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    with op.get_context().autocommit_block():
+    migration = op.get_context()
+    # A later revision can represent the other branch after the merge is split.
+    applied = context.script.iterate_revisions(migration.get_current_heads(), "base")
+    if any(rev.revision == "202611201300" for rev in applied):
+        return
+    with migration.autocommit_block():
         for name in _INDEXES:
             op.execute(f"DROP INDEX CONCURRENTLY IF EXISTS {name}")

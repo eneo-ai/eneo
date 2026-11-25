@@ -78,9 +78,13 @@
     return localizeHref(`/spaces/${item.space_id}/assistants/${item.target_id}/widget`);
   }
 
+  function externalTools(item: WidgetOverviewItem): string[] {
+    return item.external_tools ?? [];
+  }
+
   function blockedReason(item: WidgetOverviewItem): string {
-    const blockers = item.activation_blockers ?? [];
-    return blockers.length ? blockers.map(blockerLabel).join(", ") : "";
+    const reasons = (item.activation_blockers ?? []).map(blockerLabel);
+    return reasons.join(", ");
   }
 
   function budgetPercent(item: WidgetOverviewItem) {
@@ -147,6 +151,14 @@
                 <!-- Live, but not serving as configured: say so where the badge says "Aktiv". -->
                 <p class="bg-warning-dimmer text-warning-stronger rounded-lg px-3 py-2 text-sm">
                   {m.widget_admin_overview_active_issues({ reasons: blockedReason(item) })}
+                </p>
+              {/if}
+              {#if externalTools(item).length > 0}
+                <!-- The widget's reach beyond Eneo: what an anonymous visitor can make the assistant call. -->
+                <p class="text-secondary text-sm">
+                  {m.widget_admin_overview_external_tools({
+                    servers: externalTools(item).join(", ")
+                  })}
                 </p>
               {/if}
               <dl class="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-5">

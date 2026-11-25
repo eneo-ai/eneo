@@ -98,8 +98,7 @@ class ErrorCodes(int, Enum):
     PROMPT_IN_USE_BY_GOVERNANCE = 9069
     # A password session must replace its local password before other use.
     PASSWORD_CHANGE_REQUIRED = 9070
-    # An icon cannot be deleted while an assistant, app, space or group chat
-    # shows it.
+    # An icon cannot be deleted while an assistant, app or space shows it.
     ICON_IN_USE = 9075
     # A resource can only show an icon the caller uploaded in their tenant.
     ICON_NOT_ATTACHABLE = 9076
@@ -199,7 +198,14 @@ class FederatedLoginDenied(AuthenticationException):
 
 
 class BadRequestException(Exception):
-    pass
+    code: str | None = None
+
+    def __init__(self, message: str = "", *, code: str | None = None):
+        super().__init__(message)
+        # Subclasses declare their code as a class attribute; an unset code
+        # must not shadow it.
+        if code is not None:
+            self.code = code
 
 
 class ModelInUseException(Exception):

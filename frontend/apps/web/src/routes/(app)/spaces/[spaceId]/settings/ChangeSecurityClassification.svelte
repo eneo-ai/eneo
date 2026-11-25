@@ -146,7 +146,6 @@
               {@render access(m.capabilities(), affectedCapabilities)}
               {@render access(m.mcp_servers(), affectedMcpServers)}
               {@render access(m.assistants(), result?.assistants)}
-              {@render access(m.group_chats(), result?.group_chats)}
               {@render access(m.apps(), result?.apps)}
               {@render access(m.services(), result?.services)}
             </div>

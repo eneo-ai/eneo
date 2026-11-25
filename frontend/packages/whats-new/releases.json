@@ -5,6 +5,19 @@
       "version": "next",
       "entries": [
         {
+          "id": "app-run-transcript-download",
+          "type": "fixed",
+          "area": "spaces",
+          "title": {
+            "en": "Download the transcript from an app result",
+            "sv": "Ladda ner transkriptet från en appkörning"
+          },
+          "body": {
+            "en": "You can download the recording while the app runs. Eneo saves the transcript before starting the summary. If the summary is interrupted, you can download the transcript or use the same recording in a new run.",
+            "sv": "Du kan ladda ner inspelningen medan appen körs. Eneo sparar transkriptet innan sammanfattningen börjar. Om sammanfattningen avbryts kan du ladda ner texten eller använda samma inspelning i en ny körning."
+          }
+        },
+        {
           "id": "web-widgets",
           "permissions": {
             "anyOf": ["widgets", "admin"]
@@ -18,6 +31,51 @@
           "body": {
             "en": "Editors create a chat widget for a published assistant under Publishing, preview it, test it inside Eneo and copy the install snippet for the organisation's website. Administrators set the policy, activate widgets and keep house-style templates. Visitors chat anonymously without cookies, with citations, bot protection, limits and a daily budget built in.",
             "sv": "Redaktörer skapar en chattwidget för en publicerad assistent under Publicering, förhandsgranskar den, testar den i Eneo och kopierar installationskoden till organisationens webbplats. Administratörer sätter policyn, aktiverar widgetar och underhåller mallar för husstilen. Besökare chattar anonymt utan kakor och ser källorna i svaren; botskydd, begränsningar och en daglig budget ingår."
+          }
+        },
+        {
+          "id": "web-widgets-external-tools",
+          "permissions": {
+            "anyOf": ["widgets", "admin"]
+          },
+          "type": "improved",
+          "area": "assistants",
+          "title": {
+            "en": "Widgets follow the assistant’s tool selection",
+            "sv": "Widgeten följer assistentens verktygsval"
+          },
+          "body": {
+            "en": "An active widget follows the assistant’s saved MCP tool selection. Pilots upgrading from per-widget tool approval should review active assistants before upgrading. Previously unconfirmed tools that are enabled on the assistant become available to visitors at upgrade if the organisation’s policy permits them. Eneo logs every approved attempt to call one of those tools, including attempts the MCP proxy stops locally. Web search tools are reviewed separately by the organisation. The widget policy can refuse such tools altogether, and while a widget is active only an administrator can change its allowed websites, privacy, bot protection or template.",
+            "sv": "En aktiv widget följer assistentens sparade val av MCP-verktyg. Piloter som har använt separat verktygsgodkännande per widget bör granska aktiva assistenter före uppgradering. Tidigare obekräftade verktyg som är påslagna i assistenten blir tillgängliga för besökare vid uppgraderingen om organisationens policy tillåter dem. Eneo loggar varje godkänt försök att anropa ett sådant verktyg, även när MCP-proxyn stoppar det lokalt. Organisationen granskar webbsökningens verktyg separat. Widgetpolicyn kan avböja sådana verktyg helt, och medan en widget är aktiv kan bara en administratör ändra dess tillåtna webbplatser, integritet, botskydd eller mall."
+          }
+        },
+        {
+          "id": "assistant-specialists",
+          "permissions": {
+            "allOf": ["assistants"]
+          },
+          "type": "new",
+          "area": "assistants",
+          "title": {
+            "en": "Assistants that consult specialists",
+            "sv": "Assistenter som rådfrågar specialister"
+          },
+          "body": {
+            "en": "An assistant can now consult other assistants in its space before it answers. Add them under Specialists in the assistant's settings and describe what each one should be asked about. The assistant asks them focused questions, can follow up, and writes one combined answer. In either web app, expand View steps under the answer to see each question, the specialist's reply, its sources and the tools it used. Consulting needs a model that supports tools.",
+            "sv": "En assistent kan nu rådfråga andra assistenter i sin yta innan den svarar. Lägg till dem under Specialister i assistentens inställningar och beskriv vad var och en ska frågas om. Assistenten ställer avgränsade frågor till dem, kan ställa följdfrågor och skriver ett samlat svar. I båda webbgränssnitten kan du välja Visa steg under svaret för att se varje fråga, specialistens svar, dess källor och verktyg. Att rådfråga kräver en modell med verktygsstöd."
+          }
+        },
+        {
+          "id": "group-chats-became-assistants",
+          "type": "improved",
+          "area": "spaces",
+          "title": {
+            "en": "Group chats are now assistants",
+            "sv": "Gruppchattar är nu assistenter"
+          },
+          "body": {
+            "en": "To find your group conversations, open the same space, choose Assistants, open the assistant with the group's former name and select History. Its members are now specialists. If you cannot see the assistant, ask your administrator to review your assistant access.",
+            "sv": "Du hittar dina tidigare gruppkonversationer under Assistenter i samma yta. Öppna assistenten med gruppens tidigare namn och välj Historik. Medlemmarna är nu specialister. Om assistenten saknas kan din administratör se över din behörighet till assistenter."
           }
         },
         {
@@ -219,6 +277,32 @@
             "en": "In Admin > File storage, the upload limits now explain the storage limit for files kept in the database and what large files cost there. Limits above 200 MB now apply, up to that storage limit, unless operations still sets a lower limit on the server.",
             "sv": "Under Admin > Fillagring förklarar uppladdningsgränserna nu lagringsgränsen för filer som sparas i databasen och vad stora filer kostar där. Gränser över 200 MB gäller nu, upp till lagringsgränsen, om inte driften fortfarande sätter en lägre gräns på servern."
           }
+        },
+        {
+          "id": "app-run-progress-after-interruption",
+          "type": "fixed",
+          "area": "spaces",
+          "title": {
+            "en": "App runs show when processing starts",
+            "sv": "Appkörningar visar när bearbetningen börjar"
+          },
+          "body": {
+            "en": "When you reopen an app result, you can see whether processing has started. If a new run loses its place in the queue, Eneo queues it again automatically. If processing is interrupted after it starts, the result shows the failure and you can start a new run.",
+            "sv": "När du öppnar ett appresultat igen ser du om bearbetningen har börjat. Om en ny körning försvinner ur kön lägger Eneo tillbaka den automatiskt. Om bearbetningen avbryts efter start syns felet i resultatet och du kan starta en ny körning."
+          }
+        },
+        {
+          "id": "extract-pictures-from-documents",
+          "type": "new",
+          "area": "chat",
+          "title": {
+            "en": "Reuse the pictures in an attached document",
+            "sv": "Återanvänd bilderna i ett bifogat dokument"
+          },
+          "body": {
+            "en": "An assistant with the Ask a file function can take the pictures out of an attached PDF, Word or PowerPoint file and place them in a new document, for example when moving content into your organisation's template. Charts and diagrams drawn as vector graphics cannot be taken out.",
+            "sv": "En assistent med funktionen Fråga fil kan ta ut bilderna ur en bifogad PDF-, Word- eller PowerPoint-fil och placera dem i ett nytt dokument, till exempel när innehåll flyttas till organisationens mall. Diagram och figurer som är ritade som vektorgrafik kan inte tas ut."
+          }
         }
       ]
     },
@@ -233,7 +317,7 @@
           "area": "chat",
           "permissions": {
             "allOf": ["file_creation"],
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "title": {
             "en": "Create, edit and restore documents",
@@ -251,7 +335,7 @@
           "area": "chat",
           "permissions": {
             "allOf": ["file_analysis"],
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "title": {
             "en": "Explore CSV and Excel files in chat",
@@ -269,7 +353,7 @@
           "area": "chat",
           "permissions": {
             "allOf": ["compute", "charts"],
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "title": {
             "en": "Calculate and create charts",
@@ -285,7 +369,7 @@
           "type": "improved",
           "area": "chat",
           "permissions": {
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "title": {
             "en": "Send messages while files are uploading",
@@ -536,7 +620,7 @@
         {
           "id": "knowledge-on-demand",
           "permissions": {
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "type": "improved",
           "area": "chat",
@@ -553,7 +637,7 @@
           "id": "image-variations",
           "permissions": {
             "allOf": ["image_generation"],
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "type": "new",
           "area": "chat",
@@ -569,7 +653,7 @@
         {
           "id": "copy-rich-text",
           "permissions": {
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "type": "new",
           "area": "chat",
@@ -625,7 +709,7 @@
         {
           "id": "model-details",
           "permissions": {
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "type": "improved",
           "area": "chat",
@@ -641,7 +725,7 @@
         {
           "id": "chat-polish",
           "permissions": {
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "type": "improved",
           "area": "chat",
@@ -657,7 +741,7 @@
         {
           "id": "attachments",
           "permissions": {
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "type": "improved",
           "area": "chat",
@@ -689,7 +773,7 @@
         {
           "id": "open-shared-sources",
           "permissions": {
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "type": "fixed",
           "area": "knowledge",
@@ -935,7 +1019,7 @@
         {
           "id": "rename-conversations",
           "permissions": {
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "type": "new",
           "area": "chat",
@@ -951,7 +1035,7 @@
         {
           "id": "aborted-answers-saved",
           "permissions": {
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "type": "improved",
           "area": "chat",
@@ -967,7 +1051,7 @@
         {
           "id": "provider-outage-message",
           "permissions": {
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "type": "improved",
           "area": "chat",
@@ -983,7 +1067,7 @@
         {
           "id": "webp-avif-uploads",
           "permissions": {
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "type": "fixed",
           "area": "chat",

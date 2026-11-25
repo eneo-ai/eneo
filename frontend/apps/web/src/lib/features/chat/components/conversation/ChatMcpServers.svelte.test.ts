@@ -109,4 +109,32 @@ describe("ChatMcpServers", () => {
 
     expect([...disabledServerIds]).toEqual(["capability:image_generation"]);
   });
+
+  it("keeps the visible label and count in the button name for an orchestrated group", async () => {
+    render(ChatMcpServers, {
+      servers: [
+        { id: "server-a", name: "Server A", available: false, reason: "model_no_tool_calling" }
+      ],
+      modelSupportsTools: false,
+      delegatedTools: true,
+      disabledServerIds: new SvelteSet<string>(),
+      autoAcceptTools: true
+    });
+
+    // Label in Name: the accessible name still carries "Tools" and the count,
+    // not the delegated-approval sentence.
+    const trigger = page.getByRole("button", {
+      name: m.mcp_servers_status_aria({ active: 0, total: 1 })
+    });
+    await trigger.click();
+
+    // The assistant's model cannot call tools, so its own servers stay
+    // unavailable, while the approval preference still applies to the
+    // specialists' external tools.
+    await expect.element(page.getByRole("switch", { name: "Server A" })).toBeDisabled();
+    await expect
+      .element(page.getByRole("switch", { name: m.mcp_run_tools_automatically() }))
+      .toBeVisible();
+    await expect.element(page.getByText(m.assistant_delegated_tools())).toBeVisible();
+  });
 });

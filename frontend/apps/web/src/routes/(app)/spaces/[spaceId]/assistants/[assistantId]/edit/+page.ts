@@ -71,7 +71,7 @@ export const load = async (event) => {
     canUseSkills,
     documentTemplates: documentTemplates.items,
     // Visitors get the assistant as configured, tools included.
-    servesActiveWidget: widgetStatus?.serves_active_widget ?? false,
+    servesActiveWidget: widgetStatus?.serves_active_widget ?? null,
     rerankModels: models.rerankModels ?? []
   };
 };

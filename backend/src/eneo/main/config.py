@@ -383,6 +383,21 @@ class Settings(BaseSettings):
     mcp_client_connect_timeout_seconds: int = 30
     mcp_client_list_tools_timeout_seconds: int = 30
     mcp_client_call_timeout_seconds: int = 60
+    # Shared execution budget of one orchestrated group-chat question. The
+    # orchestrator and its serial specialists spend the same counters; the
+    # reserves are kept for the orchestrator's own final synthesis so an
+    # exhausted budget still ends in an answer that names its gaps. Time
+    # spent waiting for a user's tool approval does not count.
+    orchestration_max_consultations: int = 6
+    orchestration_max_model_requests: int = 24
+    orchestration_max_tool_calls: int = 48
+    orchestration_max_request_bytes: int = 4 * 1024 * 1024
+    orchestration_max_output_characters: int = 100_000
+    orchestration_timeout_seconds: float = 180
+    orchestration_consultation_timeout_seconds: float = 60
+    orchestration_reserved_model_requests: int = 2
+    orchestration_reserved_output_characters: int = 8_000
+    orchestration_reserved_seconds: float = 20
     # Tool-call budget for the built-in image generation provider. Image
     # models routinely take longer than a general MCP tool call.
     image_generation_timeout_seconds: int = 240
@@ -753,7 +768,10 @@ class Settings(BaseSettings):
     # TTL, after which the visitor's stored key re-mints with a fresh proof.
     widget_visitor_token_ttl_seconds: int = Field(default=900, gt=0)
     widget_visitor_token_grace_seconds: int = Field(default=900, ge=0)
-    widget_preview_token_ttl_seconds: int = Field(default=3600, gt=0)
+    # The preview token is a bearer in the admin page's DOM and iframe URL;
+    # the preview re-mints it before it expires, so it lives no longer than
+    # a visitor token.
+    widget_preview_token_ttl_seconds: int = Field(default=900, gt=0)
     # ALTCHA v2 proof of work: each attempt derives a key with `cost` hash
     # iterations and must land on `key_prefix`, so the expected work is
     # 16**len(key_prefix) * cost iterations and the attempt count is
@@ -1271,6 +1289,53 @@ class Settings(BaseSettings):
                 self.mcp_tool_approval_timeout_seconds,
             )
             sys.exit(1)
+
+        orchestration_limits = {
+            "ORCHESTRATION_MAX_CONSULTATIONS": self.orchestration_max_consultations,
+            "ORCHESTRATION_MAX_MODEL_REQUESTS": self.orchestration_max_model_requests,
+            "ORCHESTRATION_MAX_TOOL_CALLS": self.orchestration_max_tool_calls,
+            "ORCHESTRATION_MAX_REQUEST_BYTES": self.orchestration_max_request_bytes,
+            "ORCHESTRATION_MAX_OUTPUT_CHARACTERS": (
+                self.orchestration_max_output_characters
+            ),
+            "ORCHESTRATION_TIMEOUT_SECONDS": self.orchestration_timeout_seconds,
+            "ORCHESTRATION_CONSULTATION_TIMEOUT_SECONDS": (
+                self.orchestration_consultation_timeout_seconds
+            ),
+        }
+        for name, value in orchestration_limits.items():
+            if value <= 0:
+                logging.error(
+                    "%s must be greater than zero. Current value: %s", name, value
+                )
+                sys.exit(1)
+        orchestration_reserves = {
+            "ORCHESTRATION_RESERVED_MODEL_REQUESTS": (
+                self.orchestration_reserved_model_requests,
+                "ORCHESTRATION_MAX_MODEL_REQUESTS",
+                self.orchestration_max_model_requests,
+            ),
+            "ORCHESTRATION_RESERVED_OUTPUT_CHARACTERS": (
+                self.orchestration_reserved_output_characters,
+                "ORCHESTRATION_MAX_OUTPUT_CHARACTERS",
+                self.orchestration_max_output_characters,
+            ),
+            "ORCHESTRATION_RESERVED_SECONDS": (
+                self.orchestration_reserved_seconds,
+                "ORCHESTRATION_TIMEOUT_SECONDS",
+                self.orchestration_timeout_seconds,
+            ),
+        }
+        for name, (reserve, limit_name, limit) in orchestration_reserves.items():
+            if reserve < 0 or reserve >= limit:
+                logging.error(
+                    "%s (%s) must be between 0 and %s (%s).",
+                    name,
+                    reserve,
+                    limit_name,
+                    limit,
+                )
+                sys.exit(1)
 
         if self.mcp_tool_approval_denial_reason_max_length <= 0:
             logging.error(

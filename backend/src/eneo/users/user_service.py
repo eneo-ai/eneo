@@ -18,6 +18,7 @@ from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.actor_types import ActorType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.domain.outcome import Outcome
+from eneo.authentication.api_key_audit import log_api_key_auth_failed
 from eneo.authentication.api_key_policy import ApiKeyPolicyService
 from eneo.authentication.api_key_rate_limiter import ApiKeyRateLimiter
 from eneo.authentication.api_key_resolver import (
@@ -48,7 +49,6 @@ from eneo.database.database import sessionmanager
 from eneo.database.tables.app_table import AppRuns, Apps
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.collections_table import CollectionsTable
-from eneo.database.tables.group_chats_table import GroupChatsTable
 from eneo.database.tables.info_blobs_table import InfoBlobs
 from eneo.database.tables.integration_table import IntegrationKnowledge
 from eneo.database.tables.prompts_table import PromptsAssistants
@@ -130,7 +130,6 @@ def _permission_allows(key: ApiKeyV2InDB, required: ApiKeyPermission) -> bool:
 _SERVICE_KEY_BASE_PERMISSIONS: frozenset[Permission] = frozenset(
     {
         Permission.ASSISTANTS,
-        Permission.GROUP_CHATS,
         Permission.APPS,
         Permission.SERVICES,
         Permission.COLLECTIONS,
@@ -1729,17 +1728,10 @@ class UserService:
         elif resource_type == "service":
             stmt = sa.select(Services.space_id).where(Services.id == resource_id)
             return await session.scalar(stmt)
-        elif resource_type == "group_chat":
-            stmt = sa.select(GroupChatsTable.space_id).where(
-                GroupChatsTable.id == resource_id
-            )
-            return await session.scalar(stmt)
         elif resource_type == "conversation":
-            # Session → assistant_id or group_chat_id → space_id
+            # Session → assistant_id → space_id
             row = await session.execute(
-                sa.select(Sessions.assistant_id, Sessions.group_chat_id).where(
-                    Sessions.id == resource_id
-                )
+                sa.select(Sessions.assistant_id).where(Sessions.id == resource_id)
             )
             result = row.one_or_none()
             if result is None:
@@ -1747,11 +1739,6 @@ class UserService:
             if result.assistant_id is not None:
                 stmt = sa.select(Assistants.space_id).where(
                     Assistants.id == result.assistant_id
-                )
-                return await session.scalar(stmt)
-            if result.group_chat_id is not None:
-                stmt = sa.select(GroupChatsTable.space_id).where(
-                    GroupChatsTable.id == result.group_chat_id
                 )
                 return await session.scalar(stmt)
             return None
@@ -2138,69 +2125,8 @@ class UserService:
         *,
         request: Request | None = None,
     ) -> None:
-        if self.audit_service is None:
-            return
-
-        extra: dict[str, object] = {
-            "code": exc.code,
-            "error_message": exc.message,
-            "scope_type": key.scope_type,
-            "scope_id": str(key.scope_id) if key.scope_id else None,
-            "permission": key.permission,
-            "key_type": key.key_type,
-            "key_prefix": key.key_prefix,
-        }
-        if exc.context is not None:
-            extra.update(exc.context)
-        if request is not None:
-            route = request.scope.get("route")
-            extra["request_path"] = route.path if route else request.url.path
-            extra["method"] = request.method
-            origin = request.headers.get("origin")
-            if origin:
-                extra["origin"] = origin
-
-        ownership_raw = getattr(key, "ownership", "user")
-        ownership = (
-            ownership_raw.value
-            if isinstance(ownership_raw, Enum)
-            else str(ownership_raw)
-        )
-        is_service = ownership == "service"
-
-        if is_service:
-            metadata = AuditMetadata.system_action(
-                description="Service API key auth failed",
-                target=key,
-                extra=extra,
-            )
-        else:
-            metadata = AuditMetadata.standard(actor=user, target=key, extra=extra)
-
-        await self.audit_service.log_async(
-            tenant_id=user.tenant_id,
-            actor_id=None if is_service else user.id,
-            actor_type=ActorType.SYSTEM if is_service else ActorType.USER,
-            action=ActionType.API_KEY_AUTH_FAILED,
-            entity_type=EntityType.API_KEY,
-            entity_id=key.id,
-            description="Service API key auth failed"
-            if is_service
-            else "API key authentication failed",
-            metadata=metadata,
-            outcome=Outcome.FAILURE,
-            error_message=exc.message,
-        )
-
-        logger.warning(
-            "API key authentication failed",
-            extra={
-                "tenant_id": str(user.tenant_id),
-                "user_id": str(user.id),
-                "api_key_id": str(key.id),
-                "code": exc.code,
-                "error_message": exc.message,
-            },
+        await log_api_key_auth_failed(
+            self.audit_service, user, key, exc, request=request
         )
 
     async def authenticate(

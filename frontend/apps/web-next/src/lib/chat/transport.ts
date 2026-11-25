@@ -14,6 +14,7 @@ export type ChatSendOptions = Omit<ConversationBody, "question" | "stream">;
 export const DATA_PART_TYPES: ReadonlySet<string> = new Set([
   "data-session",
   "data-mcp-tool-references",
+  "data-consultation",
   "data-token-usage",
   "data-tool-approval",
   "data-error"

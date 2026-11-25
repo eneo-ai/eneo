@@ -48,6 +48,35 @@ describe("widget admin errors", () => {
     expect(widgetErrorMessage(apiError(500, "other"))).toBeNull();
   });
 
+  it("names the template when leaving it is what a live widget needs an admin for", () => {
+    const refusal = (fields: string[]) =>
+      new EneoError("raw", "RESPONSE", 403, 0, {
+        detail: { code: "admin_required_while_active", message: "raw", fields }
+      });
+    expect(widgetErrorMessage(refusal(["template"]))).toBe(
+      "widget_admin_template_detach_admin_only"
+    );
+    expect(widgetErrorMessage(refusal(["allowed_origins"]))).toBe(
+      "widget_admin_error_admin_required_while_active"
+    );
+  });
+
+  it("pins a live widget's admin-only settings to the fields that hold them", () => {
+    const refusal = new EneoError("raw", "RESPONSE", 403, 0, {
+      detail: {
+        code: "admin_required_while_active",
+        message: "raw",
+        fields: ["allowed_origins", "privacy", "bot_protection", "template"]
+      }
+    });
+    // The template has no field of its own: leaving it is refused in the picker.
+    expect(widgetFieldErrors(refusal)).toEqual({
+      allowed_origins: "widget_admin_error_admin_required_while_active",
+      "privacy.retention_days": "widget_admin_error_admin_required_while_active",
+      bot_protection: "widget_admin_error_admin_required_while_active"
+    });
+  });
+
   it("treats a published lock like a revision conflict", () => {
     expect(isStaleEditorError(apiError(409, "widget_revision_conflict"))).toBe(true);
     expect(isStaleEditorError(apiError(400, "field_locked_by_template"))).toBe(true);

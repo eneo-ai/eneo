@@ -1,4 +1,5 @@
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional, Union, cast
 from uuid import UUID
@@ -55,6 +56,20 @@ UNAUTHORIZED_EXCEPTION_MESSAGE = "Unauthorized. User has no permissions to acces
 _KnowledgeItemList = Sequence[Union["Collection", "Website", "IntegrationKnowledge"]]
 
 
+@dataclass(frozen=True)
+class AssistantSpecialist:
+    """An assistant this one may consult, with what to consult it for."""
+
+    id: UUID
+    name: str
+    default_description: str | None
+    user_description: str | None
+
+    @property
+    def description(self) -> str:
+        return self.user_description or self.default_description or ""
+
+
 def _with_addendum(prompt: str, addendum: str | None) -> str:
     """The turn's prompt with a surface-specific instruction appended, so a
     caller such as the widget can shape tone without editing the assistant."""
@@ -97,6 +112,7 @@ class Assistant(Entity):
         attachment_inline_text: Mapping[UUID, bool] | None = None,
         document_template: DocumentTemplateChoice | None = None,
         rerank_model_id: Optional[UUID] = None,
+        specialists: list[AssistantSpecialist] | None = None,
     ):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
 
@@ -125,6 +141,7 @@ class Assistant(Entity):
         self.published = published
         self.is_default = is_default
         self.tool_assistants = tool_assistants or []
+        self.specialists = specialists or []
         self.description = description
         self.insight_enabled = insight_enabled
         self.inline_file_text = inline_file_text
@@ -415,6 +432,18 @@ class Assistant(Entity):
             "Knowledge sources:\n" + "\n".join(lines)
         )
 
+    @property
+    def specialist_ids(self) -> set[UUID]:
+        return {specialist.id for specialist in self.specialists}
+
+    @property
+    def orchestrates(self) -> bool:
+        """Consults specialists when asked: it has some and its model can call tools."""
+        return bool(self.specialists) and (
+            self.completion_model is not None
+            and self.completion_model.supports_tool_calling
+        )
+
     def update(
         self,
         name: str | None = None,
@@ -437,9 +466,15 @@ class Assistant(Entity):
         metadata_json: Union[dict[str, object], None, NotProvided] = NOT_PROVIDED,
         icon_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
         rerank_model_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
+        specialists: list[AssistantSpecialist] | None = None,
     ):
         if name is not None:
             self.name = name
+
+        if specialists is not None:
+            if any(specialist.id == self.id for specialist in specialists):
+                raise BadRequestException("An assistant cannot be its own specialist.")
+            self.specialists = specialists
 
         if prompt is not None:
             self.prompt = prompt
@@ -553,6 +588,7 @@ class Assistant(Entity):
         skill_runtime: "SkillActivationRuntime | None" = None,
         document_template: "DocumentTemplateReference | None" = None,
         rerank: "RerankSpec | None" = None,
+        question_may_contain_uploads: bool = False,
     ) -> tuple["CompletionModelResponse", DatastoreResult]:
         # Overrides come from the orchestrating service (personal assistant
         # governance). When set, they take precedence over the values stored on
@@ -637,6 +673,7 @@ class Assistant(Entity):
         response = await completion_service.get_response(
             model=completion_model,
             text_input=question,
+            question_may_contain_uploads=question_may_contain_uploads,
             files=completion_message_files,
             prompt=_with_addendum(
                 prompt_override

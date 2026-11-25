@@ -57,6 +57,12 @@ class Transcription(UploadTask):
     pass
 
 
+class AppDispatchEnvelope(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    version: Literal[1]
+    file_ids: list[UUID]
+
+
 class UploadInfoBlobDispatchEnvelope(BaseModel):
     version: Literal[2] = 2
     task: Literal[Task.UPLOAD_FILE] = Task.UPLOAD_FILE
@@ -97,4 +103,3 @@ class AnalyzeConversationInsightsTask(TaskParams):
     to_date: str
     include_followups: bool = False
     assistant_id: UUID | None = None
-    group_chat_id: UUID | None = None

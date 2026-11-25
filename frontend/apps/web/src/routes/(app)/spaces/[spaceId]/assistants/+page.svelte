@@ -38,10 +38,6 @@
 <Page.Root>
   <Page.Header>
     <Page.Title title={m.assistants()}></Page.Title>
-    <!--
-      We made the decision to not look at assistants and group chats as individual permissions for now,
-      meaning if we ever intend to change that, we would need that distinction here
-    -->
     {#if $currentSpace.hasPermission("create", "assistant")}
       <CreateNew {data}></CreateNew>
     {/if}

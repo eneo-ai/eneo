@@ -77,7 +77,7 @@ async def test_worker_runs_the_stored_prompt_even_when_an_old_payload_has_text()
     )
 
     await inspect.unwrap(run_app)(
-        params, container=container, worker_config=MagicMock()
+        params, container=container, worker_config=MagicMock(), checkpoint=AsyncMock()
     )
 
     service.app_service.run_app.assert_awaited_once_with(  # pyright: ignore[reportAttributeAccessIssue]

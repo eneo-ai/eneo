@@ -4,6 +4,8 @@ import asyncio
 import inspect
 import logging
 import os
+from collections.abc import Awaitable
+from contextlib import AsyncExitStack
 from functools import wraps
 from typing import Any, Callable, cast
 from uuid import UUID
@@ -17,6 +19,7 @@ from opentelemetry import trace
 
 from eneo.database.database import AsyncSession, sessionmanager
 from eneo.jobs.job_models import failure_code_for_exception
+from eneo.jobs.job_repo import JobRepository
 from eneo.jobs.job_serialization import deserialize_job, serialize_job
 from eneo.jobs.task_models import ResourceTaskParams
 from eneo.main.config import Settings, get_settings
@@ -27,7 +30,12 @@ from eneo.main.models import Channel, ChannelType, RedisMessage, Status
 from eneo.observability.error_log import log_error
 from eneo.redis.connection import build_arq_redis_settings
 from eneo.server.dependencies import lifespan
-from eneo.worker.task_manager import TaskManager, WorkerConfig, publish_task_status
+from eneo.worker.task_manager import (
+    JobCheckpointError,
+    TaskManager,
+    WorkerConfig,
+    publish_task_status,
+)
 
 logger = get_logger(__name__)
 
@@ -235,7 +243,10 @@ class Worker:
         override_user(container=container, user=user)
 
     def _get_kwargs(
-        self, func: Callable[..., Any], task_manager: TaskManager
+        self,
+        func: Callable[..., Any],
+        task_manager: TaskManager,
+        checkpoint: Callable[[], Awaitable[None]],
     ) -> dict[str, Any]:
         sig = inspect.signature(func)
         parameters = {k for k in sig.parameters if k not in {"params", "container"}}
@@ -243,6 +254,8 @@ class Worker:
 
         if "worker_config" in parameters:
             kwargs["worker_config"] = WorkerConfig(task_manager=task_manager)
+        if "checkpoint" in parameters:
+            kwargs["checkpoint"] = checkpoint
 
         return kwargs
 
@@ -408,8 +421,17 @@ class Worker:
         *,
         keep_result: int | None = None,
         max_tries: int | None = None,
+        claim_before_run: Callable[[JobRepository, UUID], Awaitable[bool]]
+        | None = None,
+        function_alias: str | None = None,
     ):
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+            if (
+                "checkpoint" in inspect.signature(func).parameters
+                and claim_before_run is None
+            ):
+                raise ValueError("Job checkpoints require a committed start")
+
             @wraps(func)
             async def wrapper(ctx: ARQContext, params: ResourceTaskParams) -> Any:
                 # A job's parameters can carry text that retention removes:
@@ -424,22 +446,56 @@ class Worker:
                 user_id = params.user_id if with_user else None
 
                 task_manager: TaskManager | None = None
+                claim_pending = claim_before_run is not None
                 try:
-                    async with sessionmanager.session() as session, session.begin():
+                    if claim_before_run is not None:
+                        async with sessionmanager.session() as start, start.begin():
+                            if not await claim_before_run(JobRepository(start), job_id):
+                                return False
+                        # Only a confirmed commit lets this delivery fail a running job.
+                        claim_pending = False
+
+                    async with (
+                        sessionmanager.session() as session,
+                        AsyncExitStack() as transactions,
+                    ):
+                        await transactions.enter_async_context(session.begin())
                         container = await self._create_container(
                             session, user_id=user_id
                         )
-                        # Hold the job row until the task commits. A reaper skips
-                        # this lock, and late deliveries cannot restart a failed job.
-                        if not await container.job_repo().mark_job_started(job_id):
+                        # Hold the row through completion so recovery skips live work.
+                        repo = container.job_repo()
+                        if claim_before_run is not None:
+                            started = await repo.touch_job(job_id)
+                        else:
+                            started = await repo.mark_job_started(job_id)
+                        if not started:
                             return False
                         task_manager = container.task_manager(
                             job_id=job_id,
                             resource_id=params.id,
                             channel_type=channel_type,
                         )
+
+                        async def checkpoint() -> None:
+                            # Commit the finished file before another provider call. Reacquire
+                            # the job on the same session so even a one-slot pool can progress.
+                            try:
+                                # A long provider call can outlive the grace period.
+                                # Refresh with wall-clock time before releasing the lock.
+                                await repo.touch_job(job_id)
+                                await transactions.aclose()
+                                await transactions.enter_async_context(session.begin())
+                                if await repo.touch_job(job_id):
+                                    return
+                            except Exception as exc:
+                                raise JobCheckpointError(
+                                    "Could not save app progress"
+                                ) from exc
+                            raise JobCheckpointError("App job is no longer running")
+
                         optional_kwargs = self._get_kwargs(
-                            func, task_manager=task_manager
+                            func, task_manager, checkpoint
                         )
 
                         async with task_manager.set_status_on_exception(
@@ -452,8 +508,9 @@ class Worker:
 
                         success = task_manager.successful()
                 except (Exception, asyncio.CancelledError) as exc:
-                    # The task transaction rolled back. Store the failure separately.
-                    if await self._fail_job_after_commit_error(job_id, user_id, exc):
+                    if await self._record_job_failure(
+                        job_id, user_id, exc, only_if_queued=claim_pending
+                    ):
                         if task_manager is not None:
                             await task_manager.publish_status(Status.FAILED)
                         elif channel_type is not None and user_id is not None:
@@ -475,15 +532,26 @@ class Worker:
                 if keep_result is not None or max_tries is not None
                 else traced
             )
+            if function_alias is not None:
+                self.functions.append(
+                    arq_func(
+                        traced,
+                        name=function_alias,
+                        keep_result=keep_result,
+                        max_tries=max_tries,
+                    )
+                )
             return wrapper
 
         return decorator
 
-    async def _fail_job_after_commit_error(
+    async def _record_job_failure(
         self,
         job_id: UUID,
         user_id: UUID | None,
         exc: BaseException,
+        *,
+        only_if_queued: bool = False,
     ) -> bool:
         """Record the failure in a fresh session so the job is not left pending
         until the reaper finds it.
@@ -496,7 +564,7 @@ class Worker:
             async with sessionmanager.session() as session, session.begin():
                 container = await self._create_container(session, user_id=user_id)
                 failed = await container.job_service().fail_job(
-                    job_id, failure_code=code
+                    job_id, failure_code=code, only_if_queued=only_if_queued
                 )
             return failed is not None
         except Exception as error:

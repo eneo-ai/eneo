@@ -147,6 +147,8 @@ jobs:
           import brotli
           assert tuple(map(int, brotli.__version__.split("."))) >= (1, 2, 1), brotli.__version__
           print("Python Brotli", brotli.__version__)
+          import pypdfium2
+          print("pypdfium2", pypdfium2.PYPDFIUM_INFO)
           '
 
       - name: Smoke test the candidate

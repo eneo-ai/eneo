@@ -1,5 +1,4 @@
 /** @typedef {import('../types/resources').Assistant} Assistant */
-/** @typedef {import('../types/resources').GroupChat} GroupChat */
 /** @typedef {import('../types/resources').ChatPartner} ChatPartner */
 /** @typedef {import('../types/resources').Conversation} Conversation */
 /** @typedef {import('../types/resources').AssistantResponse} AssistantResponse */
@@ -15,7 +14,7 @@ import { readConversationStream } from "./conversation-stream.js";
 export function initConversations(client) {
   return {
     /**
-     * List all conversations of an assistant / group chat.
+     * List all conversations of an assistant.
      * @param {Object} params
      * @param {ChatPartner} params.chatPartner
      * @param {{limit?: number, cursor?: string | undefined }} [params.pagination] - The number of sessions to retrieve.
@@ -23,16 +22,14 @@ export function initConversations(client) {
      * @throws {EneoError}
      * */
     list: async ({ chatPartner, pagination }) => {
-      /**  @type {{assistant_id?: string, group_chat_id?: string}} */
-      const target = { assistant_id: undefined, group_chat_id: undefined };
+      /**  @type {{assistant_id?: string}} */
+      const target = { assistant_id: undefined };
 
       if (chatPartner.type === "assistant" || chatPartner.type === "default-assistant") {
         target.assistant_id = chatPartner.id;
-      } else if (chatPartner.type === "group-chat") {
-        target.group_chat_id = chatPartner.id;
       } else {
         throw new EneoError(
-          "Asking a question requires one of 'assistant' or 'groupChat' to be specified",
+          "Listing conversations requires an 'assistant' to be specified",
           "CONNECTION",
           0,
           0
@@ -217,7 +214,7 @@ export function initConversations(client) {
      * @param {(data: import("../types/resources").SSE.Text) => void} [params.callbacks.onText] Callback to run when a new token/word of the answer is received
      * @param {(data: import("../types/resources").SSE.Reasoning) => void} [params.callbacks.onReasoning] Callback to run when a chunk of the model's reasoning/thinking text is received
      * @param {(data: import("../types/resources").SSE.Files) => void} [params.callbacks.onImage] Callback to run when generated files of the answer is received
-     * @param {(data: import("../types/resources").SSE.TokenUsage) => void} [params.callbacks.onEneoEvent] Callback to run when a token-usage event is received
+     * @param {(data: import("../types/resources").SSE.TokenUsage | import("../types/resources").SSE.Consultation) => void} [params.callbacks.onEneoEvent] Callback to run when a token-usage event is received
      * @param {(data: import("../types/resources").SSE.ToolCall) => void} [params.callbacks.onToolCall] Callback to run when MCP tools are being executed
      * @param {(data: import("../types/resources").SSE.ToolCallDelta) => void} [params.callbacks.onToolCallDelta] Callback to run when the next piece of a pending tool call's arguments is received
      * @param {(data: import("../types/resources").SSE.ToolApprovalRequired) => void} [params.callbacks.onToolApprovalRequired] Callback to run when MCP tools require user approval
@@ -238,18 +235,16 @@ export function initConversations(client) {
       abortController,
       callbacks
     }) => {
-      /**  @type { {session_id?: string, assistant_id?: string, group_chat_id?: string}} */
-      const target = { session_id: undefined, assistant_id: undefined, group_chat_id: undefined };
+      /**  @type { {session_id?: string, assistant_id?: string}} */
+      const target = { session_id: undefined, assistant_id: undefined };
 
       if (conversation?.id && conversation.id.trim() !== "") {
         target.session_id = conversation.id;
       } else if (chatPartner?.id) {
-        if (chatPartner.type === "assistant" || chatPartner.type === "default-assistant") {
-          target.assistant_id = chatPartner.id;
-        } else target.group_chat_id = chatPartner.id;
+        target.assistant_id = chatPartner.id;
       } else {
         throw new EneoError(
-          "Asking a question requires on of 'session', 'assistant', 'groupChat' to be specified",
+          "Asking a question requires one of 'session' or 'assistant' to be specified",
           "CONNECTION",
           0,
           0
@@ -290,7 +285,7 @@ export function initConversations(client) {
      * Excludes RAG/web-search content (selected at request time).
      * Caller should debounce; concurrent requests aren't aborted server-side.
      * @param {Object} params
-     * @param {ChatPartner} [params.chatPartner] Target assistant or group chat (used when no conversation yet)
+     * @param {ChatPartner} [params.chatPartner] Target assistant (used when no conversation yet)
      * @param {{id: string} | Conversation} [params.conversation] Existing conversation to continue
      * @param {string} params.question The pending input
      * @param {{id: string}[]} [params.files] Pending file attachments
@@ -312,22 +307,15 @@ export function initConversations(client) {
       assistantPrompt,
       attachments
     }) => {
-      /** @type {{session_id?: string, assistant_id?: string, group_chat_id?: string}} */
-      const target = { session_id: undefined, assistant_id: undefined, group_chat_id: undefined };
+      /** @type {{session_id?: string, assistant_id?: string}} */
+      const target = { session_id: undefined, assistant_id: undefined };
 
       if (conversation?.id && conversation.id.trim() !== "") {
         target.session_id = conversation.id;
       } else if (chatPartner?.id) {
-        if (chatPartner.type === "assistant" || chatPartner.type === "default-assistant") {
-          target.assistant_id = chatPartner.id;
-        } else target.group_chat_id = chatPartner.id;
+        target.assistant_id = chatPartner.id;
       } else {
-        throw new EneoError(
-          "Preflight requires one of session, assistant, or groupChat",
-          "CONNECTION",
-          0,
-          0
-        );
+        throw new EneoError("Preflight requires one of session or assistant", "CONNECTION", 0, 0);
       }
 
       const res = await client.fetch("/api/v1/conversations/preflight", {

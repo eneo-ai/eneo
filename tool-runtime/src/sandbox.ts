@@ -44,7 +44,8 @@ const BASE_RULES = [
   ["--rox", "/usr/local/lib"],
   ["--ro", "/usr/share/fonts"],
   ["--ro", "/usr/local/share/fonts"],
-  // The PDF sidecar: its Python, fontconfig's configuration and prebuilt cache.
+  // The Python sidecar (PDF rendering, picture extraction), fontconfig's configuration and
+  // prebuilt cache.
   ["--rox", PDF_PYTHON_ROOT],
   ["--rox", PDF_PYTHON_BINARY],
   ["--ro", "/etc/fonts"],
@@ -89,6 +90,9 @@ export function jobPaths(job: SandboxJob["job"]): JobPaths {
       return { read: [job.templatePath] };
     case "builtin_template":
       return { write: [dirname(job.outputPath)] };
+    case "extract_images":
+      // The file and the pictures cut from it sit in a directory made for this call.
+      return { write: [job.directory] };
     case "render_chart":
       // An XLSX source is converted to CSV next to itself.
       return { write: job.source?.path ? [dirname(job.source.path)] : [] };

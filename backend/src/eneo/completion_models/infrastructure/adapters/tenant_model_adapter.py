@@ -2,14 +2,18 @@
 
 import base64
 import binascii
+import copy
 import json
 import logging
 import re
 import uuid
-from dataclasses import dataclass, field
+from collections.abc import Sequence
+from contextlib import aclosing, nullcontext
+from dataclasses import dataclass, field, replace
 from typing import (
     TYPE_CHECKING,
     Any,
+    AsyncGenerator,
     AsyncIterator,
     Literal,
     NoReturn,
@@ -34,7 +38,16 @@ from eneo.ai_models.completion_models.completion_model import (
     ToolCallMetadata,
     function_definition_to_tool,
 )
+from eneo.assistants.delegation import (
+    CONSULT_ASSISTANT_TOOL,
+    AssistantDelegation,
+    current_assistant_delegation,
+)
 from eneo.authentication.signed_urls import redact_reference_tokens_in_json
+from eneo.completion_models.domain.execution_budget import (
+    ExecutionLimitReached,
+    current_execution_budget,
+)
 from eneo.completion_models.domain.model_kwargs_capabilities import (
     resolve_supported_model_kwargs,
 )
@@ -54,6 +67,7 @@ from eneo.completion_models.infrastructure.context_builder import (
     MIN_PERCENTAGE_KNOWLEDGE,
 )
 from eneo.completion_models.infrastructure.message_payload import (
+    TurnToolCallIds,
     build_content,
     build_turn_messages,
 )
@@ -63,7 +77,11 @@ from eneo.completion_models.infrastructure.static_prompts import (
 from eneo.files.model_file_references import file_handle
 from eneo.logging.logging import LoggingDetails
 from eneo.main.config import get_settings
-from eneo.main.exceptions import APIKeyNotConfiguredException, OpenAIException
+from eneo.main.exceptions import (
+    APIKeyNotConfiguredException,
+    OpenAIException,
+    UnauthorizedException,
+)
 from eneo.main.logging import get_logger
 from eneo.main.stream_lifecycle import close_provider_stream
 from eneo.model_providers.infrastructure import litellm_transport
@@ -144,6 +162,14 @@ def _mint_ref_id(existing_prefixes: set[str]) -> uuid.UUID:
         attempt += 1
     existing_prefixes.add(str(ref_id)[:8])
     return ref_id
+
+
+def _upload_free_reference_ids(
+    proxy: "MCPProxySession | None", references: Sequence[McpToolReference] = ()
+) -> tuple[uuid.UUID, ...] | None:
+    if proxy is not None and proxy.tool_context_without_uploads:
+        return tuple(reference.id for reference in references)
+    return None
 
 
 def _build_tool_result_with_references(
@@ -487,6 +513,7 @@ class PreparedModelStream:
     mcp_proxy: "MCPProxySession | None"
     has_tools: bool
     skill_runtime: SkillActivationRuntime | None = None
+    delegation: AssistantDelegation | None = None
     # Eneo built-in tools (web search, etc.) kept so iterate_stream can
     # re-merge with refreshed MCP tools after a tools/list_changed without
     # recomputing the built-ins.
@@ -500,16 +527,43 @@ def _get_supported_openai_params(model: str) -> list[str] | None:
 
 
 async def _acompletion_call(**kwargs: Any) -> Any:
+    from eneo.assistants.delegation import authorize_current_execution
+    from eneo.completion_models.domain.execution_budget import (
+        current_execution_budget,
+    )
+
+    budget = current_execution_budget()
+    if budget is not None:
+        budget.check_active()
+        await authorize_current_execution()
+        payload = json.dumps(
+            {"messages": kwargs.get("messages"), "tools": kwargs.get("tools")},
+            ensure_ascii=False,
+        )
+        budget.reserve_model_request(len(payload.encode("utf-8")))
     kwargs.setdefault("timeout", get_settings().completion_request_timeout_seconds)
     return await litellm_transport.acompletion(**kwargs)
 
 
+def _tool_request_message(
+    calls: tuple[ProviderToolCall, ...], content: str | None
+) -> dict[str, object]:
+    return {
+        "role": "assistant",
+        "content": content,
+        "tool_calls": [
+            {
+                "id": call.call_id,
+                "type": "function",
+                "function": {"name": call.name, "arguments": call.arguments},
+            }
+            for call in calls
+        ],
+    }
+
+
 def _is_provider_unavailable_error(exc: BaseException) -> bool:
     return litellm_transport.is_provider_unavailable_error(exc)
-
-
-def _tool_metadata_arguments(tool: ToolCallMetadata) -> dict[str, Any] | None:
-    return cast(dict[str, Any] | None, cast(Any, tool).arguments)
 
 
 TOOL_RESULT_BUDGET_NOTICE = (
@@ -798,6 +852,11 @@ class TenantModelAdapter(CompletionModelAdapter):
     ) -> SkillToolCallApplication | None:
         if runtime is None:
             return None
+        budget = current_execution_budget()
+        if budget is not None:
+            for call in calls:
+                if call.name == SKILL_ACTIVATION_TOOL_NAME:
+                    budget.reserve_tool_call()
         try:
             return runtime.apply_provider_tool_calls(
                 calls=calls,
@@ -837,7 +896,10 @@ class TenantModelAdapter(CompletionModelAdapter):
             metadata.append(
                 ToolCallMetadata(
                     server_name="skills",
-                    tool_name=outcome.activation_key or "unknown",
+                    tool_name=(outcome.activation_key or "unknown")
+                    if not rejected
+                    else SKILL_ACTIVATION_TOOL_NAME,
+                    upload_free_reference_ids=None if rejected else (),
                     title=outcome.display_name,
                     arguments=arguments,
                     tool_call_id=outcome.call_id,
@@ -869,6 +931,7 @@ class TenantModelAdapter(CompletionModelAdapter):
             ToolCallMetadata(
                 server_name="skills",
                 tool_name=key,
+                upload_free_reference_ids=(),
                 title=display_name,
                 arguments={"skill_key": key, "mode": "always"},
                 tool_call_id=f"skill-always-{key}",
@@ -1126,6 +1189,12 @@ class TenantModelAdapter(CompletionModelAdapter):
                 )
             return []
         mcp_tools = mcp_proxy.get_tools_for_llm() if mcp_proxy else []
+        delegation = current_assistant_delegation()
+        if delegation is not None:
+            eneo_tools = [
+                *eneo_tools,
+                function_definition_to_tool(delegation.tool_definition),
+            ]
         built_in_names = {
             tool.get("function", {}).get("name")
             for tool in eneo_tools
@@ -1399,6 +1468,7 @@ class TenantModelAdapter(CompletionModelAdapter):
             skill_runtime=skill_runtime,
         )
         messages = provider_input.messages
+        delegation = current_assistant_delegation()
         if provider_input.tools:
             litellm_kwargs["tools"] = provider_input.tools
 
@@ -1460,9 +1530,13 @@ class TenantModelAdapter(CompletionModelAdapter):
                 choice = response.choices[0]
                 msg = choice.message
 
+                call_ids = TurnToolCallIds()
                 tool_round = 0
                 max_rounds = get_settings().max_tool_rounds
-                seen_prefixes: set[str] = set()
+                shared_budget = current_execution_budget()
+                seen_prefixes = (
+                    shared_budget.reference_prefixes if shared_budget else set[str]()
+                )
                 captured_refs: list[McpToolReference] = []
                 captured_images: list[GeneratedFile] = []
                 collected_tool_metadata: list[ToolCallMetadata] = (
@@ -1549,7 +1623,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                     _keep_round(msg)
                     return True
 
-                while msg.tool_calls and (mcp_proxy or activation_available):
+                while msg.tool_calls and (
+                    mcp_proxy or activation_available or delegation
+                ):
                     if tool_round >= max_rounds:
                         if forced_final:
                             # The provider ignored tool_choice="none" and asked
@@ -1570,7 +1646,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                             assistant_content=msg.content,
                             calls=[
                                 ProviderToolCall(
-                                    call_id=tc.id,
+                                    call_id=call_ids.claim(tc.id),
                                     name=tc.function.name,
                                     arguments=tc.function.arguments,
                                 )
@@ -1585,7 +1661,8 @@ class TenantModelAdapter(CompletionModelAdapter):
 
                     provider_calls = tuple(
                         ProviderToolCall(
-                            call_id=tc.id,
+                            call_id=call_ids.claim(tc.id),
+                            provider_id=tc.id,
                             name=tc.function.name,
                             arguments=tc.function.arguments,
                         )
@@ -1609,26 +1686,42 @@ class TenantModelAdapter(CompletionModelAdapter):
                         if activation is not None
                         else provider_calls
                     )
-                    if external_calls and mcp_proxy is None:
-                        break
                     if not activation or not activation.assistant_message_appended:
                         messages.append(
-                            {
-                                "role": "assistant",
-                                "content": msg.content,
-                                "tool_calls": [
-                                    {
-                                        "id": call.call_id,
-                                        "type": "function",
-                                        "function": {
-                                            "name": call.name,
-                                            "arguments": call.arguments,
-                                        },
-                                    }
-                                    for call in provider_calls
-                                ],
-                            }
+                            _tool_request_message(provider_calls, msg.content)
                         )
+                    if delegation is not None:
+                        for call in external_calls:
+                            if call.name != CONSULT_ASSISTANT_TOOL:
+                                continue
+                            async with aclosing(
+                                delegation.call(
+                                    call_id=call.call_id, arguments=call.arguments
+                                )
+                            ) as consultation_stream:
+                                async for _ in consultation_stream:
+                                    pass
+                            captured_refs.extend(
+                                delegation.references_for(call.call_id)
+                            )
+                            messages.append(
+                                {
+                                    "role": "tool",
+                                    "tool_call_id": call.call_id,
+                                    "content": result_budget.admit(
+                                        delegation.result_for(call.call_id)
+                                        + "\n\n"
+                                        + MCP_TOOL_REFERENCES_INSTRUCTION
+                                    ),
+                                }
+                            )
+                        external_calls = tuple(
+                            call
+                            for call in external_calls
+                            if call.name != CONSULT_ASSISTANT_TOOL
+                        )
+                    if external_calls and mcp_proxy is None:
+                        break
 
                     results: list[dict[str, Any]] = []
                     proxy_calls: list[tuple[str, dict[str, Any]]] = []
@@ -1716,6 +1809,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 result_status=result_status,
                                 result=display_text,
                                 mcp_tool_name=call.name,
+                                upload_free_reference_ids=_upload_free_reference_ids(
+                                    mcp_proxy, refs_for_call
+                                ),
                                 purpose=mcp_proxy.get_tool_purpose(call.name),
                                 is_internal=mcp_proxy.is_internal_tool(call.name),
                                 is_bundled=mcp_proxy.is_bundled_tool(call.name),
@@ -1752,6 +1848,8 @@ class TenantModelAdapter(CompletionModelAdapter):
                 completion.text = answer_text
                 completion.reasoning_content = reasoning_text
                 completion.stop = choice.finish_reason == "stop"
+                if delegation is not None:
+                    completion.consultations = copy.deepcopy(delegation.consultations)
 
             if used_input_estimate:
                 completion.input_token_estimate = cumulative_input_tokens
@@ -1868,6 +1966,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                 kwargs=litellm_kwargs,
                 mcp_proxy=mcp_proxy,
                 skill_runtime=skill_runtime,
+                delegation=current_assistant_delegation(),
                 has_tools=bool(provider_input.tools),
                 eneo_tools=provider_input.built_in_tools,
             )
@@ -1909,7 +2008,7 @@ class TenantModelAdapter(CompletionModelAdapter):
         approval_manager: "ToolApprovalManager | None" = None,
         approval_context: dict[str, Any] | None = None,
         pending_approval_ids: set[str] | None = None,
-    ) -> AsyncIterator[Completion]:
+    ) -> AsyncGenerator[Completion, None]:
         """
         Iterate streaming response from tenant model.
         Phase 2: Iterate pre-created stream inside EventSourceResponse.
@@ -1946,6 +2045,7 @@ class TenantModelAdapter(CompletionModelAdapter):
             active_provider_stream = source_stream
             mcp_proxy = prepared.mcp_proxy if prepared else None
             skill_runtime = prepared.skill_runtime if prepared else None
+            delegation = prepared.delegation if prepared else None
             activation_available = (
                 skill_runtime is not None and skill_runtime.tool_definition is not None
             )
@@ -1979,6 +2079,8 @@ class TenantModelAdapter(CompletionModelAdapter):
             def _tool_is_bundled(name: str) -> bool:
                 return mcp_proxy.is_bundled_tool(name) if mcp_proxy else False
 
+            call_ids = TurnToolCallIds()
+
             # Shared state for tool call accumulation and usage across stream draining
             class _StreamResult:
                 def __init__(self) -> None:
@@ -1996,6 +2098,31 @@ class TenantModelAdapter(CompletionModelAdapter):
                     self.context_output_token_estimate: int | None = None
                     self.answer_rounds = _RoundJoiner()
                     self.reasoning_rounds = _RoundJoiner()
+
+                def usage_completion(self, *, stop: bool) -> Completion:
+                    usage = self.usage
+                    if self.used_input_estimate and usage is not None:
+                        usage = usage.model_copy(update={"prompt_tokens": None})
+                    if self.used_output_estimate and usage is not None:
+                        usage = usage.model_copy(update={"completion_tokens": None})
+                    return Completion(
+                        response_type=None if stop else ResponseType.TOKEN_USAGE,
+                        text="",
+                        stop=stop,
+                        usage=usage,
+                        input_token_estimate=(
+                            self.cumulative_input_tokens
+                            if self.used_input_estimate
+                            else None
+                        ),
+                        context_input_token_estimate=self.context_input_token_estimate,
+                        output_token_estimate=(
+                            self.cumulative_output_tokens
+                            if self.used_output_estimate
+                            else None
+                        ),
+                        context_output_token_estimate=self.context_output_token_estimate,
+                    )
 
             result = _StreamResult()
 
@@ -2085,12 +2212,14 @@ class TenantModelAdapter(CompletionModelAdapter):
                             idx = tc_delta.index
                             if idx not in res.tool_calls_acc:
                                 res.tool_calls_acc[idx] = {
-                                    "id": tc_delta.id,
+                                    "id": None,
                                     "type": "function",
                                     "function": {"name": "", "arguments": ""},
                                 }
-                            if tc_delta.id:
-                                res.tool_calls_acc[idx]["id"] = tc_delta.id
+                            if tc_delta.id and not res.tool_calls_acc[idx]["id"]:
+                                res.tool_calls_acc[idx]["id"] = call_ids.claim(
+                                    tc_delta.id
+                                )
                             if tc_delta.function:
                                 fn = tc_delta.function
                                 if fn.name:
@@ -2241,6 +2370,10 @@ class TenantModelAdapter(CompletionModelAdapter):
                     res.cumulative_output_tokens += request_output_tokens
                     res.used_output_estimate = True
                     res.context_output_token_estimate = request_output_tokens
+                if current_execution_budget() is not None:
+                    # Keep completed model-round usage before a child blocks in
+                    # a tool or approval. Cancellation must not erase that work.
+                    yield res.usage_completion(stop=False)
 
             # --- Drain initial stream ---
             async for comp in _drain_stream(
@@ -2261,7 +2394,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                 result.has_tool_calls
                 and prepared
                 and prepared.has_tools
-                and (mcp_proxy or activation_available)
+                and (mcp_proxy or activation_available or delegation)
             ):
                 messages = prepared.messages
                 litellm_kwargs = prepared.kwargs
@@ -2295,6 +2428,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                     provider_calls = tuple(
                         ProviderToolCall(
                             call_id=cast(str, tool_call["id"]),
+                            provider_id=call_ids.provider_id_for(
+                                cast(str, tool_call["id"])
+                            ),
                             name=tool_call["function"]["name"],
                             arguments=tool_call["function"]["arguments"],
                         )
@@ -2315,6 +2451,53 @@ class TenantModelAdapter(CompletionModelAdapter):
                         if activation is not None
                         else provider_calls
                     )
+                    request_appended = bool(
+                        activation and activation.assistant_message_appended
+                    )
+                    if delegation is not None and any(
+                        call.name == CONSULT_ASSISTANT_TOOL for call in external_calls
+                    ):
+                        if not request_appended:
+                            messages.append(
+                                _tool_request_message(
+                                    provider_calls,
+                                    "".join(result.assistant_content) or None,
+                                )
+                            )
+                            request_appended = True
+                        for call in external_calls:
+                            if call.name != CONSULT_ASSISTANT_TOOL:
+                                continue
+                            async with aclosing(
+                                delegation.call(
+                                    call_id=call.call_id, arguments=call.arguments
+                                )
+                            ) as consultation_stream:
+                                async for event in consultation_stream:
+                                    yield event
+                            if delegation.references_for(call.call_id):
+                                yield Completion(
+                                    response_type=ResponseType.TOOL_CALL,
+                                    mcp_tool_references=delegation.references_for(
+                                        call.call_id
+                                    ),
+                                )
+                            messages.append(
+                                {
+                                    "role": "tool",
+                                    "tool_call_id": call.call_id,
+                                    "content": result_budget.admit(
+                                        delegation.result_for(call.call_id)
+                                        + "\n\n"
+                                        + MCP_TOOL_REFERENCES_INSTRUCTION
+                                    ),
+                                }
+                            )
+                        external_calls = tuple(
+                            call
+                            for call in external_calls
+                            if call.name != CONSULT_ASSISTANT_TOOL
+                        )
                     external_call_ids = {call.call_id for call in external_calls}
                     tool_calls = [
                         tool_call
@@ -2344,6 +2527,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                                         title=title,
                                         tool_call_id=call.call_id,
                                         result_status="deferred",
+                                        upload_free_reference_ids=_upload_free_reference_ids(
+                                            mcp_proxy
+                                        ),
                                         purpose=_tool_purpose(call.name),
                                         is_internal=_tool_is_internal(call.name),
                                         is_bundled=_tool_is_bundled(call.name),
@@ -2406,14 +2592,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                             )
                         except OpenAIException:
                             args = None
-                        info = mcp_proxy.get_tool_info(name)
-                        if info:
-                            sname, tname, title = info
-                        elif "__" in name:
-                            sname, tname = name.split("__", 1)
-                            title = None
-                        else:
-                            sname, tname, title = "", name, None
+                        sname, tname, title = _resolve_tool_names(name)
                         tool_metadata.append(
                             ToolCallMetadata(
                                 server_name=sname,
@@ -2427,12 +2606,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 is_bundled=mcp_proxy.is_bundled_tool(name),
                             )
                         )
-                    tool_args_by_call_id: dict[str, dict[str, Any] | None] = {}
-                    for tm in tool_metadata:
-                        if tm.tool_call_id is not None:
-                            tool_args_by_call_id[tm.tool_call_id] = (
-                                _tool_metadata_arguments(tm)
-                            )
+                    # A provider can reuse a call ID within a round. Keep the
+                    # parsed metadata beside the call all the way to its result.
+                    round_calls = list(zip(tool_calls, tool_metadata, strict=True))
 
                     # Approval flow. Tools of Eneo's own loopback servers
                     # (knowledge, files, built-in providers) are core
@@ -2487,9 +2663,17 @@ class TenantModelAdapter(CompletionModelAdapter):
                             approval_id=approval_id,
                         )
 
-                        wait_result = await approval_manager.wait_for_approval(
-                            approval_id
-                        )
+                        # Waiting on the user is not execution time: an
+                        # orchestrated turn's deadlines pause meanwhile.
+                        approval_budget = current_execution_budget()
+                        async with (
+                            approval_budget.pause()
+                            if approval_budget is not None
+                            else nullcontext()
+                        ):
+                            wait_result = await approval_manager.wait_for_approval(
+                                approval_id
+                            )
                         if pending_approval_ids is not None:
                             pending_approval_ids.discard(approval_id)
                         timed_out = wait_result.timed_out
@@ -2505,88 +2689,54 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 response_type=ResponseType.TOOL_APPROVAL_TIMEOUT,
                                 approval_id=approval_id,
                                 tool_calls_metadata=[
-                                    ToolCallMetadata(
-                                        server_name=tm.server_name,
-                                        tool_name=tm.tool_name,
-                                        title=tm.title,
-                                        arguments=_tool_metadata_arguments(tm),
-                                        tool_call_id=tm.tool_call_id,
+                                    replace(
+                                        tm,
                                         approved=False,
                                         result_status="timeout_denied",
-                                        mcp_tool_name=tm.mcp_tool_name,
-                                        purpose=tm.purpose,
-                                        is_internal=tm.is_internal,
-                                        is_bundled=tm.is_bundled,
                                     )
                                     for tm in approval_metadata
                                 ],
                             )
 
+                        approved_calls: list[
+                            tuple[_AccumulatedToolCall, ToolCallMetadata]
+                        ] = []
+                        denied_calls: list[
+                            tuple[_AccumulatedToolCall, ToolCallMetadata]
+                        ] = []
+                        decisions: list[ToolCallMetadata] = []
+                        for tc, metadata in round_calls:
+                            approved, _ = decision_map.get(
+                                tc["id"] or "", (False, None)
+                            )
+                            if approved:
+                                approved_calls.append((tc, metadata))
+                                status = "approved"
+                            else:
+                                denied_calls.append((tc, metadata))
+                                status = "timeout_denied" if timed_out else "denied"
+                            decisions.append(
+                                replace(
+                                    metadata, approved=approved, result_status=status
+                                )
+                            )
                         yield Completion(
                             response_type=ResponseType.TOOL_CALL,
-                            tool_calls_metadata=[
-                                ToolCallMetadata(
-                                    server_name=tm.server_name,
-                                    tool_name=tm.tool_name,
-                                    title=tm.title,
-                                    arguments=_tool_metadata_arguments(tm),
-                                    tool_call_id=tm.tool_call_id,
-                                    approved=decision_map.get(
-                                        tm.tool_call_id or "", (False, None)
-                                    )[0],
-                                    result_status=(
-                                        "approved"
-                                        if decision_map.get(
-                                            tm.tool_call_id or "", (False, None)
-                                        )[0]
-                                        else (
-                                            "timeout_denied" if timed_out else "denied"
-                                        )
-                                    ),
-                                    mcp_tool_name=tm.mcp_tool_name,
-                                    purpose=tm.purpose,
-                                    is_internal=tm.is_internal,
-                                    is_bundled=tm.is_bundled,
-                                )
-                                for tm in tool_metadata
-                            ],
+                            tool_calls_metadata=decisions,
                         )
-
-                        approved_tcs: list[_AccumulatedToolCall] = [
-                            tc
-                            for tc in tool_calls
-                            if decision_map.get(tc["id"] or "", (False, None))[0]
-                        ]
-                        denied_tcs: list[_AccumulatedToolCall] = [
-                            tc
-                            for tc in tool_calls
-                            if not decision_map.get(tc["id"] or "", (False, None))[0]
-                        ]
                     else:
                         yield Completion(
                             response_type=ResponseType.TOOL_CALL,
                             tool_calls_metadata=[
-                                ToolCallMetadata(
-                                    server_name=tm.server_name,
-                                    tool_name=tm.tool_name,
-                                    title=tm.title,
-                                    arguments=_tool_metadata_arguments(tm),
-                                    tool_call_id=tm.tool_call_id,
-                                    approved=tm.approved,
-                                    result_status="approved",
-                                    mcp_tool_name=tm.mcp_tool_name,
-                                    purpose=tm.purpose,
-                                    is_internal=tm.is_internal,
-                                    is_bundled=tm.is_bundled,
-                                )
+                                replace(tm, result_status="approved")
                                 for tm in tool_metadata
                             ],
                         )
-                        approved_tcs = tool_calls
-                        denied_tcs: list[_AccumulatedToolCall] = []
+                        approved_calls = round_calls
+                        denied_calls = []
 
                     # Add assistant message with tool calls to conversation
-                    if not activation or not activation.assistant_message_appended:
+                    if not request_appended:
                         messages.append(
                             {
                                 "role": "assistant",
@@ -2606,19 +2756,26 @@ class TenantModelAdapter(CompletionModelAdapter):
                         )
 
                     # Execute approved tools
-                    if approved_tcs:
+                    if approved_calls:
                         proxy_calls: list[tuple[str, dict[str, Any]]] = [
                             (
                                 tc["function"]["name"],
                                 self._parse_tool_arguments(tc["function"]["arguments"]),
                             )
-                            for tc in approved_tcs
+                            for tc, _ in approved_calls
                         ]
                         results = await mcp_proxy.call_tools_parallel(proxy_calls)
                         execution_metadata: list[ToolCallMetadata] = []
                         captured_refs: list[McpToolReference] = []
-                        seen_prefixes: set[str] = set()
-                        for tc, res in zip(approved_tcs, results):
+                        shared_budget = current_execution_budget()
+                        seen_prefixes = (
+                            shared_budget.reference_prefixes
+                            if shared_budget
+                            else set[str]()
+                        )
+                        for (tc, metadata), res in zip(
+                            approved_calls, results, strict=True
+                        ):
                             result_data = res
                             content_list = cast(
                                 list[dict[str, Any]], result_data.get("content") or []
@@ -2665,41 +2822,16 @@ class TenantModelAdapter(CompletionModelAdapter):
                                     "content": result_budget.admit(llm_text),
                                 }
                             )
-                            tool_info = mcp_proxy.get_tool_info(tc["function"]["name"])
-                            if tool_info:
-                                server_name, tool_name, title = tool_info
-                            elif "__" in tc["function"]["name"]:
-                                server_name, tool_name = tc["function"]["name"].split(
-                                    "__", 1
-                                )
-                                title = None
-                            else:
-                                server_name, tool_name, title = (
-                                    "",
-                                    tc["function"]["name"],
-                                    None,
-                                )
                             execution_metadata.append(
-                                ToolCallMetadata(
-                                    server_name=server_name,
-                                    tool_name=tool_name,
-                                    title=title,
-                                    arguments=tool_args_by_call_id.get(tc["id"] or ""),
-                                    tool_call_id=tc["id"],
+                                replace(
+                                    metadata,
                                     approved=True,
                                     result_status=result_status,
                                     result=display_text,
-                                    mcp_tool_name=tc["function"]["name"],
-                                    purpose=mcp_proxy.get_tool_purpose(
-                                        tc["function"]["name"]
-                                    ),
-                                    is_internal=mcp_proxy.is_internal_tool(
-                                        tc["function"]["name"]
-                                    ),
-                                    is_bundled=mcp_proxy.is_bundled_tool(
-                                        tc["function"]["name"]
-                                    ),
                                     meta=result_data.get("meta") or None,
+                                    upload_free_reference_ids=_upload_free_reference_ids(
+                                        mcp_proxy, refs_for_call
+                                    ),
                                     structured_content=(
                                         result_data.get("structured_content")
                                         if has_app_view
@@ -2719,7 +2851,7 @@ class TenantModelAdapter(CompletionModelAdapter):
 
                     # Add denied tool results
                     denied_metadata: list[ToolCallMetadata] = []
-                    for tc in denied_tcs:
+                    for tc, metadata in denied_calls:
                         denial_reason = decision_map.get(tc["id"] or "", (False, None))[
                             1
                         ]
@@ -2733,41 +2865,16 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 "content": json.dumps(denial_payload),
                             }
                         )
-                        tool_info = mcp_proxy.get_tool_info(tc["function"]["name"])
-                        if tool_info:
-                            server_name, tool_name, title = tool_info
-                        elif "__" in tc["function"]["name"]:
-                            server_name, tool_name = tc["function"]["name"].split(
-                                "__", 1
-                            )
-                            title = None
-                        else:
-                            server_name, tool_name, title = (
-                                "",
-                                tc["function"]["name"],
-                                None,
-                            )
                         denied_metadata.append(
-                            ToolCallMetadata(
-                                server_name=server_name,
-                                tool_name=tool_name,
-                                title=title,
-                                arguments=tool_args_by_call_id.get(tc["id"] or ""),
-                                tool_call_id=tc["id"],
+                            replace(
+                                metadata,
                                 approved=False,
                                 result_status=(
                                     "timeout_denied" if timed_out else "denied"
                                 ),
                                 result=json.dumps(denial_payload),
-                                mcp_tool_name=tc["function"]["name"],
-                                purpose=mcp_proxy.get_tool_purpose(
-                                    tc["function"]["name"]
-                                ),
-                                is_internal=mcp_proxy.is_internal_tool(
-                                    tc["function"]["name"]
-                                ),
-                                is_bundled=mcp_proxy.is_bundled_tool(
-                                    tc["function"]["name"]
+                                upload_free_reference_ids=_upload_free_reference_ids(
+                                    mcp_proxy
                                 ),
                             )
                         )
@@ -2857,7 +2964,16 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 )
                             except OpenAIException:
                                 args = None
-                            server_name, tool_name, title = _resolve_tool_names(name)
+                            registered = name in _allowed_tool_names() or (
+                                name == SKILL_ACTIVATION_TOOL_NAME
+                                and activation_available
+                            )
+                            display_name = name if registered else "unknown_tool"
+                            server_name, tool_name, title = (
+                                _resolve_tool_names(name)
+                                if registered
+                                else ("", display_name, None)
+                            )
                             refused_metadata.append(
                                 ToolCallMetadata(
                                     server_name=server_name,
@@ -2867,7 +2983,10 @@ class TenantModelAdapter(CompletionModelAdapter):
                                     tool_call_id=tool_call["id"],
                                     result_status="failed",
                                     result=refusal_payload,
-                                    mcp_tool_name=name,
+                                    upload_free_reference_ids=_upload_free_reference_ids(
+                                        mcp_proxy
+                                    ),
+                                    mcp_tool_name=display_name,
                                     purpose=_tool_purpose(name),
                                     is_internal=_tool_is_internal(name),
                                     is_bundled=_tool_is_bundled(name),
@@ -2912,75 +3031,59 @@ class TenantModelAdapter(CompletionModelAdapter):
             # Final stop — attach accumulated usage. If any request lacked
             # provider prompt usage, keep that field unset and expose the
             # cumulative request-payload estimate separately.
-            final_usage = result.usage
-            if result.used_input_estimate and final_usage is not None:
-                final_usage = final_usage.model_copy(update={"prompt_tokens": None})
-            if result.used_output_estimate and final_usage is not None:
-                final_usage = final_usage.model_copy(update={"completion_tokens": None})
-            yield Completion(
-                text="",
-                stop=True,
-                usage=final_usage,
-                input_token_estimate=(
-                    result.cumulative_input_tokens
-                    if result.used_input_estimate
-                    else None
-                ),
-                context_input_token_estimate=result.context_input_token_estimate,
-                output_token_estimate=(
-                    result.cumulative_output_tokens
-                    if result.used_output_estimate
-                    else None
-                ),
-                context_output_token_estimate=result.context_output_token_estimate,
-            )
+            yield result.usage_completion(stop=True)
 
             logger.info(
                 f"[TenantModelAdapter] {self.litellm_model}: Stream iteration completed"
             )
 
         except Exception as exc:
-            # Mid-stream errors: yield error event instead of raising
-            failure = litellm_transport.classify_stream_failure(exc)
-            if failure is not None and failure.unavailable:
-                self._record_provider_unavailable(
-                    phase="stream_iteration", exc=exc, failure=failure
-                )
-            else:
-                log_error(
-                    logger,
-                    logging.ERROR,
-                    "[TenantModelAdapter] %s: Error during stream iteration",
-                    self.litellm_model,
-                    error=exc,
-                    extra={
-                        "provider_type": self.provider_type,
-                        "model": self.litellm_model,
-                        "operation": "stream_iteration",
-                        "error_code": failure.code if failure is not None else None,
-                    },
-                )
-
-            yield Completion(
-                text="",
-                error=(
-                    failure.message
-                    if failure is not None
-                    else litellm_transport.STREAM_ERROR_MESSAGE
-                ),
-                error_code=failure.status if failure is not None else 500,
-                error_reason=(
-                    failure.code
-                    if failure is not None
-                    else litellm_transport.STREAM_ERROR_CODE
-                ),
-                response_type=ResponseType.ERROR,
-                stop=True,
-            )
+            yield self._stream_error(exc)
         finally:
             # A finished stream is already exhausted; an aborted one still holds
             # the provider's HTTP response until it is closed.
             await close_provider_stream(active_provider_stream)
+
+    def _stream_error(self, exc: Exception) -> Completion:
+        if isinstance(exc, (ExecutionLimitReached, UnauthorizedException)):
+            raise exc
+        # Mid-stream errors: yield error event instead of raising
+        failure = litellm_transport.classify_stream_failure(exc)
+        if failure is not None and failure.unavailable:
+            self._record_provider_unavailable(
+                phase="stream_iteration", exc=exc, failure=failure
+            )
+        else:
+            log_error(
+                logger,
+                logging.ERROR,
+                "[TenantModelAdapter] %s: Error during stream iteration",
+                self.litellm_model,
+                error=exc,
+                extra={
+                    "provider_type": self.provider_type,
+                    "model": self.litellm_model,
+                    "operation": "stream_iteration",
+                    "error_code": failure.code if failure is not None else None,
+                },
+            )
+
+        return Completion(
+            text="",
+            error=(
+                failure.message
+                if failure is not None
+                else litellm_transport.STREAM_ERROR_MESSAGE
+            ),
+            error_code=failure.status if failure is not None else 500,
+            error_reason=(
+                failure.code
+                if failure is not None
+                else litellm_transport.STREAM_ERROR_CODE
+            ),
+            response_type=ResponseType.ERROR,
+            stop=True,
+        )
 
     @override
     def get_model_route(self) -> str:

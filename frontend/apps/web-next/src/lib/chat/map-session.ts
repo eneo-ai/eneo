@@ -2,6 +2,45 @@ import type { Schema } from "@/lib/api/models";
 import type { EneoToolMetadata, EneoUIMessage, ToolAppView } from "./types";
 
 type PersistedMessage = Schema<"Message">;
+type RecordedTool = NonNullable<PersistedMessage["tool_calls"]>[number];
+type ToolPart = Extract<EneoUIMessage["parts"][number], { type: "dynamic-tool" }>;
+
+/** The result endpoint uses a specialist's step UUID, even when two providers reuse a call ID. */
+export function recordedToolPart(
+  tool: RecordedTool,
+  resultId: string,
+  pending?: "input-available" | "input-streaming"
+): ToolPart {
+  const base = {
+    type: "dynamic-tool" as const,
+    toolName: tool.tool_name,
+    toolCallId: resultId,
+    providerMetadata: {
+      eneo: {
+        server_name: tool.server_name,
+        title: tool.title ?? null,
+        purpose: tool.purpose ?? null,
+        is_internal: tool.is_internal ?? null,
+        is_bundled: tool.is_bundled ?? null,
+        app_view: (tool.app_view as ToolAppView | null | undefined) ?? null,
+        approved: tool.approved ?? null,
+        result_status: tool.result_status ?? null,
+        generated_file_ids: tool.generated_file_ids ?? null
+      } satisfies EneoToolMetadata
+    },
+    input: tool.arguments ?? {}
+  };
+  if (tool.approved === false) return { ...base, state: "output-error", errorText: "denied" };
+  if (pending) return { ...base, state: pending };
+  if (tool.result_status && !["succeeded", "completed"].includes(tool.result_status)) {
+    return { ...base, state: "output-error", errorText: tool.result_status };
+  }
+  return {
+    ...base,
+    state: "output-available",
+    output: { status: tool.result_status ?? "succeeded" }
+  };
+}
 
 /**
  * Maps a persisted conversation (question/answer pairs) onto UIMessages so
@@ -47,35 +86,16 @@ export function mapSessionMessages(messages: PersistedMessage[]): EneoUIMessage[
     }
 
     for (const tool of message.tool_calls ?? []) {
-      parts.push({
-        type: "dynamic-tool",
-        toolName: tool.tool_name ?? "tool",
-        toolCallId: tool.tool_call_id ?? `${baseId}-tool-${parts.length}`,
-        providerMetadata: {
-          eneo: {
-            server_name: tool.server_name,
-            title: tool.title ?? null,
-            purpose: tool.purpose ?? null,
-            // Eneo's own server or not, by the backend's routing (null before the flag existed).
-            is_internal: tool.is_internal ?? null,
-            is_bundled: tool.is_bundled ?? null,
-            app_view: (tool.app_view as ToolAppView | null | undefined) ?? null,
-            // Approval record for MCP tools that needed approval (null: none needed).
-            approved: tool.approved ?? null,
-            result_status: tool.result_status ?? null,
-            // The files the call produced (live streams carry the call id on the file part).
-            generated_file_ids: tool.generated_file_ids ?? null
-          } satisfies EneoToolMetadata
-        },
-        state:
-          tool.result_status && tool.result_status !== "succeeded"
-            ? "output-error"
-            : "output-available",
-        input: tool.arguments ?? {},
-        output: { status: tool.result_status ?? "succeeded" },
-        errorText:
-          tool.result_status && tool.result_status !== "succeeded" ? tool.result_status : undefined
-      } as EneoUIMessage["parts"][number]);
+      parts.push(recordedToolPart(tool, tool.tool_call_id ?? `${baseId}-tool-${parts.length}`));
+    }
+
+    for (const step of message.consultations ?? []) {
+      // A reopened conversation cannot resume an interrupted specialist or its approval.
+      const data =
+        step.status === "running" || step.status === "awaiting_approval"
+          ? { ...step, status: "incomplete" as const }
+          : step;
+      parts.push({ type: "data-consultation", id: step.id, data });
     }
 
     parts.push({ type: "text", text: message.answer ?? "" });

@@ -9,7 +9,11 @@ import pytest
 from arq.worker import Function, create_worker
 from sqlalchemy.exc import IntegrityError
 
-from eneo.jobs.job_manager import CRAWLER_QUEUE_NAME, DEFAULT_QUEUE_NAME
+from eneo.jobs.job_manager import (
+    CRAWLER_QUEUE_NAME,
+    DEFAULT_QUEUE_NAME,
+    DURABLE_APP_FUNCTION,
+)
 from eneo.jobs.job_models import JobFailureCode, Task
 from eneo.main.config import get_settings
 from eneo.main.exceptions import TenantQuotaExceededException
@@ -56,10 +60,14 @@ def test_arq_constructs_crawler_with_shared_runtime_settings() -> None:
     assert crawler.functions["crawl"].keep_result_s == 0
 
 
-def test_arq_does_not_rerun_app_jobs_after_a_worker_crash() -> None:
-    general = create_worker(WorkerSettings)
+@pytest.mark.parametrize("name", [Task.RUN_APP.value, DURABLE_APP_FUNCTION])
+def test_arq_registers_app_deliveries_without_replay_or_result_retention(
+    name: str,
+) -> None:
+    function = create_worker(WorkerSettings).functions[name]
 
-    assert general.functions[Task.RUN_APP.value].max_tries == 1
+    assert function.max_tries == 1
+    assert function.keep_result_s == 0
 
 
 async def test_crawler_startup_removes_earlier_workspaces_before_runtime_start(
@@ -326,7 +334,7 @@ async def test_commit_failure_records_the_job_failure_in_a_fresh_session(
     task_job_service.complete_job.assert_awaited_once_with(job_id, "done")
     # ...so the failure is written where it survives, as its code.
     recovery_container.job_service.return_value.fail_job.assert_awaited_once_with(
-        job_id, failure_code=JobFailureCode.PROCESSING_FAILED
+        job_id, failure_code=JobFailureCode.PROCESSING_FAILED, only_if_queued=False
     )
 
 
@@ -406,7 +414,7 @@ async def test_cancelled_task_records_cancelled_in_fresh_session_after_rollback(
     assert tx_contexts[0].committed is False
     assert tx_contexts[1].committed is True
     recovery_container.job_service.return_value.fail_job.assert_awaited_once_with(
-        job_id, failure_code=JobFailureCode.CANCELLED
+        job_id, failure_code=JobFailureCode.CANCELLED, only_if_queued=False
     )
     assert published_when_recovery_committed[-1] is True
 
@@ -463,9 +471,11 @@ async def test_a_commit_failure_is_recorded_as_its_code_without_text(
     worker = _recovery_worker(monkeypatch, job_service)
     job_id = uuid4()
 
-    await worker._fail_job_after_commit_error(job_id, None, error)
+    await worker._record_job_failure(job_id, None, error)
 
-    job_service.fail_job.assert_awaited_once_with(job_id, failure_code=code)
+    job_service.fail_job.assert_awaited_once_with(
+        job_id, failure_code=code, only_if_queued=False
+    )
 
 
 async def test_a_failure_that_cannot_be_recorded_is_logged_without_its_text(
@@ -483,7 +493,7 @@ async def test_a_failure_that_cannot_be_recorded_is_logged_without_its_text(
     worker_module.logger.addHandler(caplog.handler)
     try:
         with caplog.at_level(logging.DEBUG):
-            await worker._fail_job_after_commit_error(
+            await worker._record_job_failure(
                 uuid4(), None, RuntimeError("commit refused: Lönelista 2026")
             )
     finally:

@@ -608,7 +608,8 @@ def _build_assistant_update_changes(
         new_tool_map = {str(t.tool_id): t.is_enabled for t in assistant.mcp_tools}
 
         tool_changes: list[dict[str, object]] = []
-        for tid, is_enabled in new_tool_map.items():
+        for tid in sorted(old_mcp_tool_overrides.keys() | new_tool_map.keys()):
+            is_enabled = new_tool_map.get(tid)
             old_enabled = old_mcp_tool_overrides.get(tid)
             if old_enabled != is_enabled:
                 tool_changes.append(
@@ -778,6 +779,13 @@ async def update_assistant(
     if "rerank_model_id" in request_dict:
         rerank_model_id = assistant.rerank_model_id
 
+    specialists = None
+    if assistant.specialists is not None:
+        specialists = [
+            (specialist.id, specialist.user_description)
+            for specialist in assistant.specialists
+        ]
+
     updated_assistant, _ = await service.update_assistant(
         assistant_id=id,
         name=assistant.name,
@@ -792,6 +800,7 @@ async def update_assistant(
         mcp_server_ids=mcp_server_ids,
         enabled_capabilities=assistant.enabled_capabilities,
         mcp_tools=mcp_tool_settings,
+        specialists=specialists,
         description=description,
         insight_enabled=assistant.insight_enabled,
         inline_file_text=assistant.inline_file_text,
@@ -833,12 +842,17 @@ async def update_assistant(
             space = None
 
     # Build extra context
-    extra = {
+    extra: dict[str, object] = {
         "type": updated_assistant.type.value if updated_assistant.type else "standard",
         "summary": f"Modified {', '.join(change_summary)}"
         if change_summary
         else "No changes detected",
     }
+
+    if "mcp_servers" in changes or "mcp_tools" in changes:
+        extra["serves_active_widget"] = await container.widget_repo().serves_target(
+            current_user.tenant_id, id
+        )
 
     audit_service = container.audit_service()
     await audit_service.log_async(
@@ -1504,6 +1518,11 @@ async def add_mcp_to_assistant(
                     "added": [{"id": str(mcp_server.id), "name": mcp_server.name}]
                 }
             },
+            extra={
+                "serves_active_widget": await container.widget_repo().serves_target(
+                    user.tenant_id, id
+                )
+            },
         ),
     )
 
@@ -1556,6 +1575,11 @@ async def remove_mcp_from_assistant(
                 "mcp_servers": {
                     "removed": [{"id": str(mcp_server.id), "name": mcp_server.name}]
                 }
+            },
+            extra={
+                "serves_active_widget": await container.widget_repo().serves_target(
+                    user.tenant_id, id
+                )
             },
         ),
     )

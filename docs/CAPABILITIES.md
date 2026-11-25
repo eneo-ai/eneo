@@ -163,6 +163,10 @@ their tokens removed and are supported on replay. Providers receive fresh
 signed URLs and downloads still enforce file access. See
 `backend/src/eneo/files/model_file_references.py`.
 
+### Pictures from attached documents
+
+The `file_analysis` capability's `extract_images` tool takes the pictures out of an attached PDF, Word or PowerPoint file. It runs in the tool runtime (parsing and page rendering need memory proportional to the file) and returns MCP `image` blocks, which the ask path saves as generated images like any other tool-produced image. Each picture therefore gets a file reference the model can pass to `create_document.images`, which is how a document's figures are carried into a new document. The usual limits apply: `MCP_TOOL_IMAGE_MAX_COUNT` pictures per result (the tool pages with `offset`) and `MCP_TOOL_IMAGE_MAX_BYTES` each. Only pictures stored as images are found; charts and diagrams drawn as vector graphics are not. The page images Eneo derives at upload for vision input are separate and carry no reference.
+
 ### Documents, spreadsheets and exports
 
 A binary embedded resource (`resource` with `blob`) becomes a generated file only when the producing server's purpose delivers that type (`GENERATED_FILE_TYPES_BY_PURPOSE`):

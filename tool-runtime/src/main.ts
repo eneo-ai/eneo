@@ -25,6 +25,8 @@ import { chartConfigSchema } from "./tools/charts/config";
 import type { ChartResult } from "./tools/charts/ports";
 import { chartTools } from "./tools/charts/tool";
 import { chartView } from "./tools/charts/view";
+import type { ExtractImagesResult } from "./tools/pictures/ports";
+import { pictureTools } from "./tools/pictures/tool";
 
 const config = loadConfig(process.env);
 const isolate = (job: SandboxJob, timeoutMs: number) =>
@@ -84,6 +86,21 @@ const sheetCache = new SheetCache(
 );
 // Parsed sheets are plaintext on disk: they leave within one sweep of expiring.
 sheetCache.sweepEvery(Math.max(30_000, Math.min(tabular.cache_ttl_ms, 5 * 60_000)));
+// Rendering shares the native-job slots: a large workbook or PDF is as heavy as a query.
+const renderTimeoutMs = 25_000;
+// Sheet sources and Word templates download under the same policy as attachments.
+const fileAccess = {
+  allowedFileOrigins: config.tabular.allowedFileOrigins,
+  maxBytes: tabular.max_upload_bytes,
+  timeoutMs: tabular.download_timeout_ms,
+};
+// PDFs and picture extraction run a Python sidecar each, so they queue separately from the
+// native-job slots.
+const pdfScheduler = new Scheduler(
+  config.pdfConcurrency,
+  config.maxConcurrency,
+  config.maxConcurrency,
+);
 const ingestTimeoutMs = 25_000;
 const queryJobTimeoutMs = Math.min(tabular.query_timeout_ms + 10_000, 30_000);
 endpoints.push({
@@ -106,23 +123,18 @@ endpoints.push({
       query: (job) =>
         slot(async () => (await isolate({ job }, queryJobTimeoutMs)) as unknown as QueryJobResult),
     },
-  }),
+  }).concat(
+    // Pictures are cut out of an attached file by the Python sidecar.
+    pictureTools(
+      (job) =>
+        pdfScheduler.run(
+          async () => (await isolate({ job }, renderTimeoutMs)) as ExtractImagesResult,
+        ),
+      fileAccess,
+    ),
+  ),
 });
 
-// Rendering shares the native-job slots: a large workbook or PDF is as heavy as a query.
-const renderTimeoutMs = 25_000;
-// Sheet sources and Word templates download under the same policy as attachments.
-const fileAccess = {
-  allowedFileOrigins: config.tabular.allowedFileOrigins,
-  maxBytes: tabular.max_upload_bytes,
-  timeoutMs: tabular.download_timeout_ms,
-};
-// PDFs run a Python sidecar each, so they queue separately from the native-job slots.
-const pdfScheduler = new Scheduler(
-  config.pdfConcurrency,
-  config.maxConcurrency,
-  config.maxConcurrency,
-);
 const render = fileRenderer((job) =>
   (job.format === "pdf" ? pdfScheduler.run.bind(pdfScheduler) : slot)(
     async () => (await isolate({ job }, renderTimeoutMs)) as RenderResult,

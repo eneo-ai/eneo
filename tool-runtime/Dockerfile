@@ -65,6 +65,7 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY package.json tsconfig.json ./
 COPY src ./src
 COPY scripts/render_pdf.py ./scripts/render_pdf.py
+COPY scripts/extract_images.py ./scripts/extract_images.py
 COPY --from=views /app/dist ./dist
 USER bun
 EXPOSE 3010

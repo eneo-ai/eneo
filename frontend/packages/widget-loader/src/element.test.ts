@@ -246,6 +246,16 @@ describe("saved settings", () => {
     expect(request).toHaveBeenCalledWith(`https://eneo.example.se/widget/settings/${WIDGET_ID}`);
   });
 
+  it("ignores a base-url that is not an http(s) address", async () => {
+    const request = stubSettings();
+    const element = await mount({ "base-url": "javascript:alert(1)//" });
+    // The loader's own default stands in, so nothing script-bearing is ever
+    // fetched, framed or written into an attribute.
+    expect(element.baseUrl.startsWith("http")).toBe(true);
+    expect(request).toHaveBeenCalledWith(`${element.baseUrl}/widget/settings/${WIDGET_ID}`);
+    expect(request.mock.calls.flat().join(" ")).not.toContain("javascript:");
+  });
+
   it("shows the launcher only once the settings are in, already in the saved corner", async () => {
     const held = heldSettings();
     const element = attach();

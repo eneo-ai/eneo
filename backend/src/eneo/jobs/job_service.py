@@ -17,6 +17,7 @@ from eneo.jobs.job_models import (
 from eneo.jobs.job_repo import ACTIVE_JOB_STATUSES, JobRepository
 from eneo.jobs.job_staging import job_staging_path
 from eneo.jobs.task_models import (
+    AppDispatchEnvelope,
     TaskParams,
     Transcription,
     UploadInfoBlob,
@@ -28,6 +29,16 @@ from eneo.main.models import Status
 from eneo.users.user import UserInDB
 
 logger = get_logger(__name__)
+
+
+async def _enqueue_committed_job(task: Task, job_id: UUID, params: TaskParams) -> None:
+    try:
+        await job_manager.enqueue(task, job_id, params)
+    except Exception:
+        logger.exception(
+            "Queue did not confirm job dispatch",
+            extra={"job_id": str(job_id), "task": task.value},
+        )
 
 
 class JobService:
@@ -48,6 +59,7 @@ class JobService:
         task_params: TaskParams,
         enqueue: bool = True,
         after_commit: bool = False,
+        dispatch_envelope: AppDispatchEnvelope | None = None,
     ) -> JobInDb:
         """Add a QUEUED job row and hand the job to the worker.
 
@@ -61,7 +73,14 @@ class JobService:
         if task in KNOWLEDGE_TASKS:
             raise ValueError(f"Knowledge task {task.value} requires durable dispatch")
         job = Job(task=task, name=name, status=Status.QUEUED, user_id=self.user.id)
-        job_in_db = await self.job_repo.add_job(job=job)
+        if dispatch_envelope is None:
+            job_in_db = await self.job_repo.add_job(job=job)
+        else:
+            if task != Task.RUN_APP or not enqueue or not after_commit:
+                raise ValueError("App dispatch requires a post-commit app submission")
+            job_in_db = await self.job_repo.add_durable_job(
+                job, job_id=uuid4(), dispatch_envelope=dispatch_envelope
+            )
 
         if not enqueue:
             return job_in_db
@@ -85,16 +104,10 @@ class JobService:
             await job_manager.enqueue(task, job_id, task_params)
             return
 
-        async def dispatch() -> None:
-            try:
-                await job_manager.enqueue(task, job_id, task_params)
-            except Exception:
-                logger.exception(
-                    "Job dispatch after commit failed; the stale-job reaper fails it",
-                    extra={"job_id": str(job_id), "task": task.value},
-                )
-
-        after_outer_transaction(session.sync_session, on_commit=dispatch)
+        after_outer_transaction(
+            session.sync_session,
+            on_commit=lambda: _enqueue_committed_job(task, job_id, task_params),
+        )
 
     async def queue_durable_knowledge_job(
         self,
@@ -116,7 +129,7 @@ class JobService:
 
         envelope = build_dispatch_envelope(task, task_params)
         job = Job(task=task, name=name, status=Status.QUEUED, user_id=self.user.id)
-        job_in_db = await self.job_repo.add_durable_knowledge_job(
+        job_in_db = await self.job_repo.add_durable_job(
             job,
             job_id=job_id or uuid4(),
             dispatch_envelope=envelope,
@@ -161,9 +174,16 @@ class JobService:
 
         return await self.job_repo.update_job(job_id, job_update)
 
-    async def fail_job(self, job_id: UUID, *, failure_code: JobFailureCode):
+    async def fail_job(
+        self,
+        job_id: UUID,
+        *,
+        failure_code: JobFailureCode,
+        only_if_queued: bool = False,
+    ):
         """Fail an active job. Store only the code since an error can quote
-        the job's input."""
+        the job's input. Use only_if_queued when the caller cannot confirm that
+        it owns an in-progress job."""
         job_update = JobUpdate(
             status=Status.FAILED,
             finished_at=datetime.now(timezone.utc),
@@ -171,7 +191,9 @@ class JobService:
             failure_code=failure_code,
         )
         return await self.job_repo.update_job(
-            job_id, job_update, from_statuses=ACTIVE_JOB_STATUSES
+            job_id,
+            job_update,
+            from_statuses=(Status.QUEUED,) if only_if_queued else ACTIVE_JOB_STATUSES,
         )
 
     async def get_running_jobs(self):

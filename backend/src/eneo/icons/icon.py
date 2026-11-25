@@ -18,7 +18,7 @@ class IconInUseError(Exception):
 
     def __init__(self) -> None:
         super().__init__(
-            "The icon is still shown by an assistant, app, space or group chat. "
+            "The icon is still shown by an assistant, app or space. "
             "Remove it there first; the icon is deleted when nothing shows it."
         )
 
