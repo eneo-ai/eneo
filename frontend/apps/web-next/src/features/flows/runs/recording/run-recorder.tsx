@@ -42,7 +42,7 @@ import {
   type SavedRecording
 } from "./recording-keeper";
 import type { StoredPart } from "./recording-store";
-import { resumeRefusalText, ResumePrompt } from "./resume-prompt";
+import { discardRefusalText, resumeRefusalText, ResumePrompt } from "./resume-prompt";
 import {
   AudioRecorder,
   MAX_PARTS_AWAITING_UPLOAD,
@@ -652,10 +652,12 @@ export function RunRecorder({
   async function discardSaved(saved: SavedRecording) {
     setResumeBusy("discard");
     setResumeProblem(null);
-    const discarded = await keeper.forgetSession(stepId, saved.sessionId);
+    // Only the form that holds the recording discards it: not while another tab has it open.
+    const outcome = await keeper.discard(stepId, saved.sessionId);
     setResumeBusy(null);
-    if (!discarded) {
-      setResumeProblem(t("flow_transcript_resume_discard_failed"));
+    if (outcome === "closed") return;
+    if (outcome !== "discarded") {
+      setResumeProblem(discardRefusalText(outcome, t));
       return;
     }
     settle(saved);

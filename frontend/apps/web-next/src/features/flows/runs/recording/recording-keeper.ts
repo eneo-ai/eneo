@@ -35,6 +35,13 @@ import {
  * That is a choice of what to offer, not a protection against someone who
  * reads the browser's storage directly. Recordings with no activity for a
  * day are deleted whoever made them.
+ *
+ * A kept recording has at most one holder: the form that records it or has
+ * continued it. The keeper holds a Web Lock per recording for that form, and
+ * only the holder writes the recording to the device, continues it or
+ * discards it; another tab's part stays in that tab. The browser lets go of
+ * the lock when the tab closes, crashes or reloads. Without Web Locks there
+ * is no holder, and recordings are kept as before.
  */
 
 /** A recording kept on the device, as the resume prompt describes it. */
@@ -52,8 +59,38 @@ export type SavedRecording = {
 /** Why a kept recording cannot continue in this form, or null when it can. */
 export type ResumeRefusal = "step_changed" | "too_many_parts" | "type_not_accepted";
 
+/**
+ * How discarding a kept recording from the resume prompt went: refused while
+ * another form holds it ("open_elsewhere") or when the browser refused to ask
+ * ("read_failed"); "closed" when the form went meanwhile.
+ */
+export type DiscardOutcome =
+  "discarded" | "discard_failed" | "open_elsewhere" | "read_failed" | "closed";
+
 /** Where a part of this form is kept: on the device, or only in this tab. */
 export type PartKeeping = "device" | "tab";
+
+/**
+ * The answer to the keeper asking to hold a recording: "taken" while another
+ * form holds it, "failed" when the browser refused the request, "closed" once
+ * the form let go.
+ */
+type HoldAnswer = "held" | "taken" | "failed" | "closed";
+
+type Hold = {
+  stepId: string;
+  sessionId: string;
+  answer: Promise<HoldAnswer>;
+  state: "asking" | "held" | "refused" | "released";
+  /** Letting go: no new write is let in, the ones under way end first. */
+  closing: Promise<void> | null;
+  letGo: () => void;
+};
+
+/** The lock a form holds while it has a recording. */
+function holdLockName(flowId: string, stepId: string, sessionId: string): string {
+  return `eneo-flow-recording-holder:${flowId}::${stepId}::${sessionId}`;
+}
 
 /** What the recorder tells about the parts it records. */
 export type RecorderJournal = {
@@ -161,6 +198,12 @@ export class RecordingKeeper {
   #listeners = new Set<() => void>();
   #degraded = new Map<string, JournalDegradation>();
   #version = 0;
+  /** What this keeper holds, asked to hold or was refused, per recording: it never refuses itself. */
+  #holds = new Map<string, Hold>();
+  /** Writes and removals under way, per recording, which end before its hold is let go. */
+  #work = new Map<string, Set<Promise<unknown>>>();
+  /** The form let go: nothing more is held or written. */
+  #closed = false;
 
   /** `userId`: the signed-in person, whose recordings are kept and offered; null while not known. */
   constructor(
@@ -241,6 +284,14 @@ export class RecordingKeeper {
           this.#degrade(address(part), "failed");
           return;
         }
+        // A part begins: the recording's hold is taken, or asked for again after a refusal.
+        // Without it the part stays in this tab, as when storage refuses it.
+        const held = this.#take(stepId, part.sessionId, { again: true }).then(
+          (answer) => answer === "held"
+        );
+        void held.then((ok) => {
+          if (!ok) this.#degrade(address(part), "failed");
+        });
         const meta: Omit<JournalMeta, "lastChunkAt"> = {
           ...address(part),
           mimeType: part.mimeType,
@@ -249,7 +300,7 @@ export class RecordingKeeper {
           streamed: streamed(),
           ...this.#owner()
         };
-        this.#journal.begin(meta);
+        this.#journal.begin(meta, held);
       },
       append: (part, chunk, recordedMs) => {
         if (this.#isForgotten(stepId, part.sessionId)) return;
@@ -272,7 +323,7 @@ export class RecordingKeeper {
     stepId: string,
     part: Omit<StoredPart, "flowId" | "stepId" | "interrupted" | "liveTranscript" | "userId">
   ): Promise<PartKeeping> {
-    const storing = this.#store(stepId, part);
+    const storing = this.#during(stepId, part.sessionId, this.#store(stepId, part));
     this.#storing.set(
       partKey({ flowId: this.#flowId, stepId, sessionId: part.sessionId, index: part.index }),
       storing
@@ -285,7 +336,19 @@ export class RecordingKeeper {
    * for, in order, once they are stored: a reload then still finds it. None
    * of them keeps it when one is not on the device.
    */
-  async keepLiveTranscript(
+  keepLiveTranscript(
+    stepId: string,
+    parts: readonly Pick<PartAddress, "sessionId" | "index">[],
+    id: string
+  ): Promise<void> {
+    const writing = this.#keepLiveTranscript(stepId, parts, id);
+    for (const sessionId of new Set(parts.map((part) => part.sessionId))) {
+      this.#during(stepId, sessionId, writing);
+    }
+    return writing;
+  }
+
+  async #keepLiveTranscript(
     stepId: string,
     parts: readonly Pick<PartAddress, "sessionId" | "index">[],
     id: string
@@ -295,6 +358,8 @@ export class RecordingKeeper {
     if (!this.#db || addresses.some((address) => this.#isForgotten(stepId, address.sessionId))) {
       return;
     }
+    const held = await Promise.all(addresses.map((address) => this.#holding(address)));
+    if (held.includes(false)) return;
     try {
       await this.#db.setLiveTranscript(addresses, { id, parts: addresses.length });
     } catch {
@@ -313,19 +378,26 @@ export class RecordingKeeper {
       index: part.index
     };
     this.#track(stepId, part.sessionId);
+    // The hold its part's start took or was refused; asked for only when there was none.
+    const held =
+      this.#db !== null &&
+      !this.#isForgotten(stepId, part.sessionId) &&
+      (await this.#take(stepId, part.sessionId)) === "held";
     let keeping: PartKeeping = "tab";
-    if (this.#db && !this.#isForgotten(stepId, part.sessionId)) {
+    if (held) {
       try {
-        await this.#db.putPart({ ...part, ...address, interrupted: false, ...this.#owner() });
+        await this.#db!.putPart({ ...part, ...address, interrupted: false, ...this.#owner() });
         keeping = "device";
       } catch {
         keeping = "tab";
       }
     }
-    // A part only this tab holds keeps its journal, to rebuild it after a reload.
+    // A part only this tab holds keeps its journal, to rebuild it after a reload; without the
+    // hold the journal wrote nothing, and the part ends there.
     if (keeping === "device") await this.#journal?.commit(address);
+    else if (!held) await this.#journal?.discard(address);
     if (this.#isForgotten(stepId, part.sessionId)) {
-      await this.#db?.deletePart(address).catch(() => undefined);
+      if (keeping === "device") await this.#db?.deletePart(address).catch(() => undefined);
       return "tab";
     }
     this.#keeping.set(partKey(address), keeping);
@@ -338,6 +410,11 @@ export class RecordingKeeper {
     const address: PartAddress = { flowId: this.#flowId, stepId, sessionId, index };
     this.#keeping.delete(partKey(address));
     this.#changed();
+    await this.#during(stepId, sessionId, this.#deletePart(address));
+  }
+
+  async #deletePart(address: PartAddress): Promise<void> {
+    if (!(await this.#holding(address))) return;
     try {
       await this.#db?.deletePart(address);
     } catch {
@@ -345,19 +422,41 @@ export class RecordingKeeper {
     }
   }
 
-  /** A recording thrown away, or taken by a started run: nothing of it stays. */
+  /**
+   * A recording thrown away, or taken by a started run: nothing of it stays.
+   * Only its holder removes anything; one this form never held is left on
+   * the device as it is. The hold is let go once the removal has ended,
+   * also when it failed.
+   */
   async forgetSession(stepId: string, sessionId: string): Promise<boolean> {
     const key = `${stepId}::${sessionId}`;
     this.#forgotten.add(key);
+    const removed = await this.#during(stepId, sessionId, this.#deleteSession(stepId, sessionId));
+    // Still stored: it can be discarded again, or continued after all.
+    if (!removed) this.#forgotten.delete(key);
+    await this.#release(stepId, sessionId);
+    return removed;
+  }
+
+  async #deleteSession(stepId: string, sessionId: string): Promise<boolean> {
+    const held = await this.#holding({ stepId, sessionId });
     await this.#journal?.discardSession(this.#flowId, stepId, sessionId);
+    if (!held) return true;
     try {
       await this.#db?.deleteSession(this.#flowId, stepId, sessionId);
       return true;
     } catch {
-      // Still stored: it can be discarded again, or continued after all.
-      this.#forgotten.delete(key);
       return false;
     }
+  }
+
+  /** A kept recording discarded from the resume prompt: only by its holder, which this form becomes. */
+  async discard(stepId: string, sessionId: string): Promise<DiscardOutcome> {
+    const answer = await this.#take(stepId, sessionId, { again: true });
+    if (answer === "taken") return "open_elsewhere";
+    if (answer === "failed") return "read_failed";
+    if (answer === "closed") return "closed";
+    return (await this.forgetSession(stepId, sessionId)) ? "discarded" : "discard_failed";
   }
 
   /** Every recording this form made or continued is forgotten. */
@@ -371,6 +470,24 @@ export class RecordingKeeper {
   /** Whether this form made or continued any recording. */
   get holdsSessions(): boolean {
     return [...this.#sessions.values()].some((ids) => ids.size > 0);
+  }
+
+  /** The form has the keeper (again, after strict mode's first unmount); answers how it lets go. */
+  open(): () => void {
+    this.#closed = false;
+    return () => void this.close();
+  }
+
+  /**
+   * The form goes: every recording it holds is let go once the writes and
+   * removals under way have ended (a run started or a closed form begins
+   * those without waiting). Nothing more is held or written.
+   */
+  async close(): Promise<void> {
+    this.#closed = true;
+    await Promise.all(
+      [...this.#holds.values()].map((hold) => this.#release(hold.stepId, hold.sessionId))
+    );
   }
 
   /**
@@ -525,6 +642,102 @@ export class RecordingKeeper {
     }
     await db.dropJournal(meta).catch(() => undefined);
     return true;
+  }
+
+  /**
+   * Asks to hold a recording, without waiting for another form: answered from
+   * this keeper's own book when it holds the recording, asks for it or was
+   * refused it (`again` asks anew after a refusal). A hold granted after the
+   * form let go is let go at once. Without Web Locks nothing is held, and
+   * every write goes ahead as before.
+   */
+  #take(stepId: string, sessionId: string, { again = false } = {}): Promise<HoldAnswer> {
+    const locks = this.#locks;
+    if (!locks) return Promise.resolve("held");
+    const key = `${stepId}::${sessionId}`;
+    const current = this.#holds.get(key);
+    if (this.#closed || current?.closing) return Promise.resolve("closed");
+    if (current?.state === "asking" || current?.state === "held") return current.answer;
+    if (current?.state === "refused" && !again) return current.answer;
+    if (current?.state === "released" && !again) return Promise.resolve("closed");
+    const hold: Hold = {
+      stepId,
+      sessionId,
+      answer: Promise.resolve("failed"),
+      state: "asking",
+      closing: null,
+      letGo: () => {
+        hold.state = "released";
+      }
+    };
+    hold.answer = new Promise<HoldAnswer>((resolve) => {
+      const answer = (value: HoldAnswer) => {
+        if (hold.state === "asking") hold.state = value === "held" ? "held" : "refused";
+        resolve(value);
+      };
+      try {
+        locks
+          .request(holdLockName(this.#flowId, stepId, sessionId), { ifAvailable: true }, (lock) => {
+            if (!lock) {
+              answer("taken");
+              return;
+            }
+            if (hold.closing || hold.state !== "asking") {
+              answer("closed");
+              return;
+            }
+            return new Promise<void>((release) => {
+              hold.letGo = () => {
+                hold.state = "released";
+                release();
+              };
+              answer("held");
+            });
+          })
+          .catch(() => answer("failed"));
+      } catch {
+        answer("failed");
+      }
+    });
+    this.#holds.set(key, hold);
+    return hold.answer;
+  }
+
+  /** Whether this keeper holds the recording now, for a write that needs it; never once it lets go. */
+  async #holding({ stepId, sessionId }: Pick<PartAddress, "stepId" | "sessionId">) {
+    if (!this.#locks) return true;
+    const hold = this.#holds.get(`${stepId}::${sessionId}`);
+    if (!hold || hold.closing || hold.state === "released" || this.#closed) return false;
+    return (await hold.answer) === "held";
+  }
+
+  /** A write or removal for a recording, which its hold outlasts. */
+  #during<T>(stepId: string, sessionId: string, work: Promise<T>): Promise<T> {
+    const key = `${stepId}::${sessionId}`;
+    const pending = this.#work.get(key) ?? new Set<Promise<unknown>>();
+    this.#work.set(key, pending);
+    pending.add(work);
+    const done = () => pending.delete(work);
+    work.then(done, done);
+    return work;
+  }
+
+  /**
+   * Lets go of a recording: no new write is let in, the part being recorded
+   * leaves its journal as it is, and the writes and removals under way end
+   * (successful or not) before the lock goes.
+   */
+  #release(stepId: string, sessionId: string): Promise<void> {
+    const hold = this.#holds.get(`${stepId}::${sessionId}`);
+    if (!hold || hold.state === "released") return Promise.resolve();
+    hold.closing ??= (async () => {
+      await this.#journal?.leaveSession(this.#flowId, stepId, sessionId);
+      const pending = this.#work.get(`${stepId}::${sessionId}`);
+      while (pending && pending.size > 0) await Promise.allSettled([...pending]);
+      hold.letGo();
+      hold.closing = null;
+    })();
+    return hold.closing;
   }
 
   /** Whether the signed-in person recorded it; never while their id is not known. */

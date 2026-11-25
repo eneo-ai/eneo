@@ -85,7 +85,11 @@ export class RecordingJournal {
     this.#now = now;
   }
 
-  begin(meta: Omit<JournalMeta, "lastChunkAt">): void {
+  /** `allowed`: whether the keeper may write the recording to the device; nothing is written until it says so. */
+  begin(
+    meta: Omit<JournalMeta, "lastChunkAt">,
+    allowed: Promise<boolean> = Promise.resolve(true)
+  ): void {
     const locks = this.#locks;
     if (!locks || !JOURNALED_TYPE.test(meta.mimeType)) {
       this.#onDegraded("unavailable", meta);
@@ -110,24 +114,30 @@ export class RecordingJournal {
       releaseLock: () => undefined
     };
     this.#entries.set(partKey(address), entry);
-    // Nothing is written before the lock is held; a refused lock writes nothing.
+    // Nothing is written before the keeper may write and the lock is held; a refusal writes nothing.
     const granted = new Promise<boolean>((resolve) => {
       entry.settleGrant = resolve;
-      try {
-        locks
-          .request(
-            journalLockName(address),
-            () =>
-              new Promise<void>((release) => {
-                entry.releaseLock = release;
-                resolve(true);
-                if (entry.ended) release();
-              })
-          )
-          .catch(() => resolve(false));
-      } catch {
-        resolve(false);
-      }
+      void allowed.then((ok) => {
+        if (!ok || entry.ended) {
+          resolve(false);
+          return;
+        }
+        try {
+          locks
+            .request(
+              journalLockName(address),
+              () =>
+                new Promise<void>((release) => {
+                  entry.releaseLock = release;
+                  resolve(true);
+                  if (entry.ended) release();
+                })
+            )
+            .catch(() => resolve(false));
+        } catch {
+          resolve(false);
+        }
+      });
     });
     entry.ready = granted.then(async (held) => {
       if (!held) {
@@ -184,7 +194,16 @@ export class RecordingJournal {
   }
 
   /** Every part of a recording ends its journal, dropped; settles once none writes any more. */
-  async discardSession(flowId: string, stepId: string, sessionId: string): Promise<void> {
+  discardSession(flowId: string, stepId: string, sessionId: string): Promise<void> {
+    return this.#endSession(flowId, stepId, sessionId, true);
+  }
+
+  /** The page lets go of a recording: what its parts wrote stays, to be rebuilt; settles once none writes any more. */
+  leaveSession(flowId: string, stepId: string, sessionId: string): Promise<void> {
+    return this.#endSession(flowId, stepId, sessionId, false);
+  }
+
+  async #endSession(flowId: string, stepId: string, sessionId: string, drop: boolean) {
     await Promise.all(
       [...this.#entries.values()]
         .filter(
@@ -193,7 +212,7 @@ export class RecordingJournal {
             address.stepId === stepId &&
             address.sessionId === sessionId
         )
-        .map(({ address }) => this.discard(address))
+        .map(({ address }) => this.#end(address, drop))
     );
   }
 

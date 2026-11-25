@@ -9,7 +9,7 @@ import { TextArea } from "@astryxdesign/core/TextArea";
 import { useAnnounce, useMediaQuery } from "@astryxdesign/core/hooks";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
-import { Fragment, useId, useImperativeHandle, useRef, useState, type Ref } from "react";
+import { Fragment, useEffect, useId, useImperativeHandle, useRef, useState, type Ref } from "react";
 import { flushSync } from "react-dom";
 import { useAppContext } from "@/components/providers/app-context";
 import { blockingError, ListError, RefreshError } from "@/components/composites/query-state";
@@ -204,6 +204,8 @@ function StartRunForm({
   // Only the signed-in person's recordings are kept and offered: others may use this browser.
   const { user } = useAppContext();
   const [keeper] = useState(() => new RecordingKeeper(flow.id, user.id));
+  // The form holds the recordings it records or continues until it goes, then lets them go.
+  useEffect(() => keeper.open(), [keeper]);
 
   function recorderRef(stepId: string) {
     return (handle: RecorderHandle | null) => {

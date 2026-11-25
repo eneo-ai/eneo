@@ -154,8 +154,14 @@ function installBrowser({ recorder = true, live = false } = {}) {
   vi.stubGlobal("AudioContext", live ? FakeAudioContext : undefined);
   vi.stubGlobal("AudioWorkletNode", FakeNode);
   vi.stubGlobal("WebSocket", FakeSocket);
-  Object.defineProperty(navigator, "locks", { configurable: true, value: fakeLocks().locks });
+  browserLocks = fakeLocks();
+  Object.defineProperty(navigator, "locks", { configurable: true, value: browserLocks.locks });
 }
+
+/** The browser's Web Locks, shared by every form the test opens, as by the tabs of a browser. */
+let browserLocks = fakeLocks();
+/** The lock the form holds while it has the kept recording. */
+const HOLD = "eneo-flow-recording-holder:flow-1::step-1::0a1b2c3d-0000-4000-8000-000000000001";
 
 /** When a kept part was captured: two hours ago (inside the keeper's 24 h window), a minute per part. */
 const KEPT_BASE = Math.floor(Date.now() / 60_000) * 60_000 - 2 * 60 * 60 * 1000;
@@ -1337,6 +1343,66 @@ describe("Keeping a recording on the device", () => {
     expect(device.db.parts.size).toBe(0);
   });
 
+  it("does not discard a kept recording another tab has open, and removes nothing", async () => {
+    installBrowser();
+    await device.db.putPart(keptPart(0));
+    browserLocks.holdElsewhere(HOLD);
+    const { dialog } = await openDialog(audioContract());
+    fireEvent.click(
+      await within(dialog).findByRole("button", { name: messages.flow_transcript_resume_discard })
+    );
+    expect(
+      await within(dialog).findByText(messages.flow_transcript_resume_discard_open_elsewhere)
+    ).toBeTruthy();
+    expect(device.db.parts.size).toBe(1);
+
+    // Once the other tab has let go, it can be discarded here.
+    browserLocks.releaseElsewhere(HOLD);
+    fireEvent.click(button(dialog, messages.flow_transcript_resume_discard));
+    await waitFor(() => expect(device.db.parts.size).toBe(0));
+    expect(browserLocks.isHeld(HOLD)).toBe(false);
+  });
+
+  it("says the recording could not be read, not that it is open elsewhere, when asking to hold it fails", async () => {
+    installBrowser();
+    await device.db.putPart(keptPart(0));
+    browserLocks.failRequests("eneo-flow-recording-holder:");
+    const { dialog } = await openDialog(audioContract());
+    fireEvent.click(
+      await within(dialog).findByRole("button", { name: messages.flow_transcript_resume_discard })
+    );
+    expect(
+      await within(dialog).findByText(messages.flow_transcript_resume_read_failed)
+    ).toBeTruthy();
+    expect(device.db.parts.size).toBe(1);
+  });
+
+  it("holds no recording after a start the microphone refused", async () => {
+    installBrowser();
+    microphone.mockRejectedValue(new DOMException("denied", "NotAllowedError"));
+    const { dialog } = await openDialog(audioContract());
+    fireEvent.click(button(dialog, messages.flow_transcript_rec_start));
+    await within(dialog).findByText(messages.flow_transcript_rec_problem_title);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(device.db.parts.size + device.db.journals.size).toBe(0);
+    // No hold of any recording is held: a lock in use would be one the fake knows by name.
+    expect(browserLocks.heldNames()).toEqual([]);
+  });
+
+  it("lets go of the recording once the run took it", async () => {
+    installBrowser();
+    grantMicrophone();
+    const { dialog, onStarted } = await openDialog(audioContract());
+    await recordAndStop(dialog);
+    await waitFor(() => expect(FakeUpload.sent).toHaveLength(1));
+    expect(browserLocks.heldNames()).toHaveLength(1);
+    fireEvent.click(button(dialog, messages.flow_runs_summary_next));
+    fireEvent.click(button(dialog, messages.flow_runs_start_submit));
+    await waitFor(() => expect(onStarted).toHaveBeenCalled());
+    await waitFor(() => expect(browserLocks.heldNames()).toEqual([]));
+    expect(device.db.parts.size).toBe(0);
+  });
+
   it("closes the form and keeps the recording to continue later", async () => {
     installBrowser();
     grantMicrophone();
@@ -1349,6 +1415,8 @@ describe("Keeping a recording on the device", () => {
     fireEvent.click(button(dialog, messages.flow_transcript_save_later));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(device.db.parts.size).toBe(1);
+    // The closed form let go of it.
+    await waitFor(() => expect(browserLocks.heldNames()).toEqual([]));
 
     // Opened again, the form offers it.
     fireEvent.click(screen.getByRole("button", { name: "Kör" }));
