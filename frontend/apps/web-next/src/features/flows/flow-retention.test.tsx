@@ -293,7 +293,9 @@ describe("the retention section", () => {
       spaceHref: SPACE_HREF
     });
     expect(
-      within(section).getByText("Körningar tas bort automatiskt 90 dagar efter att de avslutades.")
+      within(section).getByText(
+        "Körningar kan tas bort automatiskt 90 dagar efter att de avslutades."
+      )
     ).toBeTruthy();
     expect(section.querySelector("svg.lucide-clock[aria-hidden='true']")).toBeTruthy();
     expect(section.querySelector("svg.lucide-ban")).toBeNull();
@@ -306,13 +308,13 @@ describe("the retention section", () => {
     expect(link.getAttribute("href")).toBe(SPACE_HREF);
     expect(link.closest("dd")).toBeTruthy();
     expect(rowValue(section, "Gäller")).toBe(
-      "Alla flödets körningar som startar medan ytan har en gallringstid. Varje körning räknas från när den avslutades, också om den misslyckades eller avbröts."
+      "Flödets körningar som startar medan ytan har en gallringstid. Körningar som startade medan ytan saknade gallringstid, eller före uppgraderingen som införde automatisk gallring, tas inte bort automatiskt: de tas bort först när en administratör rensar körningar för hand. Varje körning räknas från när den avslutades, också om den misslyckades eller avbröts."
     );
     expect(rowValue(section, "Tas bort")).toBe(
       "Körningen med steg, transkript och de filer som ingen kvarvarande körning använder. Det går inte att återställa."
     );
     expect(rowValue(section, "Står kvar")).toBe(
-      "Bland annat körningar som inte har avslutats, körningar med rättslig spärr och körningar som startade medan ytan saknade gallringstid."
+      "Bland annat körningar som inte har avslutats, körningar med rättslig spärr och körningar som startade medan ytan saknade gallringstid eller före uppgraderingen som införde automatisk gallring."
     );
     await expectNoAxeViolations(document.body);
   });
@@ -320,7 +322,9 @@ describe("the retention section", () => {
   it("says a shorter flow time of its own applies under the space's cap", () => {
     const section = renderSection(retentionOf(90, 30), { spaceHref: SPACE_HREF });
     expect(
-      within(section).getByText("Körningar tas bort automatiskt 30 dagar efter att de avslutades.")
+      within(section).getByText(
+        "Körningar kan tas bort automatiskt 30 dagar efter att de avslutades."
+      )
     ).toBeTruthy();
     expect(rowValue(section, "Flödets gallringstid")).toBe("30 dagar");
     expect(rowValue(section, "Ytans gallringstid")).toBe(
@@ -332,7 +336,9 @@ describe("the retention section", () => {
   it("says the space's shorter time applies over a longer one saved on the flow", () => {
     const section = renderSection(retentionOf(90, 120));
     expect(
-      within(section).getByText("Körningar tas bort automatiskt 90 dagar efter att de avslutades.")
+      within(section).getByText(
+        "Körningar kan tas bort automatiskt 90 dagar efter att de avslutades."
+      )
     ).toBeTruthy();
     expect(rowValue(section, "Flödets gallringstid")).toBe(
       "120 dagar sparat på flödet. Ytans kortare tid gäller."
@@ -369,7 +375,7 @@ describe("the retention section", () => {
   it("tells someone who may not change it who does, under the status line", async () => {
     const section = renderSection(retentionOf(90, null));
     const status = within(section).getByText(
-      "Körningar tas bort automatiskt 90 dagar efter att de avslutades."
+      "Körningar kan tas bort automatiskt 90 dagar efter att de avslutades."
     );
     const who = within(section).getByText(
       "Gallringen ändras av den som administrerar ytan och har behörigheten ”Gallring – hantera regler”."
@@ -564,6 +570,11 @@ describe("flow retention", () => {
     backend.PUT.mockResolvedValue(settings({ days: 30 }, { days: 60 }));
     const said = recordAnnouncements();
     const days = await openDialog();
+    expect(
+      within(screen.getByRole("dialog")).getByText(
+        "Gäller flödets körningar som startar medan ytan har en gallringstid, inte äldre körningar. Varje körning räknas från när den avslutades."
+      )
+    ).toBeTruthy();
     expect(warningShown()).toBe(false);
     fireEvent.change(days, { target: { value: "3" } });
     fireEvent.change(days, { target: { value: "30" } });
@@ -577,7 +588,7 @@ describe("flow retention", () => {
     const banner = title.closest("[id]")!;
     expect(
       within(banner as HTMLElement).getByText(
-        "Gallringstiden kortas från 60 dagar till 30 dagar. Kontrollen görs var femte minut. Körningen med steg, transkript och de filer som ingen kvarvarande körning använder tas bort och går inte att återställa. Datumet är ungefärligt: servern räknar från klockslaget då körningen avslutades, och körningen kan tas bort när den nya gallringstiden har gått sedan dess. Körningar med rättslig spärr och körningar som startade medan ytan saknade gallringstid står kvar."
+        "Gallringstiden kortas från 60 dagar till 30 dagar. Kontrollen görs var femte minut. Körningen med steg, transkript och de filer som ingen kvarvarande körning använder tas bort och går inte att återställa. Datumet är ungefärligt: servern räknar från klockslaget då körningen avslutades, och körningen kan tas bort när den nya gallringstiden har gått sedan dess. Körningar med rättslig spärr och körningar som startade medan ytan saknade gallringstid, eller före uppgraderingen som införde automatisk gallring, står kvar."
       )
     ).toBeTruthy();
     expect(days.getAttribute("aria-describedby")).toContain(banner.getAttribute("id"));

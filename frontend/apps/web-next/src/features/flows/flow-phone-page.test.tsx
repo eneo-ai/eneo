@@ -144,7 +144,7 @@ describe("FlowPage on a phone", () => {
       "the space has a time",
       { space: { days: 90 }, flow: null },
       {},
-      "Gallring: körningar tas bort automatiskt 90 dagar efter att de avslutades."
+      "Gallring: körningar kan tas bort automatiskt 90 dagar efter att de avslutades."
     ],
     [
       "the space has no time, though the flow has",
@@ -248,7 +248,7 @@ describe("FlowPage on a phone", () => {
     const turned = within(section).getByRole("link", { name: "Ändra i ytans inställningar" });
     expect(turned.parentElement!.classList.contains("flex-col")).toBe(true);
     const status = within(section).getByText(
-      "Körningar tas bort automatiskt 90 dagar efter att de avslutades."
+      "Körningar kan tas bort automatiskt 90 dagar efter att de avslutades."
     );
     const change = within(section).getByRole("button", { name: "Ändra gallring" });
     expect(status.compareDocumentPosition(change) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -271,7 +271,7 @@ describe("FlowPage on a phone", () => {
     fireEvent.click(within(settings).getByRole("button", { name: "Inställningar" }));
     const section = within(settings).getByRole("region", { name: "Gallring" });
     const status = within(section).getByText(
-      "Körningar tas bort automatiskt 90 dagar efter att de avslutades."
+      "Körningar kan tas bort automatiskt 90 dagar efter att de avslutades."
     );
     const change = within(section).getByRole("button", { name: "Ändra gallring" });
     // Under the status line, across the width, and before the rows.
