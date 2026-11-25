@@ -194,6 +194,19 @@ function partsOf(sessionId: string | null, entries: readonly UploadEntry[]) {
   );
 }
 
+/**
+ * The parts a recording keeps, in order: every recorded row of it on the form,
+ * one the core refused for good included. Its copy on the device belongs to
+ * the recording, so it counts in the recording's numbering and length until
+ * its row is taken off the form. More of them than `partsOf` means a refused part.
+ */
+function keptPartsOf(sessionId: string | null, entries: readonly UploadEntry[]) {
+  if (!sessionId) return [];
+  return entries.flatMap((entry) =>
+    entry.recording?.sessionId === sessionId ? [entry.recording] : []
+  );
+}
+
 /** How close to its end (px) a scrolled box still counts as at the end: about a line. */
 const AT_END_PX = 24;
 
@@ -694,17 +707,14 @@ export function RunRecorder({
     const before = partsOf(current, now);
     // Recording again while the last recording's parts are on the form goes on with it.
     const sessionId = before.length > 0 && current ? current : crypto.randomUUID();
-    // After every part of the recording the form has seen, one the core refused for good included:
-    // its copy on the device keeps its own place.
-    const firstIndex = now.reduce(
-      (next, entry) =>
-        entry.recording?.sessionId === sessionId ? Math.max(next, entry.recording.index + 1) : next,
-      0
-    );
-    const recordedBeforeMs = before.reduce((sum, part) => sum + part.durationMs, 0);
+    // Numbered after, and timed with, every part the recording keeps: a refused part's copy on
+    // the device keeps its own place.
+    const kept = keptPartsOf(sessionId, now);
+    const firstIndex = kept.reduce((next, part) => Math.max(next, part.index + 1), 0);
+    const recordedBeforeMs = kept.reduce((sum, part) => sum + part.durationMs, 0);
     if (
       byItself &&
-      recordingTimeLeftMs(limits.maxRecordingMs, before.length + 1, recordedBeforeMs) <= 0
+      recordingTimeLeftMs(limits.maxRecordingMs, kept.length + 1, recordedBeforeMs) <= 0
     ) {
       return null;
     }
@@ -718,7 +728,7 @@ export function RunRecorder({
       limits: (): RecorderLimits => ({
         ...limits,
         recordedBeforeMs,
-        partsBefore: before.length,
+        partsBefore: kept.length,
         filesLeft: filesLeft(input, latestEntries.current),
         awaitingUpload: awaitingUpload(latestEntries.current, keptWhere)
       })
@@ -811,18 +821,29 @@ export function RunRecorder({
   }
 
   const { phase, problem, ended } = snapshot;
-  const formParts = partsOf(session ?? latestSession(entries), entries);
+  const recordingId = session ?? latestSession(entries);
+  const formParts = partsOf(recordingId, entries);
+  const keptParts = keptPartsOf(recordingId, entries);
   const continues = formParts.length > 0;
   const running = phase === "recording" || phase === "paused";
-  // What recording more may still hold, said once a recording has parts on the form.
+  // What recording more may still hold, said once a recording has parts on the form: counted
+  // as the recorder counts it, from every part the recording keeps.
   const roomMs =
     continues && limits.maxRecordingMs
       ? recordingTimeLeftMs(
           limits.maxRecordingMs,
-          formParts.length + 1,
-          formParts.reduce((sum, part) => sum + part.durationMs, 0)
+          keptParts.length + 1,
+          keptParts.reduce((sum, part) => sum + part.durationMs, 0)
         )
       : null;
+  // A part the core refused for good holds its slot (filesLeft) while the field does not count
+  // it (stays): when the slots are used, say which row to take off.
+  const slotHeld = entries.some((entry) => entry.recording && !stays(entry))
+    ? t("flow_transcript_rec_refused_part_holds_slot")
+    : null;
+  // Likewise its length counts in the recording's: when the time is used, say which row to take off.
+  const timeHeld =
+    keptParts.length > formParts.length ? t("flow_transcript_rec_refused_part_holds_time") : null;
 
   /** What the step lets a recording hold, as the form says it under its heading. */
   function limitHint(): string | null {
@@ -933,7 +954,12 @@ export function RunRecorder({
         <Banner
           status="warning"
           title={t("flow_transcript_rec_problem_title")}
-          description={t("flow_transcript_rec_files_full", { count: input.max_files ?? 0 })}
+          description={[
+            t("flow_transcript_rec_files_full", { count: input.max_files ?? 0 }),
+            slotHeld
+          ]
+            .filter(Boolean)
+            .join(" ")}
           collapsible={false}
         />
       ) : null}
@@ -963,7 +989,12 @@ export function RunRecorder({
         <Banner
           status="warning"
           title={t("flow_transcript_rec_ended_title")}
-          description={endedText(ended, t)}
+          description={[
+            endedText(ended, t),
+            ended === "files" ? slotHeld : ended === "length" ? timeHeld : null
+          ]
+            .filter(Boolean)
+            .join(" ")}
           collapsible={false}
         />
       ) : null}
