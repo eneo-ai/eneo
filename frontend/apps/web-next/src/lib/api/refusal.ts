@@ -204,7 +204,11 @@ function applyRefusal(response: Response, error: EneoApiError): void {
 
 /** Cookie requests and cache-only route gates share this document's session check. */
 export async function requireBrowserSession(): Promise<string> {
-  if (pendingProbe) await pendingProbe;
+  // Wait for the check or renewal holding requests, and for a renewal that
+  // takes over meanwhile; a failure rejects the request. The loop ends: each
+  // holder clears `pendingProbe` in a callback attached before anyone can wait
+  // for it, so that runs before a waiter resumes.
+  while (pendingProbe) await pendingProbe;
   assertCurrent();
   if (snapshot.status === "unbound") {
     throw new EneoApiError("The browser session has not been checked.", { status: 503 });
