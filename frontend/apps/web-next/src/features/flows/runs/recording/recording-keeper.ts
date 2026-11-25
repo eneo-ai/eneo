@@ -56,8 +56,25 @@ export type SavedRecording = {
   contract: ContractSnapshot;
 };
 
-/** Why a kept recording cannot continue in this form, or null when it can. */
-export type ResumeRefusal = "step_changed" | "too_many_parts" | "type_not_accepted";
+/**
+ * Why a kept recording cannot continue in this form: the step no longer
+ * takes it, another form holds it ("open_elsewhere"), or it could not be
+ * read or held ("read_failed").
+ */
+export type ResumeRefusal =
+  "step_changed" | "too_many_parts" | "type_not_accepted" | "open_elsewhere" | "read_failed";
+
+/**
+ * How "Fortsätt" on a kept recording went: its parts are this form's now,
+ * it was refused, nothing of it was left, a press was already under way
+ * ("busy"), or the form went meanwhile ("closed").
+ */
+export type ResumeOutcome =
+  | { kind: "continued"; parts: StoredPart[] }
+  | { kind: "refused"; refusal: ResumeRefusal }
+  | { kind: "empty" }
+  | { kind: "busy" }
+  | { kind: "closed" };
 
 /**
  * How discarding a kept recording from the resume prompt went: refused while
@@ -204,6 +221,8 @@ export class RecordingKeeper {
   #work = new Map<string, Set<Promise<unknown>>>();
   /** The form let go: nothing more is held or written. */
   #closed = false;
+  /** Recordings whose "Fortsätt" is under way: a second press continues none. */
+  #resuming = new Set<string>();
 
   /** `userId`: the signed-in person, whose recordings are kept and offered; null while not known. */
   constructor(
@@ -568,8 +587,56 @@ export class RecordingKeeper {
       .sort((a, b) => a.index - b.index);
   }
 
+  /**
+   * "Fortsätt": a kept recording goes on in this form, which holds it from
+   * now on. Refused while another form holds it; otherwise its parts are
+   * read and the step tried (`resumeRefusal`) before they count as this
+   * form's. A hold taken here that leads to no takeover is let go.
+   */
+  async resume(
+    stepId: string,
+    sessionId: string,
+    contract: ContractSnapshot
+  ): Promise<ResumeOutcome> {
+    const key = `${stepId}::${sessionId}`;
+    if (this.#resuming.has(key)) return { kind: "busy" };
+    this.#resuming.add(key);
+    try {
+      const heldBefore = this.#holds.get(key)?.state === "held";
+      const answer = await this.#take(stepId, sessionId, { again: true });
+      if (answer === "taken") return { kind: "refused", refusal: "open_elsewhere" };
+      if (answer === "failed") return { kind: "refused", refusal: "read_failed" };
+      if (answer === "closed") return { kind: "closed" };
+      const outcome = await this.#takeOver(stepId, sessionId, contract);
+      if (outcome.kind !== "continued" && !heldBefore) await this.#release(stepId, sessionId);
+      return outcome;
+    } finally {
+      this.#resuming.delete(key);
+    }
+  }
+
+  async #takeOver(
+    stepId: string,
+    sessionId: string,
+    contract: ContractSnapshot
+  ): Promise<ResumeOutcome> {
+    let parts: StoredPart[];
+    try {
+      parts = await this.readSession(stepId, sessionId);
+    } catch {
+      return { kind: "refused", refusal: "read_failed" };
+    }
+    if (this.#closed) return { kind: "closed" };
+    if (parts.length === 0) return { kind: "empty" };
+    // The flow may have changed since: its step must still take these parts as they are.
+    const refusal = resumeRefusal(contract, parts);
+    if (refusal) return { kind: "refused", refusal };
+    this.#adopt(stepId, parts);
+    return { kind: "continued", parts };
+  }
+
   /** A kept recording goes on in this form: its parts count as kept on the device. */
-  adopt(stepId: string, parts: readonly StoredPart[]): void {
+  #adopt(stepId: string, parts: readonly StoredPart[]): void {
     for (const part of parts) {
       this.#track(stepId, part.sessionId);
       this.#keeping.set(partKey(part), "device");

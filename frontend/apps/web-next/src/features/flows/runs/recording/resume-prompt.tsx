@@ -26,6 +26,10 @@ export function resumeRefusalText(refusal: ResumeRefusal, t: Translator): string
       return t("flow_transcript_resume_too_many_parts");
     case "type_not_accepted":
       return t("flow_transcript_resume_type_not_accepted");
+    case "open_elsewhere":
+      return t("flow_transcript_resume_open_elsewhere");
+    case "read_failed":
+      return t("flow_transcript_resume_read_failed");
   }
 }
 
