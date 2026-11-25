@@ -458,17 +458,29 @@ describe("RunRecorder in the start dialog", () => {
     expect(stored.mock.calls.map(([part]) => part.index)).toEqual([0, 1, 2]);
   });
 
-  /** Records part 1, which uploads, and part 2, which the core refuses for good; answers part 2's remove button. */
-  async function refuseSecondPart(dialog: HTMLElement) {
+  /**
+   * Records `uploaded` parts, which upload, and one more, which the core refuses for good;
+   * answers the refused part's remove button.
+   */
+  async function refuseLastPart(dialog: HTMLElement, uploaded = 1) {
     await recordAndStop(dialog);
     await waitFor(() => expect(FakeUpload.sent).toHaveLength(1));
+    for (let part = 2; part <= uploaded; part++) {
+      fireEvent.click(button(dialog, messages.flow_transcript_rec_continue));
+      fireEvent.click(
+        await within(dialog).findByRole("button", { name: messages.flow_transcript_rec_stop })
+      );
+      await waitFor(() => expect(FakeUpload.sent).toHaveLength(part));
+    }
     FakeUpload.refuseNext = true;
     fireEvent.click(button(dialog, messages.flow_transcript_rec_continue));
     fireEvent.click(
       await within(dialog).findByRole("button", { name: messages.flow_transcript_rec_stop })
     );
     // Refused: no upload left to stop, only the row to take off.
-    return within(dialog).findByRole("button", { name: /^Ta bort Inspelning, del 2/ });
+    return within(dialog).findByRole("button", {
+      name: new RegExp(`^Ta bort Inspelning, del ${uploaded + 1}`)
+    });
   }
 
   /** Closes the form with "Spara och fortsätt senare", opens it again and continues the recording. */
@@ -483,14 +495,16 @@ describe("RunRecorder in the start dialog", () => {
     return again;
   }
 
-  const FILES_FULL = /alla platser är använda\. Ta bort en fil om du vill spela in mer\.$/;
+  const FILES_FULL = /alla platser är använda\. Ta bort en fil om du vill spela in mer\./;
+  const SLOT_HELD =
+    /En del som inte kunde laddas upp håller en plats\. Ta bort delen för att frigöra platsen\. Spara den som fil först om du vill ha en kopia\.$/;
 
   it("keeps a part the core refused for good in its slot, so the saved recording can be continued", async () => {
     installBrowser();
     grantMicrophone();
     const stored = vi.spyOn(device.db, "putPart");
     const { dialog } = await openDialog(audioContract(false, 1_800, 2));
-    await refuseSecondPart(dialog);
+    await refuseLastPart(dialog);
     await waitFor(() => expect(stored).toHaveBeenCalledTimes(2));
 
     // Both parts are on the device: the step's two slots are used.
@@ -508,13 +522,16 @@ describe("RunRecorder in the start dialog", () => {
     expect(within(again).queryByText(messages.flow_transcript_resume_problem_title)).toBeNull();
   });
 
-  it("records again once the refused part is taken off the form", async () => {
+  it("says the refused part holds the slot the field counts as free, and records again once it is taken off the form", async () => {
     installBrowser();
     grantMicrophone();
-    const { dialog } = await openDialog(audioContract(false, 1_800, 2));
-    const remove = await refuseSecondPart(dialog);
+    const { dialog } = await openDialog(audioContract(false, 1_800, 5));
+    const remove = await refuseLastPart(dialog, 4);
+    // The field counts four of five: a refused row holds no place there.
+    expect(within(dialog).getByText("Filer: 4 av 5")).toBeTruthy();
     fireEvent.click(button(dialog, messages.flow_transcript_rec_continue));
-    await within(dialog).findByText(FILES_FULL);
+    const full = await within(dialog).findByText(FILES_FULL);
+    expect(full.textContent).toMatch(SLOT_HELD);
 
     fireEvent.click(remove);
     fireEvent.click(button(dialog, messages.flow_transcript_rec_continue));
@@ -533,13 +550,8 @@ describe("RunRecorder in the start dialog", () => {
     await waitFor(() => expect(FakeUpload.sent).toHaveLength(1), { timeout: 3_000 });
     // Part 2 is refused for good as it arrives, while part 3 records.
     FakeUpload.refuseNext = true;
-    expect(
-      await within(dialog).findByText(
-        messages.flow_transcript_rec_ended_files,
-        {},
-        { timeout: 6_000 }
-      )
-    ).toBeTruthy();
+    const ended = await within(dialog).findByText(SLOT_HELD, {}, { timeout: 6_000 });
+    expect(ended.textContent?.startsWith(messages.flow_transcript_rec_ended_files)).toBe(true);
     await within(dialog).findByRole("button", { name: messages.flow_transcript_rec_continue });
     await waitFor(() => expect(stored).toHaveBeenCalledTimes(3));
     expect(stored.mock.calls.map(([part]) => part.index)).toEqual([0, 1, 2]);

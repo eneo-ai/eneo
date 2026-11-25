@@ -823,6 +823,11 @@ export function RunRecorder({
           formParts.reduce((sum, part) => sum + part.durationMs, 0)
         )
       : null;
+  // A part the core refused for good holds its slot (filesLeft) while the field does not count
+  // it (stays): when the slots are used, say which row to take off.
+  const slotHeld = entries.some((entry) => entry.recording && !stays(entry))
+    ? t("flow_transcript_rec_refused_part_holds_slot")
+    : null;
 
   /** What the step lets a recording hold, as the form says it under its heading. */
   function limitHint(): string | null {
@@ -933,7 +938,12 @@ export function RunRecorder({
         <Banner
           status="warning"
           title={t("flow_transcript_rec_problem_title")}
-          description={t("flow_transcript_rec_files_full", { count: input.max_files ?? 0 })}
+          description={[
+            t("flow_transcript_rec_files_full", { count: input.max_files ?? 0 }),
+            slotHeld
+          ]
+            .filter(Boolean)
+            .join(" ")}
           collapsible={false}
         />
       ) : null}
@@ -963,7 +973,9 @@ export function RunRecorder({
         <Banner
           status="warning"
           title={t("flow_transcript_rec_ended_title")}
-          description={endedText(ended, t)}
+          description={[endedText(ended, t), ended === "files" ? slotHeld : null]
+            .filter(Boolean)
+            .join(" ")}
           collapsible={false}
         />
       ) : null}

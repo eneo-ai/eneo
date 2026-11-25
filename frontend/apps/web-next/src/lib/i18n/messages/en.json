@@ -9528,6 +9528,7 @@
   "flow_transcript_rec_microphone_busy": "The microphone is in use by another program or cannot be read. Close other programs that use it and try again.",
   "flow_transcript_rec_microphone_failed": "The microphone could not be used. Try again.",
   "flow_transcript_rec_files_full": "{count, plural, one {The step takes one file, and that slot is taken.} other {The step takes at most # files, and every slot is taken.}} Remove a file to record more.",
+  "flow_transcript_rec_refused_part_holds_slot": "A part that could not be uploaded holds a slot. Remove the part to free the slot. Save it as a file first if you want to keep a copy.",
   "flow_transcript_rec_ended_title": "The recording stopped",
   "flow_transcript_rec_ended_length": "The recording reached the flow's longest length. What was recorded is kept.",
   "flow_transcript_rec_ended_files": "Every file slot of the step is taken. What was recorded is kept.",
