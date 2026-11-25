@@ -123,7 +123,10 @@ class CrawlContext:
     website_id: UUID
     tenant_id: UUID
     tenant_slug: str | None
-    user_id: UUID
+    # Who the content is added by: a person, a service principal, or nobody
+    # when the space's own schedule runs the crawl.
+    user_id: UUID | None
+    created_by_service_id: UUID | None = field(default=None, kw_only=True)
     attempt_id: UUID
     lease_owner: str
 
@@ -192,5 +195,8 @@ class PreparedPage:
     # Context for persistence
     tenant_id: UUID
     website_id: UUID
-    user_id: UUID
+    # Who the content is added by: a person, a service principal, or nobody
+    # when the space's own schedule runs the crawl.
+    user_id: UUID | None
+    created_by_service_id: UUID | None = field(default=None, kw_only=True)
     embedding_model_id: UUID

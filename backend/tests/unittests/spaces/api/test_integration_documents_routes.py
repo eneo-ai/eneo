@@ -830,22 +830,21 @@ async def test_refused_organization_credentials_are_a_400_with_a_stable_code(
             },
             id="batch",
         ),
-        pytest.param("POST", "{id}/sync/", None, id="sync"),
     ],
 )
-async def test_service_keys_cannot_queue_imports_or_syncs(
+async def test_service_keys_are_not_refused_as_creators(
     documents_api, method, route, body
 ):
-    """The queued job belongs to the caller; a service key has no user row."""
+    """A queued job belongs to the service principal behind the key, so a
+    service key gets as far as any caller: the request reaches the space."""
     api = documents_api
     api.user.active_api_key = make_api_key(
         ownership=ApiKeyOwnership.SERVICE,
         owner_user_id=None,
         permission=ApiKeyPermission.ADMIN,
         tenant_id=api.user.tenant_id,
+        service_principal_id=uuid4(),
     )
-    jobs = AsyncMock()
-    api.container.job_service.override(providers.Object(jobs))
 
     async with AsyncClient(
         transport=ASGITransport(app=api.app), base_url="http://test"
@@ -854,11 +853,8 @@ async def test_service_keys_cannot_queue_imports_or_syncs(
             method, api.change_url(route, api.knowledge.id), json=body
         )
 
-    assert response.status_code == 403, response.text
-    # The production app flattens this detail; this app serves it as raised.
-    assert response.json()["detail"]["code"] == "service_key_cannot_create_resources"
-    jobs.queue_job.assert_not_awaited()
-    api.space_repo.one.assert_not_awaited()
+    assert response.status_code != 403, response.text
+    api.space_repo.one.assert_awaited()
 
 
 @pytest.mark.parametrize(

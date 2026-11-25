@@ -280,6 +280,25 @@ class SpaceService:
 
         return space
 
+    async def require_space_admin(self, id: UUID) -> None:
+        """Refuse the caller unless they administer this space.
+
+        For reads that concern the space as a whole, such as how much it
+        stores. Decided from the caller's own facts, without loading the
+        space's content.
+        """
+        facts = await self.repo.get_space_access_facts(id)
+        if not self.actor_manager.get_space_actor(facts).can_edit_space():
+            raise UnauthorizedException(
+                "Only admins of the space can read this.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "space",
+                    "action": "edit",
+                    "auth_layer": "domain_policy",
+                },
+            )
+
     async def get_applications_projection(
         self, id: UUID
     ) -> SpaceApplicationsProjection:

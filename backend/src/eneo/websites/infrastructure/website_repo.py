@@ -54,6 +54,7 @@ class WebsiteRepository:
                 size=0,
                 tenant_id=website.tenant_id,
                 user_id=website.user_id,
+                created_by_service_id=website.created_by_service_id,
                 embedding_model_id=website.embedding_model.id,
                 space_id=website.space_id,
                 **self._auth_values(website.http_auth),

@@ -2,6 +2,7 @@
 
 
 from typing import TYPE_CHECKING
+from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy.orm import selectinload
@@ -12,6 +13,7 @@ from eneo.database.tables.integration_table import IntegrationKnowledge
 from eneo.database.tables.spaces_table import Spaces, SpacesUsers
 from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.websites_table import Websites
+from eneo.storage.domain.storage import SpaceStorage
 from eneo.storage.domain.storage_factory import (
     StorageInfoFactory,
     StorageInfoQueryResult,
@@ -93,6 +95,34 @@ class StorageInfoRepository:
         )
 
         return await self.session.execute(query)
+
+    async def get_space_storage(self, space_id: UUID) -> SpaceStorage:
+        """What one space of the caller's organisation stores."""
+
+        def stored(table: type[CollectionsTable | Websites | IntegrationKnowledge]):
+            return (
+                sa.select(sa.func.coalesce(sa.func.sum(table.size), 0))
+                .where(
+                    table.space_id == space_id,
+                    table.tenant_id == self.user.tenant_id,
+                )
+                .scalar_subquery()
+            )
+
+        row = (
+            await self.session.execute(
+                sa.select(
+                    stored(CollectionsTable),
+                    stored(Websites),
+                    stored(IntegrationKnowledge),
+                )
+            )
+        ).one()
+        return SpaceStorage(
+            collections_size=int(row[0]),
+            websites_size=int(row[1]),
+            integration_knowledge_size=int(row[2]),
+        )
 
     async def get_storage_info(self) -> "StorageInfo":
         results = await self._get_spaces()

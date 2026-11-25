@@ -1680,6 +1680,7 @@ class Container(containers.DeclarativeContainer):
         oauth_token_repo=oauth_token_repo,
         job_repo=job_repo,
         user_repo=user_repo,
+        space_actors=user_service,
         change_key_service=office_change_key_service,
         sharepoint_subscription_repo=sharepoint_subscription_repo,
         redis_client=redis_client,

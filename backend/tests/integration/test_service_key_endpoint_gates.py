@@ -18,6 +18,7 @@ the bearer-token control case in each block.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -316,42 +317,6 @@ _CREATION_ENDPOINTS: list[tuple[str, str, dict | None]] = [
     ("POST", "/api/v1/services/", {"name": "x"}),
     # An icon records its uploader, which a service key does not have.
     ("POST", "/api/v1/icons/", None),
-    (
-        "POST",
-        "/api/v1/spaces/{space_id}/knowledge/groups/",
-        {"name": "x"},
-    ),
-    (
-        "POST",
-        "/api/v1/spaces/{space_id}/knowledge/websites/",
-        {"name": "x", "url": "https://example.com", "space_id": _STUB_ID},
-    ),
-    (
-        "POST",
-        f"/api/v1/spaces/{{space_id}}/knowledge/integrations/add/{_STUB_ID}/",
-        {
-            "name": "x",
-            "embedding_model": {"id": _STUB_ID},
-            "url": "https://contoso.sharepoint.com/sites/x",
-        },
-    ),
-    (
-        "POST",
-        f"/api/v1/spaces/{{space_id}}/knowledge/integrations/add/{_STUB_ID}/batch/",
-        {"embedding_model": {"id": _STUB_ID}, "items": []},
-    ),
-    # A sync queues a job owned by the caller, like a create.
-    (
-        "POST",
-        f"/api/v1/spaces/{{space_id}}/knowledge/integrations/{_STUB_ID}/sync/",
-        None,
-    ),
-    (
-        "POST",
-        "/api/v1/groups/",
-        {"name": "x", "embedding_model": {"id": _STUB_ID}},
-    ),
-    ("POST", f"/api/v1/groups/{_STUB_ID}/info-blobs/", {"info_blobs": []}),
     ("POST", "/api/v1/roles/", {"name": "x", "permissions": []}),
     ("POST", "/api/v1/mcp-servers/", {"name": "x", "url": "https://example.com"}),
     ("POST", "/api/v1/mcp-servers/bundled/compute/", {}),
@@ -600,6 +565,63 @@ async def test_service_key_creates_a_service_in_a_space(
     )
     assert by_person.status_code == 200, by_person.text
     assert service_id in {item["id"] for item in by_person.json()["services"]["items"]}
+
+
+async def test_service_key_creates_a_collection_in_a_space(
+    client, db_container, admin_token, tenant_admin_service_secret, test_space_id
+):
+    created = await client.post(
+        f"/api/v1/spaces/{test_space_id}/knowledge/groups/",
+        json={"name": "Handbook"},
+        headers={"X-API-Key": tenant_admin_service_secret},
+    )
+    assert created.status_code in (200, 201), created.text
+    collection_id = created.json()["id"]
+
+    assert _made_by_a_service(await _creator(db_container, "groups", collection_id))
+    # A collection without a person as creator still shows up in its space.
+    by_person = await client.get(
+        f"/api/v1/spaces/{test_space_id}/knowledge/",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert by_person.status_code == 200, by_person.text
+    assert collection_id in {item["id"] for item in by_person.json()["groups"]["items"]}
+
+
+async def test_service_key_creates_a_website_in_a_space_and_its_crawl_is_its_own(
+    client,
+    db_container,
+    tenant_admin_service_secret,
+    test_space_id,
+    monkeypatch,
+):
+    from eneo.websites.domain import crawl_service
+
+    monkeypatch.setattr(crawl_service, "reconcile_crawl_work", AsyncMock())
+
+    created = await client.post(
+        f"/api/v1/spaces/{test_space_id}/knowledge/websites/",
+        json={"name": "Intranet", "url": "https://example.com"},
+        headers={"X-API-Key": tenant_admin_service_secret},
+    )
+    assert created.status_code in (200, 201), created.text
+    website_id = created.json()["id"]
+
+    assert _made_by_a_service(await _creator(db_container, "websites", website_id))
+    async with db_container() as container:
+        job = (
+            await container.session().execute(
+                sa.text(
+                    "SELECT j.user_id, j.service_principal_id FROM jobs j"
+                    " JOIN crawl_attempts a ON a.dispatch_id = j.id"
+                    " JOIN crawl_runs r ON r.id = a.crawl_run_id"
+                    " WHERE r.website_id = :website_id"
+                ),
+                {"website_id": website_id},
+            )
+        ).one()
+    assert job.user_id is None
+    assert job.service_principal_id is not None
 
 
 async def test_an_assistant_key_reaches_an_assistant_a_service_key_made(

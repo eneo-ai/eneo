@@ -78,7 +78,7 @@ class WebsiteCreateRequestDeprecated(BaseModel):
 
 class WebsiteInDBBase(InDB):
     space_id: Optional[UUID] = None
-    user_id: UUID
+    user_id: UUID | None = None
     tenant_id: UUID
     embedding_model_id: UUID
     size: int = 0
@@ -166,7 +166,7 @@ class WebsiteSparse(ResourcePermissionsMixin, WebsiteBase, InDB):
         default=None,
         description="Completion time of the latest successful, unchanged, empty, or partial indexing run.",
     )
-    user_id: UUID
+    user_id: UUID | None = None
     embedding_model: IdAndName
     metadata: WebsiteMetadata
 

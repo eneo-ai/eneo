@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING, Optional, Union, cast, overload
 
 from typing_extensions import override
 
+from eneo.authentication.principal import Principal
 from eneo.base.base_entity import Entity
 from eneo.embedding_models.domain.embedding_model import EmbeddingModel
 from eneo.main.models import NOT_PROVIDED, NotProvided, is_provided
@@ -46,7 +47,7 @@ class Website(Entity):
         created_at: Optional["datetime"],
         updated_at: Optional["datetime"],
         space_id: "UUID",
-        user_id: "UUID",
+        user_id: Optional["UUID"],
         tenant_id: "UUID",
         url: str,
         name: Optional[str],
@@ -61,10 +62,14 @@ class Website(Entity):
         consecutive_failures: int = 0,
         next_retry_at: Optional["datetime"] = None,
         last_indexed_at: Optional["datetime"] = None,
+        created_by_service_id: Optional["UUID"] = None,
     ):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
         self.space_id = space_id
+        # Who added the website: a person (user_id) or a service principal.
+        # Its crawls run for the space, not as this creator.
         self.user_id = user_id
+        self.created_by_service_id = created_by_service_id
         self.tenant_id = tenant_id
         self.url = url
         self.name = name
@@ -210,7 +215,7 @@ class Website(Entity):
             created_at=None,
             updated_at=None,
             space_id=space_id,
-            user_id=user.id,
+            **Principal.from_user(user).creator_columns(),
             tenant_id=user.tenant_id,
             url=url,
             name=name,
@@ -277,6 +282,7 @@ class Website(Entity):
                 "UUID", record.space_id
             ),  # DB invariant: space_id is non-null for persisted websites
             user_id=record.user_id,
+            created_by_service_id=record.created_by_service_id,
             tenant_id=record.tenant_id,
             url=record.url,
             name=record.name,
@@ -366,7 +372,7 @@ class WebsiteSparse(Entity):
         id: "UUID",
         created_at: "datetime",
         updated_at: "datetime",
-        user_id: "UUID",
+        user_id: Optional["UUID"],
         tenant_id: "UUID",
         embedding_model_id: "UUID",
         space_id: "UUID",

@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import UUID
 
+from eneo.authentication.principal import Principal
 from eneo.files.text import TextExtractor
 from eneo.info_blobs.info_blob import (
     CapturedKnowledgeOriginal,
@@ -64,7 +65,7 @@ class TextProcessor:
     ) -> InfoBlobAdd:
         return InfoBlobAdd(
             title=title,
-            user_id=self.user.id,
+            **Principal.from_user(self.user).creator_columns(),
             text=text,
             group_id=group_id,
             url=url,

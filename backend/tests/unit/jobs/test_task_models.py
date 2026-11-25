@@ -27,6 +27,7 @@ def test_a_person_queues_a_job_as_themselves():
         "service_principal_id": None,
         "api_key_id": None,
         "tenant_id": person.tenant_id,
+        "acting_space_id": None,
     }
 
 
@@ -51,6 +52,7 @@ def test_a_service_key_queues_a_job_for_its_principal_and_names_itself():
         "service_principal_id": principal_id,
         "api_key_id": user.active_api_key.id,
         "tenant_id": user.tenant_id,
+        "acting_space_id": None,
     }
 
 
@@ -115,3 +117,37 @@ def test_params_match_only_their_own_owner():
     assert services.same_actor(None, principal_id)
     assert not services.same_actor(None, uuid4())
     assert not services.same_actor(person_id, None)
+
+
+def _space_actor():
+    """The made-up user a space's own scheduled work runs as."""
+    space_id = uuid4()
+    scope = SimpleNamespace(id=space_id, ownership="service", service_principal_id=None)
+    return SimpleNamespace(
+        id=space_id, tenant_id=uuid4(), active_api_key=scope, acting_space_id=space_id
+    )
+
+
+def test_a_space_queues_its_own_job_with_no_person_or_service_behind_it():
+    actor = _space_actor()
+
+    assert task_actor(actor) == {
+        "user_id": None,
+        "service_principal_id": None,
+        "api_key_id": None,
+        "tenant_id": actor.tenant_id,
+        "acting_space_id": actor.acting_space_id,
+    }
+
+
+def test_a_spaces_own_job_names_its_organisation_and_nobody_else():
+    space_id, tenant_id = uuid4(), uuid4()
+
+    assert TaskParams(tenant_id=tenant_id, acting_space_id=space_id)
+    for extra in (
+        {"user_id": uuid4(), "tenant_id": tenant_id},
+        {"service_principal_id": uuid4(), "tenant_id": tenant_id},
+        {},
+    ):
+        with pytest.raises(ValidationError):
+            TaskParams(acting_space_id=space_id, **extra)

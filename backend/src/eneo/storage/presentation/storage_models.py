@@ -30,6 +30,16 @@ class StorageInfoModel(BaseModel):
     items: list[StorageSpaceInfoModel]
 
 
+class SpaceStorageModel(BaseModel):
+    """What one space stores, in bytes. Informational: there is no limit per
+    space."""
+
+    size: int
+    collections_size: int
+    websites_size: int
+    integration_knowledge_size: int
+
+
 class StorageModel(BaseModel):
     total_used: int
     personal_used: int

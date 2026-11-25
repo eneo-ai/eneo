@@ -198,7 +198,7 @@ class CrawlUserMetadata:
 class CrawlDetails:
     item: CrawlOverviewItem
     space_id: UUID | None
-    owner: CrawlUserMetadata
+    owner: CrawlUserMetadata | None
     initiated_by: CrawlUserMetadata | None
     indexed_size: int
     stored_resources: int
@@ -486,7 +486,9 @@ class CrawlRunRepository:
                         WebsitesTable.tenant_id == tenant_id,
                     ),
                 )
-                .join(
+                # The creator is a trace: a source made by a service key, or
+                # whose creator is gone, has none.
+                .outerjoin(
                     Users,
                     sa.and_(
                         Users.id == WebsitesTable.user_id, Users.tenant_id == tenant_id
@@ -558,7 +560,9 @@ class CrawlRunRepository:
                 last_indexed_at=row.last_indexed_at,
             ),
             space_id=row.space_id,
-            owner=CrawlUserMetadata(row.owner_id, row.username, row.email),
+            owner=CrawlUserMetadata(row.owner_id, row.username, row.email)
+            if row.owner_id is not None
+            else None,
             initiated_by=initiated_by,
             indexed_size=row.size,
             stored_resources=stored_resources or 0,
@@ -946,7 +950,9 @@ class CrawlRunRepository:
             raise ValueError("Crawl task does not match the admitted attempt")
         if task.run_id != run_id or task.website_id != run.website_id:
             raise ValueError("Crawl task does not match the crawl run")
-        if task.origin.value != run.origin or task.user_id != job.user_id:
+        if task.origin.value != run.origin or not task.same_actor(
+            job.user_id, job.service_principal_id
+        ):
             raise ValueError("Crawl task identity does not match persisted ownership")
 
         await self.session.execute(

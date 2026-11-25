@@ -4,6 +4,7 @@ import asyncio
 import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -42,6 +43,11 @@ class WebhookApi:
     redis: AsyncMock
 
 
+def _person() -> SimpleNamespace:
+    """The person a personal connection syncs as."""
+    return SimpleNamespace(id=uuid4(), tenant_id=uuid4(), active_api_key=None)
+
+
 @pytest.fixture
 async def api():
     session = AsyncMock()
@@ -72,6 +78,7 @@ async def api():
             oauth_token_repo=AsyncMock(),
             job_repo=AsyncMock(),
             user_repo=AsyncMock(),
+            space_actors=AsyncMock(),
             change_key_service=change_keys,
             sharepoint_subscription_repo=subscription_repo,
             redis_client=redis,
@@ -300,7 +307,7 @@ async def test_valid_notification_queues_exactly_the_referencing_knowledge(api):
     result.all.return_value = _knowledge_rows(2)
     api.session.execute.return_value = result
     api.service.oauth_token_repo.one_or_none.return_value = MagicMock(id=uuid4())
-    api.service.user_repo.get_user_by_id.return_value = MagicMock(id=uuid4())
+    api.service.user_repo.get_user_by_id.return_value = _person()
 
     response = await api.client.post(WEBHOOK, json={"value": [_notification()]})
 
@@ -398,7 +405,7 @@ async def test_the_webhook_path_hands_lifecycle_events_to_lifecycle_handling(
     result.all.return_value = _knowledge_rows(1)
     api.session.execute.return_value = result
     api.service.oauth_token_repo.one_or_none.return_value = MagicMock(id=uuid4())
-    api.service.user_repo.get_user_by_id.return_value = MagicMock(id=uuid4())
+    api.service.user_repo.get_user_by_id.return_value = _person()
 
     response = await api.client.post(
         WEBHOOK,
@@ -430,7 +437,7 @@ async def test_a_change_notification_alone_starts_no_lifecycle_handling(
     result.all.return_value = _knowledge_rows(1)
     api.session.execute.return_value = result
     api.service.oauth_token_repo.one_or_none.return_value = MagicMock(id=uuid4())
-    api.service.user_repo.get_user_by_id.return_value = MagicMock(id=uuid4())
+    api.service.user_repo.get_user_by_id.return_value = _person()
 
     response = await api.client.post(WEBHOOK, json={"value": [_notification()]})
 
@@ -444,7 +451,7 @@ async def test_missed_notifications_on_the_webhook_path_queue_syncs(api):
     result.all.return_value = _knowledge_rows(2)
     api.session.execute.return_value = result
     api.service.oauth_token_repo.one_or_none.return_value = MagicMock(id=uuid4())
-    api.service.user_repo.get_user_by_id.return_value = MagicMock(id=uuid4())
+    api.service.user_repo.get_user_by_id.return_value = _person()
 
     response = await api.client.post(WEBHOOK, json={"value": [_lifecycle("missed")]})
 

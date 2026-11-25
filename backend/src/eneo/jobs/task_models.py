@@ -17,6 +17,7 @@ class TaskActor(TypedDict):
     service_principal_id: UUID | None
     api_key_id: UUID | None
     tenant_id: UUID | None
+    acting_space_id: UUID | None
 
 
 def task_actor(user: "UserInDB") -> TaskActor:
@@ -24,8 +25,18 @@ def task_actor(user: "UserInDB") -> TaskActor:
 
     A person is named by ``user_id``. A service key has no person behind it:
     the job belongs to the key's service principal, and the key's own id lets
-    the worker sign the caller in again with the same rights.
+    the worker sign the caller in again with the same rights. A space running
+    its own scheduled work is named by ``acting_space_id``.
     """
+    acting_space_id = getattr(user, "acting_space_id", None)
+    if isinstance(acting_space_id, UUID):
+        return {
+            "user_id": None,
+            "service_principal_id": None,
+            "api_key_id": None,
+            "tenant_id": user.tenant_id,
+            "acting_space_id": acting_space_id,
+        }
     key = getattr(user, "active_api_key", None)
     if key is not None and str(getattr(key.ownership, "value", key.ownership)) == (
         "service"
@@ -37,12 +48,14 @@ def task_actor(user: "UserInDB") -> TaskActor:
             "service_principal_id": key.service_principal_id,
             "api_key_id": key.id,
             "tenant_id": user.tenant_id,
+            "acting_space_id": None,
         }
     return {
         "user_id": user.id,
         "service_principal_id": None,
         "api_key_id": None,
         "tenant_id": user.tenant_id,
+        "acting_space_id": None,
     }
 
 
@@ -54,11 +67,19 @@ class TaskParams(BaseModel):
     service_principal_id: UUID | None = None
     api_key_id: UUID | None = None
     tenant_id: UUID | None = None
+    # The space whose own scheduled work this is; no person or service then.
+    acting_space_id: UUID | None = None
 
     @model_validator(mode="after")
     def one_actor(self) -> "TaskParams":
         if self.user_id is not None and self.service_principal_id is not None:
             raise ValueError("A job runs as a person or a service, not both")
+        if self.acting_space_id is not None and (
+            self.user_id is not None
+            or self.service_principal_id is not None
+            or self.tenant_id is None
+        ):
+            raise ValueError("A space's own job names its organisation and nobody else")
         if self.service_principal_id is not None and (
             self.api_key_id is None or self.tenant_id is None
         ):

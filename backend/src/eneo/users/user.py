@@ -310,6 +310,10 @@ class UserInDB(UserInDBBase):
     credential: Optional[CredentialFacts] = Field(
         default=None, exclude=True, repr=False
     )
+    # Set only on the made-up user that a space's own scheduled work runs as:
+    # the space it acts for. No person and no service key is behind it. Never
+    # persisted or returned.
+    acting_space_id: Optional[UUID] = Field(default=None, exclude=True, repr=False)
     roles: list[RoleInDB] = []
     quota_used: int = 0
     deleted_at: Optional[datetime] = Field(

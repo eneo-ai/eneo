@@ -19,11 +19,13 @@ class CreatorColumns(TypedDict):
 
 @dataclass(frozen=True)
 class Principal:
-    """Who is acting: a person, or the service principal behind a service key.
+    """Who is acting: a person, the service principal behind a service key,
+    or a space running its own scheduled work.
 
     A service key signs in as a made-up user whose id is the key's id and has
     no row in ``users``, so that id must never be stored as a user. The stable
-    identity of a service is its service principal.
+    identity of a service is its service principal. A space acting for itself
+    has no identity to record: what it writes has no creator.
     """
 
     principal_type: PrincipalType
@@ -55,6 +57,8 @@ class Principal:
 
     @classmethod
     def from_user(cls, user: UserInDB | UserSparse) -> Principal:
+        if isinstance(getattr(user, "acting_space_id", None), UUID):
+            return cls(principal_type=PrincipalType.SPACE)
         key = getattr(user, "active_api_key", None)
         if key is not None:
             ownership = getattr(key, "ownership", "user")

@@ -89,7 +89,10 @@ class InfoBlobMetadata(InfoBlobMetadataUpsertPublic):
 
 class InfoBlobAdd(InfoBlobBase, InfoBlobMetadataUpsertPublic):
     size: Optional[int] = None
-    user_id: UUID
+    # Who added the content: a person, a service principal, or nobody when
+    # the space's own schedule fetched it.
+    user_id: UUID | None = None
+    created_by_service_id: UUID | None = None
     group_id: Optional[UUID] = None
     website_id: Optional[UUID] = None
     tenant_id: UUID
@@ -130,7 +133,6 @@ class InfoBlobUpdatePublic(BaseModel):
 
 class InfoBlobUpdate(InfoBlobMetadataUpsertPublic):
     id: UUID
-    user_id: UUID
     source_metadata: Optional[list[SourceMetadataEntry]] = None
 
 
@@ -138,7 +140,8 @@ class InfoBlobInDBNoText(InDB):
     url: Optional[str] = None
     title: Optional[str] = None
     embedding_model_id: UUID
-    user_id: UUID
+    user_id: UUID | None = None
+    created_by_service_id: UUID | None = None
     tenant_id: UUID
     size: int
 

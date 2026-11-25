@@ -330,7 +330,7 @@ class _FakeSession:
 
 @dataclass
 class _SchedulerHarness:
-    """Fakes around queue_website_crawls: sessions, owner lookup, admission."""
+    """Fakes around queue_website_crawls: sessions, the space actor, admission."""
 
     query_session: _FakeSession
     website_sessions: list[_FakeSession]
@@ -359,6 +359,7 @@ def _scheduler_harness(
     *,
     crawl: AsyncMock | None = None,
     recorder: AsyncMock | None = None,
+    spaces_gone: set[UUID] | None = None,
 ) -> _SchedulerHarness:
     import eneo.database.database as database_module
     import eneo.websites.application.crawl_dispatch as crawl_dispatch_module
@@ -376,20 +377,15 @@ def _scheduler_harness(
         database_module, "sessionmanager", SimpleNamespace(session=_open_session)
     )
 
-    owners = {
-        website.user_id: SimpleNamespace(id=website.user_id, tenant=object())
+    # A space that still exists acts for itself; one that is gone has no actor.
+    actors = {
+        (website.space_id, website.tenant_id): SimpleNamespace(
+            acting_space_id=website.space_id, tenant=object()
+        )
         for website in websites
+        if website.space_id not in (spaces_gone or ())
     }
     repo_sessions: list[object] = []
-
-    class _FakeUsersRepository:
-        def __init__(self, session: object) -> None:
-            repo_sessions.append(session)
-
-        async def get_user_by_id(self, user_id: object) -> SimpleNamespace:
-            return owners[cast(UUID, user_id)]
-
-    monkeypatch.setattr(crawl_tasks_module, "UsersRepository", _FakeUsersRepository)
 
     crawl = crawl or AsyncMock()
     containers: list[Any] = []
@@ -397,7 +393,18 @@ def _scheduler_harness(
     class _FakeContainer:
         def __init__(self, **providers_by_name: Any) -> None:
             self.providers_by_name = providers_by_name
-            containers.append(self)
+            if "user" in providers_by_name:
+                containers.append(self)
+
+        def user_service(self) -> SimpleNamespace:
+            repo_sessions.append(self.providers_by_name["session"]())
+
+            async def get_space_actor_user(
+                *, space_id: UUID, tenant_id: UUID
+            ) -> SimpleNamespace | None:
+                return actors.get((space_id, tenant_id))
+
+            return SimpleNamespace(get_space_actor_user=get_space_actor_user)
 
         def crawl_service(self) -> SimpleNamespace:
             return SimpleNamespace(crawl=crawl)
@@ -425,14 +432,15 @@ def _scheduler_harness(
     )
 
 
-async def test_queue_website_crawls_reads_owner_through_website_session(
+async def test_queue_website_crawls_runs_as_the_space_on_the_website_session(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Each admission looks up the owner on its own transactional session.
+    """Each admission runs as the website's space, on its own session.
 
-    The cron session has no transaction, so anything that queries through it
-    fails; the owner lookup and the crawl admission must both run on the
-    per-website session.
+    A schedule belongs to the space, not to whoever set it up, so the person
+    in ``user_id`` is never looked up. The cron session has no transaction, so
+    anything that queries through it fails; resolving the space and admitting
+    the crawl must both run on the per-website session.
     """
     website = _website()
     harness = _scheduler_harness(monkeypatch, [website])
@@ -443,11 +451,39 @@ async def test_queue_website_crawls_reads_owner_through_website_session(
     assert harness.scheduler.website_sparse_repo.session is harness.query_session
     assert harness.repo_sessions == [website_session]
     assert harness.containers[0].providers_by_name["session"]() is website_session
-    assert harness.containers[0].providers_by_name["user"]().id == website.user_id
+    actor = harness.containers[0].providers_by_name["user"]()
+    assert actor.acting_space_id == website.space_id
     harness.crawl.assert_awaited_once_with(
         website, origin=CrawlOrigin.SCHEDULED, reconcile_after_commit=False
     )
     harness.reconcile.assert_awaited_once()
+
+
+async def test_queue_website_crawls_runs_when_the_creator_is_gone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    website = _website()
+    website.user_id = None
+    harness = _scheduler_harness(monkeypatch, [website])
+
+    assert await queue_website_crawls(container=harness.cron_container) is True
+
+    harness.crawl.assert_awaited_once_with(
+        website, origin=CrawlOrigin.SCHEDULED, reconcile_after_commit=False
+    )
+
+
+async def test_queue_website_crawls_counts_a_website_without_its_space_as_failed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    website = _website()
+    harness = _scheduler_harness(monkeypatch, [website], spaces_gone={website.space_id})
+
+    assert await queue_website_crawls(container=harness.cron_container) is False
+
+    harness.crawl.assert_not_awaited()
+    record: SchedulerRunRecord = harness.recorder.await_args.args[0]
+    assert (record.due, record.admitted, record.failed) == (1, 0, 1)
 
 
 async def test_queue_website_crawls_records_per_tenant_marker(

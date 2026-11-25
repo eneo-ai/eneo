@@ -4,7 +4,7 @@ import hmac
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Protocol, cast
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 import sqlalchemy as sa
@@ -57,6 +57,7 @@ from eneo.integration.infrastructure.sharepoint_sync_keys import (
 from eneo.jobs.job_models import Task
 from eneo.jobs.job_repo import JobRepository
 from eneo.jobs.job_service import JobService
+from eneo.jobs.task_models import task_actor
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
 from eneo.observability.error_log import log_error
@@ -118,9 +119,17 @@ class _SyncState:
     marker_recently_caught_up: bool
 
 
+class SpaceActors(Protocol):
+    """Gives the made-up user a space's own scheduled work runs as."""
+
+    async def get_space_actor_user(
+        self, *, space_id: UUID, tenant_id: UUID
+    ) -> UserInDB | None: ...
+
+
 @dataclass
 class _QueueContext:
-    """Per-call caches: one tenant admin or user lookup and one JobService each."""
+    """Per-call caches: one space or user lookup and one JobService each."""
 
     users: dict[str, UserInDB] = field(default_factory=lambda: {})
     job_services: dict[str, JobService] = field(default_factory=lambda: {})
@@ -140,6 +149,7 @@ class SharepointWebhookService:
         oauth_token_repo: OauthTokenRepository,
         job_repo: JobRepository,
         user_repo: UsersRepository,
+        space_actors: SpaceActors,
         change_key_service: OfficeChangeKeyService,
         sharepoint_subscription_repo: SharePointSubscriptionRepository,
         redis_client: "aioredis.Redis",
@@ -149,6 +159,7 @@ class SharepointWebhookService:
         self.oauth_token_repo = oauth_token_repo
         self.job_repo = job_repo
         self.user_repo = user_repo
+        self.space_actors = space_actors
         self.change_key_service = change_key_service
         self.sharepoint_subscription_repo = sharepoint_subscription_repo
         self.redis_client = redis_client
@@ -584,34 +595,32 @@ class SharepointWebhookService:
                 f"Using OAuth token {token_id} for integration {user_integration_db.id}"
             )
 
-        # Determine which user to use for job creation
-        # For tenant_app integrations (user_id=None), use a tenant admin
-        # For user_oauth integrations, use the specific user
+        # Who the job runs as. An organisation's connection has no person
+        # behind it (user_id is None), so its sync is the space's own work and
+        # runs as the space the knowledge is in. A personal connection syncs
+        # as its person.
         user_cache = context.users
         if user_integration_db.user_id is None:
-            # Tenant app integration - person-independent
-            # Use a tenant admin for job creation
-            cache_key = f"tenant_admin_{user_integration_db.tenant_id}"
+            cache_key = f"space_{knowledge_db.space_id}"
             if cache_key not in user_cache:
                 try:
-                    admin_user = await self._get_tenant_admin(
-                        user_integration_db.tenant_id
+                    space_actor = await self.space_actors.get_space_actor_user(
+                        space_id=knowledge_db.space_id,
+                        tenant_id=user_integration_db.tenant_id,
                     )
-                    user_cache[cache_key] = admin_user
-                    logger.info(
-                        f"Using tenant admin {admin_user.id} for tenant_app integration {user_integration_db.id}"
-                    )
+                    if space_actor is None:
+                        raise ValueError(f"Space {knowledge_db.space_id} not found")
+                    user_cache[cache_key] = space_actor
                 except Exception as exc:
                     log_error(
                         logger,
                         logging.WARNING,
-                        "Could not load tenant admin for tenant %s",
-                        user_integration_db.tenant_id,
+                        "Could not act as space %s for its SharePoint sync",
+                        knowledge_db.space_id,
                         error=exc,
                     )
                     return None
             user_for_job = user_cache[cache_key]
-            user_id_for_job = user_for_job.id
             job_service_key = cache_key
         else:
             # User OAuth integration - use the specific user
@@ -636,7 +645,6 @@ class SharepointWebhookService:
                     )
                     return None
             user_for_job = user_cache[user_id_str]
-            user_id_for_job = user_integration_db.user_id
             job_service_key = user_id_str
 
         resource_type, resource_id = fallback_resource or (
@@ -670,7 +678,7 @@ class SharepointWebhookService:
             return None
 
         params = SharepointContentTaskParam(
-            user_id=user_id_for_job,
+            **task_actor(user_for_job),
             id=ui_id,
             token_id=token_id,  # None for tenant_app, UUID for user_oauth
             tenant_app_id=tenant_app_id,  # UUID for tenant_app, None for user_oauth
@@ -956,29 +964,6 @@ class SharepointWebhookService:
             knowledge_id,
         )
         return True
-
-    async def _get_tenant_admin(self, tenant_id: UUID) -> UserInDB:
-        """Get a tenant admin user for creating jobs for tenant_app integrations.
-
-        Tenant app integrations are person-independent (user_id=None), but jobs
-        still require a user context. We use a tenant admin for this purpose.
-
-        Args:
-            tenant_id: The tenant ID
-
-        Returns:
-            A tenant admin user
-
-        Raises:
-            Exception: If no admin user is found for the tenant
-        """
-        admins = await self.user_repo.list_tenant_admins(tenant_id=tenant_id)
-        if not admins:
-            raise Exception(f"No admin users found for tenant {tenant_id}")
-
-        # The oldest admin, the same one every time: the job runs as this user,
-        # so a provider's outbound headers carry this admin's attributes.
-        return admins[0]
 
     async def _fetch_knowledge_by_subscription(
         self, subscription_db_id: UUID

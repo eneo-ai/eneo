@@ -1,4 +1,5 @@
-"""A job a service key queued runs as that key, signed in again in the worker."""
+"""Whom a job runs as in the worker: the person who queued it, the service
+key signed in again, or the space whose own scheduled work it is."""
 
 from __future__ import annotations
 
@@ -9,7 +10,9 @@ from uuid import UUID, uuid4
 import pytest
 import sqlalchemy as sa
 
-from eneo.authentication.auth_models import is_service_api_key
+from eneo.authentication.auth_models import is_service_api_key, is_space_actor
+from eneo.authentication.principal import Principal
+from eneo.authentication.principal_types import PrincipalType
 from eneo.jobs.task_models import ResourceTaskParams, task_actor
 from eneo.worker.job_actor import JobActor, load_job_user
 
@@ -108,3 +111,73 @@ async def test_a_persons_job_runs_as_that_person(db_container, admin_user):
     assert user is not None
     assert user.id == admin_user.id
     assert not is_service_api_key(user)
+
+
+async def _space(client, admin_token) -> UUID:
+    resp = await client.post(
+        "/api/v1/spaces/",
+        json={"name": f"job-actor-{uuid4().hex[:8]}"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 201, resp.text
+    return UUID(resp.json()["id"])
+
+
+async def test_a_spaces_own_job_runs_as_that_space_and_nowhere_else(
+    client, db_container, admin_user, admin_token
+):
+    space_id = await _space(client, admin_token)
+    other_space_id = await _space(client, admin_token)
+    async with db_container() as container:
+        scheduled = await container.user_service().get_space_actor_user(
+            space_id=space_id, tenant_id=admin_user.tenant_id
+        )
+    assert scheduled is not None
+    params = ResourceTaskParams(id=uuid4(), **task_actor(scheduled))
+
+    async with db_container() as container:
+        user = await load_job_user(container, JobActor.of(params))
+
+    assert user is not None
+    assert is_space_actor(user)
+    assert user.tenant_id == admin_user.tenant_id
+    assert Principal.from_user(user).principal_type == PrincipalType.SPACE
+    # Nobody owns the job, and no person or stored key is behind it.
+    assert (params.user_id, params.service_principal_id, params.api_key_id) == (
+        None,
+        None,
+        None,
+    )
+    async with db_container(user=user) as container:
+        users = await container.session().scalar(
+            sa.text("SELECT count(*) FROM users WHERE id = :id"), {"id": user.id}
+        )
+        keys = await container.session().scalar(
+            sa.text("SELECT count(*) FROM api_keys_v2 WHERE id = :id"), {"id": user.id}
+        )
+        own = container.actor_manager().get_space_actor(
+            await container.space_repo().get_space_access_facts(space_id)
+        )
+        other = container.actor_manager().get_space_actor(
+            await container.space_repo().get_space_access_facts(other_space_id)
+        )
+    assert (users, keys) == (0, 0)
+    assert own.can_create_websites() and own.can_edit_space()
+    assert not other.can_read_space()
+
+
+async def test_a_space_of_another_organisation_runs_nothing(
+    client, db_container, admin_token
+):
+    space_id = await _space(client, admin_token)
+
+    async with db_container() as container:
+        foreign = await load_job_user(
+            container, JobActor(tenant_id=uuid4(), acting_space_id=space_id)
+        )
+        gone = await load_job_user(
+            container, JobActor(tenant_id=uuid4(), acting_space_id=uuid4())
+        )
+
+    assert foreign is None
+    assert gone is None

@@ -1,6 +1,7 @@
 # Copyright (c) 2025 Sundsvalls Kommun
 
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
@@ -8,6 +9,22 @@ if TYPE_CHECKING:
     from uuid import UUID
 
     from eneo.spaces.api.space_models import SpaceMember
+
+
+@dataclass(frozen=True)
+class SpaceStorage:
+    """What one space stores, by kind of knowledge. A number to read, not a
+    limit: nothing is refused because of it."""
+
+    collections_size: int
+    websites_size: int
+    integration_knowledge_size: int
+
+    @property
+    def size(self) -> int:
+        return (
+            self.collections_size + self.websites_size + self.integration_knowledge_size
+        )
 
 
 class StorageSpaceInfo:

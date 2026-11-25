@@ -11,7 +11,6 @@ from pydantic import BaseModel, Field
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
-from eneo.authentication.auth_dependencies import require_user_for_creation
 from eneo.authentication.endpoint_access import Authentication, endpoint_access
 from eneo.main.container.container import Container
 from eneo.main.exceptions import BadRequestException
@@ -187,7 +186,7 @@ class AdminCrawlerUser(BaseModel):
 
 class AdminCrawlerDetails(AdminCrawlerItem):
     space_id: UUID | None
-    owner: AdminCrawlerUser
+    owner: AdminCrawlerUser | None
     initiated_by: AdminCrawlerUser | None
     indexed_size: int
     stored_resources: int
@@ -372,7 +371,7 @@ async def list_admin_scheduled_websites(
 @router.get(
     "/runs/{id}/",
     response_model=AdminCrawlerDetails,
-    description="Read a crawl's owning space, source owner, recorded manual initiator, indexed storage and current source state. Requires tenant admin permission; does not grant access to indexed content.",
+    description="Read a crawl's owning space, the person who created the source when there is one, recorded manual initiator, indexed storage and current source state. Requires tenant admin permission; does not grant access to indexed content.",
     responses=responses.get_responses([403, 404]),
 )
 @endpoint_access(
@@ -395,7 +394,9 @@ async def get_crawler_details(
         started_at=item.started_at,
         last_indexed_at=item.last_indexed_at,
         space_id=details.space_id,
-        owner=AdminCrawlerUser.model_validate(details.owner, from_attributes=True),
+        owner=AdminCrawlerUser.model_validate(details.owner, from_attributes=True)
+        if details.owner
+        else None,
         initiated_by=AdminCrawlerUser.model_validate(
             details.initiated_by, from_attributes=True
         )
@@ -544,19 +545,18 @@ async def _audit_crawler_action(
 @router.post(
     "/websites/{id}/run/",
     response_model=CrawlRunPublic,
-    description="Request a crawl with the website's current settings. Tenant admin permission permits this operation in private spaces without granting content access. Returns the existing active run when present. Requires a user identity; retry starts a new full crawl. A new run executes as the requesting administrator, whose storage quota covers newly published content versions.",
+    description="Request a crawl with the website's current settings. Tenant admin permission permits this operation in private spaces without granting content access. Returns the existing active run when present; retry starts a new full crawl. A new run executes as the caller. When the caller is a person, their storage quota covers newly published content versions; a service key has no personal quota, so only the organization's limit applies.",
     responses=responses.get_responses([403, 404]),
 )
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
-    reason="Tenant admin permission and a user identity gate crawl requests; the website is loaded for the caller's tenant.",
+    reason="Tenant admin permission gates crawl requests; the website is loaded for the caller's tenant.",
 )
 async def request_admin_crawl(
     id: UUID, container: AdminMutationContainer
 ) -> CrawlRunPublic:
     user = container.user()
-    await require_user_for_creation(user)
     website = await container.website_sparse_repo().one_for_tenant(id, user.tenant_id)
     run = await container.crawl_service().crawl(website)
     await _audit_crawler_action(

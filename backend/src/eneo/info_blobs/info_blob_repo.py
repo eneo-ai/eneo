@@ -29,7 +29,6 @@ from eneo.database.tables.object_content_table import (
     InfoBlobContentReferences,
     ObjectContents,
 )
-from eneo.database.tables.users_table import Users
 from eneo.database.tables.websites_table import Websites
 from eneo.info_blobs.info_blob import (
     InfoBlobAdd,
@@ -752,8 +751,9 @@ class InfoBlobRepository:
 
     async def releasable_search_bytes(
         self, info_blob_ids: Sequence[UUID]
-    ) -> dict[UUID, int]:
-        """Chunk bytes that replacing these versions releases, per owner."""
+    ) -> dict[UUID | None, int]:
+        """Chunk bytes that replacing these versions releases, per person who
+        added them; None gathers what no person added."""
         if not info_blob_ids:
             return {}
         rows = await self.session.execute(
@@ -767,7 +767,7 @@ class InfoBlobRepository:
 
     async def release_replaced_search_data(
         self, info_blob_ids: Sequence[UUID]
-    ) -> dict[UUID, int]:
+    ) -> dict[UUID | None, int]:
         """Delete replaced versions' chunks and shrink their size to match.
 
         Only the active version of a source is searched, so a replaced version
@@ -1489,11 +1489,11 @@ class InfoBlobRepository:
 
     @staticmethod
     def retained_size_of_tenant_stmt(tenant_id: UUID):
-        return (
-            sa.select(sa.func.sum(InfoBlobs.size))
-            .select_from(InfoBlobs)
-            .join(Users)
-            .where(Users.tenant_id == tenant_id)
+        # By the content's own organisation, not through whoever added it:
+        # content a service key or a schedule added has no person, and it
+        # still counts against the organisation's limit.
+        return sa.select(sa.func.sum(InfoBlobs.size)).where(
+            InfoBlobs.tenant_id == tenant_id
         )
 
     async def get_total_size_of_group(self, group_id: UUID):
@@ -1531,7 +1531,7 @@ class InfoBlobRepository:
         return size or 0
 
     async def get_total_size_of_tenant(self, tenant_id: UUID):
-        stmt = self._sum_stmt().join(Users).where(Users.tenant_id == tenant_id)
+        stmt = self._sum_stmt().where(InfoBlobs.tenant_id == tenant_id)
 
         size = await self.session.scalar(stmt)
 

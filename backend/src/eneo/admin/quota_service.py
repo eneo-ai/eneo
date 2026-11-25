@@ -20,7 +20,7 @@ _PENDING_QUOTA_OWNERS = "knowledge_publication_quota_owners"
 
 
 def enforce_quota_on_commit(
-    session: AsyncSession, *, tenant_id: UUID, user_id: UUID
+    session: AsyncSession, *, tenant_id: UUID, user_id: UUID | None
 ) -> None:
     """Validate retained storage after all publications in this transaction.
 
@@ -29,7 +29,7 @@ def enforce_quota_on_commit(
     outside the lock and preserves the caller's atomic rollback boundary.
     """
     owners = cast(
-        set[tuple[UUID, UUID]],
+        set[tuple[UUID, UUID | None]],
         session.sync_session.info.setdefault(_PENDING_QUOTA_OWNERS, set()),
     )
     owners.add((tenant_id, user_id))
@@ -39,7 +39,7 @@ def _check_publication_quota(session: Session) -> None:
     if session.in_nested_transaction():
         return
     owners = cast(
-        set[tuple[UUID, UUID]], session.info.get(_PENDING_QUOTA_OWNERS, set())
+        set[tuple[UUID, UUID | None]], session.info.get(_PENDING_QUOTA_OWNERS, set())
     )
     if not owners:
         return
@@ -61,7 +61,9 @@ def _check_publication_quota(session: Session) -> None:
     user_limits = dict(
         session.execute(
             sa.select(Users.id, Users.quota_limit)
-            .where(Users.id.in_({user_id for _, user_id in owners}))
+            .where(
+                Users.id.in_({user_id for _, user_id in owners if user_id is not None})
+            )
             .order_by(Users.id)
             .with_for_update(key_share=True)
         )
@@ -75,11 +77,15 @@ def _check_publication_quota(session: Session) -> None:
         or 0
         for tenant_id in tenant_limits
     }
-    for tenant_id, user_id in sorted(owners):
-        user_limit = user_limits[user_id]
+    for tenant_id, user_id in sorted(
+        owners, key=lambda owner: (owner[0], str(owner[1]))
+    ):
+        # Content a service key or a schedule added belongs to no person: only
+        # the organisation's limit applies to it.
+        user_limit = user_limits.get(user_id) if user_id is not None else None
         user_usage = (
             session.scalar(InfoBlobRepository.retained_size_of_user_stmt(user_id)) or 0
-            if user_limit is not None
+            if user_id is not None and user_limit is not None
             else 0
         )
         ensure_quota_capacity(
@@ -124,7 +130,7 @@ class QuotaService:
         return len(text.encode("utf-8"))
 
     async def ensure_capacity(
-        self, size_in_bytes: int, *, released: Mapping[UUID, int] | None = None
+        self, size_in_bytes: int, *, released: Mapping[UUID | None, int] | None = None
     ) -> None:
         """Check that `size_in_bytes` more fits the tenant and user quotas.
 
@@ -150,7 +156,7 @@ class QuotaService:
         )
 
     async def add_text(
-        self, text_to_add: str, *, released: Mapping[UUID, int] | None = None
+        self, text_to_add: str, *, released: Mapping[UUID | None, int] | None = None
     ) -> int:
         size_of_text = self._size_of_text(text_to_add)
         await self.ensure_capacity(size_of_text, released=released)

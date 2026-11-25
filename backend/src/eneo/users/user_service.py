@@ -31,10 +31,12 @@ from eneo.authentication.auth_models import (
     METHOD_PERMISSION_MAP,
     PERMISSION_LEVEL_ORDER,
     AccessToken,
+    ApiKeyHashVersion,
     ApiKeyOwnership,
     ApiKeyPermission,
     ApiKeyScopeType,
     ApiKeyState,
+    ApiKeyType,
     ApiKeyV2InDB,
     CredentialFacts,
     FederatedIdentity,
@@ -1257,6 +1259,51 @@ class UserService:
         if is_organization:
             return Permission.ADMIN in user.permissions
         return bool(is_member)
+
+    async def get_space_actor_user(
+        self, *, space_id: UUID, tenant_id: UUID
+    ) -> "UserInDB | None":
+        """The made-up user a space's own scheduled work runs as.
+
+        A crawl schedule or an organisation's content sync belongs to the
+        space, not to whoever set it up, so it must keep running when that
+        person is gone. The actor is built in memory with the rights of an
+        admin in that one space and nothing outside it; no user and no key is
+        stored for it. None when the space is not in the organisation.
+        """
+        assert self._session is not None
+        name = await self._session.scalar(
+            sa.select(Spaces.name).where(
+                Spaces.id == space_id, Spaces.tenant_id == tenant_id
+            )
+        )
+        if name is None:
+            return None
+        # Rights are derived the way a service key's are, from a scope and a
+        # permission, so the space acts through the same checks as any caller.
+        scope = ApiKeyV2InDB(
+            id=space_id,
+            tenant_id=tenant_id,
+            ownership=ApiKeyOwnership.SERVICE,
+            key_prefix="space",
+            key_suffix="space",
+            name=f"Space {name}",
+            key_type=ApiKeyType.SK,
+            permission=ApiKeyPermission.ADMIN,
+            scope_type=ApiKeyScopeType.SPACE,
+            scope_id=space_id,
+            state=ApiKeyState.ACTIVE,
+            key_hash="",
+            hash_version=ApiKeyHashVersion.HMAC_SHA256.value,
+        )
+        user = await self._build_service_user(scope)
+        return user.model_copy(
+            update={
+                "email": f"space-{space_id.hex[:8]}@space.actor",
+                "username": f"Space ({name})",
+                "acting_space_id": space_id,
+            }
+        )
 
     async def _build_service_user(self, key: ApiKeyV2InDB) -> "UserInDB":
         """Build a synthetic UserInDB for service keys — no DB user lookup.

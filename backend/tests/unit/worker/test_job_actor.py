@@ -5,11 +5,14 @@ from uuid import uuid4
 from eneo.worker.job_actor import JobActor, load_job_user
 
 
-def _container(*, person=None, service_key_user=None):
+def _container(*, person=None, service_key_user=None, space_actor=None):
     container = MagicMock()
     container.user_repo.return_value.get_user_by_id = AsyncMock(return_value=person)
     container.user_service.return_value.get_service_key_user = AsyncMock(
         return_value=service_key_user
+    )
+    container.user_service.return_value.get_space_actor_user = AsyncMock(
+        return_value=space_actor
     )
     return container
 
@@ -83,3 +86,41 @@ async def test_a_job_without_an_actor_has_no_user():
     assert await load_job_user(container, JobActor()) is None
     container.user_repo.return_value.get_user_by_id.assert_not_awaited()
     container.user_service.return_value.get_service_key_user.assert_not_awaited()
+
+
+def test_a_spaces_own_job_is_present_without_a_person_or_a_key():
+    params = SimpleNamespace(
+        user_id=None, api_key_id=None, tenant_id=uuid4(), acting_space_id=uuid4()
+    )
+
+    actor = JobActor.of(params)
+
+    assert actor.is_space
+    assert actor.present
+    assert not actor.is_service_key
+
+
+async def test_a_spaces_own_job_runs_as_the_space():
+    space_id, tenant_id = uuid4(), uuid4()
+    space_actor = SimpleNamespace(acting_space_id=space_id)
+    container = _container(space_actor=space_actor)
+
+    user = await load_job_user(
+        container, JobActor(tenant_id=tenant_id, acting_space_id=space_id)
+    )
+
+    assert user is space_actor
+    container.user_service.return_value.get_space_actor_user.assert_awaited_once_with(
+        space_id=space_id, tenant_id=tenant_id
+    )
+    container.user_repo.return_value.get_user_by_id.assert_not_awaited()
+
+
+async def test_a_spaces_own_job_has_no_user_once_the_space_is_gone():
+    container = _container(space_actor=None)
+
+    user = await load_job_user(
+        container, JobActor(tenant_id=uuid4(), acting_space_id=uuid4())
+    )
+
+    assert user is None

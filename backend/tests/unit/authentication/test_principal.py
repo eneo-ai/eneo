@@ -70,3 +70,23 @@ def test_a_user_without_the_key_field_is_a_person():
     user = SimpleNamespace(id=uuid4())
 
     assert Principal.from_user(user).creator_columns()["user_id"] == user.id
+
+
+def test_a_space_acting_for_itself_leaves_no_creator():
+    """Scheduled work has nobody behind it: neither a person nor a service."""
+    space_id = uuid4()
+    actor = SimpleNamespace(
+        id=space_id,
+        acting_space_id=space_id,
+        active_api_key=SimpleNamespace(
+            id=space_id, ownership="service", service_principal_id=None
+        ),
+    )
+
+    principal = Principal.from_user(actor)
+
+    assert principal.principal_type == PrincipalType.SPACE
+    assert principal.creator_columns() == {
+        "user_id": None,
+        "created_by_service_id": None,
+    }

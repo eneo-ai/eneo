@@ -106,6 +106,7 @@ def service(redis) -> SharepointWebhookService:
         oauth_token_repo=AsyncMock(),
         job_repo=AsyncMock(),
         user_repo=AsyncMock(),
+        space_actors=AsyncMock(),
         change_key_service=AsyncMock(),
         sharepoint_subscription_repo=AsyncMock(),
         redis_client=redis,  # pyright: ignore[reportArgumentType]
