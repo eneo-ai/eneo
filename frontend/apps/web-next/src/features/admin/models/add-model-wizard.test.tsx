@@ -1309,7 +1309,7 @@ describe("the model step for a server at an address of its own", () => {
     expect(await within(dialog).findByText(title)).toBeTruthy();
     expect(
       within(dialog).getByText(
-        "Kontrollera adressen med Redigera leverantör i menyn på leverantörens kort."
+        "Kontrollera adressen med Redigera leverantör i menyn på leverantörens kort under Modeller."
       )
     ).toBeTruthy();
     // One banner: not the list's own as well, and no line about live text.
@@ -1339,7 +1339,7 @@ describe("the model step for a server at an address of its own", () => {
     ).toBeTruthy();
     expect(
       within(dialog).getByText(
-        "Skriv modellens id nedan. En server som bara ger livetext kan sakna modellista. Är adressen fel ändrar du den med Redigera leverantör i menyn på leverantörens kort."
+        "Skriv modellens id nedan. En server som bara ger livetext kan sakna modellista. Är adressen fel ändrar du den med Redigera leverantör i menyn på leverantörens kort under Modeller."
       )
     ).toBeTruthy();
     expect(within(dialog).queryByText(/svarade inte/)).toBeNull();
@@ -1368,7 +1368,7 @@ describe("the model step for a server at an address of its own", () => {
     expect(await within(dialog).findByText("Servern skickade ingen modellista")).toBeTruthy();
     expect(
       within(dialog).getByText(
-        "Kontrollera adressen och nyckeln med Redigera leverantör i menyn på leverantörens kort. Du kan också skriva modellens id nedan."
+        "Kontrollera adressen och nyckeln med Redigera leverantör i menyn på leverantörens kort under Modeller. Du kan också skriva modellens id nedan."
       )
     ).toBeTruthy();
     expect(within(dialog).queryByText(/svarade/)).toBeNull();
