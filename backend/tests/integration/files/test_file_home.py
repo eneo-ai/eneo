@@ -20,6 +20,7 @@ from eneo.files.file_home import (
     FileHomeConflictError,
     FileHomes,
     FileHomeSpaceNotFoundError,
+    FileHomeUnresolved,
     FileInUseElsewhereError,
 )
 from eneo.files.file_models import FileType
@@ -308,3 +309,83 @@ async def test_every_kind_of_use_leads_to_its_space(
             draft: FileFamilyUse(space_ids=frozenset()),
         }
         assert not use[draft].in_use
+
+
+async def test_filling_in_gives_a_home_to_what_is_used_in_one_space_only(
+    db_container, admin_user, assistant_factory, completion_model_factory
+) -> None:
+    async with db_container() as container:
+        session = container.session()
+        here = await _space(container, "Meetings")
+        elsewhere = await _space(container, "Economy")
+        model = await completion_model_factory(session, "Fill model")
+        local = await assistant_factory(
+            session, "Minute taker", model.id, space_id=here
+        )
+        other = await assistant_factory(
+            session, "Bookkeeper", model.id, space_id=elsewhere
+        )
+        only_here = await _file(session, admin_user)
+        derived = await _file(session, admin_user, parent_id=only_here)
+        in_two_spaces = await _file(session, admin_user)
+        leads_nowhere = await _file(session, admin_user)
+        draft = await _file(session, admin_user)
+        already_placed = await _file(session, admin_user)
+        homes = FileHomes(session)
+        await homes.set_home(
+            already_placed, space_id=here, tenant_id=admin_user.tenant_id
+        )
+        # The family is used through its derived File only.
+        await _asked_in_conversation(
+            session, admin_user, derived, assistant_id=local.id
+        )
+        for assistant in (local, other):
+            await _asked_in_conversation(
+                session, admin_user, in_two_spaces, assistant_id=assistant.id
+            )
+        await _asked_in_conversation(
+            session, admin_user, leads_nowhere, assistant_id=local.id
+        )
+        await _asked_in_conversation(
+            session, admin_user, leads_nowhere, assistant_id=None
+        )
+        await _asked_in_conversation(
+            session, admin_user, already_placed, assistant_id=local.id
+        )
+
+        # One File at a time, as a job that is stopped and started again would.
+        placed = 0
+        unresolved: dict[UUID, FileHomeUnresolved] = {}
+        after: UUID | None = None
+        batches = 0
+        while True:
+            batch = await homes.fill_in_space(here, after=after, limit=1)
+            placed += batch.placed
+            unresolved.update(batch.unresolved)
+            batches += 1
+            after = batch.next_after
+            if after is None:
+                break
+        again = await homes.fill_in_space(here)
+
+        assert batches > 1
+        assert placed == 1
+        assert unresolved == {
+            in_two_spaces: FileHomeUnresolved.SEVERAL_SPACES,
+            leads_nowhere: FileHomeUnresolved.NO_SPACE,
+        }
+        # Every id is kept, and nothing that could not be placed got a home.
+        assert await homes.homes_of(
+            [only_here, derived, in_two_spaces, leads_nowhere, draft, already_placed]
+        ) == {
+            only_here: here,
+            derived: here,
+            in_two_spaces: None,
+            leads_nowhere: None,
+            draft: None,
+            already_placed: here,
+        }
+        # Running it again places nothing new and reports the same Files.
+        assert again.placed == 0
+        assert again.unresolved == unresolved
+        assert again.next_after is None

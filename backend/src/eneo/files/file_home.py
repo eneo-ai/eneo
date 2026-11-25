@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
@@ -59,6 +60,26 @@ class FileHomeSpaceNotFoundError(FileHomeError):
     """The space is not one of the File's organisation."""
 
     code = "file_home_space_not_found"
+
+
+class FileHomeUnresolved(StrEnum):
+    """Why the use of a File does not say which space it belongs in."""
+
+    SEVERAL_SPACES = "several_spaces"
+    NO_SPACE = "no_space"
+
+
+@dataclass(frozen=True, slots=True)
+class FileHomeFill:
+    """What one batch of filling in homes did in one space."""
+
+    # Families that got the space as their home.
+    placed: int
+    # Roots of families used here that could not be placed, and why. They keep
+    # their ids and stay without a home; nothing is split or copied.
+    unresolved: dict[UUID, FileHomeUnresolved]
+    # Where the next batch continues; ``None`` when the space is done.
+    next_after: UUID | None
 
 
 class FileUsePathUndeclaredError(RuntimeError):
@@ -279,6 +300,93 @@ class FileHomes:
                     "attached here."
                 )
         await self._write_home(root_of, space_id=space_id)
+
+    async def fill_in_space(
+        self, space_id: UUID, *, after: UUID | None = None, limit: int = 500
+    ) -> FileHomeFill:
+        """Give the Files from before homes existed their home, one batch.
+
+        A family that is used in this space and nowhere else gets the space
+        as its home. A family that is also used in another space, or whose
+        use leads to no space, is left without a home and reported as
+        unresolved: an administrator decides about it, and no id changes.
+        Drafts are not touched; they are not in use anywhere.
+
+        Safe to stop and run again: a family that has its home is not a
+        candidate any more. ``after`` continues where the batch before ended.
+        """
+        tenant_id = await self._session.scalar(
+            sa.select(Spaces.tenant_id)
+            .where(Spaces.id == space_id)
+            .with_for_update(read=True, key_share=True)
+        )
+        if tenant_id is None:
+            return FileHomeFill(placed=0, unresolved={}, next_after=None)
+        uses = sa.union_all(*_USES_WITH_THEIR_SPACE.values()).subquery("file_uses")
+        candidates = (
+            sa.select(uses.c.file_id)
+            .join(Files, Files.id == uses.c.file_id)
+            .where(
+                uses.c.space_id == space_id,
+                Files.home_space_id.is_(None),
+                Files.tenant_id == tenant_id,
+            )
+            .distinct()
+            .order_by(uses.c.file_id)
+            .limit(limit)
+        )
+        if after is not None:
+            candidates = candidates.where(uses.c.file_id > after)
+        used_here = (await self._session.scalars(candidates)).all()
+        if not used_here:
+            return FileHomeFill(placed=0, unresolved={}, next_after=None)
+
+        root_ids = set((await self._roots_of(used_here)).values())
+        root_of = await self._usage.lock_families(root_ids)
+        # Read under the locks: a family another batch placed meanwhile, or
+        # one that got its home through an attach, is left as it is.
+        without_home = set(
+            (
+                await self._session.scalars(
+                    sa.select(Files.id).where(
+                        Files.id
+                        == sa.any_(_ids("roots", sorted(set(root_of.values())))),
+                        Files.home_space_id.is_(None),
+                    )
+                )
+            ).all()
+        )
+        candidates_of = {
+            member: root for member, root in root_of.items() if root in without_home
+        }
+        use = await self.use_of_families(candidates_of)
+        placing: dict[UUID, UUID] = {}
+        unresolved: dict[UUID, FileHomeUnresolved] = {}
+        for root_id, family_use in use.items():
+            if family_use.only_in(space_id):
+                continue
+            unresolved[root_id] = (
+                FileHomeUnresolved.NO_SPACE
+                if family_use.unplaced
+                else FileHomeUnresolved.SEVERAL_SPACES
+            )
+        for member, root_id in candidates_of.items():
+            if root_id not in unresolved:
+                placing[member] = root_id
+        if placing:
+            await self._session.execute(
+                sa.update(Files)
+                .where(
+                    Files.id == sa.any_(_ids("members", sorted(placing))),
+                    Files.home_space_id.is_(None),
+                )
+                .values(home_space_id=space_id)
+            )
+        return FileHomeFill(
+            placed=len(set(placing.values())),
+            unresolved=unresolved,
+            next_after=used_here[-1] if len(used_here) == limit else None,
+        )
 
     async def inherit(self, file_id: UUID, *, from_file_id: UUID) -> None:
         """Give a new File the home of the File it was made from.
