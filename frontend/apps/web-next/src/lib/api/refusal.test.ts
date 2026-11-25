@@ -1112,7 +1112,7 @@ describe("session expiry and renewal", () => {
       expect(await done(checking)).toBe(true);
       const error = await checking.catch((reason: unknown) => reason);
       expect(error).toMatchObject({ name: "EneoApiError", status: 504 });
-      // Aborted, not raced: a late answer can never be applied.
+      // Aborted, not raced: an answer that never came cannot arrive later.
       expect(fetcher.mock.calls[0]![1]!.signal!.aborted).toBe(true);
       expect(owner.getSessionSnapshot()).toEqual({
         status: "bound",
@@ -1218,6 +1218,35 @@ describe("session expiry and renewal", () => {
       });
       expect(FakeChannel.all.flatMap((channel) => channel.posted)).toEqual([]);
     });
+
+    it.each(asks)(
+      "still ends the page on a whole %s refusal for another sign-in read after the limit",
+      async (_, ask) => {
+        await bound();
+        // The refusal arrived whole; only reading its body ends after the limit.
+        let body!: ReadableStreamDefaultController<Uint8Array>;
+        fetcher.mockResolvedValueOnce(
+          new Response(
+            new ReadableStream<Uint8Array>({ start: (controller) => void (body = controller) }),
+            { status: 401, headers: { "content-type": "application/json" } }
+          )
+        );
+        const asking = ask().catch((reason: unknown) => reason);
+        await vi.advanceTimersByTimeAsync(LIMIT);
+        expect(await done(asking)).toBe(false);
+        expect(fetcher.mock.calls[0]![1]!.signal!.aborted).toBe(true);
+        expect(navigate).not.toHaveBeenCalled();
+        body.enqueue(
+          new TextEncoder().encode(JSON.stringify({ message: "Refused", eneo_error_code: 9090 }))
+        );
+        body.close();
+        expect(await done(asking)).toBe(true);
+        const error = await asking;
+        expect(error).toMatchObject({ name: "EneoApiError", status: 401, code: 9090 });
+        expect(navigate).toHaveBeenCalledExactlyOnceWith("/login", { replace: true });
+        expect(owner.getSessionSnapshot()).toEqual({ status: "stale", destination: "/login" });
+      }
+    );
 
     it("aborts a running check when the page ends, and not as a time-out", async () => {
       await bound();
