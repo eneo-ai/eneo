@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { act, cleanup, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderHookInApp } from "@/test/render";
+import { UPLOAD_RETRY_DELAYS_MS } from "./recording/upload-retry";
 import { makeInput } from "./run-fixtures";
 import { useRuntimeUploads } from "./use-runtime-uploads";
 
@@ -279,4 +280,83 @@ it("keeps a recorded part when a file is picked for a step that takes one", asyn
   const entries = hook.result.current.uploads["step-1"]!;
   expect(entries[0]).toMatchObject({ key: recorded.key, state: "uploading" });
   expect(entries[1]).toMatchObject({ name: "fil.webm", state: "failed" });
+});
+
+describe("a recorded part whose attempt is on its way when the browser comes back online", () => {
+  beforeEach(() => vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] }));
+  afterEach(() => vi.useRealTimers());
+
+  const part = (hook: { result: { current: ReturnType<typeof useRuntimeUploads> } }) =>
+    hook.result.current.uploads["step-1"]![0]!;
+
+  /** The part fails on the network until timed attempt `attempts` is on its way; then the browser is back online. */
+  async function onItsWayWhenOnline(attempts: number) {
+    const hook = renderHookInApp(() => useRuntimeUploads("flow-1", undefined));
+    const input = makeInput({ step_id: "step-1", accepted_mimetypes: ["audio/webm"] });
+    act(() =>
+      hook.result.current.add(input, [new File(["audio"], "del-1.webm", { type: "audio/webm" })], {
+        recording: { sessionId: "rec-1", index: 0, durationMs: 1000, streamed: false },
+        label: "Inspelning"
+      })
+    );
+    await vi.waitFor(() => expect(UploadRequest.sent).toHaveLength(1));
+    for (const delay of UPLOAD_RETRY_DELAYS_MS.slice(0, attempts)) {
+      const sent = UploadRequest.sent.length;
+      act(() => UploadRequest.sent.at(-1)!.onerror?.());
+      await vi.waitFor(() => expect(part(hook).state).toBe("failed"));
+      await act(() => vi.advanceTimersByTimeAsync(delay));
+      await vi.waitFor(() => expect(UploadRequest.sent).toHaveLength(sent + 1));
+    }
+    // Nothing is sent twice: the attempt on its way goes on.
+    await act(async () => {
+      window.dispatchEvent(new Event("online"));
+    });
+    expect(UploadRequest.sent).toHaveLength(attempts + 1);
+    expect(UploadRequest.sent.at(-1)!.aborted).toBe(false);
+    return hook;
+  }
+
+  it("goes again by itself when the last timed attempt then runs out of time", async () => {
+    const hook = await onItsWayWhenOnline(UPLOAD_RETRY_DELAYS_MS.length);
+    // No byte moves: the upload's own time limit ends the attempt.
+    await act(() => vi.advanceTimersByTimeAsync(120_000));
+    await vi.waitFor(() =>
+      expect(part(hook)).toMatchObject({
+        state: "failed",
+        retryable: true,
+        nextRetryAt: expect.any(Number)
+      })
+    );
+    // With no second online event.
+    await act(() => vi.advanceTimersByTimeAsync(UPLOAD_RETRY_DELAYS_MS[0]));
+    await vi.waitFor(() =>
+      expect(UploadRequest.sent).toHaveLength(UPLOAD_RETRY_DELAYS_MS.length + 2)
+    );
+  });
+
+  it("goes again after the first wait when an earlier timed attempt then fails", async () => {
+    const hook = await onItsWayWhenOnline(2);
+    act(() => UploadRequest.sent.at(-1)!.onerror?.());
+    await vi.waitFor(() => expect(part(hook).state).toBe("failed"));
+    await act(() => vi.advanceTimersByTimeAsync(UPLOAD_RETRY_DELAYS_MS[0]));
+    await vi.waitFor(() => expect(UploadRequest.sent).toHaveLength(4));
+  });
+
+  it.each([
+    ["uploads", (xhr: UploadRequest) => xhr.answer(201, { id: "file-1" }), "done"],
+    [
+      "is refused for good",
+      (xhr: UploadRequest) => xhr.answer(422, { message: "Not accepted" }),
+      "failed"
+    ]
+  ] as const)("sends nothing again when that attempt %s", async (_case, settle, state) => {
+    const hook = await onItsWayWhenOnline(1);
+    act(() => settle(UploadRequest.sent.at(-1)!));
+    await vi.waitFor(() => expect(part(hook).state).toBe(state));
+    await act(() => vi.advanceTimersByTimeAsync(10 * 60_000));
+    await act(async () => {
+      window.dispatchEvent(new Event("online"));
+    });
+    expect(UploadRequest.sent).toHaveLength(2);
+  });
 });

@@ -5,8 +5,9 @@
  * online brings the next attempt forward; that counts as the attempt. After
  * the last wait no timer sends it, but the browser coming back online still
  * does, and its waits then start over as after "Försök igen": an outage
- * longer than the waits does not leave it behind. A refusal that does not
- * pass (too large, not accepted) is never scheduled.
+ * longer than the waits does not leave it behind. Nor does an attempt on its
+ * way as the browser comes back online. A refusal that does not pass (too
+ * large, not accepted) is never scheduled.
  */
 
 /** The waits before each automatic attempt. */
@@ -59,9 +60,17 @@ export class UploadRetries {
   /**
    * The browser is back online: every part waiting for its next attempt goes
    * now, and so does every part whose attempts were spent, with its waits
-   * starting over.
+   * starting over. A part whose attempt is on its way is not sent twice: if
+   * that attempt fails, its waits start over.
    */
   online(): void {
+    // A count with no wait and not spent: an attempt on its way, or an automatic attempt that ended
+    // with a failure that does not pass while its row stays. Nothing sends the second again but
+    // "Försök igen", which starts over anyway, so dropping its count changes nothing. Before the
+    // waiting parts go, so their attempt now counts.
+    for (const key of [...this.#attempts.keys()]) {
+      if (!this.#pending.has(key) && !this.#spent.has(key)) this.#attempts.delete(key);
+    }
     for (const key of [...this.#pending.keys()]) {
       this.#clear(key);
       this.#attempt(key);
