@@ -12,6 +12,7 @@ from starlette.datastructures import Headers
 from eneo.authentication.auth_models import is_service_api_key
 from eneo.authentication.principal_types import PrincipalType
 from eneo.files.file_content_loader import FileContentLoader
+from eneo.files.file_home import FileHomes, space_of_question
 from eneo.files.file_models import (
     File,
     FileContentRangeError,
@@ -161,6 +162,7 @@ class FileService:
         self._upload_admission = upload_admission
         self._content_loader = FileContentLoader(repo, object_content)
         self._usage = FileUsageRepository(repo.session)
+        self._homes = FileHomes(repo.session)
 
     @asynccontextmanager
     async def _write_transaction(self) -> AsyncGenerator[None]:
@@ -171,7 +173,38 @@ class FileService:
         async with session.begin():
             yield
 
-    async def save_file(self, upload_file: UploadFile) -> FileInfo:
+    async def _place_new_file(
+        self,
+        file_id: UUID,
+        *,
+        space_id: UUID | None = None,
+        for_question_id: UUID | None = None,
+        made_from_file_id: UUID | None = None,
+    ) -> None:
+        """Give a File its home in the transaction that creates it.
+
+        A File made in a known space lives there from the start, so it is
+        never a draft in between. A new version lives where the File it was
+        made from lives. An upload that names no space stays a draft until it
+        is attached.
+        """
+        if made_from_file_id is not None:
+            await self._homes.inherit(file_id, from_file_id=made_from_file_id)
+        if space_id is None and for_question_id is not None:
+            space_id = await self.repo.session.scalar(
+                space_of_question(for_question_id)
+            )
+        if space_id is not None:
+            await self._homes.set_home(
+                file_id, space_id=space_id, tenant_id=self._owner().tenant_id
+            )
+
+    async def save_file(
+        self, upload_file: UploadFile, *, space_id: UUID | None = None
+    ) -> FileInfo:
+        """Store an upload. With ``space_id`` the file lives in that space
+        from the start; the caller has checked the uploader's right to it.
+        Without it the file is a draft until it is attached."""
         snapshot = self._require_upload_admission()
         storage_target = snapshot.new_write_storage_target
         if (
@@ -229,6 +262,7 @@ class FileService:
                                 policy_revision=snapshot.policy_revision,
                                 parent_file_id=root.metadata.id,
                             )
+                        await self._place_new_file(root.metadata.id, space_id=space_id)
                     return project_file_info(
                         root.metadata,
                         list(root.references),
@@ -244,11 +278,13 @@ class FileService:
                     object_store_revision=snapshot.object_store_revision,
                 ) as publication:
                     async with self._write_transaction():
-                        return await self._publish_verified_family(
+                        published = await self._publish_verified_family(
                             family,
                             publication=publication,
                             policy_revision=snapshot.policy_revision,
                         )
+                        await self._place_new_file(published.id, space_id=space_id)
+                        return published
 
     async def _capture_prepared_file(
         self,
@@ -478,7 +514,11 @@ class FileService:
         image_data: bytes,
         name: str = "generated_image.jpeg",
         mimetype: str = "image/jpeg",
+        *,
+        for_question_id: UUID | None = None,
     ) -> File:
+        """Store an image a tool made. ``for_question_id`` is the question it
+        was made for: the image then lives in the space that question is in."""
         self._authenticated_user()
         prepared = PreparedFileUpload(
             name=name,
@@ -498,6 +538,7 @@ class FileService:
         # once the write block closes, so a read after it would fail.
         async with self._write_transaction():
             file_id = await self._persist_prepared_file(prepared)
+            await self._place_new_file(file_id, for_question_id=for_question_id)
             return await self._generated_file(file_id, image_data)
 
     async def _generated_file(self, file_id: UUID, data: bytes) -> File:
@@ -530,6 +571,7 @@ class FileService:
         mimetype: str,
         *,
         revises_file_id: UUID | None = None,
+        for_question_id: UUID | None = None,
     ) -> File:
         """Persist a tool-generated document (DOCX, XLSX, PDF) as a File.
 
@@ -542,7 +584,10 @@ class FileService:
         ``revises_file_id`` names the version of a conversation document the
         bytes were edited from. The caller has reached that file through an
         authorized conversation; this method records the link and checks
-        nothing further about it.
+        nothing further about it. The new version lives where that file lives.
+
+        ``for_question_id`` is the question the document was made for: it then
+        lives in the space that question is in.
         """
         self._authenticated_user()
         validate_generated_document(data, mimetype)
@@ -559,6 +604,11 @@ class FileService:
                 file_id = await self._persist_prepared_file(
                     replace(prepared, derivatives=()),
                     revises_file_id=revises_file_id,
+                )
+                await self._place_new_file(
+                    file_id,
+                    for_question_id=for_question_id,
+                    made_from_file_id=revises_file_id,
                 )
                 return await self._generated_file(file_id, data)
 

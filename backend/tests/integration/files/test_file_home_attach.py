@@ -25,6 +25,11 @@ from eneo.database.tables.assistant_table import AssistantsFiles
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.spaces_table import SpacesCompletionModels
 from eneo.files.file_home import FileHomeConflictError, FileHomes
+from eneo.main.models import ModelId
+from eneo.questions.question import QuestionAdd
+from eneo.roles.permissions import Permission
+from eneo.roles.role import RoleCreate
+from eneo.users.user import UserAdd, UserState
 
 
 @pytest.fixture
@@ -306,3 +311,128 @@ async def test_a_file_asked_about_lives_in_the_space_of_the_assistant(
             sa.select(sa.func.count()).select_from(Files).where(Files.id == file_id)
         )
     assert still_there == 1
+
+
+async def test_an_upload_that_names_its_space_lives_there_from_the_start(
+    client, db_container, two_spaces
+) -> None:
+    headers, meetings, _, _ = two_spaces
+
+    upload = await client.post(
+        "/api/v1/files/",
+        files={"upload_file": ("minutes.txt", b"minutes", "text/plain")},
+        data={"space_id": meetings},
+        headers=headers,
+    )
+
+    # The response is the one an upload has always given.
+    assert upload.status_code == 200, upload.text
+    assert "home_space_id" not in upload.json()
+    assert await _home(db_container, upload.json()["id"]) == meetings
+
+
+async def test_an_upload_cannot_name_a_space_the_uploader_cannot_read(
+    client, db_container, admin_user, patch_auth_service_jwt, two_spaces
+) -> None:
+    _, meetings, _, _ = two_spaces
+    async with db_container() as container:
+        role = await container.role_repo().create_role(
+            RoleCreate(
+                name=f"file-home-{uuid4().hex[:8]}",
+                permissions=[p for p in Permission if p is not Permission.ADMIN],
+                tenant_id=admin_user.tenant_id,
+            )
+        )
+        outsider = await container.user_repo().add(
+            UserAdd(
+                email=f"file-home-{uuid4().hex[:8]}@example.com",
+                username=f"file_home_{uuid4().hex[:8]}",
+                state=UserState.ACTIVE,
+                tenant_id=admin_user.tenant_id,
+                roles=[ModelId(id=role.id)],
+            )
+        )
+        token = container.auth_service().create_access_token_for_user(outsider)
+        outsider_id = outsider.id
+    headers = {"Authorization": f"Bearer {token}"}
+
+    async def stored() -> int:
+        async with db_container() as container:
+            return await container.session().scalar(
+                sa.select(sa.func.count())
+                .select_from(Files)
+                .where(Files.owner_user_id == outsider_id)
+            )
+
+    for space_id, status in ((meetings, 403), (str(uuid4()), 404)):
+        refused = await client.post(
+            "/api/v1/files/",
+            files={"upload_file": ("minutes.txt", b"minutes", "text/plain")},
+            data={"space_id": space_id},
+            headers=headers,
+        )
+        assert refused.status_code == status, refused.text
+    # Refused before anything was stored.
+    assert await stored() == 0
+
+    # The same person uploads a draft as before.
+    draft = await client.post(
+        "/api/v1/files/",
+        files={"upload_file": ("minutes.txt", b"minutes", "text/plain")},
+        headers=headers,
+    )
+    assert draft.status_code == 200, draft.text
+    assert await stored() == 1
+
+
+async def test_a_file_made_for_a_question_lives_in_the_questions_space(
+    client, db_container, admin_user, two_spaces
+) -> None:
+    headers, meetings, _, model_id = two_spaces
+    assistant_id = UUID(await _assistant(client, headers, meetings, model_id))
+    async with db_container() as container:
+        conversation = await container.session_service().create_session(
+            name="plan", assistant_id=assistant_id
+        )
+        question = await container.question_repo().add(
+            QuestionAdd(
+                question="skriv en plan",
+                answer="",
+                num_tokens_question=0,
+                num_tokens_answer=0,
+                tenant_id=admin_user.tenant_id,
+                session_id=conversation.id,
+                assistant_id=assistant_id,
+            )
+        )
+        files = container.file_service()
+
+        image = await files.save_image_from_bytes(
+            b"\x89PNG-chart",
+            name="chart.png",
+            mimetype="image/png",
+            for_question_id=question.id,
+        )
+        document = await files.save_generated_document(
+            b"# Plan\n",
+            name="Plan.md",
+            mimetype="text/markdown",
+            for_question_id=question.id,
+        )
+        # A reader's edit of the document is a file of its own, in the same home.
+        version = await files.save_generated_document(
+            b"# Plan\n\nPhase one.\n",
+            name="Plan.md",
+            mimetype="text/markdown",
+            revises_file_id=document.id,
+        )
+        # Made for nothing in particular: a draft.
+        loose = await files.save_image_from_bytes(b"\x89PNG-loose")
+        made = [str(file.id) for file in (image, document, version, loose)]
+
+    assert [await _home(db_container, file_id) for file_id in made] == [
+        meetings,
+        meetings,
+        meetings,
+        None,
+    ]

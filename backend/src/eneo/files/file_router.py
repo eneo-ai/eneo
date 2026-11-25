@@ -5,7 +5,16 @@ from typing import Annotated, cast
 from urllib.parse import urlencode
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, Query, Request, Response, UploadFile
+from fastapi import (
+    APIRouter,
+    Depends,
+    Form,
+    Header,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+)
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -71,7 +80,12 @@ _FileUploadContainer = Annotated[
     "/",
     response_model=FilePublic,
     responses=responses.get_responses([400, 403, 413, 415, 503]),
-    description="Upload a file; rejects unsupported media types and oversized files.",
+    description="Upload a file; rejects unsupported media types and oversized files. "
+    "The optional form field `space_id` names the space the file is meant for: "
+    "the file then belongs to that space from the start, and the caller must be "
+    "able to read the space. Without it the file belongs to no space until it "
+    "is attached to an assistant, an app, an app run or a question. A file "
+    "belongs to one space and cannot be attached in another.",
 )
 @endpoint_access(
     authentication=Authentication.USER,
@@ -81,10 +95,19 @@ _FileUploadContainer = Annotated[
 async def upload_file(
     upload_file: UploadFile,
     container: _FileUploadContainer,
+    space_id: Annotated[
+        UUID | None,
+        Form(description="The space the file is meant for. Optional."),
+    ] = None,
 ):
     service = container.file_service()
     current_user = container.user()
-    file = await service.save_file(upload_file)
+    session = cast(AsyncSession, container.session())
+    if space_id is not None:
+        # The upload has no transaction of its own until the file is stored.
+        async with session.begin():
+            await container.space_service().require_space_reader(space_id)
+    file = await service.save_file(upload_file, space_id=space_id)
 
     extra = {
         "size_bytes": file.size,
@@ -94,8 +117,10 @@ async def upload_file(
         else None,
     }
 
+    if space_id is not None:
+        extra["home_space_id"] = str(space_id)
+
     audit_service = container.audit_service()
-    session = cast(AsyncSession, container.session())
     try:
         async with session.begin():
             await audit_service.log_async(

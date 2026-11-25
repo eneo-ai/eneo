@@ -42,10 +42,16 @@ async def test_generated_image_is_saved_with_matching_extension(mime_type, exten
         data=b"\x89PNG", mime_type=mime_type, tool_call_id="c1", mcp_tool_name="t"
     )
 
-    await service._save_generated_image(image)
+    question_id = uuid4()
 
+    await service._save_generated_image(image, question_id=question_id)
+
+    # The image is stored for the question, so it lives where the question is.
     service.file_service.save_image_from_bytes.assert_awaited_once_with(
-        b"\x89PNG", name=f"generated_image.{extension}", mimetype=mime_type
+        b"\x89PNG",
+        name=f"generated_image.{extension}",
+        mimetype=mime_type,
+        for_question_id=question_id,
     )
 
 

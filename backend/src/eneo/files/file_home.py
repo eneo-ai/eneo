@@ -567,7 +567,6 @@ class FileHomes:
         uses too cannot follow, and cannot be left behind either while the
         assistant still uses it, so the move is refused. No copy is made.
         """
-        await self._require_space(target_space_id, tenant_id=tenant_id)
         attached = sa.select(AssistantsFiles.file_id.label("file_id")).where(
             AssistantsFiles.assistant_id == assistant_id
         )
@@ -577,12 +576,70 @@ class FileHomes:
             .join(Sessions, Sessions.id == Questions.session_id)
             .where(Sessions.assistant_id == assistant_id)
         )
-        used_by_assistant = sorted(
-            (await self._session.scalars(sa.union(attached, asked))).all()
+        return await self._move_with(
+            sa.union_all(attached, asked).subquery("moving_uses"),
+            what="the assistant",
+            source_space_id=source_space_id,
+            target_space_id=target_space_id,
+            tenant_id=tenant_id,
         )
-        if not used_by_assistant:
+
+    async def move_with_service(
+        self,
+        service_id: UUID,
+        *,
+        source_space_id: UUID,
+        target_space_id: UUID,
+        tenant_id: UUID,
+    ) -> int:
+        """Move the home of the Files a service takes along to another space.
+
+        The same rule as for an assistant: the families that live in the
+        source space and that only the service's questions use move, and one
+        that something else uses too refuses the move.
+        """
+        asked = (
+            sa.select(QuestionsFiles.file_id.label("file_id"))
+            .join(Questions, Questions.id == QuestionsFiles.question_id)
+            .outerjoin(Sessions, Sessions.id == Questions.session_id)
+            .where(
+                sa.or_(
+                    Questions.service_id == service_id,
+                    Sessions.service_id == service_id,
+                )
+            )
+        )
+        return await self._move_with(
+            asked.subquery("moving_uses"),
+            what="the service",
+            source_space_id=source_space_id,
+            target_space_id=target_space_id,
+            tenant_id=tenant_id,
+        )
+
+    async def _move_with(
+        self,
+        own_uses: sa.Subquery,
+        *,
+        what: str,
+        source_space_id: UUID,
+        target_space_id: UUID,
+        tenant_id: UUID,
+    ) -> int:
+        """Move the homes of the families that only ``own_uses`` use.
+
+        ``own_uses`` has one row per use, with the File in ``file_id``. The
+        caller holds both spaces locked.
+        """
+        await self._require_space(target_space_id, tenant_id=tenant_id)
+        used = sorted(
+            (
+                await self._session.scalars(sa.select(own_uses.c.file_id).distinct())
+            ).all()
+        )
+        if not used:
             return 0
-        root_ids = set((await self._roots_of(used_by_assistant)).values())
+        root_ids = set((await self._roots_of(used)).values())
         root_of = await self._usage.lock_families(root_ids)
         living_in_source = set(
             (
@@ -603,16 +660,23 @@ class FileHomes:
             return 0
         # Counted under the family locks, so an attach that committed while
         # the families were being locked is seen.
-        own_uses = await self._count_assistant_uses(moving, assistant_id)
-        all_uses = await self._count_all_uses(moving)
+        own_rows = await self._session.execute(
+            sa.select(own_uses.c.file_id, sa.func.count())
+            .where(own_uses.c.file_id == sa.any_(_ids("member_ids", sorted(moving))))
+            .group_by(own_uses.c.file_id)
+        )
+        own_count: dict[UUID, int] = dict.fromkeys(moving.values(), 0)
+        for file_id, count in own_rows.tuples():
+            own_count[moving[file_id]] += count
+        all_count = await self._count_all_uses(moving)
         shared = sorted(
-            root for root in set(moving.values()) if all_uses[root] != own_uses[root]
+            root for root in set(moving.values()) if all_count[root] != own_count[root]
         )
         if shared:
             raise FileInUseElsewhereError(
-                f"{len(shared)} file(s) of the assistant are also used by "
-                "something else in the space. Remove those uses, or the files "
-                "from the assistant, before moving it."
+                f"{len(shared)} file(s) of {what} are also used by something "
+                f"else in the space. Remove those uses, or the files from {what}, "
+                "before moving it."
             )
         result = await self._session.execute(
             sa.update(Files)
@@ -621,41 +685,12 @@ class FileHomes:
         )
         return affected_row_count(result)
 
-    # --- helpers ---------------------------------------------------------
-
     async def _count_all_uses(self, root_of: dict[UUID, UUID]) -> dict[UUID, int]:
         uses = sa.union_all(*_USES_WITH_THEIR_SPACE.values()).subquery("file_uses")
         rows = await self._session.execute(
             sa.select(uses.c.file_id, sa.func.count())
             .where(uses.c.file_id == sa.any_(_ids("member_ids", sorted(root_of))))
             .group_by(uses.c.file_id)
-        )
-        counts: dict[UUID, int] = dict.fromkeys(root_of.values(), 0)
-        for file_id, count in rows.tuples():
-            counts[root_of[file_id]] += count
-        return counts
-
-    async def _count_assistant_uses(
-        self, root_of: dict[UUID, UUID], assistant_id: UUID
-    ) -> dict[UUID, int]:
-        """The uses of each family by one assistant and its conversations."""
-        members = _ids("member_ids", sorted(root_of))
-        attached = sa.select(AssistantsFiles.file_id.label("file_id")).where(
-            AssistantsFiles.assistant_id == assistant_id,
-            AssistantsFiles.file_id == sa.any_(members),
-        )
-        asked = (
-            sa.select(QuestionsFiles.file_id.label("file_id"))
-            .join(Questions, Questions.id == QuestionsFiles.question_id)
-            .join(Sessions, Sessions.id == Questions.session_id)
-            .where(
-                Sessions.assistant_id == assistant_id,
-                QuestionsFiles.file_id == sa.any_(members),
-            )
-        )
-        own = sa.union_all(attached, asked).subquery("assistant_uses")
-        rows = await self._session.execute(
-            sa.select(own.c.file_id, sa.func.count()).group_by(own.c.file_id)
         )
         counts: dict[UUID, int] = dict.fromkeys(root_of.values(), 0)
         for file_id, count in rows.tuples():

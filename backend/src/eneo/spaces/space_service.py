@@ -280,6 +280,25 @@ class SpaceService:
 
         return space
 
+    async def require_space_reader(self, id: UUID) -> None:
+        """Refuse the caller unless they can read this space.
+
+        Decided from the caller's own facts, without loading the space's
+        content. For acts that put something of the caller's own into the
+        space, such as naming it as the home of an upload.
+        """
+        facts = await self.repo.get_space_access_facts(id)
+        if not self.actor_manager.get_space_actor(facts).can_read_space():
+            raise UnauthorizedException(
+                "You do not have permission to read this space.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "space",
+                    "action": "read",
+                    "auth_layer": "domain_policy",
+                },
+            )
+
     async def require_space_admin(self, id: UUID) -> None:
         """Refuse the caller unless they administer this space.
 

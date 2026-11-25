@@ -202,9 +202,9 @@ async def test_a_generated_image_is_never_saved_for_a_visitor():
     service.file_service.save_image_from_bytes = AsyncMock()
     image = GeneratedFile(data=b"png", mime_type="image/png", tool_call_id="c")
 
-    assert await service._save_generated_image(image) is None
+    assert await service._save_generated_image(image, question_id=uuid4()) is None
     service.file_service.save_image_from_bytes.assert_not_awaited()
 
     service.user = TEST_USER
-    assert await service._save_generated_image(image) is not None
+    assert await service._save_generated_image(image, question_id=uuid4()) is not None
     service.file_service.save_image_from_bytes.assert_awaited_once()

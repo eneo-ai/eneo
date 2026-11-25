@@ -13,6 +13,7 @@ from eneo.database.tables.app_table import AppRuns, AppRunsFiles, AppsFiles
 from eneo.database.tables.assistant_table import AssistantsFiles
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.questions_table import Questions, QuestionsFiles
+from eneo.database.tables.service_table import Services
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.tenant_table import Tenants
@@ -449,3 +450,70 @@ async def test_attaching_and_deleting_a_space_wait_for_each_other(
         # a draft.
         assert attached == "space gone"
         assert draft_left == (None, 1)
+
+
+async def test_moving_a_service_takes_along_the_files_only_its_questions_use(
+    db_container, admin_user
+) -> None:
+    async with db_container() as container:
+        session = container.session()
+        source = await _space(container, "Source")
+        target = await _space(container, "Target")
+        service = Services(
+            name="Classifier",
+            prompt="Classify",
+            user_id=admin_user.id,
+            space_id=source,
+        )
+        session.add(service)
+        await session.flush()
+
+        async def asked_of_the_service(file_id: UUID) -> None:
+            question = Questions(
+                question="Classify",
+                answer="",
+                num_tokens_question=0,
+                num_tokens_answer=0,
+                tenant_id=admin_user.tenant_id,
+                service_id=service.id,
+            )
+            session.add(question)
+            await session.flush()
+            session.add(
+                QuestionsFiles(question_id=question.id, file_id=file_id, type="user")
+            )
+            await session.flush()
+
+        own = await _file(session, admin_user)
+        shared = await _file(session, admin_user)
+        await asked_of_the_service(own)
+        await asked_of_the_service(shared)
+        await _asked_in_conversation(session, admin_user, shared, assistant_id=None)
+        homes = FileHomes(session)
+        for file_id in (own, shared):
+            await homes.set_home(
+                file_id, space_id=source, tenant_id=admin_user.tenant_id
+            )
+
+        with pytest.raises(FileInUseElsewhereError, match="the service"):
+            await homes.move_with_service(
+                service.id,
+                source_space_id=source,
+                target_space_id=target,
+                tenant_id=admin_user.tenant_id,
+            )
+        assert await homes.homes_of([own, shared]) == {own: source, shared: source}
+
+        # Without the file that something else uses too, the rest follows.
+        await session.execute(
+            sa.delete(QuestionsFiles).where(QuestionsFiles.file_id == shared)
+        )
+        moved = await homes.move_with_service(
+            service.id,
+            source_space_id=source,
+            target_space_id=target,
+            tenant_id=admin_user.tenant_id,
+        )
+
+        assert moved == 1
+        assert await homes.homes_of([own, shared]) == {own: target, shared: source}
