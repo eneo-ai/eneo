@@ -162,9 +162,11 @@ function installBrowser({ recorder = true, live = false } = {}) {
 let browserLocks = fakeLocks();
 /** The lock a form holds while it records or has continued the kept recording. */
 const HOLD = "eneo-flow-recording-holder:flow-1::step-1::0a1b2c3d-0000-4000-8000-000000000001";
-/** Whether a text is also spoken: the live region repeats it beside the banner that shows it. */
+/** Whether a text is spoken: the app's live region carries it. */
 const spoken = (text: string) =>
-  waitFor(() => expect(screen.getAllByText(text).length).toBeGreaterThan(1));
+  waitFor(() =>
+    expect(screen.getAllByText(text).some((node) => node.closest("[aria-live]"))).toBe(true)
+  );
 
 /** When a kept part was captured: two hours ago (inside the keeper's 24 h window), a minute per part. */
 const KEPT_BASE = Math.floor(Date.now() / 60_000) * 60_000 - 2 * 60 * 60 * 1000;
@@ -1484,6 +1486,45 @@ describe("Keeping a recording on the device", () => {
     );
     expect(device.db.parts.has(`flow-1::step-1::${keptPart(0).sessionId}::0002`)).toBe(false);
     expect(device.db.journals.size).toBe(1);
+  });
+
+  it("puts a refused offer last, with its refusal shown only beside it", async () => {
+    installBrowser();
+    grantMicrophone();
+    const other = "0a1b2c3d-0000-4000-8000-000000000002";
+    // The newest recording, offered first, has two parts; an older one has one.
+    await device.db.putPart(keptPart(0));
+    await device.db.putPart(keptPart(1));
+    await device.db.putPart(keptPart(0, { sessionId: other, capturedAt: keptAt(-5) }));
+    browserLocks.holdElsewhere(HOLD);
+    browserLocks.holdElsewhere(`eneo-flow-recording-holder:flow-1::step-1::${other}`);
+    const { dialog } = await openDialog(audioContract());
+    const refused = messages.flow_transcript_resume_open_elsewhere;
+    expect(await within(dialog).findByText(/består av 2 delar/)).toBeTruthy();
+
+    // Refused, the newest goes last: the older one is offered, without the first one's refusal.
+    fireEvent.click(button(dialog, messages.flow_transcript_resume_continue));
+    expect(await within(dialog).findByText(/består av en del/)).toBeTruthy();
+    expect(within(dialog).queryByText(refused)).toBeNull();
+    await spoken(refused);
+
+    // Every offer refused: the first refused is offered again, with its own refusal.
+    fireEvent.click(button(dialog, messages.flow_transcript_resume_continue));
+    expect(await within(dialog).findByText(/består av 2 delar/)).toBeTruthy();
+    expect(within(dialog).getByText(refused)).toBeTruthy();
+
+    // A new recording can start meanwhile, and the refused one is tried again once the other
+    // tab let go.
+    await recordAndStop(dialog);
+    browserLocks.releaseElsewhere(HOLD);
+    fireEvent.click(button(dialog, messages.flow_transcript_resume_continue));
+    expect(await within(dialog).findByText("Inspelning, del 2 (00:30)")).toBeTruthy();
+
+    // "Inte nu" does as before: the prompt goes.
+    fireEvent.click(button(dialog, messages.flow_transcript_resume_not_now));
+    await waitFor(() =>
+      expect(within(dialog).queryByText(messages.flow_transcript_resume_title)).toBeNull()
+    );
   });
 
   it("takes nothing over when the form closes while Fortsätt waits, in the app's strict mode", async () => {
