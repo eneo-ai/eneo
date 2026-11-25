@@ -49,6 +49,8 @@ class FakeUpload {
   static failAll = false;
   /** The core refuses the next upload for good (a 4xx that sending again does not change). */
   static refuseNext = false;
+  /** While set, uploads wait here until the test answers them. */
+  static held: (() => void)[] | null = null;
   status = 0;
   responseText = "";
   upload = { onprogress: null as ((event: ProgressEvent) => void) | null };
@@ -63,7 +65,7 @@ class FakeUpload {
   abort() {}
   send(body: FormData) {
     const file = body.get("upload_file") as File;
-    queueMicrotask(() => {
+    const answer = () => {
       if (FakeUpload.failNext || FakeUpload.failAll) {
         FakeUpload.failNext = false;
         this.onerror?.();
@@ -85,7 +87,9 @@ class FakeUpload {
         size: file.size
       });
       this.onload?.();
-    });
+    };
+    if (FakeUpload.held) FakeUpload.held.push(answer);
+    else queueMicrotask(answer);
   }
 }
 
@@ -281,6 +285,7 @@ beforeEach(async () => {
   FakeUpload.failNext = false;
   FakeUpload.failAll = false;
   FakeUpload.refuseNext = false;
+  FakeUpload.held = null;
   FakeSocket.instances = [];
   FakeNode.instances = [];
   microphone.mockReset();
@@ -1326,6 +1331,156 @@ describe("Keeping a recording on the device", () => {
       within(confirm).getByRole("button", { name: messages.flow_transcript_close_confirm })
     );
     await waitFor(() => expect(device.db.parts.size).toBe(0));
+  });
+
+  describe("a part both uploaded and kept on the device", () => {
+    beforeEach(() => {
+      vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    });
+
+    const saveButton = (dialog: HTMLElement) =>
+      within(dialog).getByRole("button", { name: /^Spara Inspelning, del 1/ });
+
+    /** Clicks "Spara som fil" on part 1 and answers the file the download got. */
+    async function savePart(dialog: HTMLElement): Promise<File> {
+      const urls = vi.mocked(URL.createObjectURL);
+      const before = urls.mock.calls.length;
+      fireEvent.click(saveButton(dialog));
+      await waitFor(() => expect(urls.mock.calls.length).toBe(before + 1));
+      return urls.mock.calls.at(-1)![0] as File;
+    }
+
+    /** A blob's bytes as text: jsdom's File has no `text()`. */
+    const contentOf = (blob: Blob) =>
+      new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.readAsText(blob);
+      });
+
+    /** The file the recorder made for part 1, as the form got it. */
+    const recorded = (stored: { mock: { calls: [StoredPart][] } }) =>
+      stored.mock.calls[0]![0].blob as File;
+
+    /** Records part 1 and waits until it is uploaded and the device keeps it. */
+    async function uploadedAndKept(dialog: HTMLElement) {
+      await recordAndStop(dialog);
+      await within(dialog).findByText(/^Uppladdad/);
+      await within(dialog).findByText(messages.flow_transcript_save_later_hint);
+    }
+
+    it("reads the part from the device to save it, with the same name and bytes", async () => {
+      installBrowser();
+      grantMicrophone();
+      const stored = vi.spyOn(device.db, "putPart");
+      const { dialog } = await openDialog(audioContract());
+      await uploadedAndKept(dialog);
+      const read = vi.spyOn(device.db, "listParts");
+
+      const saved = await savePart(dialog);
+
+      // Not the form's own copy, which it let go of.
+      expect(saved).not.toBe(recorded(stored));
+      expect(read).toHaveBeenCalled();
+      expect(saved.name).toBe(recorded(stored).name);
+      expect(await contentOf(saved)).toBe(await contentOf(recorded(stored)));
+      // The row is as before.
+      expect(within(dialog).getByText(/^Uppladdad/)).toBeTruthy();
+    });
+
+    it.each([
+      ["its copy on the device is gone", () => device.db.parts.clear()],
+      [
+        "the device cannot be read",
+        () => {
+          device.db.listParts = () => Promise.reject(new DOMException("broken", "UnknownError"));
+        }
+      ]
+    ])("says the part is uploaded and goes with the run when %s", async (_case, lose) => {
+      installBrowser();
+      grantMicrophone();
+      const { dialog } = await openDialog(audioContract());
+      await uploadedAndKept(dialog);
+      lose();
+      const urls = vi.mocked(URL.createObjectURL);
+      const before = urls.mock.calls.length;
+
+      fireEvent.click(saveButton(dialog));
+
+      expect(
+        await within(dialog).findByText(messages.flow_transcript_upload_save_unavailable)
+      ).toBeTruthy();
+      expect(urls.mock.calls.length).toBe(before);
+      // Nothing else changes: the row is uploaded, and nothing is sent again.
+      expect(within(dialog).getByText(/^Uppladdad/)).toBeTruthy();
+      expect(FakeUpload.sent).toHaveLength(1);
+    });
+
+    it("lets go of the part when the device answers after the upload", async () => {
+      installBrowser();
+      grantMicrophone();
+      let store = () => {};
+      const put = device.db.putPart;
+      const stored = vi.spyOn(device.db, "putPart").mockImplementation(
+        (part) =>
+          new Promise((resolve) => {
+            store = () => resolve(put(part));
+          })
+      );
+      const { dialog } = await openDialog(audioContract());
+      await recordAndStop(dialog);
+      await within(dialog).findByText(/^Uppladdad/);
+      // Not on the device yet: the form's own copy is saved.
+      expect(await savePart(dialog)).toBe(recorded(stored));
+
+      await act(async () => store());
+      await within(dialog).findByText(messages.flow_transcript_save_later_hint);
+      expect(await savePart(dialog)).not.toBe(recorded(stored));
+    });
+
+    it("lets go of the part when the upload answers after the device", async () => {
+      installBrowser();
+      grantMicrophone();
+      FakeUpload.held = [];
+      const stored = vi.spyOn(device.db, "putPart");
+      const { dialog } = await openDialog(audioContract());
+      await recordAndStop(dialog);
+      await within(dialog).findByText(messages.flow_transcript_save_later_hint);
+      await waitFor(() => expect(FakeUpload.held).toHaveLength(1));
+      // Still uploading: the form's own copy is saved.
+      expect(await savePart(dialog)).toBe(recorded(stored));
+
+      await act(async () => FakeUpload.held!.shift()!());
+      await within(dialog).findByText(/^Uppladdad/);
+      expect(await savePart(dialog)).not.toBe(recorded(stored));
+    });
+
+    it("keeps the part in the form when only this tab holds it", async () => {
+      installBrowser();
+      grantMicrophone();
+      const stored = vi
+        .spyOn(device.db, "putPart")
+        .mockRejectedValue(new DOMException("full", "QuotaExceededError"));
+      const { dialog } = await openDialog(audioContract());
+      await recordAndStop(dialog);
+      await within(dialog).findByText(/^Uppladdad/);
+      await within(dialog).findByText(messages.flow_transcript_save_later_only_in_tab);
+
+      expect(await savePart(dialog)).toBe(recorded(stored));
+    });
+
+    it("keeps the part in the form while it waits to be sent again, though the device keeps it", async () => {
+      installBrowser();
+      grantMicrophone();
+      FakeUpload.failAll = true;
+      const stored = vi.spyOn(device.db, "putPart");
+      const { dialog } = await openDialog(audioContract());
+      await recordAndStop(dialog);
+      await within(dialog).findByText(/^Nytt försök kl\./);
+      await within(dialog).findByText(messages.flow_transcript_save_later_hint);
+
+      expect(await savePart(dialog)).toBe(recorded(stored));
+    });
   });
 });
 

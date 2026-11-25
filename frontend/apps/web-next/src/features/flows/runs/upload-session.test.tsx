@@ -284,6 +284,65 @@ it("keeps a recorded part when a file is picked for a step that takes one", asyn
   expect(entries[1]).toMatchObject({ name: "fil.webm", state: "failed" });
 });
 
+describe("a recorded part whose copy is kept elsewhere", () => {
+  const input = makeInput({ step_id: "step-1", accepted_mimetypes: ["audio/webm"] });
+
+  function recordPart() {
+    const hook = renderHookInApp(() => useRuntimeUploads("flow-1", undefined));
+    act(() =>
+      hook.result.current.add(input, [new File(["audio"], "del-1.webm", { type: "audio/webm" })], {
+        recording: { sessionId: "rec-1", index: 0, durationMs: 1000, streamed: false },
+        label: "Inspelning"
+      })
+    );
+    return hook;
+  }
+  const row = (hook: ReturnType<typeof recordPart>) => hook.result.current.uploads["step-1"]![0]!;
+
+  it("lets go of the part's file once it is uploaded, and the row stays as it was", async () => {
+    const hook = recordPart();
+    await waitFor(() => expect(UploadRequest.sent).toHaveLength(1));
+    act(() => UploadRequest.sent[0]!.answer(201, { id: "file-1" }));
+    await waitFor(() => expect(row(hook)).toMatchObject({ state: "done", fileId: "file-1" }));
+    const before = row(hook);
+    expect(hook.result.current.fileOf(before.key)).not.toBeNull();
+
+    act(() => hook.result.current.release("step-1", before.key));
+
+    expect(hook.result.current.fileOf(before.key)).toBeNull();
+    expect(row(hook)).toEqual(before);
+  });
+
+  it("keeps the file of a part that uploads, failed or waits to be sent again", async () => {
+    const hook = recordPart();
+    await waitFor(() => expect(UploadRequest.sent).toHaveLength(1));
+    const { key } = row(hook);
+    act(() => hook.result.current.release("step-1", key));
+    expect(hook.result.current.fileOf(key)).not.toBeNull();
+
+    act(() => UploadRequest.sent[0]!.onerror?.());
+    await waitFor(() => expect(row(hook)).toMatchObject({ state: "failed", retryable: true }));
+    act(() => hook.result.current.release("step-1", key));
+    expect(hook.result.current.fileOf(key)).not.toBeNull();
+
+    // The kept file is what goes again.
+    act(() => {
+      window.dispatchEvent(new Event("online"));
+    });
+    await waitFor(() => expect(UploadRequest.sent).toHaveLength(2));
+    expect(row(hook).state).toBe("uploading");
+  });
+
+  it("keeps the file of a part the core refused", async () => {
+    const hook = recordPart();
+    await waitFor(() => expect(UploadRequest.sent).toHaveLength(1));
+    act(() => UploadRequest.sent[0]!.answer(422, { message: "Refused" }));
+    await waitFor(() => expect(row(hook)).toMatchObject({ state: "failed", retryable: false }));
+    act(() => hook.result.current.release("step-1", row(hook).key));
+    expect(hook.result.current.fileOf(row(hook).key)).not.toBeNull();
+  });
+});
+
 describe("a recorded part sent again after the session check failed", () => {
   const probe = (generation = "a") =>
     new Response(null, { status: 204, headers: { "Eneo-Session-Generation": generation } });
