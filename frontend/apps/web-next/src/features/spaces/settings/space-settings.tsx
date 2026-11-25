@@ -486,6 +486,9 @@ function RetentionSection() {
     );
     // The flows' effective times follow the new cap.
     void queryClient.invalidateQueries({ queryKey: ["flows"] });
+    // The save stopped any read of the space on its way (`useUpdateSpace`), and such a read
+    // can carry a time another administrator set after this one: read the space again.
+    void queryClient.invalidateQueries({ queryKey: ["spaces", routeId], exact: true });
     // Runs in a personal space are not removed automatically: it says nothing of flows.
     const said = space.personal
       ? next === null

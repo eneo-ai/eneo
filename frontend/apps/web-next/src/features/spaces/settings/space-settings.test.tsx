@@ -386,6 +386,85 @@ it.each([
   }
 );
 
+it("reads the space again after a save, so a time set while the save's answer was on its way is shown", async () => {
+  const { queryClient } = showSettings();
+  const section = document.getElementById("security")!;
+  // The clear is saved; its answer is on its way.
+  const patch = deferredPatch();
+  api.PATCH.mockReturnValueOnce(patch.promise);
+  enterRetention("");
+  await waitFor(() => expect(api.PATCH).toHaveBeenCalledTimes(1));
+  const cleared = { ...state.space, data_retention_days: null };
+  // Then another administrator sets 7 days, and a read of the space that has read 7 is on its way.
+  state.space = { ...cleared, data_retention_days: 7 };
+  const counted = countSpaceReads();
+  let answer!: (value: unknown) => void;
+  counted.hold = { answer: new Promise((resolve) => (answer = resolve)) };
+  void queryClient
+    .query({ ...spaceQueryOptions(api as never, "space-1"), staleTime: 0 })
+    .catch(() => {});
+  await waitFor(() => expect(counted.reads).toBe(1));
+  // The save's answer stops that read (`useUpdateSpace`), and the read's answer comes too late.
+  await act(async () => patch.resolve(cleared));
+  await act(async () => answer({ data: state.space, response: new Response("{}") }));
+  await waitFor(() => expect(retentionField().value).toBe("7"));
+  expect(within(section).queryByText(messages.space_retention_saved_off)).toBeNull();
+});
+
+/**
+ * Saves 60 days while a read of the space is on its way, and holds the read the page makes
+ * after the save. Another administrator has set 90 by then; `land` answers the held read.
+ * The read on its way leaves the API reader on the space's query, so the next read goes
+ * through `api.GET` and can be held.
+ */
+async function saveWhileTheNextReadIsHeld(queryClient: QueryClient) {
+  const patch = deferredPatch();
+  api.PATCH.mockReturnValueOnce(patch.promise);
+  enterRetention("60");
+  await waitFor(() => expect(api.PATCH).toHaveBeenCalledTimes(1));
+  const saved = { ...state.space, data_retention_days: 60 };
+  state.space = { ...saved, data_retention_days: 90 };
+  const counted = countSpaceReads();
+  counted.hold = { answer: new Promise(() => {}) };
+  void queryClient
+    .query({ ...spaceQueryOptions(api as never, "space-1"), staleTime: 0 })
+    .catch(() => {});
+  await waitFor(() => expect(counted.reads).toBe(1));
+  let answer!: (value: unknown) => void;
+  counted.hold = { answer: new Promise((resolve) => (answer = resolve)) };
+  await act(async () => patch.resolve(saved));
+  // The page's read after the save is on its way, and the field can be edited again.
+  await waitFor(() => expect(counted.reads).toBe(2));
+  await waitFor(() => expect(retentionField().readOnly).toBe(false));
+  return {
+    land: () => act(async () => answer({ data: state.space, response: new Response("{}") }))
+  };
+}
+
+it("keeps a time typed while the space is read again after a save", async () => {
+  const { queryClient } = showSettings();
+  const section = document.getElementById("security")!;
+  const { land } = await saveWhileTheNextReadIsHeld(queryClient);
+  expect(within(section).getByText(/äldre än 60 dagar/)).toBeTruthy();
+  fireEvent.change(retentionField(), { target: { value: "45" } });
+  await land();
+  // The read has landed (the line about 60 days goes), and the typed time stays.
+  await waitFor(() => expect(within(section).queryByText(/äldre än 60 dagar/)).toBeNull());
+  expect(retentionField().value).toBe("45");
+});
+
+it("keeps a confirmation open while the space is read again after a save", async () => {
+  const { queryClient } = showSettings();
+  const section = document.getElementById("security")!;
+  const { land } = await saveWhileTheNextReadIsHeld(queryClient);
+  enterRetention("7");
+  const dialog = await screen.findByRole("alertdialog", { name: "Spara gallringstiden?" });
+  await land();
+  await waitFor(() => expect(within(section).queryByText(/äldre än 60 dagar/)).toBeNull());
+  expect(screen.getByRole("alertdialog", { name: "Spara gallringstiden?" })).toBe(dialog);
+  expect(retentionField().value).toBe("7");
+});
+
 // A time that removes content asks first: one set on a space without a time, or a shorter one.
 it.each([
   ["a time on a space without one", null, "7", "asks"],
