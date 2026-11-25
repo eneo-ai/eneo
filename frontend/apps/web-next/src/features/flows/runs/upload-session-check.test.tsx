@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { UPLOAD_RETRY_DELAYS_MS } from "./recording/upload-retry";
 import { makeInput, UploadRequest } from "./run-fixtures";
 
 /**
@@ -156,4 +157,63 @@ it("fails a part whose session check never answers at the check's limit, in the 
     "Filen kom inte fram. Försök igen med knappen, eller ta bort filen."
   );
   expect(UploadRequest.sent).toHaveLength(0);
+});
+
+describe("a recorded part sent again after the session check failed", () => {
+  /** The session check fails the `failure` way; a recorded part then fails and waits to go again. */
+  async function failedPart(failure: () => Promise<Response>) {
+    await checkFails(failure);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const hook = form();
+    record(hook, 0);
+    await vi.waitFor(() => expect(row(hook)).toMatchObject({ state: "failed", retryable: true }));
+    return hook;
+  }
+
+  /** The server is back, with no `online` event: the next attempt checks once and uploads. */
+  async function serverBackThen(hook: Form, attempt: () => unknown) {
+    fetcher.mockImplementation(async () => probe());
+    fetcher.mockClear();
+    await act(async () => attempt());
+    await vi.waitFor(() => expect(UploadRequest.sent).toHaveLength(1));
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(owner.getSessionSnapshot()).not.toHaveProperty("checkError");
+    act(() => UploadRequest.sent[0]!.answer(201, { id: "file-1" }));
+    await vi.waitFor(() => expect(row(hook)).toMatchObject({ state: "done", fileId: "file-1" }));
+  }
+
+  describe.each([
+    ["could not reach the server", offline],
+    ["answered 503", busy]
+  ])("when the last check %s", (_case, failure) => {
+    it("checks the session again before the next timed attempt, then uploads", async () => {
+      const hook = await failedPart(failure);
+      await serverBackThen(hook, () => vi.advanceTimersByTimeAsync(UPLOAD_RETRY_DELAYS_MS[0]));
+    });
+
+    it("checks the session again when Try again is pressed after the timed attempts ran out", async () => {
+      const hook = await failedPart(failure);
+      // The server stays down through every timed attempt: one check each, nothing sent.
+      for (const delay of UPLOAD_RETRY_DELAYS_MS) {
+        const checks = fetcher.mock.calls.length;
+        await act(() => vi.advanceTimersByTimeAsync(delay));
+        await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(checks + 1));
+        await vi.waitFor(() => expect(row(hook).state).toBe("failed"));
+      }
+      expect(row(hook).nextRetryAt).toBeNull();
+      expect(UploadRequest.sent).toHaveLength(0);
+      await serverBackThen(hook, () => hook.result.current.retry("step-1", row(hook).key));
+    });
+  });
+
+  it("still ends the page and sends nothing when the check finds another person's session", async () => {
+    const hook = await failedPart(offline);
+    fetcher.mockImplementation(async () => probe("someone-else"));
+    await act(() => vi.advanceTimersByTimeAsync(UPLOAD_RETRY_DELAYS_MS[0]));
+    await vi.waitFor(() => expect(owner.getSessionSnapshot().status).toBe("stale"));
+    expect(navigate).toHaveBeenCalledWith("/login", { replace: true });
+    await vi.waitFor(() => expect(row(hook).state).toBe("failed"));
+    expect(row(hook).retryable).toBe(false);
+    expect(UploadRequest.sent).toHaveLength(0);
+  });
 });

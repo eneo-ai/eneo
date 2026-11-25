@@ -79,8 +79,9 @@ it("settles a refused upload and sends its body to the same refusal handler", as
 });
 
 it("sends a recorded part again when the session check could not reach the server", async () => {
-  // Offline, the session check fails with fetch's network error, and every
-  // request is prepared against that failure until a check succeeds.
+  // The session check failed with fetch's network error, and so does the
+  // request's preparation (offline, the gate keeps that failure without
+  // checking again). Through the real gate: upload-session-check.test.tsx.
   hooks.prepare.mockRejectedValueOnce(new TypeError("Failed to fetch"));
   const hook = renderHookInApp(() => useRuntimeUploads("flow-1", undefined));
   const input = makeInput({ step_id: "step-1", accepted_mimetypes: ["audio/webm"] });
