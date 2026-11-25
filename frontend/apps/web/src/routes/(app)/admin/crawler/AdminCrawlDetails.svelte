@@ -236,7 +236,7 @@
                 ? m.crawl_origin_scheduled()
                 : details.initiated_by?.username ||
                   details.initiated_by?.email ||
-                  m.admin_crawler_not_recorded()}
+                  m.admin_crawler_no_person()}
             </p>
             <CrawlRunDetailsContent
               run={details.run}
@@ -281,7 +281,7 @@
                     {details.owner.username ? details.owner.email : ""}
                   </dd>
                 {:else}
-                  <dd class="mt-1 break-words">{m.admin_crawler_not_recorded()}</dd>
+                  <dd class="mt-1 break-words">{m.admin_crawler_no_person()}</dd>
                 {/if}
               </div>
               <div>

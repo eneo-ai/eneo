@@ -304,7 +304,7 @@ function SourceTab({
               ) : null}
             </span>
           ) : (
-            t("admin_crawler_not_recorded")
+            t("admin_crawler_no_person")
           )}
         </MetadataListItem>
         <MetadataListItem label={t("admin_crawler_schedule")}>
@@ -487,7 +487,7 @@ export function CrawlDetailsDialog({
                               ? t("crawl_origin_scheduled")
                               : data.initiated_by?.username ||
                                 data.initiated_by?.email ||
-                                t("admin_crawler_not_recorded")}
+                                t("admin_crawler_no_person")}
                           </p>
                           <CrawlRunDetailsContent
                             key={runId}

@@ -49,10 +49,10 @@
 
     table.columnPrimary({
       header: m.author(),
-      value: (item) => item.user?.email ?? "",
+      value: (item) => item.user?.email ?? m.prompt_author_none(),
       cell: (item) => {
         return Table.renderComponent(PromptCreator, {
-          user: item.value.user ?? { email: "" }
+          user: item.value.user ?? { email: m.prompt_author_none() }
         });
       }
     }),

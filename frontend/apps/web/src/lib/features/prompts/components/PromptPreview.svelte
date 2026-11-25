@@ -29,6 +29,8 @@
         </h2>
         {#if $previewedPrompt.user}
           <MemberChip member={$previewedPrompt.user}></MemberChip>
+        {:else}
+          <span class="text-secondary text-sm font-normal">{m.prompt_author_none()}</span>
         {/if}
       </div>
 
