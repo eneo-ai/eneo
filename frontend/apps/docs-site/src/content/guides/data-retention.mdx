@@ -96,8 +96,8 @@ retention setting):
   you leave the field; a time on a space without one, or a shorter time, asks
   you to confirm first. A line under the field then says what applies to the
   space's Flow runs. If someone else changed the time since the page read it,
-  nothing is saved: the page reads the time again and asks you to check it and
-  save again.
+  nothing is saved: the page drops your change and shows the time now stored,
+  so you can enter yours again.
 - **API:** `PATCH /api/v1/spaces/{space_id}/` with
   `{"data_retention_days": 30}`; `null` removes the time, leaving it out keeps it.
   Add `"expected_data_retention_days"` with the time you read (or `null`) and a
@@ -190,9 +190,9 @@ five minutes. Runs that started while the space had no time, or before the
 upgrade to this version, are never removed automatically. Removing the space's
 time pauses the removal, also for a Flow with a time of its own; setting a time
 again resumes it for the runs that started under a time. Personal spaces are
-not covered in this version. A run under a legal hold, or whose audit row or
-webhook delivery is still pending, stays, and so does a file another remaining
-run uses. An administrator with `retention_manage` can also remove due runs
+not covered in this version. A run under a legal hold, a run whose audit row is
+not delivered (pending or failed for good), and a run whose webhook delivery is
+still pending stay, and so does a file another remaining run uses. An administrator with `retention_manage` can also remove due runs
 with the explicit purge.
 
 Changing a Flow's time, or a shared space's time, writes the audit event

@@ -220,9 +220,12 @@ execution record and no audit event. In this release `flows.run_history` is the 
 that runs often: it removes finished Flow runs that started while their space had a
 time, once they are older than the space's time or the Flow's shorter one. One run, its
 steps and the file families only it uses form its unit, rolled back whole when any part
-of it cannot be removed; a run that exceeds the limits, fails or is locked by someone
-else is kept and reported as `unit_exceeds_budget`, `run_failed` or `run_locked`, and
-the other runs proceed. See
+of it cannot be removed. A run that exceeds the limits, whose removal fails on that run
+alone, or that someone else has locked is kept and reported as `unit_exceeds_budget`,
+`run_failed` or `run_locked`, and the other runs proceed. A run whose removal waits
+past the lock timeout on a row it reaches is kept as `run_locked` too. A statement
+timeout, a deadlock or an error that would fail every run ends the execution instead,
+and the runs its open chunk removed come back. See
 [Flow run-history retention](/guides/flows/retention-policy#automatic-removal).
 
 Work runs in bounded chunks. Each chunk is one database transaction with durable
