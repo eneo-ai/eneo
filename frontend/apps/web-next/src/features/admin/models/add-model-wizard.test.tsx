@@ -1327,6 +1327,42 @@ describe("the model step for a server at an address of its own", () => {
     expect(within(dialog).queryByText(/Eneo hittade/)).toBeNull();
     expect(within(dialog).queryByText(/Servern skickade/)).toBeNull();
   });
+
+  it("keeps another cloud type's catalog and region when it has an address", async () => {
+    const voxtral = { name: "voxtral-mini-latest", mode: "transcription" };
+    const { dialog } = renderWizard({
+      initialProviderId: "p-mistral",
+      fixedKind: "transcription",
+      providerList: [
+        {
+          ...existing,
+          id: "p-mistral",
+          name: "Mistral",
+          provider_type: "mistral",
+          config: { endpoint: "https://api.mistral.ai" }
+        }
+      ],
+      caps: {
+        ...catalogCaps,
+        providers: {
+          ...catalogCaps.providers,
+          mistral: {
+            ...capabilities.providers.openai,
+            modes: ["transcription"],
+            models: { transcription: [voxtral] }
+          }
+        }
+      },
+      transcriptionList: []
+    });
+
+    expect(
+      await within(dialog).findByRole("checkbox", { name: /voxtral-mini-latest/ })
+    ).toBeTruthy();
+    expect(within(dialog).queryByText(/Eneo hittade/)).toBeNull();
+    const hosting = within(dialog).getByRole("combobox", { name: /^Hosting-region/ });
+    expect(hosting.textContent).toContain("Frankrike");
+  });
 });
 
 it("creates supported providers with validated headers and keeps rejected input for retry", async () => {

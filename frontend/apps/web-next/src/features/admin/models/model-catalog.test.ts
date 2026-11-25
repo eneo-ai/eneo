@@ -37,10 +37,18 @@ describe("hasOwnEndpoint", () => {
     ["openai", "https://openai.com.example.se/v1"],
     ["openai", "https://notopenai.com/v1"],
     // An address that cannot be read is not OpenAI's service either.
-    ["openai", "gateway.example.se"],
-    ["anthropic", "https://proxy.kommun.se/v1"]
+    ["openai", "gateway.example.se"]
   ])("counts %s at %s as an address of its own", (type, endpoint) => {
     expect(hasOwnEndpoint(type, endpoint)).toBe(true);
+  });
+
+  it.each([
+    ["mistral", "https://api.mistral.ai"],
+    ["mistral", "https://gateway.example.se/v1"],
+    ["ollama", "http://ollama.kommun.se:11434"],
+    ["anthropic", "https://proxy.kommun.se/v1"]
+  ])("counts %s at %s as the type's own service, as before", (type, endpoint) => {
+    expect(hasOwnEndpoint(type, endpoint)).toBe(false);
   });
 
   it("keeps vLLM and Azure as they were", () => {
