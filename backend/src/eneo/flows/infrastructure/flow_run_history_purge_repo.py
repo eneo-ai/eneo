@@ -10,9 +10,11 @@ from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute
 
+from eneo.data_retention.application.retention_runner import is_lock_wait_timeout
 from eneo.data_retention.infrastructure.gallring_lock import (
     GallringSubject,
     acquire_shared,
@@ -159,7 +161,8 @@ class FlowRunRemovalOutcome(StrEnum):
     # webhook delivery that came after the selection).
     NOT_PURGEABLE = "not_purgeable"
     # Another transaction holds the run, a step result, an upload binding, a
-    # live text or a file family.
+    # live text or a file family, or a row a delete waited on past the lock
+    # timeout.
     LOCKED = "locked"
     # The rows or files left in this call cannot fund it.
     SHORT = "short"
@@ -448,12 +451,13 @@ class FlowRunHistoryPurgeRepository:
         are locked without waiting, so a row another transaction holds gives
         LOCKED instead of a wait that could end in a deadlock: a transcript
         edit locks the step result and then reaches the run through a foreign
-        key, the opposite order. The deletes of the run's outbox rows and of
-        its cascade can still wait for a row, up to the lock timeout, which
-        ends the chunk. Anything but REMOVED rolls the
+        key, the opposite order. The deletes of the run's rows and files can
+        still wait for a row nothing locked first (its cascade, an outbox row,
+        a stored content the file owner marks); a wait past the lock timeout
+        gives LOCKED too. Anything but REMOVED rolls the
         savepoint back, so a run is never gone while one of its files can
-        still be read. An error rolls the savepoint back and gives FAILED
-        with the error; the caller decides whether it is the run's own."""
+        still be read. Any other error rolls the savepoint back and gives
+        FAILED with the error; the caller decides whether it is the run's own."""
         work = _Work()
         try:
             async with self.session.begin_nested() as unit:
@@ -467,6 +471,13 @@ class FlowRunHistoryPurgeRepository:
                 if removal.outcome is not FlowRunRemovalOutcome.REMOVED:
                     await unit.rollback()
         except Exception as error:
+            # Leaving the block rolled the savepoint back, which also restores
+            # the transaction. Only the database's own lock wait counts: a
+            # busy gallring lock is not a row of this run.
+            if isinstance(error, DBAPIError) and is_lock_wait_timeout(error):
+                return work.charged(
+                    FlowRunRemovalOutcome.LOCKED, max_rows=max_rows, max_files=max_files
+                )
             return work.charged(
                 FlowRunRemovalOutcome.FAILED,
                 max_rows=max_rows,
