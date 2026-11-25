@@ -10566,6 +10566,7 @@
   "flow_runtime_input_mimetypes_default": "Standardtyper för formatet",
   "app_recording_device_disconnected": "Inspelningen stoppades eftersom mikrofonen kopplades bort.",
   "enable_mcp_in_space_settings": "Aktivera MCP-servrar i space-inställningarna först.",
+  "speaker_service_dialog_saved_title": "{name} är sparad",
   "speaker_service_active_label": "Aktiv: {name}",
   "speaker_service_checked_at": "Testad <time></time>",
   "speaker_service_check_announce": "Anslutningstest för {name}: {status}",
