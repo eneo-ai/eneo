@@ -3,7 +3,7 @@ import { act, cleanup, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderHookInApp } from "@/test/render";
 import { UPLOAD_RETRY_DELAYS_MS } from "./recording/upload-retry";
-import { makeInput } from "./run-fixtures";
+import { makeInput, UploadRequest } from "./run-fixtures";
 import { useRuntimeUploads } from "./use-runtime-uploads";
 
 const hooks = vi.hoisted(() => ({
@@ -17,44 +17,6 @@ vi.mock("@/lib/api/base", async (original) => ({
   onRawRefusal: hooks.response
 }));
 vi.mock("./runs-api", () => ({ deleteRuntimeFile: vi.fn(async () => undefined) }));
-
-class UploadRequest {
-  static sent: UploadRequest[] = [];
-  headers = new Headers();
-  responseHeaders = new Headers({ "Eneo-Session-Generation": "a", "x-trace-id": "trace-1" });
-  status = 0;
-  responseText = "";
-  upload = { onprogress: null as ((event: ProgressEvent) => void) | null };
-  onload: (() => void) | null = null;
-  onerror: (() => void) | null = null;
-  onabort: (() => void) | null = null;
-  aborted = false;
-  url = "";
-  open(_method: string, url: string) {
-    this.url = url;
-  }
-  setRequestHeader(name: string, value: string) {
-    this.headers.set(name, value);
-  }
-  getAllResponseHeaders() {
-    return Array.from(this.responseHeaders, ([key, value]) => `${key}: ${value}`).join("\r\n");
-  }
-  getResponseHeader(name: string) {
-    return this.responseHeaders.get(name);
-  }
-  send() {
-    UploadRequest.sent.push(this);
-  }
-  abort() {
-    this.aborted = true;
-    this.onabort?.();
-  }
-  answer(status: number, body: unknown) {
-    this.status = status;
-    this.responseText = JSON.stringify(body);
-    this.onload?.();
-  }
-}
 
 let session: AbortController;
 beforeEach(() => {
