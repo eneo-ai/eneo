@@ -1160,6 +1160,52 @@ describe("the model step for a server at an address of its own", () => {
     expect(within(dialog).queryByText(/Eneo hittade/)).toBeNull();
   });
 
+  it("asks where a server of its own stands instead of guessing the region", async () => {
+    const { dialog, onOpenChange } = renderStep(gateway, liveTranscriptionModels);
+
+    const hosting = await within(dialog).findByRole("combobox", { name: /^Hosting-region/ });
+    expect(hosting.textContent).not.toContain("USA");
+    expect(hosting.textContent).toContain("Välj region");
+    expect(describedBy(hosting)).toContain(
+      "Var servern som kör modellen står. Eneo kan inte se det, så välj själv."
+    );
+    fireEvent.click(await within(dialog).findByRole("checkbox", { name: /pianissimo-sv/ }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till 1 modell" }));
+
+    expect(document.activeElement).toBe(hosting);
+    expect(within(dialog).getByText("Välj var servern står.")).toBeTruthy();
+    expect(api.POST).not.toHaveBeenCalled();
+    await expectNoAxeViolations(document.body);
+
+    fireEvent.keyDown(hosting, { key: "Enter" });
+    fireEvent.click(await screen.findByRole("option", { name: "Sverige" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till 1 modell" }));
+
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+    expect(api.POST).toHaveBeenCalledWith("/api/v1/admin/tenant-models/transcription/", {
+      body: expect.objectContaining({ name: "pianissimo-sv", hosting: "swe" })
+    });
+  });
+
+  it("asks for the region of a provider just created with an address", async () => {
+    const { dialog } = renderWizard({ fixedKind: "transcription", caps: catalogCaps });
+    api.POST.mockImplementation(
+      (path: string, options?: { body?: { config?: Record<string, string> } }) =>
+        path === "/api/v1/admin/model-providers/"
+          ? ok({ ...existing, id: "p-new", config: options?.body?.config ?? {} })
+          : ok({})
+    );
+    fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till OpenAI" }));
+    await waitFor(() => expect(field(/^API-nyckel/)).toBeTruthy());
+    fireEvent.change(field(/^API-nyckel/), { target: { value: "sk-live-1234" } });
+    fireEvent.change(field(/^Bekräfta API-nyckel/), { target: { value: "sk-live-1234" } });
+    fireEvent.change(field(/^Endpoint-URL/), { target: { value: "https://gateway.example/v1" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Nästa" }));
+
+    const hosting = await within(dialog).findByRole("combobox", { name: /^Hosting-region/ });
+    expect(hosting.textContent).toContain("Välj region");
+  });
+
   it("treats Azure, which always has an address, as the cloud service it is", async () => {
     const { dialog } = renderStep(
       {

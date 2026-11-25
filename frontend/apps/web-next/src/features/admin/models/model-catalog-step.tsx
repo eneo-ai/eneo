@@ -56,7 +56,8 @@ import {
   HOSTING_REGIONS,
   isEmbeddingFamily,
   isHostingRegion,
-  type EmbeddingFamily
+  type EmbeddingFamily,
+  type HostingRegion
 } from "./model-metadata-options";
 
 const NO_CLASSIFICATION = "__none__";
@@ -221,7 +222,11 @@ export function ModelCatalogStep({
   const [manualBusy, setManualBusy] = useState(false);
   /** An id typed in that the provider has already. */
   const [manualTaken, setManualTaken] = useState<string | null>(null);
-  const [hosting, setHosting] = useState(() => defaultModelHosting(providerType));
+  const [chosenHosting, setChosenHosting] = useState<HostingRegion | null>(null);
+  // The type says where its cloud service stands; it says nothing about a
+  // server of its own, so that one has no default and must be chosen.
+  const hosting = chosenHosting ?? (hasOwnEndpoint ? null : defaultModelHosting(providerType));
+  const hostingRef = useRef<HTMLDivElement>(null);
   const [embeddingFamily, setEmbeddingFamily] = useState<EmbeddingFamily>("openai");
   const [classificationId, setClassificationId] = useState(NO_CLASSIFICATION);
   const [realtime, setRealtime] = useState(false);
@@ -344,7 +349,7 @@ export function ModelCatalogStep({
   }
 
   const create = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (region: HostingRegion) => {
       const models = selectedModels;
       const results = await Promise.allSettled(
         models.map((model) => {
@@ -357,7 +362,7 @@ export function ModelCatalogStep({
               family: embeddingFamily,
               dimensions: model.output_vector_size ?? null,
               max_input: model.max_input_tokens ?? null,
-              hosting,
+              hosting: region,
               input_cost_per_token: model.input_cost_per_token ?? null,
               output_cost_per_token: model.output_cost_per_token ?? null,
               security_classification: selectedClassification
@@ -369,7 +374,7 @@ export function ModelCatalogStep({
               name: model.name,
               display_name: displayName,
               family: providerType,
-              hosting,
+              hosting: region,
               cost_per_image: model.cost_per_image ?? null,
               // The request defaults are edited afterwards; "auto" lets the model decide.
               default_size: "auto",
@@ -384,7 +389,7 @@ export function ModelCatalogStep({
               name: model.name,
               display_name: displayName,
               family: providerType,
-              hosting,
+              hosting: region,
               security_classification: selectedClassification
             });
           }
@@ -394,7 +399,7 @@ export function ModelCatalogStep({
               name: model.name,
               display_name: displayName,
               family: providerType,
-              hosting,
+              hosting: region,
               cost_per_minute: model.cost_per_minute ?? null,
               supports_realtime: realtime && realtimeAvailable,
               security_classification: selectedClassification
@@ -409,7 +414,7 @@ export function ModelCatalogStep({
             vision: model.supports_vision,
             reasoning: model.supports_reasoning,
             supports_tool_calling: model.supports_function_calling,
-            hosting,
+            hosting: region,
             family: providerType,
             input_cost_per_token: model.input_cost_per_token ?? null,
             output_cost_per_token: model.output_cost_per_token ?? null,
@@ -456,6 +461,11 @@ export function ModelCatalogStep({
 
   /** Moves focus to the first problem, shown at its field (WCAG 3.3.1). */
   function focusFirstProblem(): boolean {
+    if (!hosting) {
+      const trigger = hostingRef.current?.querySelector<HTMLElement>('[role="combobox"]');
+      trigger?.focus();
+      return Boolean(trigger);
+    }
     if (selected.size === 0) return focus.focus("list") || focus.focus("manual");
     const model = needsLimits[0];
     if (!model) return false;
@@ -466,7 +476,7 @@ export function ModelCatalogStep({
 
   async function handleCreate() {
     if (busy) return;
-    if (selected.size === 0 || needsLimits.length > 0) {
+    if (!hosting || selected.size === 0 || needsLimits.length > 0) {
       flushSync(() => setSubmitted(true));
       focusFirstProblem();
       return;
@@ -495,7 +505,7 @@ export function ModelCatalogStep({
       }
       setValidating(false);
     }
-    create.mutate();
+    create.mutate(hosting);
   }
 
   const noSelection = submitted && selected.size === 0;
@@ -516,14 +526,24 @@ export function ModelCatalogStep({
         />
       )}
 
-      <Selector
-        label={t("hosting_region")}
-        options={HOSTING_REGIONS.map((value) => ({ value, label: t(`hosting_${value}`) }))}
-        value={hosting}
-        onChange={(value) => {
-          if (isHostingRegion(value)) setHosting(value);
-        }}
-      />
+      <div ref={hostingRef}>
+        <Selector
+          label={t("hosting_region")}
+          description={hasOwnEndpoint ? t("hosting_region_own_server_help") : undefined}
+          placeholder={t("hosting_region_placeholder")}
+          options={HOSTING_REGIONS.map((value) => ({ value, label: t(`hosting_${value}`) }))}
+          value={hosting ?? undefined}
+          isRequired={hasOwnEndpoint}
+          status={
+            submitted && !hosting
+              ? { type: "error", message: t("form_problem_choose_hosting_region") }
+              : undefined
+          }
+          onChange={(value) => {
+            if (isHostingRegion(value)) setChosenHosting(value);
+          }}
+        />
+      </div>
       {mode === "embedding" && (
         <Selector
           label={t("model_family")}
