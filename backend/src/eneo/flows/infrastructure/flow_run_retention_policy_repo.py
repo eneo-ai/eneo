@@ -7,6 +7,7 @@ from uuid import UUID
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from eneo.data_retention.domain.rules import RetentionTimeChangedError
 from eneo.data_retention.infrastructure.gallring_lock import (
     GallringSubject,
     acquire_exclusive,
@@ -32,6 +33,7 @@ from eneo.flows.flow_retention_policy import (
 )
 from eneo.flows.infrastructure.flow_retention_hold_repo import flow_has_active_hold
 from eneo.main.exceptions import NotFoundException
+from eneo.main.models import NOT_PROVIDED, NotProvided, is_provided
 from eneo.tenants.tenant_repo import update_tenant_flow_settings
 
 
@@ -198,18 +200,36 @@ class FlowRunRetentionPolicyRepository:
         tenant_id: UUID,
         flow_id: UUID,
         policy: FlowRunRetentionPolicy | None,
+        expected_effective_days: int | None | NotProvided = NOT_PROVIDED,
+        expected_inherited_days: int | None | NotProvided = NOT_PROVIDED,
     ) -> FlowRunRetentionPolicyChange:
         await acquire_exclusive(self.session, GallringSubject.FLOW_HISTORY)
         await self._lock_flow(tenant_id=tenant_id, flow_id=flow_id)
         before = await self.get_flow(tenant_id=tenant_id, flow_id=flow_id)
+        space_days = before.inherited_policy.days if before.inherited_policy else None
         # Read under the lock the Space writer also takes, so the cap holds.
         # Every time sent is checked, also one stored before the cap was lowered.
         require_within_space_cap(
-            space_days=before.inherited_policy.days
-            if before.inherited_policy
-            else None,
+            space_days=space_days,
             days=policy.days if policy is not None else None,
         )
+        # A change chosen against the times read then is refused when, under
+        # the same lock, one of them is another: the Space's or the Flow's time
+        # was changed since. The Space's time counts on its own, since giving
+        # a Space a time starts the removal without changing the time that
+        # applies.
+        current_days = before.effective.effective_days
+        if before.local_policy != policy and (
+            (
+                is_provided(expected_effective_days)
+                and expected_effective_days != current_days
+            )
+            or (
+                is_provided(expected_inherited_days)
+                and expected_inherited_days != space_days
+            )
+        ):
+            raise RetentionTimeChangedError(current_days=current_days)
         if before.local_policy != policy:
             await self.session.execute(
                 sa.update(Flows)

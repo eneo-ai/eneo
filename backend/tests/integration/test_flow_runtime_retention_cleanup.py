@@ -75,6 +75,7 @@ from eneo.flows.infrastructure.flow_run_audit_outbox_repo import (
 from eneo.flows.infrastructure.flow_run_history_purge_repo import (
     FlowRunHistoryPurgeCounts,
     FlowRunHistoryPurgeRepository,
+    FlowRunHistoryPurgeResult,
 )
 from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
     FlowRunWebhookDeliveryRepository,
@@ -206,6 +207,21 @@ async def flow_retention_service(
     return FlowRetentionRepository(async_session)
 
 
+async def _purge_due_history(
+    service: FlowRetentionRepository, *, now: datetime, limit: int
+) -> FlowRunHistoryPurgeResult:
+    """The explicit purge's selection and removal, without its scope and
+    receipt: what it takes and how it removes it."""
+    run_ids = list(
+        await service.session.scalars(
+            service._build_flow_run_history_purge_batch_query(now=now, limit=limit)
+        )
+    )
+    return await FlowRunHistoryPurgeRepository(service.session).purge_run_history(
+        run_ids
+    )
+
+
 @pytest.fixture
 async def flow_retention_space(
     async_session: AsyncSession, test_tenant, admin_user
@@ -260,6 +276,7 @@ async def _create_flow_runtime_fixture(
     flow_settings: dict | None = None,
     flow_deleted: bool = False,
     run_id: UUID | None = None,
+    marked: bool = False,
 ) -> FlowRuntimeRetentionFixture:
     if flow_settings is not None:
         await async_session.execute(
@@ -359,6 +376,7 @@ async def _create_flow_runtime_fixture(
         input_payload_json={"input": "source"},
         output_payload_json={"result": "ok"},
         job_id=None,
+        started_under_space_retention=marked,
         created_at=created_at,
         updated_at=created_at,
     )
@@ -1073,19 +1091,22 @@ async def _flush_and_clear_identity_map(async_session: AsyncSession) -> None:
 
 
 @pytest.mark.asyncio
-async def test_scheduled_cleanup_preserves_all_flow_owned_data(
+async def test_scheduled_cleanup_removes_only_marked_due_flow_runs(
     db_container,
     db_session,
     completion_model_factory,
+    space_factory,
 ) -> None:
-    """Every registered retention task runs and leaves Flow data in place.
+    """Every registered retention task runs; of Flow data, only a run that
+    started under its shared space's time, and is past it, goes.
 
     The organization's conversation time and the unused-upload grace both
     make old content due, and a chat and an unreferenced file are removed, so
-    the run did work. The Flow data is older than any retention time, and an
-    authoring chat has not been asked anything yet. Mutants: a registered task
-    that removes old Flow runs; one that removes live transcripts; the
-    empty-session sweep without its authoring-chat guard."""
+    the run did work. The other Flow data is older than any retention time but
+    unmarked, in a personal space, and an authoring chat has not been asked
+    anything yet. Mutants: a registered task that removes unmarked Flow runs;
+    one that removes live transcripts; the empty-session sweep without its
+    authoring-chat guard."""
     now = datetime.now(timezone.utc)
     async with db_container() as setup_container:
         session = setup_container.session()
@@ -1138,6 +1159,20 @@ async def test_scheduled_cleanup_preserves_all_flow_owned_data(
             days_old=400,
             flow_retention_days=1,
         )
+        shared = await space_factory(
+            session, f"Shared Flow retention {uuid4()}", data_retention_days=30
+        )
+        marked = await _create_flow_runtime_fixture(
+            session,
+            tenant=tenant,
+            user=user,
+            space=shared,
+            assistant=assistant,
+            days_old=400,
+            marked=True,
+        )
+        marked_run_id = marked.run.id
+        marked_file_ids = (marked.generated_file.id, marked.runtime_input_file.id)
         outbox_id = await _add_flow_audit_outbox_row(
             session,
             run=runtime.run,
@@ -1304,8 +1339,13 @@ async def test_scheduled_cleanup_preserves_all_flow_owned_data(
         assert report.job_run_id is not None, report
         assert report.outcome is RetentionJobOutcome.SUCCEEDED, report
         assert not [key for key in report.counts if "flow" in key], report
+    [flow_runs] = [report for report in reports if report.task == "flows.run_history"]
+    assert flow_runs.counts["runs.runs_deleted"] == 1, flow_runs
 
     async with db_session() as session:
+        assert await session.get(FlowRuns, marked_run_id) is None
+        for file_id in marked_file_ids:
+            assert await session.get(Files, file_id) is None
         assert await session.get(Questions, question_id) is None
         assert await session.get(Files, unreferenced_file_id) is None
         assert await session.get(FlowRuns, run_id) is not None
@@ -1567,7 +1607,8 @@ async def test_flow_run_history_purge_preserves_canonical_audit(
         with_audit_log=True,
     )
 
-    result = await flow_retention_service.purge_old_flow_run_history_batch(
+    result = await _purge_due_history(
+        flow_retention_service,
         now=datetime.now(timezone.utc),
         limit=10,
     )
@@ -1636,7 +1677,8 @@ async def test_flow_run_history_purge_preserves_canonical_audit(
         == 0
     )
 
-    second_result = await flow_retention_service.purge_old_flow_run_history_batch(
+    second_result = await _purge_due_history(
+        flow_retention_service,
         now=datetime.now(timezone.utc),
         limit=10,
     )
@@ -1858,7 +1900,8 @@ async def test_flow_run_history_purge_reclaims_runtime_source_after_final_refere
     await async_session.flush()
     live_transcript_id = live_transcript.id
 
-    first_result = await flow_retention_service.purge_old_flow_run_history_batch(
+    first_result = await _purge_due_history(
+        flow_retention_service,
         now=datetime.now(timezone.utc),
         limit=10,
     )
@@ -1883,7 +1926,8 @@ async def test_flow_run_history_purge_reclaims_runtime_source_after_final_refere
     )
     assert await async_session.get(FlowLiveTranscripts, live_transcript_id) is not None
 
-    second_result = await flow_retention_service.purge_old_flow_run_history_batch(
+    second_result = await _purge_due_history(
+        flow_retention_service,
         now=datetime.now(timezone.utc),
         limit=10,
     )
@@ -1907,7 +1951,8 @@ async def test_flow_run_history_purge_reclaims_runtime_source_after_final_refere
         tenant_id=test_tenant.id,
     )
 
-    third_result = await flow_retention_service.purge_old_flow_run_history_batch(
+    third_result = await _purge_due_history(
+        flow_retention_service,
         now=datetime.now(timezone.utc),
         limit=10,
     )
@@ -2006,8 +2051,8 @@ async def test_the_live_text_of_a_recording_goes_with_any_of_its_parts(
     await async_session.flush()
     live_transcript_id = live_transcript.id
 
-    await flow_retention_service.purge_old_flow_run_history_batch(
-        now=datetime.now(timezone.utc), limit=10
+    await _purge_due_history(
+        flow_retention_service, now=datetime.now(timezone.utc), limit=10
     )
     await _flush_and_clear_identity_map(async_session)
 
@@ -2117,7 +2162,7 @@ async def test_the_live_text_of_a_recording_goes_when_a_later_run_releases_a_par
     live_transcript_id = live_transcript.id
     keeps_second_id = keeps_second.id
 
-    await flow_retention_service.purge_old_flow_run_history_batch(now=now, limit=10)
+    await _purge_due_history(flow_retention_service, now=now, limit=10)
     await _flush_and_clear_identity_map(async_session)
     assert await async_session.get(FlowRuns, fixture.run.id) is None
     assert await async_session.get(FlowLiveTranscripts, live_transcript_id) is not None
@@ -2128,8 +2173,8 @@ async def test_the_live_text_of_a_recording_goes_when_a_later_run_releases_a_par
         .where(FlowRuns.id == keeps_second_id)
         .values(created_at=created_at, started_at=created_at, finished_at=created_at)
     )
-    await flow_retention_service.purge_old_flow_run_history_batch(
-        now=datetime.now(timezone.utc), limit=10
+    await _purge_due_history(
+        flow_retention_service, now=datetime.now(timezone.utc), limit=10
     )
     await _flush_and_clear_identity_map(async_session)
 
@@ -2167,7 +2212,8 @@ async def test_flow_run_history_purge_keeps_runtime_source_with_another_owner(
     )
     await async_session.flush()
 
-    result = await flow_retention_service.purge_old_flow_run_history_batch(
+    result = await _purge_due_history(
+        flow_retention_service,
         now=datetime.now(timezone.utc),
         limit=10,
     )
@@ -2299,7 +2345,8 @@ async def test_flow_run_history_purge_keeps_the_origin_of_files_used_elsewhere(
     unused_output_id = unused_output.id
     await async_session.flush()
 
-    result = await flow_retention_service.purge_old_flow_run_history_batch(
+    result = await _purge_due_history(
+        flow_retention_service,
         now=datetime.now(timezone.utc),
         limit=10,
     )
@@ -2359,7 +2406,8 @@ async def test_flow_run_history_purge_removes_pdf_input_with_extracted_image(
     )
     assert len(content_ids) == 2
 
-    result = await flow_retention_service.purge_old_flow_run_history_batch(
+    result = await _purge_due_history(
+        flow_retention_service,
         now=datetime.now(timezone.utc),
         limit=10,
     )
@@ -2460,13 +2508,17 @@ async def test_flow_run_history_purge_rollback_restores_run_binding_and_source(
 
 
 @pytest.mark.asyncio
-async def test_flow_run_history_purge_rejects_missing_primary_without_partial_delete(
+async def test_flow_run_history_purge_removes_an_input_without_primary_content(
     async_session: AsyncSession,
     test_tenant,
     admin_user,
     flow_retention_space: Spaces,
     flow_retention_assistant: Assistants,
 ) -> None:
+    """An input File without primary content counts as zero bytes, and the run
+    and the File go as any other. Mutants: such a File fails the purge, so one
+    run stops every purge behind it; it is left out of the sizes, so its
+    binding and File are never released."""
     fixture = await _create_flow_runtime_fixture(
         async_session,
         tenant=test_tenant,
@@ -2478,47 +2530,73 @@ async def test_flow_run_history_purge_rejects_missing_primary_without_partial_de
     )
     run_id = fixture.run.id
     source_file_id = fixture.runtime_input_file.id
-    source_content_id = await async_session.scalar(
-        select(FileContentReferences.content_id).where(
-            FileContentReferences.file_id == source_file_id
-        )
-    )
-    assert source_content_id is not None
     await async_session.execute(
         delete(FileContentReferences).where(
             FileContentReferences.file_id == source_file_id
         )
     )
-    savepoint = await async_session.begin_nested()
 
-    with pytest.raises(
-        RuntimeError,
-        match=r"File row\(s\) without durable primary content",
-    ):
-        await FlowRunHistoryPurgeRepository(async_session).purge_run_history([run_id])
+    result = await FlowRunHistoryPurgeRepository(async_session).purge_run_history(
+        [run_id]
+    )
+    await _flush_and_clear_identity_map(async_session)
 
-    await savepoint.rollback()
-    async_session.expunge_all()
-    assert await async_session.get(FlowRuns, run_id) is not None
-    assert await async_session.get(Files, source_file_id) is not None
-    assert await _flow_runtime_upload_exists(
+    assert result.counts.flow_runs_purged == 1
+    assert result.counts.flow_runtime_source_candidates == 1
+    assert result.counts.flow_runtime_source_candidate_bytes == 0
+    assert result.counts.flow_runtime_source_bindings_deleted == 1
+    assert result.counts.flow_runtime_source_files_deleted == 1
+    assert result.counts.flow_runtime_source_bytes_deleted == 0
+    assert await async_session.get(FlowRuns, run_id) is None
+    assert await async_session.get(Files, source_file_id) is None
+    assert not await _flow_runtime_upload_exists(
         async_session,
         file_id=source_file_id,
         flow_id=fixture.flow.id,
         tenant_id=test_tenant.id,
     )
-    assert (
-        await _count_for_run(
-            async_session,
-            FlowRunStepInputFiles,
-            run_id=run_id,
-        )
-        == 1
+
+
+@pytest.mark.asyncio
+async def test_abandoned_upload_purge_removes_an_upload_without_primary_content(
+    async_session: AsyncSession,
+    test_tenant,
+    admin_user,
+    flow_retention_space: Spaces,
+    flow_retention_service: FlowRetentionRepository,
+) -> None:
+    """Mutant: an upload without primary content stops the abandoned-upload
+    purge, or is never released."""
+    now = datetime.now(timezone.utc)
+    abandoned = await _create_unbound_runtime_upload_fixture(
+        async_session,
+        tenant=test_tenant,
+        user=admin_user,
+        space=flow_retention_space,
+        uploaded_at=now - timedelta(days=2),
+        size=321,
     )
-    content = await async_session.get(ObjectContents, source_content_id)
-    assert content is not None
-    assert content.state == ContentState.DELETE_PENDING.value
-    assert content.reference_count == 0
+    file_id = abandoned.file.id
+    await async_session.execute(
+        delete(FileContentReferences).where(FileContentReferences.file_id == file_id)
+    )
+    await async_session.execute(
+        update(Tenants)
+        .where(Tenants.id == test_tenant.id)
+        .values(flow_runtime_upload_abandonment_days=1)
+    )
+    await async_session.flush()
+
+    counts = await flow_retention_service.purge_abandoned_flow_runtime_uploads(
+        now=now, limit=10
+    )
+    await _flush_and_clear_identity_map(async_session)
+
+    assert counts.flow_runtime_source_candidates == 1
+    assert counts.flow_runtime_source_candidate_bytes == 0
+    assert counts.flow_runtime_source_bindings_deleted == 1
+    assert counts.flow_runtime_source_files_deleted == 1
+    assert await async_session.get(Files, file_id) is None
 
 
 @pytest.mark.parametrize(
@@ -2557,7 +2635,8 @@ async def test_flow_run_history_purge_keeps_run_with_pending_webhook(
         ),
     )
 
-    result = await flow_retention_service.purge_old_flow_run_history_batch(
+    result = await _purge_due_history(
+        flow_retention_service,
         now=now,
         limit=10,
     )
@@ -2621,7 +2700,8 @@ async def test_flow_run_history_purge_removes_run_with_dead_lettered_webhook(
         )
     )
 
-    result = await flow_retention_service.purge_old_flow_run_history_batch(
+    result = await _purge_due_history(
+        flow_retention_service,
         now=datetime.now(timezone.utc),
         limit=10,
     )
@@ -2663,7 +2743,8 @@ async def test_flow_run_history_purge_keeps_generated_file_shared_with_retained_
         generated_file=fixture.generated_file,
     )
 
-    result = await flow_retention_service.purge_old_flow_run_history_batch(
+    result = await _purge_due_history(
+        flow_retention_service,
         now=datetime.now(timezone.utc),
         limit=10,
     )
@@ -2706,7 +2787,8 @@ async def test_flow_run_history_purge_removes_generated_file_with_derived_child(
         parent_file_id=fixture.generated_file.id,
     )
 
-    result = await flow_retention_service.purge_old_flow_run_history_batch(
+    result = await _purge_due_history(
+        flow_retention_service,
         now=datetime.now(timezone.utc),
         limit=10,
     )
@@ -2748,7 +2830,8 @@ async def test_flow_run_history_purge_caps_a_longer_flow_time_by_the_space(
         flow_retention_days=1,
     )
 
-    result = await flow_retention_service.purge_old_flow_run_history_batch(
+    result = await _purge_due_history(
+        flow_retention_service,
         now=datetime.now(timezone.utc),
         limit=10,
     )
@@ -2779,7 +2862,8 @@ async def test_flow_run_history_purge_uses_space_policy_when_flow_inherits(
         flow_retention_days=None,
     )
 
-    result = await flow_retention_service.purge_old_flow_run_history_batch(
+    result = await _purge_due_history(
+        flow_retention_service,
         now=datetime.now(timezone.utc),
         limit=10,
     )
@@ -2826,7 +2910,8 @@ async def test_flow_run_history_purge_uses_space_retention_one_day_boundary(
     purged.run.finished_at = purged_anchor
     await async_session.flush()
 
-    result = await flow_retention_service.purge_old_flow_run_history_batch(
+    result = await _purge_due_history(
+        flow_retention_service,
         now=now,
         limit=10,
     )
@@ -2874,7 +2959,8 @@ async def test_flow_run_history_purge_skips_old_non_terminal_runs(
     run_id = fixture.run.id
     flow_id = fixture.flow.id
 
-    counts = await flow_retention_service.purge_old_flow_run_history_batch(
+    counts = await _purge_due_history(
+        flow_retention_service,
         now=datetime.now(timezone.utc),
         limit=10,
     )
@@ -2918,7 +3004,8 @@ async def test_flow_run_history_purge_keeps_runs_without_retention_policy(
         flow_retention_days=None,
     )
 
-    result = await flow_retention_service.purge_old_flow_run_history_batch(
+    result = await _purge_due_history(
+        flow_retention_service,
         now=datetime.now(timezone.utc),
         limit=10,
     )
@@ -2963,7 +3050,8 @@ async def test_flow_run_history_purge_skips_runs_with_undelivered_audit_outbox(
     )
 
     now = datetime.now(timezone.utc)
-    result = await flow_retention_service.purge_old_flow_run_history_batch(
+    result = await _purge_due_history(
+        flow_retention_service,
         now=now,
         limit=10,
     )
@@ -3021,7 +3109,8 @@ async def test_successful_audit_outbox_redrive_delivery_permits_existing_purge_p
         operator_identity="test-operator",
     )
     delivery_result = await delivery_service.deliver_due(now=now)
-    result = await flow_retention_service.purge_old_flow_run_history_batch(
+    result = await _purge_due_history(
+        flow_retention_service,
         now=now,
         limit=10,
     )
@@ -3033,7 +3122,7 @@ async def test_successful_audit_outbox_redrive_delivery_permits_existing_purge_p
 
 
 @pytest.mark.asyncio
-async def test_purge_old_flow_run_history_batch_drains_only_eligible_runs(
+async def test_the_explicit_purge_drains_only_eligible_runs(
     async_session: AsyncSession,
     test_tenant,
     admin_user,
@@ -3080,15 +3169,18 @@ async def test_purge_old_flow_run_history_batch_drains_only_eligible_runs(
     )
 
     now = datetime.now(timezone.utc)
-    first_batch = await flow_retention_service.purge_old_flow_run_history_batch(
+    first_batch = await _purge_due_history(
+        flow_retention_service,
         now=now,
         limit=1,
     )
-    second_batch = await flow_retention_service.purge_old_flow_run_history_batch(
+    second_batch = await _purge_due_history(
+        flow_retention_service,
         now=now,
         limit=1,
     )
-    drained_batch = await flow_retention_service.purge_old_flow_run_history_batch(
+    drained_batch = await _purge_due_history(
+        flow_retention_service,
         now=now,
         limit=1,
     )
@@ -3151,7 +3243,8 @@ async def test_flow_run_history_blocked_counts_use_audit_webhook_precedence(
         with_audit_log=False,
     )
 
-    result = await flow_retention_service.purge_old_flow_run_history_batch(
+    result = await _purge_due_history(
+        flow_retention_service,
         now=now,
         limit=10,
     )
@@ -3189,7 +3282,8 @@ async def test_flow_run_history_purge_removes_run_for_soft_deleted_flow(
         flow_deleted=True,
     )
 
-    result = await flow_retention_service.purge_old_flow_run_history_batch(
+    result = await _purge_due_history(
+        flow_retention_service,
         now=datetime.now(timezone.utc),
         limit=10,
     )

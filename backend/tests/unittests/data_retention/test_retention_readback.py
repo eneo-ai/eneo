@@ -304,4 +304,6 @@ def test_each_task_keeps_its_own_not_due_reasons() -> None:
         "sessions.empty": {"no_longer_due"},
         "files.unused": {"files_not_old_enough"},
         "retention.jobs": set(),
+        # A run it cannot remove stays due: a restore is not complete with it.
+        "flows.run_history": set(),
     }

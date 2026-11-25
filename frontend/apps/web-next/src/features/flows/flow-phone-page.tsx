@@ -77,6 +77,7 @@ export function FlowPhonePage({ flowId, onStart }: { flowId: string; onStart: ()
                   services: space.transcription_services ?? []
                 }}
                 classification={space.security_classification}
+                personalSpace={space.personal}
               />
             </div>
           </Collapsible>

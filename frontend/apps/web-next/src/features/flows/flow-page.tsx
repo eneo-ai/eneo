@@ -876,6 +876,7 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
       flow={flow}
       canEdit={canEdit}
       setsSpaceRetention={space.personal ? mayEdit : spaceCan("edit", "space")}
+      personalSpace={space.personal}
       transcription={transcription}
       onSave={saveSettings}
       onEditingChange={onUnsavedChange}

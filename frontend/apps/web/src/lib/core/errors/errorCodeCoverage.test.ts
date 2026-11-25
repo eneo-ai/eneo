@@ -64,6 +64,8 @@ const UNLOCALIZED_BY_DESIGN = new Map<number, string>([
 
   // Browser-session protocol of the Vite web app, answered with a reload.
   [9090, "SESSION_GENERATION_MISMATCH — answered by a reload, never shown"],
+  // Raised only when a client sends the retention time it replaces; this app never does.
+  [9087, "RETENTION_TIME_CHANGED — needs an expected retention time this app never sends"],
   // Localized from its details instead of one message per code.
   [9080, "PERSONAL_SKILLS_REJECTED — personalChatSkills.ts shows the copy for details.reason"]
 ]);

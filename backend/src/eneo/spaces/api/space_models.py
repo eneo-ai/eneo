@@ -209,11 +209,27 @@ class UpdateSpaceRequest(BaseModel):
             "Applies to all assistants and apps in the space that don't have "
             "their own retention policy. It also caps the run history of every "
             "Flow in the space: a Flow may choose a shorter time, never a longer "
-            "one. In a shared space, changing it needs the `retention_manage` "
+            "one. In a shared space it also turns on the automatic removal of Flow "
+            "runs: a run that starts while the space has a time is removed, with "
+            "its files, once that time or its Flow's shorter time has passed. "
+            "Removing the time stops it; runs that started before the space had a "
+            "time stay. In a shared space, changing it needs the `retention_manage` "
             "permission and a signed-in person. Sending the stored value is no "
             "change. Set to null to disable the space-level policy. "
             "Omit to keep the current retention policy unchanged. "
             "Valid range: 1-2555 days (1 day to 7 years)."
+        ),
+    )
+    expected_data_retention_days: Union[int, None, NotProvided] = Field(
+        default=NOT_PROVIDED,
+        description=(
+            "The space's time the caller saw when it chose `data_retention_days`, "
+            "or null when it saw none set. When the request changes the time, it "
+            "is compared with the stored time under the lock the change takes; "
+            "if they differ, nothing in the request is saved and the answer is "
+            "409 `retention_time_changed`, with the stored time in "
+            "`context.current_days`. Omit to save without the comparison. "
+            "Ignored when the request does not change the time."
         ),
     )
 

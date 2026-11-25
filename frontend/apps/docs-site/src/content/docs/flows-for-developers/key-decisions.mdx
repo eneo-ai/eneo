@@ -55,10 +55,13 @@ time its conversations use) and a Flow's own time
 (`flows.flow_run_history_retention_days`). The space's time caps every Flow in
 it: a Flow may choose a shorter time, and a longer one is refused with code
 9086. The organization sets no time for Flows, so a conversation setting never
-makes Flow runs purgeable without a space administrator's choice. A time does not
-authorize scheduled deletion of Flow history. The administrator settings API can preview or
-explicitly purge eligible history; held runs remain stored. [Flow run-history retention](/guides/flows/retention-policy) owns
-the permissions, eligibility, and audit contract. The product has no
+makes Flow runs due without a space administrator's choice. The space's time also
+turns on removal: a run records at its start whether its space had a time, and the
+shared retention engine removes only those runs once due, so setting a time never
+reaches back to runs that started without one. The administrator settings API can
+still preview or explicitly purge any due history; held runs remain stored.
+[Flow run-history retention](/guides/flows/retention-policy) owns the permissions,
+removal, and audit contract. The product has no
 classification retention plane, minimum-retention barriers, or tombstones.
 
 ## 8. Tenant ownership is relational

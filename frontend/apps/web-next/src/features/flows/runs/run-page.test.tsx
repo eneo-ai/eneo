@@ -921,7 +921,8 @@ describe("FlowRunPage", () => {
       messages.flow_runs_result_retry_at.replace("{time}", time)
     );
 
-    // Delivered: the status says so, and nothing is read again after it.
+    // Delivered: the status says so, and only the minute's check that the run still exists is read
+    // after it, never its content.
     const delivered = resultDelivery({
       delivery_status: "delivered",
       delivery_attempts: 2,
@@ -934,13 +935,14 @@ describe("FlowRunPage", () => {
     expect(screen.getByText(messages.flow_runs_result_delivered)).toBeTruthy();
     expect(state.announce).toHaveBeenCalledWith(messages.flow_runs_result_delivered);
     const statuses = calls(STATUS).length;
-    await act(() => vi.advanceTimersByTimeAsync(60_000));
+    await act(() => vi.advanceTimersByTimeAsync(50_000));
     expect(calls(STATUS)).toHaveLength(statuses);
-    expect([calls(DETAIL).length, calls(GRAPH).length, calls(STEPS).length]).toEqual([
-      details,
-      graphs,
-      steps
-    ]);
+    expect(calls(GRAPH)).toHaveLength(graphs);
+    await act(() => vi.advanceTimersByTimeAsync(15_000));
+    // The check reads the status and the graph, both content-free.
+    expect(calls(STATUS)).toHaveLength(statuses + 1);
+    expect(calls(GRAPH)).toHaveLength(graphs + 1);
+    expect([calls(DETAIL).length, calls(STEPS).length]).toEqual([details, steps]);
   });
 
   /** The requests since `from`, per endpoint. */
@@ -1767,6 +1769,88 @@ describe("FlowRunPage", () => {
     await act(() => vi.advanceTimersByTimeAsync(2_100));
     expect(calls(STATUS).length).toBeGreaterThan(2);
     expect(calls(STEPS)).toHaveLength(2);
+  });
+
+  describe("a run that is not there", () => {
+    const goneShown = async () => {
+      expect(
+        await screen.findByRole("heading", { level: 1, name: messages.flow_run_gone_title })
+      ).toBeTruthy();
+      expect(screen.getByText(messages.flow_run_gone_description)).toBeTruthy();
+      expect(
+        screen.getByRole("link", { name: messages.flow_run_gone_back }).getAttribute("href")
+      ).toContain("/flows/flow-1?tab=runs");
+      // Nothing to read again: no retry, no refresh, and no error code.
+      expect(screen.queryByRole("button", { name: /Försök igen/ })).toBeNull();
+      expect(screen.queryByRole("button", { name: messages.flow_run_more_refresh })).toBeNull();
+      expect(screen.queryByText(messages.flow_runs_run_failed_to_load)).toBeNull();
+      expect(screen.queryByText(messages.query_error_refresh_title)).toBeNull();
+    };
+
+    it("says it does not exist or was removed when its read answers 404", async () => {
+      answerRun(makeRunSummary());
+      state.routes[STATUS] = () => ({ status: 404, body: { message: "Not found" } });
+      renderRun();
+      await goneShown();
+    });
+
+    it("says so when the run is removed while the page is open", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const running = makeRunSummary({ status: "running", finished_at: null, revision: 2 });
+      answerRun(running, makeRunDetail({ ...running, result: null }));
+      renderRun();
+      await screen.findByText(messages.flow_runs_result_pending);
+
+      state.routes[STATUS] = () => ({ status: 404, body: { message: "Not found" } });
+      await act(() => vi.advanceTimersByTimeAsync(2_100));
+      await goneShown();
+      expect(screen.queryByText(messages.flow_runs_result_pending)).toBeNull();
+    });
+
+    it("says so when a finished run is removed while the page is open, without reading its content again", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      answerRun(makeRunSummary());
+      renderRun();
+      await resultSection();
+      const [details, steps] = [calls(DETAIL).length, calls(STEPS).length];
+
+      state.routes[STATUS] = () => ({ status: 404, body: { message: "Not found" } });
+      await act(() => vi.advanceTimersByTimeAsync(61_000));
+      await goneShown();
+      expect(screen.queryByRole("heading", { name: messages.flow_runs_result_heading })).toBeNull();
+      expect(calls(DETAIL)).toHaveLength(details);
+      expect(calls(STEPS)).toHaveLength(steps);
+    });
+
+    it("puts the focus on the message when the run is removed under it", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const running = makeRunSummary({ status: "running", finished_at: null, revision: 2 });
+      answerRun(running, makeRunDetail({ ...running, result: null }));
+      renderRun();
+      const refresh = await screen.findByRole("button", { name: messages.flow_run_more_refresh });
+      refresh.focus();
+
+      state.routes[STATUS] = () => ({ status: 404, body: { message: "Not found" } });
+      await act(() => vi.advanceTimersByTimeAsync(2_100));
+      const title = await screen.findByRole("heading", {
+        level: 1,
+        name: messages.flow_run_gone_title
+      });
+      // On the message itself, not left on the page.
+      await waitFor(() => {
+        expect(document.activeElement).not.toBe(document.body);
+        expect(document.activeElement?.contains(title)).toBe(true);
+      });
+    });
+
+    it("keeps the error and its retry for any other failure", async () => {
+      answerRun(makeRunSummary());
+      state.routes[STATUS] = () => ({ status: 500, body: { message: "Broken" } });
+      renderRun();
+      expect(await screen.findByText(messages.flow_runs_run_failed_to_load)).toBeTruthy();
+      expect(screen.getByRole("button", { name: /Försök igen/ })).toBeTruthy();
+      expect(screen.queryByText(messages.flow_run_gone_title)).toBeNull();
+    });
   });
 
   it("stops following a moving run once it is gone", async () => {

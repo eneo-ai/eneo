@@ -16,7 +16,7 @@ abstraction.
 | Review | checkpoint service and repository | actor scope, revision CAS, one active checkpoint, audit outbox |
 | Files or artifacts | runtime file service and file-row repositories | tenant/principal ownership, binding lock, signed access, retention behavior |
 | Evidence/export | evidence service, redaction owner, API adapter | tenant scope, same redaction policy, honest missing evidence, audit-before-response |
-| Retention eligibility or purge | Flow retention projection/resolver, administrator purge service, and purge repository; [retention contract](/guides/flows/retention-policy) | Flow → Space → Organization override resolution, preview non-mutation, authorization/audit, blockers, bounded whole-run purge |
+| Retention, removal or purge | Flow retention projection/resolver, the `flows.run_history` retention task, administrator purge service, and purge repository; [retention contract](/guides/flows/retention-policy) | the space's time capping the Flow's shorter time, only runs started under a space time removed automatically, preview non-mutation, authorization/audit, blockers, bounded whole-run removal |
 | Package portability | `eneo.flow_packages` plus the Flow adapter | archive safety, checksums, explicit mapping, unpublished target draft |
 | Authoring chat and flow tools | `flows/application/flow_authoring_operations.py`, `flow_authoring_chat.py`, `internal_mcp/flows.py` | the same editor update, validation, permissions and audit as the editor; edit mode and revision fencing |
 

@@ -6,7 +6,10 @@ import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
-from eneo.data_retention.domain.rules import RetentionExceedsSpaceError
+from eneo.data_retention.domain.rules import (
+    RetentionExceedsSpaceError,
+    RetentionTimeChangedError,
+)
 from eneo.main.exceptions import (
     EXCEPTION_MAP,
     BadRequestException,
@@ -366,4 +369,24 @@ def test_a_retention_period_over_its_cap_answers_400_with_the_cap_and_its_origin
         "eneo_error_code": 9086,
         "code": "retention_exceeds_space",
         "context": {"cap_days": 30, "cap_origin": wire_origin},
+    }
+
+
+@pytest.mark.parametrize("current_days", [7, None], ids=["a-time", "no-time"])
+def test_a_change_made_against_a_replaced_time_answers_409_with_the_stored_time(
+    current_days: int | None,
+):
+    """A client sent the time it saw, and another change has replaced it. The
+    body names the time stored now, null when none is set."""
+    client = _make_client(RetentionTimeChangedError(current_days=current_days))
+
+    response = client.get("/boom")
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "message": "The retention time was changed by someone else. "
+        "Check it and save again.",
+        "eneo_error_code": 9087,
+        "code": "retention_time_changed",
+        "context": {"current_days": current_days},
     }

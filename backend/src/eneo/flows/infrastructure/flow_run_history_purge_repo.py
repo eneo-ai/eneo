@@ -1,17 +1,20 @@
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
+from enum import StrEnum
 from typing import cast
 from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute
 
+from eneo.data_retention.application.retention_runner import is_lock_wait_timeout
 from eneo.data_retention.infrastructure.gallring_lock import (
     GallringSubject,
     acquire_shared,
@@ -20,17 +23,28 @@ from eneo.database.tables.files_table import Files
 from eneo.database.tables.flow_tables import (
     FlowLiveTranscripts,
     FlowOutboxDeliveryStatus,
+    FlowProviderCalls,
     FlowRunAuditOutbox,
+    FlowRunReviewCheckpointEdits,
     FlowRunReviewCheckpoints,
     FlowRuns,
     FlowRunStepInputFiles,
     FlowRunStepResultFiles,
     FlowRuntimeUploadedFiles,
     FlowRunWebhookDeliveries,
+    FlowStepAttemptResolvedInputs,
+    FlowStepAttempts,
+    FlowStepResults,
+    FlowStepTranscriptSources,
+    FlowStepTranscriptWords,
     FlowTemplateAssets,
+    FlowTranscriptCorrectionRevisions,
+    FlowTranscriptCorrections,
 )
 from eneo.database.tables.tenant_table import Tenants
 from eneo.files.file_repo import primary_file_content_size_expression
+from eneo.files.file_retention import FileRetentionReason
+from eneo.files.file_usage import FileUsageRepository
 from eneo.files.unused_file_cleanup import delete_unused_root_files
 from eneo.flows.enums import TERMINAL_FLOW_RUN_STATUS_VALUES
 from eneo.flows.infrastructure.flow_retention_hold_repo import flow_run_held_predicate
@@ -139,6 +153,135 @@ class _SoftDeletedTemplateAssetCandidate:
 class _RuntimeSourceCandidate:
     run_id: UUID
     file_id: UUID
+
+
+class FlowRunRemovalOutcome(StrEnum):
+    REMOVED = "removed"
+    # Gone, or the recheck under the lock refused it (a hold, an audit or a
+    # webhook delivery that came after the selection).
+    NOT_PURGEABLE = "not_purgeable"
+    # Another transaction holds the run, a step result, an upload binding, a
+    # live text or a file family, or a row a delete waited on past the lock
+    # timeout.
+    LOCKED = "locked"
+    # The rows or files left in this call cannot fund it.
+    SHORT = "short"
+    # A file family is larger than the family cap.
+    TOO_LARGE = "too_large"
+    # The file owner refused a family for another reason.
+    REFUSED = "refused"
+    # An error rolled the run back; ``error`` says which.
+    FAILED = "failed"
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRunRemoval:
+    """One run's removal: removed whole, or nothing (its savepoint rolled back).
+
+    ``rows`` and ``files`` are the work charged, reads included, also for a
+    run that rolled back; the counts below are what was removed and are zero
+    unless the run was removed."""
+
+    outcome: FlowRunRemovalOutcome
+    rows: int
+    files: int = 0
+    error: Exception | None = None
+    tenant_id: UUID | None = None
+    run_rows: int = 0
+    uploads_released: int = 0
+    live_transcripts_deleted: int = 0
+    roots_deleted: int = 0
+    files_deleted: int = 0
+    file_dependencies_deleted: int = 0
+    # The primary size of the released input Files, before storage confirms
+    # that the bytes are gone.
+    input_primary_bytes: int = 0
+    # Files the run used that stay: in use elsewhere, gone already, or derived.
+    files_kept: Counter[FileRetentionReason] = field(
+        default_factory=Counter[FileRetentionReason]
+    )
+
+
+_REFUSALS = {
+    FileRetentionReason.LOCKED: FlowRunRemovalOutcome.LOCKED,
+    FileRetentionReason.INSUFFICIENT_BUDGET: FlowRunRemovalOutcome.SHORT,
+    FileRetentionReason.FAMILY_EXCEEDS_BUDGET: FlowRunRemovalOutcome.TOO_LARGE,
+}
+
+
+@dataclass(slots=True)
+class _Work:
+    """The rows and files one removal has used so far, reads and released
+    families included; still charged when its savepoint rolls back.
+    ``attempt`` bounds what a family release in flight may read: its own
+    reads are unknown when it raises, so the unit is charged that bound."""
+
+    rows: int = 0
+    files: int = 0
+    attempt: int = 0
+
+    def charged(
+        self,
+        outcome: FlowRunRemovalOutcome,
+        *,
+        max_rows: int,
+        max_files: int,
+        error: Exception | None = None,
+    ) -> FlowRunRemoval:
+        """A rolled-back removal, charged within the call's allowance."""
+        return FlowRunRemoval(
+            outcome=outcome,
+            rows=max(1, min(self.rows + self.attempt, max_rows)),
+            files=min(self.files, max_files),
+            error=error,
+        )
+
+
+def flow_run_owned_row_count(run_id: UUID, ceiling: int) -> sa.Select[tuple[int]]:
+    """Every row that goes with a run, counting at most ``ceiling + 1``: the
+    run, its direct children and the rows under its attempts and correction
+    sets. Pinned to the foreign keys under ``flow_runs`` by a test, so a new
+    child table is counted."""
+    attempts = sa.select(FlowStepAttempts.id).where(
+        FlowStepAttempts.flow_run_id == run_id
+    )
+    corrections = sa.select(FlowTranscriptCorrections.id).where(
+        FlowTranscriptCorrections.flow_run_id == run_id
+    )
+    owned: list[sa.ColumnElement[bool]] = [
+        FlowRuns.id == run_id,
+        *(
+            table.flow_run_id == run_id
+            for table in (
+                FlowStepResults,
+                FlowStepAttempts,
+                FlowRunReviewCheckpoints,
+                FlowRunReviewCheckpointEdits,
+                FlowRunStepInputFiles,
+                FlowRunStepResultFiles,
+                FlowRunAuditOutbox,
+                FlowRunWebhookDeliveries,
+                FlowTranscriptCorrections,
+                FlowStepTranscriptWords,
+                FlowStepTranscriptSources,
+            )
+        ),
+        FlowStepAttemptResolvedInputs.flow_step_attempt_id.in_(attempts),
+        FlowProviderCalls.flow_step_attempt_id.in_(attempts),
+        FlowTranscriptCorrectionRevisions.correction_set_id.in_(corrections),
+    ]
+    # One LIMIT over every relation bounds the rows read, however large the run.
+    rows = (
+        sa.union_all(
+            *(
+                sa.select(sa.literal_column("1", sa.Integer)).where(condition)
+                for condition in owned
+            )
+        )
+        .limit(ceiling + 1)
+        .subquery("flow_run_rows")
+    )
+    return sa.select(sa.func.count()).select_from(rows)
 
 
 def flow_run_undelivered_audit_exists(run_id_col: object) -> sa.Exists:
@@ -292,6 +435,258 @@ class FlowRunHistoryPurgeRepository:
             ),
             affected_flow_tenant_ids=frozenset(deleted_flow_identities),
         )
+
+    async def purge_due_run(
+        self,
+        run_id: UUID,
+        *,
+        max_rows: int,
+        max_files: int,
+        max_family_rows: int,
+    ) -> FlowRunRemoval:
+        """Remove one selected run whole, with its files, or nothing.
+
+        The caller holds the gallring lock and passes ``max_rows >= 1``. The
+        run, its step results, upload bindings, live texts and file families
+        are locked without waiting, so a row another transaction holds gives
+        LOCKED instead of a wait that could end in a deadlock: a transcript
+        edit locks the step result and then reaches the run through a foreign
+        key, the opposite order. The deletes of the run's rows and files can
+        still wait for a row nothing locked first (its cascade, an outbox row,
+        a stored content the file owner marks); a wait past the lock timeout
+        gives LOCKED too. Anything but REMOVED rolls the
+        savepoint back, so a run is never gone while one of its files can
+        still be read. Any other error rolls the savepoint back and gives
+        FAILED with the error; the caller decides whether it is the run's own."""
+        work = _Work()
+        try:
+            async with self.session.begin_nested() as unit:
+                removal = await self._remove_run(
+                    run_id,
+                    work,
+                    max_rows=max_rows,
+                    max_files=max_files,
+                    max_family_rows=max_family_rows,
+                )
+                if removal.outcome is not FlowRunRemovalOutcome.REMOVED:
+                    await unit.rollback()
+        except Exception as error:
+            # Leaving the block rolled the savepoint back, which also restores
+            # the transaction. Only the database's own lock wait counts: a
+            # busy gallring lock is not a row of this run.
+            if isinstance(error, DBAPIError) and is_lock_wait_timeout(error):
+                return work.charged(
+                    FlowRunRemovalOutcome.LOCKED, max_rows=max_rows, max_files=max_files
+                )
+            return work.charged(
+                FlowRunRemovalOutcome.FAILED,
+                max_rows=max_rows,
+                max_files=max_files,
+                error=error,
+            )
+        return removal
+
+    async def _remove_run(
+        self,
+        run_id: UUID,
+        work: _Work,
+        *,
+        max_rows: int,
+        max_files: int,
+        max_family_rows: int,
+    ) -> FlowRunRemoval:
+        def stopped(outcome: FlowRunRemovalOutcome) -> FlowRunRemoval:
+            return work.charged(outcome, max_rows=max_rows, max_files=max_files)
+
+        # The run's lock also fences new child rows: their foreign key needs a
+        # share lock on it.
+        tenant_id = await self.session.scalar(
+            sa.select(FlowRuns.tenant_id)
+            .where(FlowRuns.id == run_id)
+            .with_for_update(of=FlowRuns, skip_locked=True)
+        )
+        if tenant_id is None:
+            work.rows = 2
+            held = await self.session.scalar(
+                sa.select(sa.literal(True)).where(FlowRuns.id == run_id)
+            )
+            return stopped(
+                FlowRunRemovalOutcome.LOCKED
+                if held
+                else FlowRunRemovalOutcome.NOT_PURGEABLE
+            )
+        work.rows = 1
+        # The rows under an attempt, a correction set or a review checkpoint
+        # reference those, not the run, so the count waits for the step
+        # results' lock. Who writes them, and what keeps the writer out:
+        # - correction revisions: the transcript editor, which holds the step
+        #   result's lock while it adds one;
+        # - resolved inputs: activation of an open attempt, or an import into
+        #   a new run; a finished run has no open attempt;
+        # - provider calls: a started attempt only, so none for a finished run;
+        # - review checkpoint edits: the review editor and approval, which lock
+        #   the run first.
+        cap = max_rows - work.rows
+        step_results, locked = await self._lock_all(
+            sa.select(FlowStepResults.id).where(FlowStepResults.flow_run_id == run_id),
+            cap=cap,
+        )
+        # Charged only when the unit stops here; the count below includes them.
+        if not locked:
+            work.rows += step_results
+            return stopped(
+                FlowRunRemovalOutcome.SHORT
+                if step_results > cap
+                else FlowRunRemovalOutcome.LOCKED
+            )
+        # Counted up to the call's rows before the run's files are read and
+        # its bindings and live texts locked: a run too large for them is
+        # refused at that cost.
+        run_rows = cast(
+            int,
+            await self.session.scalar(
+                flow_run_owned_row_count(run_id, ceiling=max_rows - work.rows)
+            ),
+        )
+        work.rows += run_rows
+        if work.rows > max_rows:
+            return stopped(FlowRunRemovalOutcome.SHORT)
+        if not await self._purgeable_locked_runs({run_id}):
+            return stopped(FlowRunRemovalOutcome.NOT_PURGEABLE)
+
+        result_file_ids = set(
+            await self.session.scalars(
+                sa.select(FlowRunStepResultFiles.file_id).where(
+                    FlowRunStepResultFiles.flow_run_id == run_id
+                )
+            )
+        )
+        input_file_ids = set(
+            await self.session.scalars(
+                sa.select(FlowRunStepInputFiles.file_id).where(
+                    FlowRunStepInputFiles.flow_run_id == run_id
+                )
+            )
+        )
+        for uses in (
+            sa.select(FlowRuntimeUploadedFiles.file_id).where(
+                _uuid_is_in_batch(
+                    FlowRuntimeUploadedFiles.file_id,
+                    input_file_ids,
+                    parameter_name="run_binding_file_ids",
+                )
+            ),
+            sa.select(FlowLiveTranscripts.id).where(
+                FlowLiveTranscripts.bound_file_ids.overlap(
+                    sa.bindparam(
+                        "run_live_transcript_file_ids",
+                        value=list(input_file_ids),
+                        type_=postgresql.ARRAY(postgresql.UUID(as_uuid=True)),
+                    )
+                )
+            ),
+        ):
+            # A run without input files has no binding or live text to lock.
+            if not input_file_ids:
+                break
+            cap = max_rows - work.rows
+            used, locked = await self._lock_all(uses, cap=cap)
+            work.rows += used
+            if not locked:
+                return stopped(
+                    FlowRunRemovalOutcome.SHORT
+                    if used > cap
+                    else FlowRunRemovalOutcome.LOCKED
+                )
+        if max_files == 0 and (result_file_ids or input_file_ids):
+            return stopped(FlowRunRemovalOutcome.SHORT)
+
+        input_sizes = await self._primary_file_sizes(input_file_ids)
+        await self._delete_webhook_deliveries({run_id})
+        await self._delete_audit_outbox_rows({run_id})
+        await self._delete_review_checkpoints({run_id})
+        if not await self._delete_flow_runs({run_id}):
+            raise RuntimeError("A locked, purgeable run was not deleted.")
+
+        usage = FileUsageRepository(self.session)
+        roots = members = references = 0
+        kept: Counter[FileRetentionReason] = Counter()
+        released_inputs: set[UUID] = set()
+
+        async def release(file_id: UUID) -> FlowRunRemovalOutcome | None:
+            nonlocal roots, members, references
+            # A family release reads at most its allowance and its cap.
+            work.attempt = min(max_rows - work.rows, max_family_rows)
+            result = await usage.delete_unused_root(
+                file_id,
+                max_rows=max_rows - work.rows,
+                max_files=max_files - work.files,
+                max_family_rows=max_family_rows,
+            )
+            work.attempt = 0
+            work.rows += result.rows
+            work.files += result.files
+            if result.reason.is_refusal:
+                return _REFUSALS.get(result.reason, FlowRunRemovalOutcome.REFUSED)
+            if result.reason is FileRetentionReason.DELETED:
+                roots += result.deleted_roots
+                members += result.deleted_members
+                references += result.deleted_references
+                released_inputs.add(file_id)
+            else:
+                kept[result.reason] += 1
+            return None
+
+        for file_id in sorted(result_file_ids):
+            refused = await release(file_id)
+            if refused is not None:
+                return stopped(refused)
+        # The live text and the binding use the input File; they go first.
+        live_deleted = await self._delete_released_live_transcripts(input_file_ids)
+        unbound = await self._delete_unreferenced_runtime_uploads(input_file_ids)
+        for file_id in sorted(unbound):
+            refused = await release(file_id)
+            if refused is not None:
+                return stopped(refused)
+        return FlowRunRemoval(
+            outcome=FlowRunRemovalOutcome.REMOVED,
+            rows=work.rows,
+            files=work.files,
+            tenant_id=tenant_id,
+            run_rows=run_rows,
+            uploads_released=len(unbound),
+            live_transcripts_deleted=live_deleted,
+            roots_deleted=roots,
+            files_deleted=members,
+            file_dependencies_deleted=references,
+            input_primary_bytes=sum(
+                input_sizes[file_id] for file_id in unbound & released_inputs
+            ),
+            files_kept=kept,
+        )
+
+    async def _lock_all(
+        self, rows: sa.Select[tuple[UUID]], *, cap: int
+    ) -> tuple[int, bool]:
+        """Lock every row ``rows`` selects without waiting, reading at most
+        ``cap + 1``: their number, and whether all of them are locked. None is
+        when they are more than ``cap``; not all when another transaction
+        holds one or a row arrived between the two reads."""
+        bounded = rows.limit(cap + 1)
+        total = cast(
+            int,
+            await self.session.scalar(
+                sa.select(sa.func.count()).select_from(bounded.subquery())
+            ),
+        )
+        if total > cap:
+            return total, False
+        locked = len(
+            (
+                await self.session.scalars(bounded.with_for_update(skip_locked=True))
+            ).all()
+        )
+        return total, locked == total
 
     async def purge_abandoned_runtime_uploads(
         self,
@@ -671,12 +1066,12 @@ class FlowRunHistoryPurgeRepository:
         )
         return set(result.all())
 
-    async def _delete_released_live_transcripts(self, file_ids: set[UUID]) -> None:
+    async def _delete_released_live_transcripts(self, file_ids: set[UUID]) -> int:
         """Delete the live text of a recording once a run no longer uses any
         one of its parts: the text holds every part's words, so it goes with
         the first part whose audio may go, whichever part that is."""
         if not file_ids:
-            return
+            return 0
         part = (
             sa.func.unnest(FlowLiveTranscripts.bound_file_ids)
             .table_valued("file_id")
@@ -695,7 +1090,7 @@ class FlowRunHistoryPurgeRepository:
             )
             .exists()
         )
-        await self.session.execute(
+        result = await self.session.execute(
             sa.delete(FlowLiveTranscripts)
             .where(
                 FlowLiveTranscripts.bound_file_ids.overlap(
@@ -708,6 +1103,7 @@ class FlowRunHistoryPurgeRepository:
             )
             .where(released_part)
         )
+        return _affected_row_count(result)
 
     async def _delete_webhook_deliveries(self, run_ids: set[UUID]) -> int:
         result = await self.session.execute(
@@ -750,6 +1146,9 @@ class FlowRunHistoryPurgeRepository:
         return set(await delete_unused_root_files(self.session, file_ids))
 
     async def _primary_file_sizes(self, file_ids: set[UUID]) -> dict[UUID, int]:
+        """The primary size of every requested File, 0 for one without primary
+        content. The size only counts bytes; callers release by these keys, so
+        a File without it is still released."""
         if not file_ids:
             return {}
 
@@ -767,17 +1166,9 @@ class FlowRunHistoryPurgeRepository:
                 )
             )
         ).tuples()
-        sizes: dict[UUID, int] = {}
+        sizes = dict.fromkeys(file_ids, 0)
         for file_id, raw_size_bytes in rows:
-            size_bytes = cast(int | None, raw_size_bytes)
-            if size_bytes is not None:
-                sizes[file_id] = size_bytes
-        if len(sizes) != len(file_ids):
-            missing_count = len(file_ids) - len(sizes)
-            raise RuntimeError(
-                "Flow retention found "
-                f"{missing_count} File row(s) without durable primary content"
-            )
+            sizes[file_id] = cast(int | None, raw_size_bytes) or 0
         return sizes
 
 
