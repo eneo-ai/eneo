@@ -7,7 +7,12 @@ import {
   storedPartFile,
   type JournalPart
 } from "./recording-keeper";
-import { memoryRecordings, RECORDING_TTL_MS, type ContractSnapshot } from "./recording-store";
+import {
+  memoryRecordings,
+  RECORDING_TTL_MS,
+  type ContractSnapshot,
+  type JournalMeta
+} from "./recording-store";
 import { fakeLocks } from "./testing/fake-locks";
 
 const CONTRACT: ContractSnapshot = {
@@ -935,6 +940,141 @@ describe("RecordingKeeper", () => {
       expect(lockManager.isHeld("eneo-flow-recording-holder:flow-1::step-1::rec-1")).toBe(false);
       expect(tabB.keeping("step-1", "rec-1", 0)).toBeUndefined();
       expect(tabB.nextIndex("step-1", "rec-1")).toBe(0);
+    });
+  });
+
+  describe("what a scan leaves of a journal whose lock is free", () => {
+    const JOURNAL: JournalMeta = {
+      flowId: "flow-1",
+      stepId: "step-1",
+      sessionId: "rec-1",
+      index: 2,
+      mimeType: "audio/webm;codecs=opus",
+      capturedAt: START + 120_000,
+      contract: CONTRACT,
+      streamed: false,
+      lastChunkAt: START + 120_000,
+      userId: "user-a"
+    };
+
+    /** Parts 0 and 1 kept, and a journal for part 2 with these chunks by their sequence. */
+    async function keptWithJournal(
+      chunks: Record<number, string>,
+      { locks = true, lastChunkAt = JOURNAL.lastChunkAt } = {}
+    ) {
+      const { db, keeper } = setup({ locks });
+      for (const index of [0, 1]) {
+        await keeper.keepPart("step-1", {
+          sessionId: "rec-1",
+          index,
+          blob: new Blob([`part${index}`], { type: "audio/webm" }),
+          mimeType: "audio/webm",
+          durationMs: 1_000,
+          capturedAt: START + index * 60_000,
+          contract: CONTRACT,
+          streamed: false
+        });
+      }
+      await db.putJournal({ ...JOURNAL, lastChunkAt });
+      for (const [seq, audio] of Object.entries(chunks)) {
+        await db.appendChunk(JOURNAL, Number(seq), {
+          blob: new Blob([audio], { type: "audio/webm" }),
+          recordedMs: (Number(seq) + 1) * 1_000,
+          at: lastChunkAt
+        });
+      }
+      return { db, keeper };
+    }
+
+    const part2 = (db: ReturnType<typeof memoryRecordings>) =>
+      db.parts.get("flow-1::step-1::rec-1::0002");
+
+    it("rebuilds readable chunks into part 2 and drops the journal", async () => {
+      const { db, keeper } = await keptWithJournal({ 0: "ab", 1: "cd" });
+      expect(await keeper.scan("step-1")).toMatchObject({
+        incomplete: false,
+        saved: [{ sessionId: "rec-1", parts: 3 }]
+      });
+      expect(db.journals.size).toBe(0);
+      expect(db.chunks.size).toBe(0);
+      expect(part2(db)).toMatchObject({ index: 2, interrupted: true });
+      expect(await part2(db)!.blob.text()).toBe("abcd");
+    });
+
+    it("drops a journal with no chunks and makes no part of it", async () => {
+      const { db, keeper } = await keptWithJournal({});
+      expect(await keeper.scan("step-1")).toMatchObject({
+        incomplete: false,
+        saved: [{ sessionId: "rec-1", parts: 2 }]
+      });
+      expect(db.journals.size).toBe(0);
+      expect(part2(db)).toBeUndefined();
+    });
+
+    it("rebuilds only the chunks before a gap, and drops the journal with the chunks after it", async () => {
+      const { db, keeper } = await keptWithJournal({ 0: "ab", 2: "ef" });
+      expect(await keeper.scan("step-1")).toMatchObject({
+        incomplete: false,
+        saved: [{ sessionId: "rec-1", parts: 3 }]
+      });
+      expect(db.journals.size).toBe(0);
+      expect(db.chunks.size).toBe(0);
+      expect(await part2(db)!.blob.text()).toBe("ab");
+    });
+
+    it("leaves the journal and its chunks when reading them throws, scan after scan", async () => {
+      const { db, keeper } = await keptWithJournal({ 0: "ab" });
+      vi.spyOn(db, "readChunks").mockRejectedValue(new Error("blocked"));
+      for (let scan = 0; scan < 2; scan += 1) {
+        expect(await keeper.scan("step-1")).toMatchObject({
+          incomplete: true,
+          saved: [{ sessionId: "rec-1", parts: 2 }]
+        });
+        expect(db.journals.size).toBe(1);
+        expect(db.chunks.size).toBe(1);
+        expect(part2(db)).toBeUndefined();
+      }
+    });
+
+    it("leaves the journal and its chunks when they are not read in time, scan after scan", async () => {
+      const { db, keeper } = await keptWithJournal({ 0: "ab" });
+      vi.spyOn(db, "readChunks").mockResolvedValue(null);
+      for (let scan = 0; scan < 2; scan += 1) {
+        expect(await keeper.scan("step-1")).toMatchObject({
+          incomplete: true,
+          saved: [{ sessionId: "rec-1", parts: 2 }]
+        });
+        expect(db.journals.size).toBe(1);
+        expect(db.chunks.size).toBe(1);
+        expect(part2(db)).toBeUndefined();
+      }
+    });
+
+    it("drops an expired journal and its chunks without making a part of it", async () => {
+      const { db, keeper } = await keptWithJournal(
+        { 0: "ab" },
+        { lastChunkAt: START - RECORDING_TTL_MS - 1_000 }
+      );
+      expect(await keeper.scan("step-1")).toMatchObject({
+        incomplete: false,
+        saved: [{ sessionId: "rec-1", parts: 2 }]
+      });
+      expect(db.journals.size).toBe(0);
+      expect(db.chunks.size).toBe(0);
+      expect(part2(db)).toBeUndefined();
+    });
+
+    it("leaves the journal and its chunks without Web Locks, scan after scan", async () => {
+      const { db, keeper } = await keptWithJournal({ 0: "ab" }, { locks: false });
+      for (let scan = 0; scan < 2; scan += 1) {
+        expect(await keeper.scan("step-1")).toEqual({
+          incomplete: false,
+          saved: [expect.objectContaining({ sessionId: "rec-1", parts: 2 })]
+        });
+        expect(db.journals.size).toBe(1);
+        expect(db.chunks.size).toBe(1);
+        expect(part2(db)).toBeUndefined();
+      }
     });
   });
 
