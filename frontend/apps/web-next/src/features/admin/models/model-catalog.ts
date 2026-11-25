@@ -29,17 +29,44 @@ export interface CatalogModel {
 export const NO_SUGGESTIONS_PROVIDERS = new Set(["azure"]);
 
 /**
+ * The domain of a type's own cloud service, for the types whose default
+ * address the backend knows (`DEFAULT_ENDPOINTS` in
+ * backend/src/eneo/model_providers/domain/provider_api.py). OpenAI's covers
+ * every host under it, as live text's rule does (`_is_gateway` in
+ * backend/src/eneo/transcription_models/domain/realtime.py).
+ */
+const CLOUD_DOMAINS: Record<string, string> = {
+  openai: "openai.com",
+  anthropic: "anthropic.com"
+};
+
+function isCloudAddress(type: string, endpoint: string): boolean {
+  const domain = CLOUD_DOMAINS[type];
+  if (!domain) return false;
+  try {
+    // The URL parser lowercases the host and maps full-width full stops to
+    // dots; a dot at the end names the same host.
+    const host = new URL(endpoint).hostname.replace(/\.$/, "");
+    return host === domain || host.endsWith(`.${domain}`);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * The provider is a server at an address of its own, not the type's cloud
  * service: its models are whatever that server has, and where it stands is
  * unknown. vLLM always is (its address is required); Azure always has an
- * address but is a cloud service; any other type is when an address is set.
+ * address but is a cloud service; any other type is when an address is set,
+ * unless it is the type's own cloud address (`CLOUD_DOMAINS`).
  * See backend/src/eneo/tenants/provider_field_config.py.
  */
 export function hasOwnEndpoint(providerType: string, endpoint: unknown): boolean {
   const type = providerType.toLowerCase();
   if (type === "hosted_vllm" || type === "vllm") return true;
   if (type === "azure") return false;
-  return typeof endpoint === "string" && endpoint.trim() !== "";
+  if (typeof endpoint !== "string" || endpoint.trim() === "") return false;
+  return !isCloudAddress(type, endpoint.trim());
 }
 
 function num(value: unknown): number | undefined {

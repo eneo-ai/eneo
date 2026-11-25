@@ -1221,6 +1221,34 @@ describe("the model step for a server at an address of its own", () => {
     expect(within(dialog).queryByText(/Eneo hittade/)).toBeNull();
   });
 
+  it.each(["https://api.openai.com/v1", "https://api.openai.com/v1/"])(
+    "treats OpenAI's own address %s as the cloud service, not a server of its own",
+    async (endpoint) => {
+      const { dialog } = renderStep({ ...existing, id: "p-cloud", config: { endpoint } }, []);
+
+      expect(await within(dialog).findByRole("checkbox", { name: /whisper-1/ })).toBeTruthy();
+      expect(within(dialog).queryByText(/Eneo hittade/)).toBeNull();
+      const hosting = within(dialog).getByRole("combobox", { name: /^Hosting-region/ });
+      expect(hosting.textContent).toContain("USA");
+    }
+  );
+
+  it("keeps a look-alike of OpenAI's host as a server of its own", async () => {
+    const { dialog } = renderStep(
+      { ...existing, id: "p-lookalike", config: { endpoint: "https://openai.com.example.se/v1" } },
+      []
+    );
+
+    expect(
+      await within(dialog).findByText(
+        "Eneo hittade ingen modell av typen Transkription i serverns lista"
+      )
+    ).toBeTruthy();
+    expect(within(dialog).queryByRole("checkbox", { name: /whisper-1/ })).toBeNull();
+    const hosting = within(dialog).getByRole("combobox", { name: /^Hosting-region/ });
+    expect(hosting.textContent).toContain("Välj region");
+  });
+
   it("asks where a server of its own stands instead of guessing the region", async () => {
     const { dialog, onOpenChange } = renderStep(gateway, liveTranscriptionModels);
 
