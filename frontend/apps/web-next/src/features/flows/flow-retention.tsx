@@ -186,13 +186,27 @@ function RetentionForm({
   };
 
   const save = useMutation({
-    // `expected` is the time that applied when the warning was decided; the server refuses
-    // the save (409 `retention_time_changed`) when another administrator has changed it since.
-    mutationFn: ({ sent, expected }: { sent: number | null; expected: number | null }) =>
+    // `expected` and `expectedSpace` are the time that applied and the space's time when the
+    // warning was decided; the server refuses the save (409 `retention_time_changed`) when
+    // another administrator has changed either since. The space's time counts on its own:
+    // giving the space a time starts the removal without changing the time that applies.
+    mutationFn: ({
+      sent,
+      expected,
+      expectedSpace
+    }: {
+      sent: number | null;
+      expected: number | null;
+      expectedSpace: number | null;
+    }) =>
       unwrap(
         browserApi.PUT("/api/v1/settings/flow-run-retention-policy/flows/{flow_id}", {
           params: { path: { flow_id: flow.id } },
-          body: { policy: sent === null ? null : { days: sent }, expected_effective_days: expected }
+          body: {
+            policy: sent === null ? null : { days: sent },
+            expected_effective_days: expected,
+            expected_inherited_days: expectedSpace
+          }
         })
       ),
     onSuccess: async (saved) => {
@@ -294,7 +308,11 @@ function RetentionForm({
                 setWarnedFor(days);
                 field.current?.focus();
               } else
-                save.mutate({ sent: days, expected: settings.effective.effective_days ?? null });
+                save.mutate({
+                  sent: days,
+                  expected: settings.effective.effective_days ?? null,
+                  expectedSpace: spaceDays
+                });
             }}
           >
             <NumberInput

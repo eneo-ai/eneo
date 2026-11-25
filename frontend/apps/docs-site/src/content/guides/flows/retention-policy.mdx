@@ -219,7 +219,7 @@ Clear it and use the space's time:
 }
 ```
 
-A time change can carry the time it replaces: `expected_data_retention_days` on the space's `PATCH` (the space's time as read, or `null`), and `expected_effective_days` on the Flow's `PUT` (`effective.effective_days` as read, or `null` when none applied). When, under the lock the change takes, the space's stored time or the time that applies to the Flow now differs (a change of the space's time counts for its Flows), nothing is saved and the answer is 409, `eneo_error_code` 9087 and `code` `retention_time_changed`, with the time that applies now:
+A time change can carry the times it replaces. On the space's `PATCH` that is `expected_data_retention_days` (the space's time as read, or `null`). On the Flow's `PUT` it is `expected_effective_days` (`effective.effective_days` as read, or `null` when none applied) and `expected_inherited_days` (`inherited_policy.days` as read, or `null` when the space had none). Each field sent is compared under the lock the change takes. When the space's stored time, the time that applies to the Flow now, or the Flow's space time now differs from the field, nothing is saved and the answer is 409, `eneo_error_code` 9087 and `code` `retention_time_changed`, with the time that applies now:
 
 ```json
 {
@@ -229,7 +229,7 @@ A time change can carry the time it replaces: `expected_data_retention_days` on 
 }
 ```
 
-Without the field a save works as before. A request that leaves the time unchanged is not refused. The new web app sends the field with every change of either time, so a page read before another administrator's change asks again instead of saving.
+A field left out is not compared; without them a save works as before. A request that leaves the time unchanged is not refused. After a change of the space's time, a Flow's save that carries the old space time is always refused, also when the time that applies is the same: giving a shared space a time can start the automatic removal. The new web app sends these fields with every change of either time, so a page read before another administrator's change asks again instead of saving.
 
 The Flow's retention `GET` and `PUT` return `scope`, `scope_id` and these three fields:
 
