@@ -19,7 +19,6 @@ from eneo.jobs.job_staging import reconcile_job_staging
 from eneo.jobs.task_models import (
     AnalyzeConversationInsightsTask,
     Transcription,
-    UpdateUsageStatsTaskParams,
     UploadInfoBlob,
 )
 from eneo.main.config import get_settings
@@ -41,11 +40,7 @@ from eneo.worker.object_content_tasks import (
 )
 from eneo.worker.redis.client import mark_crawl_reconciliation_healthy
 from eneo.worker.upload_tasks import transcription_task, upload_info_blob_task
-from eneo.worker.usage_stats_tasks import (
-    recalculate_all_tenants_usage_stats,
-    recalculate_tenant_usage_stats,
-    update_model_usage_stats_task,
-)
+from eneo.worker.usage_stats_tasks import recalculate_all_tenants_usage_stats
 from eneo.worker.worker import Worker
 
 worker = Worker()
@@ -208,41 +203,6 @@ async def crawl_all_websites(container: Container) -> bool:
     - NEVER: Skipped
     """
     return await queue_website_crawls(container=container)
-
-
-@worker.function()
-async def update_model_usage_stats(
-    job_id: UUID, params: dict[str, object], container: Container
-):
-    """Worker function for updating model usage statistics.
-
-    Note: params is a dict here because it comes from ARQ, but we validate it
-    by creating UpdateUsageStatsTaskParams inside the task function.
-    """
-    return await update_model_usage_stats_task(
-        job_id=job_id,
-        params=UpdateUsageStatsTaskParams.model_validate(params),
-        container=container,
-    )
-
-
-@worker.function(with_user=False)
-async def recalculate_tenant_usage_stats_job(
-    job_id: UUID, params: dict[str, object], container: Container
-):
-    """Worker function for recalculating usage statistics for a specific tenant.
-
-    Args:
-        job_id: ARQ job ID
-        params: Dictionary containing tenant_id
-        container: Dependency injection container
-    """
-    # Extract tenant_id from params
-    tenant_id = UUID(str(params["tenant_id"]))
-
-    return await recalculate_tenant_usage_stats(
-        container=container, tenant_id=tenant_id
-    )
 
 
 @worker.cron_job(hour=19, minute=00)  # Daily at 02:00 UTC

@@ -126,19 +126,6 @@ class UploadTask(InfoBlobTask):
     original_storage: KnowledgeOriginalAdmission
 
 
-class UpdateUsageStatsTaskParams(TaskParams):
-    """Parameters for updating completion model usage statistics."""
-
-    @model_validator(mode="after")
-    def names_its_organisation(self) -> "UpdateUsageStatsTaskParams":
-        if self.tenant_id is None:
-            raise ValueError("A usage statistics job names its organisation")
-        return self
-
-    model_id: Optional[UUID] = None
-    full_recalc: bool = False
-
-
 class UploadInfoBlob(UploadTask):
     pass
 

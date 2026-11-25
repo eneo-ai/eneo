@@ -33,6 +33,8 @@ class Task(str, Enum):
     PULL_CONFLUENCE_CONTENT = "pull_confluence_content"
     PULL_SHAREPOINT_CONTENT = "pull_sharepoint_content"
     SYNC_SHAREPOINT_DELTA = "sync_sharepoint_delta"
+    # Nothing queues this any more: the statistics are recalculated nightly
+    # without a job. The value stays so that old job rows still read.
     UPDATE_MODEL_USAGE_STATS = "update_model_usage_stats"
     ANALYZE_CONVERSATION_INSIGHTS = "analyze_conversation_insights"
     EXPORT_AUDIT_LOGS = "export_audit_logs"

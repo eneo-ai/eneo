@@ -48,13 +48,3 @@ class ModelMigrationFailed(DomainEvent):
     error_message: str
     failed_at_entity: Optional[str] = None
     timestamp: datetime = field(default_factory=_utc_now)
-
-
-@dataclass
-class ModelUsageStatsUpdated(DomainEvent):
-    """Emitted when usage statistics are updated."""
-
-    model_id: Optional[UUID]  # None means all models
-    tenant_id: UUID
-    update_type: str  # 'incremental' or 'full'
-    timestamp: datetime = field(default_factory=_utc_now)
