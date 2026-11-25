@@ -121,6 +121,10 @@ class ErrorCodes(int, Enum):
     # when the organisation or a flow set the cap; the context carries the cap
     # in days and the level that chose it.
     RETENTION_EXCEEDS_SPACE = 9086
+    # A File lives in one space: it cannot be used in another, and a space
+    # with a File that is still used elsewhere cannot be removed.
+    FILE_HOME_CONFLICT = 9088
+    FILE_IN_USE_ELSEWHERE = 9089
     # Browser-session protocol for the Vite app. Keep distinct from Skill errors
     # so a refused configuration save never triggers session recovery.
     SESSION_GENERATION_MISMATCH = 9090

@@ -17,6 +17,7 @@ from eneo.database.tables.ai_models_table import CompletionModels
 from eneo.database.tables.app_table import Apps, AppsFiles, AppsPrompts, InputFields
 from eneo.database.tables.prompts_table import Prompts
 from eneo.files.file_content_loader import FileAttachmentGroup, FileContentLoader
+from eneo.files.file_home import FileHomes
 from eneo.files.file_models import File, FileMetadata, FileType
 from eneo.files.file_repo import FileRepository
 from eneo.prompts.prompt import Prompt
@@ -266,6 +267,20 @@ class AppRepository:
         await self.session.execute(stmt)
 
     async def _set_attachments(self, app_in_db: Apps, attachments: list[File]) -> None:
+        # Only what is newly attached is placed in the app's space: a File the
+        # app already has stays as it is, whatever home it has or lacks.
+        attached = set(
+            (
+                await self.session.scalars(
+                    sa.select(AppsFiles.file_id).where(AppsFiles.app_id == app_in_db.id)
+                )
+            ).all()
+        )
+        await FileHomes(self.session).attach(
+            (file.id for file in attachments if file.id not in attached),
+            space_id=app_in_db.space_id,
+        )
+
         # Delete all
         stmt = sa.delete(AppsFiles).where(AppsFiles.app_id == app_in_db.id)
         await self.session.execute(stmt)

@@ -141,6 +141,30 @@ def _uses_with_their_space() -> dict[tuple[str, str], Select[Any]]:
     }
 
 
+def space_of_question(question_id: UUID) -> Select[Any]:
+    """The space a question is asked in: that of its conversation's assistant
+    or service, or of the service it was asked of directly. Empty when the
+    question leads to no space. The same path ``questions_files`` is read by."""
+    session_assistant = aliased(Assistants)
+    session_service = aliased(Services)
+    question_service = aliased(Services)
+    return (
+        sa.select(
+            sa.func.coalesce(
+                session_assistant.space_id,
+                session_service.space_id,
+                question_service.space_id,
+            )
+        )
+        .select_from(Questions)
+        .outerjoin(Sessions, Sessions.id == Questions.session_id)
+        .outerjoin(session_assistant, session_assistant.id == Sessions.assistant_id)
+        .outerjoin(session_service, session_service.id == Sessions.service_id)
+        .outerjoin(question_service, question_service.id == Questions.service_id)
+        .where(Questions.id == question_id)
+    )
+
+
 _USES_WITH_THEIR_SPACE = _uses_with_their_space()
 _DECLARED_USES = {(column.table.name, column.name) for _, column in FILE_USAGE_COLUMNS}
 if _DECLARED_USES != set(_USES_WITH_THEIR_SPACE):
@@ -276,30 +300,96 @@ class FileHomes:
         Nothing happens when the family already lives in the space. A family
         that lives in another space keeps its home and the call is refused.
         """
-        root_of = await self._lock_family_of(file_id, tenant_id=tenant_id)
         await self._require_space(space_id, tenant_id=tenant_id)
+        root_of = await self._lock_family_of(file_id, tenant_id=tenant_id)
         await self._write_home(root_of, space_id=space_id)
 
     async def take(self, file_id: UUID, *, space_id: UUID, tenant_id: UUID) -> None:
-        """Give a File its home when it is attached in a space.
-
-        A draft takes the space as its home. A File without a home that is
-        already in use can be taken only by the space where all its uses are,
-        so another space cannot claim it first. When two spaces take the same
-        draft at once, the family lock lets one through and the other is
-        refused.
-        """
-        root_of = await self._lock_family_of(file_id, tenant_id=tenant_id)
+        """Give one File its home when it is attached in a space; see ``attach``."""
         await self._require_space(space_id, tenant_id=tenant_id)
-        homes = await self._homes_of_members(root_of)
-        if homes == {None}:
-            use = next(iter((await self.use_of_families(root_of)).values()))
-            if not use.only_in(space_id):
-                raise FileInUseElsewhereError(
-                    "The file is already used outside this space and cannot be "
-                    "attached here."
+        await self.attach([file_id], space_id=space_id)
+
+    async def attach(self, file_ids: Iterable[UUID], *, space_id: UUID) -> None:
+        """Place the Files that are being attached to something in a space.
+
+        Call it in the transaction that writes the attachment.
+
+        - A File that lives in the space is fine as it is.
+        - A draft takes the space as its home.
+        - A File without a home that is already in use is taken only by the
+          space where all its uses are, so another space cannot claim it
+          before the fill-in reaches it.
+        - A File that lives in another space is refused. No copy is made:
+          upload the file again for the other space.
+
+        The space is locked first and the families after it, in id order,
+        which is the order a deleted space and the fill-in take them in. When
+        two spaces take the same draft at once, one gets it and the other is
+        refused. A space therefore never ends up holding a File that lives
+        elsewhere, or one without a home, once this has committed.
+        """
+        ids = sorted(set(file_ids))
+        if not ids:
+            return
+        tenant_id = await self._session.scalar(
+            sa.select(Spaces.tenant_id)
+            .where(Spaces.id == space_id)
+            .with_for_update(read=True, key_share=True)
+        )
+        if tenant_id is None:
+            raise FileHomeSpaceNotFoundError("The space does not exist.")
+        roots = await self._roots_of(ids)
+        if set(roots) != set(ids):
+            raise FileHomeError("The file does not exist.")
+        root_of = await self._usage.lock_families(set(roots.values()))
+        rows = (
+            await self._session.execute(
+                sa.select(Files.id, Files.tenant_id, Files.home_space_id).where(
+                    Files.id == sa.any_(_ids("members", sorted(root_of)))
                 )
-        await self._write_home(root_of, space_id=space_id)
+            )
+        ).all()
+        if any(row.tenant_id != tenant_id for row in rows):
+            raise FileHomeError("The file does not exist.")
+        homes_of_root: dict[UUID, set[UUID | None]] = {}
+        for row in rows:
+            homes_of_root.setdefault(root_of[row.id], set()).add(row.home_space_id)
+        elsewhere = sorted(
+            root for root, homes in homes_of_root.items() if homes - {None, space_id}
+        )
+        if elsewhere:
+            raise FileHomeConflictError(
+                f"{len(elsewhere)} file(s) belong to another space and cannot be "
+                "used in this one. Upload them again for this space."
+            )
+        to_place = {root for root, homes in homes_of_root.items() if None in homes}
+        if not to_place:
+            return
+        placing = {member: root for member, root in root_of.items() if root in to_place}
+        # A family that has no home at all is a draft or a File from before
+        # homes existed; where it is used decides whether this space may take it.
+        unplaced = {
+            member: root
+            for member, root in placing.items()
+            if homes_of_root[root] == {None}
+        }
+        use = await self.use_of_families(unplaced)
+        claimed = sorted(
+            root for root, family_use in use.items() if not family_use.only_in(space_id)
+        )
+        if claimed:
+            raise FileInUseElsewhereError(
+                f"{len(claimed)} file(s) are already used outside this space and "
+                "cannot be attached here. Upload them again for this space."
+            )
+        await self._session.execute(
+            sa.update(Files)
+            .where(
+                Files.id == sa.any_(_ids("placing", sorted(placing))),
+                Files.home_space_id.is_(None),
+            )
+            .values(home_space_id=space_id)
+        )
 
     async def fill_in_space(
         self, space_id: UUID, *, after: UUID | None = None, limit: int = 500

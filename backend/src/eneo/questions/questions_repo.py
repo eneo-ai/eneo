@@ -24,6 +24,7 @@ from eneo.database.tables.questions_table import (
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.users_table import Users
 from eneo.files.file_content_loader import FileContentLoader
+from eneo.files.file_home import FileHomes, space_of_question
 from eneo.files.file_models import File
 from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from eneo.info_blobs.info_blob_repo import InfoBlobRepository
@@ -201,6 +202,14 @@ class QuestionRepository:
     async def _add_files(
         self, question_id: UUID, files: list[File], file_type: str = "user"
     ):
+        # A File used in a conversation lives in the space of the assistant
+        # or service the conversation is with. One that leads to no space is
+        # attached as before and gets no home.
+        space_id = await self.session.scalar(space_of_question(question_id))
+        if space_id is not None:
+            await FileHomes(self.session).attach(
+                (file.id for file in files), space_id=space_id
+            )
         stmt = sa.insert(QuestionsFiles).values(
             [
                 dict(question_id=question_id, file_id=file.id, type=file_type)

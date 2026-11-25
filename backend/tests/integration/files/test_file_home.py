@@ -14,6 +14,7 @@ from eneo.database.tables.assistant_table import AssistantsFiles
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.questions_table import Questions, QuestionsFiles
 from eneo.database.tables.sessions_table import Sessions
+from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.tenant_table import Tenants
 from eneo.files.file_home import (
     FileFamilyUse,
@@ -389,3 +390,62 @@ async def test_filling_in_gives_a_home_to_what_is_used_in_one_space_only(
         assert again.placed == 0
         assert again.unresolved == unresolved
         assert again.next_after is None
+
+
+@pytest.mark.parametrize("first", ["attach", "delete"])
+async def test_attaching_and_deleting_a_space_wait_for_each_other(
+    db_container, admin_user, first
+) -> None:
+    """Both take the space before any file, so neither can hold what the
+    other waits for: one finishes, then the other sees what it did."""
+    async with db_container() as container:
+        space_id = await _space(container, "Meetings")
+        draft_id = await _file(container.session(), admin_user)
+
+    async def attach(delay: float) -> str:
+        await asyncio.sleep(delay)
+        async with sessionmanager.session() as session, session.begin():
+            try:
+                await FileHomes(session).attach([draft_id], space_id=space_id)
+            except FileHomeSpaceNotFoundError:
+                return "space gone"
+            await asyncio.sleep(0.3)
+            return "attached"
+
+    async def delete(delay: float) -> str:
+        await asyncio.sleep(delay)
+        async with sessionmanager.session() as session, session.begin():
+            await FileHomes(session).remove_with_space(space_id)
+            await asyncio.sleep(0.3)
+            await session.execute(sa.delete(Spaces).where(Spaces.id == space_id))
+            return "deleted"
+
+    attached, deleted = await asyncio.gather(
+        attach(0 if first == "attach" else 0.1),
+        delete(0.1 if first == "attach" else 0),
+    )
+
+    assert deleted == "deleted"
+    async with db_container() as container:
+        session = container.session()
+        space_left = await session.scalar(
+            sa.select(sa.func.count()).select_from(Spaces).where(Spaces.id == space_id)
+        )
+        draft_left = (
+            await _home(session, draft_id),
+            await session.scalar(
+                sa.select(sa.func.count())
+                .select_from(Files)
+                .where(Files.id == draft_id)
+            ),
+        )
+    assert space_left == 0
+    if first == "attach":
+        # The file was placed first, so it went with the space it lived in.
+        assert attached == "attached"
+        assert draft_left == (None, 0)
+    else:
+        # The space went first: the attach is refused and the draft is still
+        # a draft.
+        assert attached == "space gone"
+        assert draft_left == (None, 1)
