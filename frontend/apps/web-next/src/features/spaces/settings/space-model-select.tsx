@@ -25,6 +25,7 @@ export type SelectableModel = {
   deprecation_date?: string | null;
   meets_security_classification?: boolean | null;
   org?: string | null;
+  provider_name?: string | null;
   provider_type?: string | null;
   vision?: boolean | null;
   reasoning?: boolean | null;
@@ -45,7 +46,13 @@ function label(model: SelectableModel): string {
   return model.nickname ?? model.name;
 }
 
+/**
+ * The provider's name as the administrator wrote it: two servers of the same
+ * type are two groups. Org first, as in the chat model picker, would merge them.
+ */
 function groupName(model: SelectableModel, fallback: string): string {
+  const name = model.provider_name?.trim();
+  if (name) return name;
   const raw = model.org || model.provider_type || fallback;
   return raw.charAt(0).toUpperCase() + raw.slice(1);
 }
@@ -153,7 +160,9 @@ export function SpaceModelSelect({
       ...group,
       visible: matchesSearch([group.name], search)
         ? group.models
-        : group.models.filter((model) => matchesSearch([label(model), model.provider_type], search))
+        : group.models.filter((model) =>
+            matchesSearch([label(model), model.org, model.provider_type], search)
+          )
     }))
     .filter((group) => group.visible.length > 0);
 
@@ -334,7 +343,10 @@ export function SpaceModelSelect({
                       provider={group.models[0]?.provider_type ?? group.name}
                       className="size-5 shrink-0"
                     />
-                    <span className="truncate text-sm font-medium">{group.name}</span>
+                    {/* Wrapped, never cut: provider names can share a long start. */}
+                    <span className="min-w-0 text-sm font-medium break-words" title={group.name}>
+                      {group.name}
+                    </span>
                   </CollapsibleTrigger>
                   <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
                     <span aria-hidden="true">

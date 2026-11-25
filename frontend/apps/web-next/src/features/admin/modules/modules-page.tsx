@@ -1,3 +1,4 @@
+import { Text } from "@astryxdesign/core/Text";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 import { CircleAlert, Pencil, Plus, Trash2 } from "lucide-react";
@@ -34,6 +35,23 @@ const UNBOUND = "__unbound__";
 
 /** What a module key may look like (the backend's rule). */
 const MODULE_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+/**
+ * Why the backend counts an installation as not configured: it needs both a
+ * callback URL and a service key, and refuses the login handoff without them.
+ */
+function incompleteReason(
+  installation: ModuleInstallation,
+  t: ReturnType<typeof useTranslations>
+): string {
+  return [
+    installation.service_key_id ? null : t("module_admin_incomplete_no_service_key"),
+    (installation.redirect_uris ?? []).length > 0 ? null : t("module_admin_incomplete_no_callback"),
+    t("module_admin_incomplete_effect")
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
 
 export function ModulesPage({ title }: { title: string }) {
   const t = useTranslations();
@@ -183,6 +201,11 @@ export function ModulesPage({ title }: { title: string }) {
                               ? t("module_admin_configured")
                               : t("module_admin_incomplete")}
                           </Badge>
+                          {!installation.configured && (
+                            <Text type="supporting" as="p" display="block">
+                              {incompleteReason(installation, t)}
+                            </Text>
+                          )}
                         </div>
                         <div className="flex gap-2">
                           <Button

@@ -208,6 +208,28 @@ describe("ProviderEditDialog", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
+  it("forgets the provider's model lists once it is saved, so the next list comes from the new address", async () => {
+    const dialog = renderDialog();
+    const oldList = { models: [{ name: "from-the-old-server" }], error: null };
+    queryClient.setQueryData(["provider-models", "p-openai", "completion"], oldList);
+    queryClient.setQueryData(["provider-models", "p-openai", "transcription"], oldList);
+    queryClient.setQueryData(["provider-models", "p-other", "completion"], oldList);
+    fireEvent.change(field(/^Endpoint-URL/), { target: { value: "https://new.example/v1" } });
+    // A new endpoint asks for the key again.
+    fireEvent.change(field(/^API-nyckel/), { target: { value: "sk-new-5678" } });
+    fireEvent.change(field(/^Bekräfta API-nyckel/), { target: { value: "sk-new-5678" } });
+
+    save(dialog);
+
+    await waitFor(() => expect(toast.success).toHaveBeenCalled());
+    expect(queryClient.getQueryData(["provider-models", "p-openai", "completion"])).toBeUndefined();
+    expect(
+      queryClient.getQueryData(["provider-models", "p-openai", "transcription"])
+    ).toBeUndefined();
+    // Another provider's list is still its own.
+    expect(queryClient.getQueryData(["provider-models", "p-other", "completion"])).toBe(oldList);
+  });
+
   it.each([
     // Headers added to a vLLM provider whose models stream live text.
     [

@@ -108,7 +108,8 @@ function renderWizard({
   onCreated,
   imageModels = liveImageModels,
   providerList = [existing],
-  capsLoaded = true
+  capsLoaded = true,
+  transcriptionList = liveTranscriptionModels
 }: {
   initialProviderId?: string;
   models?: AdminModel[];
@@ -122,6 +123,8 @@ function renderWizard({
   imageModels?: typeof liveImageModels;
   providerList?: ModelProvider[];
   capsLoaded?: boolean;
+  /** What the provider's list answers for transcription: models, or `[{ error }]`. */
+  transcriptionList?: unknown[];
 } = {}) {
   api.GET.mockImplementation(
     (path: string, options?: { params?: { query?: { mode?: string } } }) => {
@@ -129,7 +132,7 @@ function renderWizard({
         const mode = options?.params?.query?.mode;
         if (mode === "image") return ok(imageModels);
         if (mode === "rerank") return ok(liveRerankModels);
-        if (mode === "transcription") return ok(liveTranscriptionModels);
+        if (mode === "transcription") return ok(transcriptionList);
         if (mode === "embedding")
           return ok([
             { name: "multilingual-e5-large", mode: "embedding", output_vector_size: 1024 }
@@ -251,10 +254,16 @@ describe("the add-provider wizard's credentials", () => {
 
   it("says the type is fixed and where live text streams from, before the provider is saved", async () => {
     const dialog = await toCredentials();
-    // One line: the gateway note follows the type note for the two types that carry live text.
+    // For OpenAI the type note is followed by when vLLM fits better; the rule
+    // on outbound headers stands on a line of its own.
     expect(
       within(dialog).getByText(
-        "Typen kan inte ändras efteråt. Finns din gateway redan som OpenAI-leverantör kan du använda den för livetext."
+        "Typen kan inte ändras efteråt. Har en annan aktör modellen bakom ett OpenAI-kompatibelt API passar oftast vLLM bättre. Hos vLLM är nyckeln valfri. OpenAI med egen Endpoint-URL fungerar också, men kräver en nyckel."
+      )
+    ).toBeTruthy();
+    expect(
+      within(dialog).getByText(
+        "En leverantör med utgående headers kan inte transkribera eller bära livetext."
       )
     ).toBeTruthy();
     const endpoint = field(/^Endpoint-URL/);
@@ -263,6 +272,31 @@ describe("the add-provider wizard's credentials", () => {
       .map((id) => document.getElementById(id)?.textContent ?? "")
       .join(" ");
     expect(help).toContain("Livetext använder vLLM:s realtids-API (/v1/realtime) på servern.");
+  });
+
+  it("asks for the vLLM server's address with /v1, and keeps the gateway note", async () => {
+    const { dialog } = renderWizard({
+      caps: {
+        providers: {
+          hosted_vllm: {
+            modes: ["transcription"],
+            models: {},
+            fields: [{ name: "endpoint", required: true, secret: false, in: "config" }]
+          }
+        },
+        default_fields: []
+      }
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till vLLM" }));
+    await waitFor(() => expect(field(/^Endpoint-URL/)).toBeTruthy());
+    expect(describedBy(field(/^Endpoint-URL/))).toContain(
+      "Adressen till vLLM-servern, med /v1 på slutet. Livetext använder vLLM:s realtids-API (/v1/realtime) på servern."
+    );
+    expect(
+      within(dialog).getByText(
+        "Typen kan inte ändras efteråt. Finns din gateway redan som OpenAI-leverantör kan du använda den för livetext."
+      )
+    ).toBeTruthy();
   });
 
   it("creates the provider with its key expiry and moves on to its models", async () => {
@@ -929,14 +963,51 @@ describe("the add-model wizard's catalog", () => {
     }
   );
 
-  it("names live text for each selected model when several are picked", async () => {
-    const { dialog } = renderTranscriptionStep("eligible");
-    fireEvent.click(await within(dialog).findByRole("checkbox", { name: /pianissimo-sv/ }));
-    expect(within(dialog).getByRole("checkbox", { name: /^Livetext$/ })).toBeTruthy();
-    fireEvent.click(within(dialog).getByRole("checkbox", { name: /forte-sv/ }));
+  it("marks live text per model when several are picked", async () => {
+    const { dialog, onOpenChange } = renderTranscriptionStep("eligible");
+    const catalog = await within(dialog).findByRole("group", { name: "Modeller att lägga till" });
+    // Nothing to mark before a model is picked.
+    expect(within(dialog).queryByRole("checkbox", { name: /^Livetext$/ })).toBeNull();
+    fireEvent.click(within(catalog).getByRole("checkbox", { name: /pianissimo-sv/ }));
+    fireEvent.click(within(dialog).getByRole("checkbox", { name: /^Livetext$/ }));
+    fireEvent.click(within(catalog).getByRole("checkbox", { name: /forte-sv/ }));
+
+    // One row per picked model, outside the list they were picked in; the
+    // mark made with one model picked stays with that model.
+    const live = within(dialog).getByRole("group", { name: "Livetext" });
     expect(
-      within(dialog).getByRole("checkbox", { name: /^Livetext för valda modeller/ })
+      within(dialog).getByText(
+        "Markera bara modeller som visar texten medan någon spelar in. En modell bara för ljudfiler ska inte ha livetext. Modellens server behöver stödja vLLM:s realtids-API."
+      )
     ).toBeTruthy();
+    const pianissimo = within(live).getByRole("checkbox", { name: "pianissimo-sv" });
+    const forte = within(live).getByRole("checkbox", { name: "forte-sv" });
+    expect((pianissimo as HTMLInputElement).checked).toBe(true);
+    expect((forte as HTMLInputElement).checked).toBe(false);
+    await expectNoAxeViolations(dialog);
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till 2 modeller" }));
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+    expect(api.POST).toHaveBeenCalledWith("/api/v1/admin/tenant-models/transcription/", {
+      body: expect.objectContaining({ name: "pianissimo-sv", supports_realtime: true })
+    });
+    expect(api.POST).toHaveBeenCalledWith("/api/v1/admin/tenant-models/transcription/", {
+      body: expect.objectContaining({ name: "forte-sv", supports_realtime: false })
+    });
+  });
+
+  it("keeps one locked live text box with its reason when several are picked", async () => {
+    const { dialog } = renderTranscriptionStep("endpoint_required");
+    const catalog = await within(dialog).findByRole("group", { name: "Modeller att lägga till" });
+    fireEvent.click(within(catalog).getByRole("checkbox", { name: /pianissimo-sv/ }));
+    fireEvent.click(within(catalog).getByRole("checkbox", { name: /forte-sv/ }));
+
+    const live = within(dialog).getByRole("checkbox", { name: /^Livetext$/ });
+    expect(live.getAttribute("aria-disabled")).toBe("true");
+    expect(describedBy(live)).toContain(
+      "Livetext kräver att leverantörens Endpoint-URL går till en server eller gateway med vLLM:s realtids-API."
+    );
+    expect(within(dialog).queryByRole("group", { name: "Livetext" })).toBeNull();
   });
 
   /** Creates a provider in the wizard; the list keeps answering without it, as a refetch still in flight would. */
@@ -1032,6 +1103,265 @@ describe("the add-model wizard's catalog", () => {
 
     await act(async () => {});
     expect(within(dialog).getByText("2 modeller valda")).toBeTruthy();
+  });
+});
+
+describe("the model step for a server at an address of its own", () => {
+  const whisper = { name: "whisper-1", mode: "transcription", cost_per_minute: 0.006 };
+  const catalogCaps = {
+    providers: {
+      openai: {
+        ...capabilities.providers.openai,
+        modes: ["transcription"],
+        models: { transcription: [whisper] }
+      },
+      hosted_vllm: {
+        modes: ["transcription"],
+        models: { transcription: [whisper] },
+        fields: [{ name: "endpoint", required: true, secret: false, in: "config" }]
+      },
+      azure: { ...capabilities.providers.openai, modes: ["transcription"], models: {} }
+    },
+    default_fields: capabilities.default_fields
+  };
+  const gateway: ModelProvider = {
+    ...existing,
+    id: "p-gw",
+    name: "Gateway",
+    config: { endpoint: "https://gateway.example/v1" }
+  };
+  const vllm: ModelProvider = {
+    ...existing,
+    id: "p-own-vllm",
+    name: "Aktörens vLLM",
+    provider_type: "hosted_vllm",
+    config: { endpoint: "https://vllm.example/v1" }
+  };
+  const liveRegion = () =>
+    document.querySelector("[data-astryx-live-region='polite']")?.textContent;
+
+  function renderStep(provider: ModelProvider, transcriptionList: unknown[]) {
+    return renderWizard({
+      initialProviderId: provider.id,
+      fixedKind: "transcription",
+      providerList: [provider],
+      caps: catalogCaps,
+      transcriptionList
+    });
+  }
+
+  it("shows no built-in models when the server lists none, and says it once", async () => {
+    const { dialog } = renderStep(gateway, []);
+
+    const title = "Eneo hittade ingen modell av typen Transkription i serverns lista";
+    expect(await within(dialog).findByText(title)).toBeTruthy();
+    expect(
+      within(dialog).getByText("Skriv modellens id nedan, som det står hos den som kör servern.")
+    ).toBeTruthy();
+    expect(within(dialog).queryByRole("checkbox", { name: /whisper-1/ })).toBeNull();
+    expect(within(dialog).queryByText(/modeller hittade/)).toBeNull();
+    expect(within(dialog).queryByText("Inga modeller hittades")).toBeNull();
+    expect(
+      within(dialog).getByRole("textbox", { name: "Saknas modellen? Lägg till med id" })
+    ).toBeTruthy();
+    await waitFor(() => expect(liveRegion()).toBe(title));
+    await expectNoAxeViolations(document.body);
+  });
+
+  it("says at the id field what is missing when the server lists nothing to pick", async () => {
+    const { dialog } = renderStep(vllm, []);
+    await within(dialog).findByText(
+      "Eneo hittade ingen modell av typen Transkription i serverns lista"
+    );
+    const hosting = within(dialog).getByRole("combobox", { name: /^Hosting-region/ });
+    fireEvent.keyDown(hosting, { key: "Enter" });
+    fireEvent.click(await screen.findByRole("option", { name: "Sverige" }));
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till modeller" }));
+
+    const id = within(dialog).getByRole("textbox", { name: "Saknas modellen? Lägg till med id" });
+    expect(document.activeElement).toBe(id);
+    expect(describedBy(id)).toContain("Välj minst en modell, eller lägg till en med dess id.");
+    expect(api.POST).not.toHaveBeenCalled();
+    await expectNoAxeViolations(document.body);
+  });
+
+  it("says the server sent no list, never its own error text", async () => {
+    const { dialog } = renderStep(vllm, [
+      { error: "Failed to list models: ConnectError('All connection attempts failed')" }
+    ]);
+
+    const title = "Servern skickade ingen modellista";
+    expect(await within(dialog).findByText(title)).toBeTruthy();
+    expect(
+      within(dialog).getByText(
+        "Kontrollera adressen och nyckeln. Du kan också skriva modellens id nedan."
+      )
+    ).toBeTruthy();
+    expect(within(dialog).queryByText(/Failed to list models/)).toBeNull();
+    expect(within(dialog).queryByText(/Visar den inbyggda katalogen/)).toBeNull();
+    expect(within(dialog).queryByRole("checkbox", { name: /whisper-1/ })).toBeNull();
+    await waitFor(() => expect(liveRegion()).toBe(title));
+    await expectNoAxeViolations(document.body);
+  });
+
+  it("lists the server's own models as before", async () => {
+    const { dialog } = renderStep(gateway, liveTranscriptionModels);
+
+    expect(await within(dialog).findByRole("checkbox", { name: /pianissimo-sv/ })).toBeTruthy();
+    expect(within(dialog).getByText("2 modeller hittade")).toBeTruthy();
+    expect(within(dialog).queryByRole("checkbox", { name: /whisper-1/ })).toBeNull();
+  });
+
+  it("keeps the built-in catalog for a provider without an address", async () => {
+    const { dialog } = renderStep(existing, []);
+
+    expect(await within(dialog).findByRole("checkbox", { name: /whisper-1/ })).toBeTruthy();
+    expect(within(dialog).getByText("1 modell hittad")).toBeTruthy();
+    expect(within(dialog).queryByText(/Eneo hittade/)).toBeNull();
+  });
+
+  it.each(["https://api.openai.com/v1", "https://api.openai.com/v1/"])(
+    "treats OpenAI's own address %s as the cloud service, not a server of its own",
+    async (endpoint) => {
+      const { dialog } = renderStep({ ...existing, id: "p-cloud", config: { endpoint } }, []);
+
+      expect(await within(dialog).findByRole("checkbox", { name: /whisper-1/ })).toBeTruthy();
+      expect(within(dialog).queryByText(/Eneo hittade/)).toBeNull();
+      const hosting = within(dialog).getByRole("combobox", { name: /^Hosting-region/ });
+      expect(hosting.textContent).toContain("USA");
+    }
+  );
+
+  it("keeps a look-alike of OpenAI's host as a server of its own", async () => {
+    const { dialog } = renderStep(
+      { ...existing, id: "p-lookalike", config: { endpoint: "https://openai.com.example.se/v1" } },
+      []
+    );
+
+    expect(
+      await within(dialog).findByText(
+        "Eneo hittade ingen modell av typen Transkription i serverns lista"
+      )
+    ).toBeTruthy();
+    expect(within(dialog).queryByRole("checkbox", { name: /whisper-1/ })).toBeNull();
+    const hosting = within(dialog).getByRole("combobox", { name: /^Hosting-region/ });
+    expect(hosting.textContent).toContain("Välj region");
+  });
+
+  it("asks where a server of its own stands instead of guessing the region", async () => {
+    const { dialog, onOpenChange } = renderStep(gateway, liveTranscriptionModels);
+
+    const hosting = await within(dialog).findByRole("combobox", { name: /^Hosting-region/ });
+    expect(hosting.textContent).not.toContain("USA");
+    expect(hosting.textContent).toContain("Välj region");
+    expect(describedBy(hosting)).toContain(
+      "Var servern som kör modellen står. Eneo kan inte se det, så välj själv."
+    );
+    fireEvent.click(await within(dialog).findByRole("checkbox", { name: /pianissimo-sv/ }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till 1 modell" }));
+
+    expect(document.activeElement).toBe(hosting);
+    expect(within(dialog).getByText("Välj var servern står.")).toBeTruthy();
+    expect(api.POST).not.toHaveBeenCalled();
+    await expectNoAxeViolations(document.body);
+
+    fireEvent.keyDown(hosting, { key: "Enter" });
+    fireEvent.click(await screen.findByRole("option", { name: "Sverige" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till 1 modell" }));
+
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+    expect(api.POST).toHaveBeenCalledWith("/api/v1/admin/tenant-models/transcription/", {
+      body: expect.objectContaining({ name: "pianissimo-sv", hosting: "swe" })
+    });
+  });
+
+  it("lets a server outside the listed regions say so", async () => {
+    const { dialog, onOpenChange } = renderStep(gateway, liveTranscriptionModels);
+    const hosting = await within(dialog).findByRole("combobox", { name: /^Hosting-region/ });
+    fireEvent.keyDown(hosting, { key: "Enter" });
+    fireEvent.click(await screen.findByRole("option", { name: "Annan plats" }));
+    fireEvent.click(await within(dialog).findByRole("checkbox", { name: /pianissimo-sv/ }));
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till 1 modell" }));
+
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+    expect(api.POST).toHaveBeenCalledWith("/api/v1/admin/tenant-models/transcription/", {
+      body: expect.objectContaining({ name: "pianissimo-sv", hosting: "other" })
+    });
+  });
+
+  it("asks for the region of a provider just created with an address", async () => {
+    const { dialog } = renderWizard({ fixedKind: "transcription", caps: catalogCaps });
+    api.POST.mockImplementation(
+      (path: string, options?: { body?: { config?: Record<string, string> } }) =>
+        path === "/api/v1/admin/model-providers/"
+          ? ok({ ...existing, id: "p-new", config: options?.body?.config ?? {} })
+          : ok({})
+    );
+    fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till OpenAI" }));
+    await waitFor(() => expect(field(/^API-nyckel/)).toBeTruthy());
+    fireEvent.change(field(/^API-nyckel/), { target: { value: "sk-live-1234" } });
+    fireEvent.change(field(/^Bekräfta API-nyckel/), { target: { value: "sk-live-1234" } });
+    fireEvent.change(field(/^Endpoint-URL/), { target: { value: "https://gateway.example/v1" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Nästa" }));
+
+    const hosting = await within(dialog).findByRole("combobox", { name: /^Hosting-region/ });
+    expect(hosting.textContent).toContain("Välj region");
+  });
+
+  it("treats Azure, which always has an address, as the cloud service it is", async () => {
+    const { dialog } = renderStep(
+      {
+        ...existing,
+        id: "p-azure",
+        provider_type: "azure",
+        config: { endpoint: "https://kommun.openai.azure.com" }
+      },
+      []
+    );
+
+    const hosting = await within(dialog).findByRole("combobox", { name: /^Hosting-region/ });
+    expect(hosting.textContent).toContain("Sverige");
+    expect(within(dialog).getByRole("textbox", { name: "Ange ett modell-id" })).toBeTruthy();
+    expect(within(dialog).queryByText(/Eneo hittade/)).toBeNull();
+    expect(within(dialog).queryByText(/Servern skickade/)).toBeNull();
+  });
+
+  it("keeps another cloud type's catalog and region when it has an address", async () => {
+    const voxtral = { name: "voxtral-mini-latest", mode: "transcription" };
+    const { dialog } = renderWizard({
+      initialProviderId: "p-mistral",
+      fixedKind: "transcription",
+      providerList: [
+        {
+          ...existing,
+          id: "p-mistral",
+          name: "Mistral",
+          provider_type: "mistral",
+          config: { endpoint: "https://api.mistral.ai" }
+        }
+      ],
+      caps: {
+        ...catalogCaps,
+        providers: {
+          ...catalogCaps.providers,
+          mistral: {
+            ...capabilities.providers.openai,
+            modes: ["transcription"],
+            models: { transcription: [voxtral] }
+          }
+        }
+      },
+      transcriptionList: []
+    });
+
+    expect(
+      await within(dialog).findByRole("checkbox", { name: /voxtral-mini-latest/ })
+    ).toBeTruthy();
+    expect(within(dialog).queryByText(/Eneo hittade/)).toBeNull();
+    const hosting = within(dialog).getByRole("combobox", { name: /^Hosting-region/ });
+    expect(hosting.textContent).toContain("Frankrike");
   });
 });
 
