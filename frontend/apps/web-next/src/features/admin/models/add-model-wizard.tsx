@@ -25,6 +25,7 @@ import {
 import { blockingError, QueryStateBoundary } from "@/components/composites/query-state";
 import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { KeyExpiryField } from "./key-expiry-field";
+import { hasOwnEndpoint } from "./model-catalog";
 import { ModelCatalogStep } from "./model-catalog-step";
 import {
   createProvider,
@@ -474,12 +475,20 @@ export function AddModelWizard({
               {t("enter_provider_credentials")}
             </Text>
             <Text type="supporting" display="block">
-              {/* The two types that can carry live text: a gateway already added
-                  as OpenAI needs no second provider. */}
-              {providerType === "hosted_vllm" || providerType === "openai"
-                ? `${t("provider_type_fixed_note")} ${t("provider_gateway_as_openai_note")}`
-                : t("provider_type_fixed_note")}
+              {/* The two types that can carry live text. OpenAI says when vLLM
+                  fits a server another host runs better; vLLM that a gateway
+                  already added as OpenAI needs no second provider. */}
+              {providerType === "openai"
+                ? `${t("provider_type_fixed_note")} ${t("provider_openai_compatible_note")}`
+                : providerType === "hosted_vllm"
+                  ? `${t("provider_type_fixed_note")} ${t("provider_gateway_as_openai_note")}`
+                  : t("provider_type_fixed_note")}
             </Text>
+            {providerType === "openai" && (
+              <Text type="supporting" display="block">
+                {t("provider_outbound_headers_note")}
+              </Text>
+            )}
           </div>
         </div>
         <form id={credentialsFormId} onSubmit={submitCredentials} noValidate>
@@ -594,6 +603,12 @@ export function AddModelWizard({
                 <ModelCatalogStep
                   providerId={targetProviderId}
                   providerType={targetProviderType}
+                  // A provider made in this session is the create call's
+                  // answer, so its config is what the form sent.
+                  hasOwnEndpoint={hasOwnEndpoint(
+                    targetProviderType,
+                    existingProvider?.config.endpoint
+                  )}
                   realtimeEligibility={
                     mode === "existing" ? existingProvider?.realtime_eligibility : undefined
                   }

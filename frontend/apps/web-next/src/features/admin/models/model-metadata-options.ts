@@ -9,7 +9,10 @@ export const HOSTING_REGIONS = [
   "kor",
   "deu",
   "fra",
-  "jpn"
+  "jpn",
+  // A server outside the listed regions: its location is then recorded as
+  // known to be elsewhere rather than guessed.
+  "other"
 ] as const;
 export type HostingRegion = (typeof HOSTING_REGIONS)[number];
 
@@ -24,7 +27,8 @@ export function isEmbeddingFamily(value: string): value is EmbeddingFamily {
   return EMBEDDING_FAMILIES.some((family) => family === value);
 }
 
-// Provider defaults seed the form; the administrator can choose another region.
+// Where each type's own cloud service stands seeds the form; the administrator
+// can choose another region. A server at an address of its own gets no default.
 const PROVIDER_HOSTING: Record<string, HostingRegion> = {
   openai: "usa",
   anthropic: "usa",

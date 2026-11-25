@@ -236,9 +236,11 @@ export function TranscriptionServiceDialog({
     else onTest();
   }
 
+  // Says only that the service is saved: the check runs after, and the callout
+  // below alone says how it went, so the two never disagree.
   const title =
     connected && saved
-      ? t("speaker_service_dialog_connected_title", { name: saved.name })
+      ? t("speaker_service_dialog_saved_title", { name: saved.name })
       : saved
         ? t("speaker_service_dialog_edit_title", { name: saved.name })
         : t("speaker_service_dialog_create_title");

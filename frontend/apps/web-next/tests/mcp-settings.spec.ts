@@ -169,6 +169,7 @@ test.describe("image source on a touch screen", () => {
             id: "provider-fixture",
             name: "Fixture provider",
             provider_type: "openai",
+            config: {},
             is_active: true
           }
         ],
