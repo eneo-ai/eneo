@@ -220,8 +220,8 @@ Permissions define what operations a key can perform within its scope:
 | Permission | Space Role | User keys can do | Service keys can do |
 |-----------|-----------|------------------|---------------------|
 | `read` | VIEWER | Read resources, list items | Same |
-| `write` | EDITOR | Create and update resources | Update supported existing resources (creation is gated) |
-| `admin` | ADMIN | Delete resources, manage space settings | Delete supported existing resources, manage settings (creation is gated) |
+| `write` | EDITOR | Create and update resources | Same, except for [the few things that still need a person](#what-service-keys-cannot-do) |
+| `admin` | ADMIN | Delete resources, manage space settings | Same |
 
 For files, `write` allows a key to upload files: a user key's files are owned by that user, a service key's by its service principal. `admin` is required to delete files, and deletion is still limited to files with that same owner.
 

@@ -237,7 +237,7 @@ A provider can have up to 10 headers. A header name must be a valid HTTP header 
 If one dynamic value in a mixed value is missing, the setting applies to the whole header: a partial value like `tier-` is never sent.
 
 <Callout type="warning">
-  **Block the request** denies service to every user who lacks the attribute. That includes service keys, users whose identity provider has not filled in the attribute, and newly provisioned users until the next sync. The recommended setting is to leave the header out and give the receiving side a default.
+  **Block the request** denies service to every user who lacks the attribute. That includes service keys, users whose identity provider has not filled in the attribute, newly provisioned users until the next sync, and scheduled crawls and an organization's SharePoint syncs, which run as the space and have no attributes. The recommended setting is to leave the header out and give the receiving side a default.
 </Callout>
 
 ### Blocked requests
@@ -286,8 +286,8 @@ Changes are recorded as `model_provider_headers_updated`, with secret values mas
 
 - A request a user makes, such as a chat message or a search, uses that user's attributes.
 - A file upload is processed with the attributes of the user who uploaded it.
-- A scheduled website crawl uses the attributes of the website's owner. A crawl started by hand uses the attributes of the user who started it.
-- A [SharePoint integration](/guides/sharepoint-integration) connected as a tenant app is not tied to a person, so a synchronisation triggered by a SharePoint webhook uses the attributes of the tenant's oldest administrator: the earliest-created active or invited user with the admin permission.
+- A scheduled website crawl runs as the space the website is in. A space is not a person and has no attributes, so every dynamic value is missing and the header's setting for a missing value applies. A crawl started by hand uses the attributes of the user who started it.
+- A [SharePoint integration](/guides/sharepoint-integration) connected as a tenant app is not tied to a person, so its synchronisation runs as the space the knowledge is in and has no attributes either.
 
 ### When changes take effect
 

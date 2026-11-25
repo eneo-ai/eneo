@@ -145,9 +145,9 @@ _SERVICE_KEY_BASE_PERMISSIONS: frozenset[Permission] = frozenset(
         # Web search: automations asking an assistant keep the capability the
         # assistant offers; the route guards and the tenant's providers still
         # bound what a key can reach. Image, document and spreadsheet
-        # creation are deliberately absent: their outputs are persisted as
-        # files keyed on user_id, and the synthetic service user has no users
-        # row to key them on.
+        # creation are deliberately absent: they are not granted to service
+        # keys. Their outputs are files, which a service principal can own,
+        # so granting them is a product decision, not a technical limit.
         Permission.WEB_SEARCH,
     }
 )
