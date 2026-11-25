@@ -275,10 +275,14 @@
               </div>
               <div class="min-w-0">
                 <dt class="text-secondary">{m.admin_crawler_source_owner()}</dt>
-                <dd class="mt-1 break-words">{details.owner.username || details.owner.email}</dd>
-                <dd class="text-secondary break-all text-xs">
-                  {details.owner.username ? details.owner.email : ""}
-                </dd>
+                {#if details.owner}
+                  <dd class="mt-1 break-words">{details.owner.username || details.owner.email}</dd>
+                  <dd class="text-secondary break-all text-xs">
+                    {details.owner.username ? details.owner.email : ""}
+                  </dd>
+                {:else}
+                  <dd class="mt-1 break-words">{m.admin_crawler_not_recorded()}</dd>
+                {/if}
               </div>
               <div>
                 <dt class="text-secondary">{m.admin_crawler_schedule()}</dt>

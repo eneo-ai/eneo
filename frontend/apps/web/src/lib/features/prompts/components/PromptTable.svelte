@@ -49,10 +49,10 @@
 
     table.columnPrimary({
       header: m.author(),
-      value: (item) => item.user.email,
+      value: (item) => item.user?.email ?? "",
       cell: (item) => {
         return Table.renderComponent(PromptCreator, {
-          user: item.value.user
+          user: item.value.user ?? { email: "" }
         });
       }
     }),

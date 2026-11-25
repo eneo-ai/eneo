@@ -2291,7 +2291,7 @@ export interface paths {
     };
     /**
      * Get Crawler Details
-     * @description Read a crawl's owning space, source owner, recorded manual initiator, indexed storage and current source state. Requires tenant admin permission; does not grant access to indexed content.
+     * @description Read a crawl's owning space, the person who created the source when there is one, recorded manual initiator, indexed storage and current source state. Requires tenant admin permission; does not grant access to indexed content.
      */
     get: operations["get_crawler_details_api_v1_admin_crawler_runs__id___get"];
     put?: never;
@@ -2373,7 +2373,7 @@ export interface paths {
     put?: never;
     /**
      * Request Admin Crawl
-     * @description Request a crawl with the website's current settings. Tenant admin permission permits this operation in private spaces without granting content access. Returns the existing active run when present. Requires a user identity; retry starts a new full crawl. A new run executes as the requesting administrator, whose storage quota covers newly published content versions.
+     * @description Request a crawl with the website's current settings. Tenant admin permission permits this operation in private spaces without granting content access. Returns the existing active run when present; retry starts a new full crawl. A new run executes as the caller. When the caller is a person, their storage quota covers newly published content versions; a service key has no personal quota, so only the organization's limit applies.
      */
     post: operations["request_admin_crawl_api_v1_admin_crawler_websites__id__run__post"];
     delete?: never;
@@ -5491,6 +5491,26 @@ export interface paths {
     };
     /** Get Space Knowledge */
     get: operations["get_space_knowledge_api_v1_spaces__id__knowledge__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/spaces/{id}/storage/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Space Storage
+     * @description How much this space stores, in bytes, by kind of knowledge. For admins of the space. Informational: there is no limit per space, and the organization's total and limit are not included.
+     */
+    get: operations["get_space_storage_api_v1_spaces__id__storage__get"];
     put?: never;
     post?: never;
     delete?: never;
@@ -10593,7 +10613,7 @@ export interface components {
       last_indexed_at: string | null;
       /** Space Id */
       space_id: string | null;
-      owner: components["schemas"]["AdminCrawlerUser"];
+      owner: components["schemas"]["AdminCrawlerUser"] | null;
       initiated_by: components["schemas"]["AdminCrawlerUser"] | null;
       /** Indexed Size */
       indexed_size: number;
@@ -11439,7 +11459,7 @@ export interface components {
       status: components["schemas"]["Status"];
       /** Finished At */
       finished_at: string | null;
-      user: components["schemas"]["UserSparse"];
+      user?: components["schemas"]["UserSparse"] | null;
       /** Skill Provenance */
       skill_provenance: components["schemas"]["SkillExecutionReference"][];
       /** Output */
@@ -11460,7 +11480,7 @@ export interface components {
       status: components["schemas"]["Status"];
       /** Finished At */
       finished_at: string | null;
-      user: components["schemas"]["UserSparse"];
+      user?: components["schemas"]["UserSparse"] | null;
       /** Skill Provenance */
       skill_provenance: components["schemas"]["SkillExecutionReference"][];
     };
@@ -11486,11 +11506,8 @@ export interface components {
       description?: string | null;
       /** Published */
       published: boolean;
-      /**
-       * User Id
-       * Format: uuid
-       */
-      user_id: string;
+      /** User Id */
+      user_id?: string | null;
       /**
        * Icon Id
        * @description Icon ID referencing an uploaded icon
@@ -12144,7 +12161,7 @@ export interface components {
        * @default false
        */
       published?: boolean;
-      user: components["schemas"]["UserSparse"];
+      user?: components["schemas"]["UserSparse"] | null;
       tools: components["schemas"]["UseTools"];
       /**
        * Specialists
@@ -12302,11 +12319,8 @@ export interface components {
        * @default []
        */
       permissions?: components["schemas"]["ResourcePermission"][];
-      /**
-       * User Id
-       * Format: uuid
-       */
-      user_id: string;
+      /** User Id */
+      user_id?: string | null;
       /**
        * Published
        * @default false
@@ -14436,7 +14450,7 @@ export interface components {
        * @default false
        */
       published?: boolean;
-      user: components["schemas"]["UserSparse"];
+      user?: components["schemas"]["UserSparse"] | null;
     };
     /** CursorPaginatedResponse[ApiKeyV2] */
     CursorPaginatedResponse_ApiKeyV2_: {
@@ -14663,7 +14677,7 @@ export interface components {
        * @default false
        */
       published?: boolean;
-      user: components["schemas"]["UserSparse"];
+      user?: components["schemas"]["UserSparse"] | null;
       tools: components["schemas"]["UseTools"];
       /**
        * Specialists
@@ -20823,7 +20837,7 @@ export interface components {
       description?: string | null;
       /** Is Selected */
       is_selected?: boolean | null;
-      user: components["schemas"]["UserSparse"];
+      user?: components["schemas"]["UserSparse"] | null;
       /** Text */
       text: string;
     };
@@ -20857,7 +20871,7 @@ export interface components {
       description?: string | null;
       /** Is Selected */
       is_selected: boolean;
-      user: components["schemas"]["UserSparse"];
+      user?: components["schemas"]["UserSparse"] | null;
     };
     /** PromptUpdateRequest */
     PromptUpdateRequest: {
@@ -21790,7 +21804,7 @@ export interface components {
       /** Groups */
       groups: components["schemas"]["GroupPublicBase"][];
       completion_model: components["schemas"]["CompletionModelPublic"];
-      user: components["schemas"]["UserPublicBase"];
+      user?: components["schemas"]["UserPublicBase"] | null;
     };
     /** ServiceRun */
     ServiceRun: {
@@ -21839,11 +21853,8 @@ export interface components {
        * @default []
        */
       permissions?: components["schemas"]["ResourcePermission"][];
-      /**
-       * User Id
-       * Format: uuid
-       */
-      user_id: string;
+      /** User Id */
+      user_id?: string | null;
     };
     /** SessionFeedback */
     SessionFeedback: {
@@ -23453,6 +23464,21 @@ export interface components {
       default_assistant?: components["schemas"]["DefaultAssistant"] | null;
       /** Data Retention Days */
       data_retention_days?: number | null;
+    };
+    /**
+     * SpaceStorageModel
+     * @description What one space stores, in bytes. Informational: there is no limit per
+     *     space.
+     */
+    SpaceStorageModel: {
+      /** Size */
+      size: number;
+      /** Collections Size */
+      collections_size: number;
+      /** Websites Size */
+      websites_size: number;
+      /** Integration Knowledge Size */
+      integration_knowledge_size: number;
     };
     /**
      * StartRunRequest
@@ -48412,6 +48438,55 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["Knowledge"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_space_storage_api_v1_spaces__id__storage__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SpaceStorageModel"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */

@@ -294,14 +294,18 @@ function SourceTab({
           {details.space_name ?? t("admin_crawler_not_recorded")}
         </MetadataListItem>
         <MetadataListItem label={t("admin_crawler_source_owner")}>
-          <span className="flex flex-col">
-            <span className="break-words">{details.owner.username || details.owner.email}</span>
-            {details.owner.username ? (
-              <span className="text-ax-text-secondary text-xs break-all">
-                {details.owner.email}
-              </span>
-            ) : null}
-          </span>
+          {details.owner ? (
+            <span className="flex flex-col">
+              <span className="break-words">{details.owner.username || details.owner.email}</span>
+              {details.owner.username ? (
+                <span className="text-ax-text-secondary text-xs break-all">
+                  {details.owner.email}
+                </span>
+              ) : null}
+            </span>
+          ) : (
+            t("admin_crawler_not_recorded")
+          )}
         </MetadataListItem>
         <MetadataListItem label={t("admin_crawler_schedule")}>
           {t(intervalLabelKey(details.update_interval))}

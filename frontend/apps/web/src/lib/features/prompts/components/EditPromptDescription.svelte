@@ -24,7 +24,7 @@
 
   let isOpen = false;
 
-  $: isPromptCreatedByUser = user.id === prompt.user.id;
+  $: isPromptCreatedByUser = user.id === prompt.user?.id;
 
   function saveDescription() {
     updatePromptDescription({

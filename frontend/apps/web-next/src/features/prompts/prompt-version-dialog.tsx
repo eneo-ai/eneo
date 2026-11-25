@@ -131,7 +131,7 @@ function History({
       ),
     staleTime: 0
   });
-  const author = selected?.user.id === user.id;
+  const author = selected?.user?.id === user.id;
   const mutation = useMutation({
     mutationFn: async (action: Action) => {
       if (action.kind === "delete") {
@@ -190,7 +190,7 @@ function History({
   const dirty = step.kind === "description" && description !== step.originalDescription;
   const actionTitle = step.kind === "delete" ? t("delete_prompt") : t("edit_prompt_description");
   function submit() {
-    if (saving.current || step.kind === "preview" || step.target.user.id !== user.id) return;
+    if (saving.current || step.kind === "preview" || step.target.user?.id !== user.id) return;
     if (
       step.kind === "delete" &&
       (list.data?.find((version) => version.id === step.target.id)?.is_selected ??
@@ -283,9 +283,11 @@ function History({
                             )}{" "}
                             {version.is_selected && <strong>{t("current_version")}</strong>}
                           </span>
-                          <span className="text-ax-text-secondary break-words">
-                            {t("author")}: {version.user.username || version.user.email}
-                          </span>
+                          {version.user && (
+                            <span className="text-ax-text-secondary break-words">
+                              {t("author")}: {version.user.username || version.user.email}
+                            </span>
+                          )}
                           {version.description && (
                             <span className="text-ax-text-secondary line-clamp-2">
                               {version.description}
