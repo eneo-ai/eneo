@@ -1,6 +1,6 @@
 ---
 title: Uppgraderingsanteckningar
-translationSource: guides/upgrade-notes.mdx@975cd4811b68
+translationSource: guides/upgrade-notes.mdx@b2cbe35ae259
 ---
 
 import { Callout } from "nextra/components";
@@ -32,6 +32,7 @@ Varje punkt kan hindra backend från att starta, stoppa inloggningen eller förl
 11. Exportera granskningsloggen först om du behöver filnamnen: uppgraderingen tar bort dem för gott. Se [Exportera granskningsloggar](/guides/audit-logging#exporting-audit-logs).
 12. Kör kontrollen av sessioner mot databasen från 2.3: en session som har både användare och API-nyckel, eller ingen av dem, stoppar `db-init`. Se [Webbwidgetar](#widgets).
 13. Ersätt API-nycklar som integrationer eller moduler fortfarande använder men som har statusen Utgången, eller som policyn för oanvända nycklar kommer att låta gå ut: de slutar fungera vid den första nattliga körningen. Se [API-nycklar som borde ha gått ut](#api-keys-expire).
+14. Planera driftstopp för `db-init` i proportion till storleken på `files` och `sessions`: migreringarna `202611241100` och `202611241200` låser var sin tabell medan de kontrollerar varje rad. Se [Tjänstenycklar äger sina filer och konversationer](#service-key-files).
 
 **Gå tillbaka till 2.3:** läs tillbaka säkerhetskopian från `pg_dump` som togs före `db-init`, tillsammans med en matchande ögonblicksbild av objektlagringen. En nedgradering av schemat stannar vid migreringen `202610291900` ("Cannot discard approved Skill reference history") så snart en godkänd Skill-version hänvisar till en annan Skill. En nedgradering tar aldrig tillbaka tömda eller borttagna loggar, tömda namn eller omskrivna granskningsposter.
 
@@ -136,6 +137,7 @@ flowchart TB
 | [Ikoner](#icons) | API-konsumenter för ikoner, administratörer med flera organisationer | Driftsätt backend och båda frontends tillsammans |
 | Granskningshändelsen `user_access_token_issued` registrerar varje token som driftansvarig tar ut för en användare med super-API-nyckeln, alltid och innan tokenet lämnas ut | Klienter med en fast lista över granskningshändelser | Godta det nya värdet |
 | [API-nycklar som borde ha gått ut slutar fungera](#api-keys-expire) | Integrationer och moduler med API-nycklar; organisationer med policyn för oanvända nycklar | Ersätt nycklarna; kontrollera policyns antal dagar |
+| [Tjänstenycklar äger sina filer och konversationer](#service-key-files) | Integrationer med tjänstenycklar; driftansvariga; alla som skriver direkt till `api_keys_v2`, `files` eller `sessions` | Planera driftstopp; räkna med `200` där uppladdning och borttagning av filer svarade `403` |
 
 ### Gallring, loggar och lagring [#retention-logs-storage]
 
@@ -351,6 +353,22 @@ När policyn för oanvända nycklar (`auto_expire_unused_days`) lät en nyckel g
 En körning tar högst 500 nycklar ur varje urval: nycklar efter sitt slutdatum, nycklar registrerade som utgångna men fortfarande öppna, nycklar vars rotationsfrist har gått ut, och oanvända nycklar per organisation. Nycklar utöver gränsen väntar till en senare natt. En oanvänd nyckel, eller en som är registrerad som utgången men fortfarande öppen, fungerar till dess; en nyckel efter sitt slutdatum eller sin rotationsfrist nekas redan vid inloggningen, och bara det registrerade läget och granskningsraden väntar. Jobbets granskningsrader (`api_key_expired`, och `api_key_revoked` efter en rotation) skrivs nu också när organisationen har stängt av granskningsloggen eller åtgärden.
 
 **Gör:** före uppgraderingen, leta i **Admin > API-nycklar** upp nycklarna med statusen Utgången som en integration eller modul fortfarande använder, och nycklarna som policyn kommer att låta gå ut. Skapa en ny nyckel och lägg in den i integrationen, eller i modulens konfiguration för en moduls tjänstenyckel. Sätt policyns antal dagar längre än det längsta uppehållet för en tjänst som använder en nyckel. En nyckel som har gått ut kommer inte tillbaka när policyn stängs av. Se [Nattligt underhåll](/docs/api-key-management#nightly-maintenance).
+
+### Tjänstenycklar äger sina filer och konversationer [#service-key-files]
+
+En tjänstenyckel kunde inte ladda upp eller ta bort filer, eftersom en fil måste ägas av en person. Nu hör varje tjänstenyckel till en tjänsteprincipal, och en fil ägs av en person eller av en tjänsteprincipal. Se [Tjänsteprincipalen bakom en tjänstenyckel](/docs/api-key-management#the-service-principal-behind-a-service-key).
+
+- `POST /api/v1/files/` med en tjänstenyckel svarar `200` i stället för `403 service_key_cannot_create_resources`. Filen ägs av nyckelns tjänsteprincipal.
+- `DELETE /api/v1/files/{id}/` med en tjänstenyckel tar bort en fil som den principalen äger. Anropet svarar inte längre `403 service_key_cannot_delete_files`; den koden finns inte kvar. En fil med en annan ägare svarar `404`.
+- En tjänstenyckel läser bara de filer som dess egen principal äger. En roterad nyckel behåller filerna från nyckeln den ersatte.
+- En konversation som startats med en tjänstenyckel hör till nyckelns tjänsteprincipal. Tidigare hörde den till nyckeln, så en roterad nyckel kunde inte läsa konversationerna från nyckeln den ersatte, och en nyckel som hade startat en konversation gick inte att ta bort. Båda fungerar nu.
+- En ny vägran: `403 service_principal_disabled` när nyckelns tjänsteprincipal är avstängd. I dag stänger ingenting av en principal.
+
+Migreringen `202611241000` skapar `service_principals` och ger varje befintlig tjänstenyckel en principal, en per rotationskedja. Migreringen `202611241100` byter namn på `files.user_id` till `files.owner_user_id` och lägger till `files.owner_type` och `files.owner_service_id`. Ingen rad skrivs om, men migreringen kontrollerar varje rad i `files` medan tabellen är låst. Migreringen `202611241200` lägger till `sessions.service_principal_id`, fyller i den för de konversationer som en tjänstenyckel har startat och kontrollerar varje rad i `sessions` medan den tabellen är låst. `sessions.api_key_id` finns kvar som den nyckel som startade konversationen och blir tom när nyckeln tas bort.
+
+**Gör:** stoppa varje backend och worker före `db-init`, och planera driftstopp i proportion till storleken på `files` och `sessions`. Egen SQL som läser `files.user_id` ska läsa `files.owner_user_id`; SQL som lägger in en tjänstenyckel i `api_keys_v2` ska sätta `service_principal_id`; SQL som letar upp en tjänstenyckels konversationer ska använda `sessions.service_principal_id`.
+
+**Återställning:** `alembic downgrade 202611201305`. Den nekas så länge en tjänsteprincipal äger en fil, eller äger en konversation vars nyckel har tagits bort; ta bort de filerna och konversationerna först.
 
 ## Detaljer: gallring, loggar och lagring [#details-retention]
 
