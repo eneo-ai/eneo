@@ -2,7 +2,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { Trash2 } from "lucide-react";
 import { useLocale, useTranslations } from "use-intl";
 import { Banner } from "@astryxdesign/core/Banner";
-import type { ResumeRefusal, SavedRecording } from "./recording-keeper";
+import type { DiscardOutcome, ResumeRefusal, SavedRecording } from "./recording-keeper";
 
 type Translator = ReturnType<typeof useTranslations>;
 
@@ -26,6 +26,25 @@ export function resumeRefusalText(refusal: ResumeRefusal, t: Translator): string
       return t("flow_transcript_resume_too_many_parts");
     case "type_not_accepted":
       return t("flow_transcript_resume_type_not_accepted");
+    case "open_elsewhere":
+      return t("flow_transcript_resume_open_elsewhere");
+    case "read_failed":
+      return t("flow_transcript_resume_read_failed");
+  }
+}
+
+/** Why a kept recording was not discarded from the prompt. */
+export function discardRefusalText(
+  outcome: Exclude<DiscardOutcome, "discarded" | "closed">,
+  t: Translator
+): string {
+  switch (outcome) {
+    case "open_elsewhere":
+      return t("flow_transcript_resume_discard_open_elsewhere");
+    case "read_failed":
+      return t("flow_transcript_resume_read_failed");
+    case "discard_failed":
+      return t("flow_transcript_resume_discard_failed");
   }
 }
 

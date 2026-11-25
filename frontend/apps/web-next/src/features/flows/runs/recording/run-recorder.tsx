@@ -35,14 +35,12 @@ import { DiscardRecording } from "./discard-recording";
 import { LiveTranscript, type LiveSnapshot } from "./live-transcript";
 import {
   contractSnapshot,
-  resumeRefusal,
   storedPartFile,
   type PartKeeping,
   type RecordingKeeper,
   type SavedRecording
 } from "./recording-keeper";
-import type { StoredPart } from "./recording-store";
-import { resumeRefusalText, ResumePrompt } from "./resume-prompt";
+import { discardRefusalText, resumeRefusalText, ResumePrompt } from "./resume-prompt";
 import {
   AudioRecorder,
   MAX_PARTS_AWAITING_UPLOAD,
@@ -606,56 +604,56 @@ export function RunRecorder({
     setResumeProblem(null);
   }
 
+  /** Shows why a kept recording did not continue or go, and says it. */
+  function refuse(problem: string) {
+    setResumeProblem(problem);
+    announce(problem);
+  }
+
   async function continueSaved(saved: SavedRecording) {
     setResumeBusy("continue");
     setResumeProblem(null);
-    try {
-      let parts: StoredPart[];
-      try {
-        parts = await keeper.readSession(stepId, saved.sessionId);
-      } catch {
-        setResumeProblem(t("flow_transcript_resume_read_failed"));
-        return;
-      }
-      if (parts.length === 0) {
-        settle(saved);
-        return;
-      }
-      // The flow may have changed since: its step must still take these parts as they are.
-      const refusal = resumeRefusal(snapshotOfContract(), parts);
-      if (refusal) {
-        setResumeProblem(resumeRefusalText(refusal, t));
-        return;
-      }
-      keeper.adopt(stepId, parts);
-      setSession(saved.sessionId);
-      for (const part of parts) {
-        onPart(
-          storedPartFile(part),
-          {
-            sessionId: part.sessionId,
-            index: part.index,
-            durationMs: part.durationMs,
-            streamed: part.streamed,
-            liveTranscript: part.liveTranscript
-          },
-          partLabel(part.index, part.durationMs)
-        );
-      }
+    // The keeper takes the recording over only when no other tab holds it and the step takes it.
+    const outcome = await keeper.resume(stepId, saved.sessionId, snapshotOfContract());
+    // A second press while the first goes on: the first answers.
+    if (outcome.kind === "busy") return;
+    setResumeBusy(null);
+    if (outcome.kind === "closed") return;
+    if (outcome.kind === "empty") {
       settle(saved);
-      announce(t("flow_transcript_resume_added"));
-    } finally {
-      setResumeBusy(null);
+      return;
     }
+    if (outcome.kind === "refused") {
+      refuse(resumeRefusalText(outcome.refusal, t));
+      return;
+    }
+    setSession(saved.sessionId);
+    for (const part of outcome.parts) {
+      onPart(
+        storedPartFile(part),
+        {
+          sessionId: part.sessionId,
+          index: part.index,
+          durationMs: part.durationMs,
+          streamed: part.streamed,
+          liveTranscript: part.liveTranscript
+        },
+        partLabel(part.index, part.durationMs)
+      );
+    }
+    settle(saved);
+    announce(t("flow_transcript_resume_added"));
   }
 
   async function discardSaved(saved: SavedRecording) {
     setResumeBusy("discard");
     setResumeProblem(null);
-    const discarded = await keeper.forgetSession(stepId, saved.sessionId);
+    // Not while another tab has the recording open.
+    const outcome = await keeper.discard(stepId, saved.sessionId);
     setResumeBusy(null);
-    if (!discarded) {
-      setResumeProblem(t("flow_transcript_resume_discard_failed"));
+    if (outcome === "closed") return;
+    if (outcome !== "discarded") {
+      refuse(discardRefusalText(outcome, t));
       return;
     }
     settle(saved);

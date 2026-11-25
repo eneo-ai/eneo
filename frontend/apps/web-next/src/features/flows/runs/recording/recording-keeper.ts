@@ -49,8 +49,35 @@ export type SavedRecording = {
   contract: ContractSnapshot;
 };
 
-/** Why a kept recording cannot continue in this form, or null when it can. */
-export type ResumeRefusal = "step_changed" | "too_many_parts" | "type_not_accepted";
+/**
+ * Why a kept recording cannot continue in this form, or null when it can:
+ * the step no longer takes it, another form holds it ("open_elsewhere"), or
+ * it could not be read or held ("read_failed").
+ */
+export type ResumeRefusal =
+  "step_changed" | "too_many_parts" | "type_not_accepted" | "open_elsewhere" | "read_failed";
+
+/**
+ * What Fortsätt came to: the recording's parts taken over; refused; nothing
+ * kept to continue ("empty"); the same recording already being continued
+ * here ("busy"); or the form went meanwhile ("closed").
+ */
+export type ResumeOutcome =
+  | { kind: "continued"; parts: StoredPart[] }
+  | { kind: "refused"; refusal: ResumeRefusal }
+  | { kind: "empty" }
+  | { kind: "busy" }
+  | { kind: "closed" };
+
+/** What Kassera came to; "closed" when the form went meanwhile. */
+export type DiscardOutcome =
+  "discarded" | "discard_failed" | "open_elsewhere" | "read_failed" | "closed";
+
+/** What asking to hold a recording gave: held, held by another form, the browser refused to ask, the form went. */
+type HoldAnswer = "held" | "taken" | "failed" | "closed";
+
+/** `ended`: settles once the browser has the lock back, or never gave it. */
+type Hold = { answer: Promise<HoldAnswer>; letGo: (() => void) | null; ended: Promise<void> };
 
 /** Where a part of this form is kept: on the device, or only in this tab. */
 export type PartKeeping = "device" | "tab";
@@ -126,6 +153,11 @@ export function storedPartFile(part: StoredPart): File {
   );
 }
 
+/** The Web Lock a form holds while it records or has continued a recording. */
+function holdLockName(flowId: string, stepId: string, sessionId: string): string {
+  return `eneo-flow-recording-holder:${flowId}::${stepId}::${sessionId}`;
+}
+
 /** The device's store where the browser has one. */
 export function browserRecordings(): RecordingDatabase | null {
   try {
@@ -140,6 +172,8 @@ export type ScanResult = {
   /** Some kept recordings could not be read: not the same as none. */
   incomplete: boolean;
 };
+
+const holdKey = (stepId: string, sessionId: string) => `${stepId}::${sessionId}`;
 
 /** The page's storage managers already asked to keep their storage: one per page. */
 const storageAsked = new WeakSet<object>();
@@ -161,6 +195,14 @@ export class RecordingKeeper {
   #listeners = new Set<() => void>();
   #degraded = new Map<string, JournalDegradation>();
   #version = 0;
+  /**
+   * The recordings this form holds or is asking to hold, by step and
+   * session. Only Fortsätt and Kassera depend on the hold: recording and
+   * keeping parts never wait for it.
+   */
+  #holds = new Map<string, Hold>();
+  #resuming = new Set<string>();
+  #closed = false;
 
   /** `userId`: the signed-in person, whose recordings are kept and offered; null while not known. */
   constructor(
@@ -237,6 +279,8 @@ export class RecordingKeeper {
     return {
       begin: (part) => {
         this.#track(stepId, part.sessionId);
+        // The form holds what it records, so another tab cannot continue or discard it; nothing waits for it.
+        void this.#take(stepId, part.sessionId);
         if (!this.#journal) {
           this.#degrade(address(part), "failed");
           return;
@@ -451,8 +495,79 @@ export class RecordingKeeper {
       .sort((a, b) => a.index - b.index);
   }
 
+  /** The form has the keeper (again, after strict mode's first unmount); answers how it lets go. */
+  open(): () => void {
+    this.#closed = false;
+    return () => void this.close();
+  }
+
+  /** The form goes: every recording it holds is let go. Writes under way go on as before. */
+  async close(): Promise<void> {
+    this.#closed = true;
+    await Promise.all([...this.#holds.keys()].map((key) => this.#release(key)));
+  }
+
+  /**
+   * Fortsätt: holds the recording, reads its parts, checks that the step
+   * still takes them, and takes them over. Refused while another form holds
+   * it. A hold taken here that leads to no takeover is let go.
+   */
+  async resume(
+    stepId: string,
+    sessionId: string,
+    contract: ContractSnapshot
+  ): Promise<ResumeOutcome> {
+    const key = holdKey(stepId, sessionId);
+    if (this.#resuming.has(key)) return { kind: "busy" };
+    this.#resuming.add(key);
+    try {
+      const heldBefore = this.#holds.has(key);
+      const outcome = await this.#takeOver(stepId, sessionId, contract);
+      if (outcome.kind !== "continued" && !heldBefore) await this.#release(key);
+      return outcome;
+    } finally {
+      this.#resuming.delete(key);
+    }
+  }
+
+  /** Kassera from the prompt: refused while another form holds the recording; let go once it is gone. */
+  async discard(stepId: string, sessionId: string): Promise<DiscardOutcome> {
+    const key = holdKey(stepId, sessionId);
+    const answer = await this.#take(stepId, sessionId);
+    if (answer === "taken") return "open_elsewhere";
+    if (answer === "failed") return "read_failed";
+    if (answer === "closed") return "closed";
+    const discarded = await this.forgetSession(stepId, sessionId);
+    await this.#release(key);
+    return discarded ? "discarded" : "discard_failed";
+  }
+
+  async #takeOver(
+    stepId: string,
+    sessionId: string,
+    contract: ContractSnapshot
+  ): Promise<ResumeOutcome> {
+    const answer = await this.#take(stepId, sessionId);
+    if (answer === "taken") return { kind: "refused", refusal: "open_elsewhere" };
+    if (answer === "failed") return { kind: "refused", refusal: "read_failed" };
+    if (answer === "closed") return { kind: "closed" };
+    let parts: StoredPart[];
+    try {
+      parts = await this.readSession(stepId, sessionId);
+    } catch {
+      return { kind: "refused", refusal: "read_failed" };
+    }
+    if (this.#closed) return { kind: "closed" };
+    if (parts.length === 0) return { kind: "empty" };
+    // The flow may have changed since: its step must still take these parts as they are.
+    const refusal = resumeRefusal(contract, parts);
+    if (refusal) return { kind: "refused", refusal };
+    this.#adopt(stepId, parts);
+    return { kind: "continued", parts };
+  }
+
   /** A kept recording goes on in this form: its parts count as kept on the device. */
-  adopt(stepId: string, parts: readonly StoredPart[]): void {
+  #adopt(stepId: string, parts: readonly StoredPart[]): void {
     for (const part of parts) {
       this.#track(stepId, part.sessionId);
       this.#keeping.set(partKey(part), "device");
@@ -534,6 +649,66 @@ export class RecordingKeeper {
   /** Who records what this form keeps, as each part and journal carries it. */
   #owner(): { userId?: string } {
     return this.#userId === null ? {} : { userId: this.#userId };
+  }
+
+  /**
+   * Holds a recording, or answers from this form's own book: Web Locks are
+   * not re-entrant, so the form never refuses itself. Asked with
+   * `ifAvailable`, so nothing waits in line; only "taken" means another form
+   * holds it, and a request that throws is "failed". An answer other than
+   * "held" leaves no entry, so the next ask tries again. A hold granted after
+   * it was let go is let go at once. Without Web Locks nothing is held, and
+   * every form may continue, as before.
+   */
+  #take(stepId: string, sessionId: string): Promise<HoldAnswer> {
+    const locks = this.#locks;
+    if (!locks) return Promise.resolve("held");
+    if (this.#closed) return Promise.resolve("closed");
+    const key = holdKey(stepId, sessionId);
+    const current = this.#holds.get(key);
+    if (current) return current.answer;
+    let answer: (answer: HoldAnswer) => void = () => {};
+    const hold: Hold = {
+      answer: new Promise<HoldAnswer>((resolve) => {
+        answer = resolve;
+      }),
+      letGo: null,
+      ended: Promise.resolve()
+    };
+    // In the book before asking: an answer may come back before the request returns.
+    this.#holds.set(key, hold);
+    const done = (refused: Exclude<HoldAnswer, "held">) => {
+      if (this.#holds.get(key) === hold) this.#holds.delete(key);
+      answer(refused);
+    };
+    try {
+      hold.ended = locks
+        .request(holdLockName(this.#flowId, stepId, sessionId), { ifAvailable: true }, (lock) => {
+          if (!lock) return done("taken");
+          if (this.#holds.get(key) !== hold) return done("closed");
+          return new Promise<void>((letGo) => {
+            hold.letGo = letGo;
+            answer("held");
+          });
+        })
+        .then(
+          () => undefined,
+          () => done("failed")
+        );
+    } catch {
+      done("failed");
+    }
+    return hold.answer;
+  }
+
+  /** Lets go of a recording, or of the ask for it still under way; settles once the lock is back. */
+  async #release(key: string): Promise<void> {
+    const hold = this.#holds.get(key);
+    if (!hold) return;
+    this.#holds.delete(key);
+    hold.letGo?.();
+    // An ask still under way is answered "closed" and lets go itself.
+    if (hold.letGo) await hold.ended;
   }
 
   #track(stepId: string, sessionId: string) {

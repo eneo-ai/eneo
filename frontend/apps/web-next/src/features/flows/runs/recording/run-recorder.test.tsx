@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { useState } from "react";
+import { StrictMode, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { initializeBrowserSession, SESSION_GENERATION_HEADER } from "@/lib/api/refusal";
 import messages from "@/lib/i18n/messages/sv.json";
@@ -154,8 +154,17 @@ function installBrowser({ recorder = true, live = false } = {}) {
   vi.stubGlobal("AudioContext", live ? FakeAudioContext : undefined);
   vi.stubGlobal("AudioWorkletNode", FakeNode);
   vi.stubGlobal("WebSocket", FakeSocket);
-  Object.defineProperty(navigator, "locks", { configurable: true, value: fakeLocks().locks });
+  browserLocks = fakeLocks();
+  Object.defineProperty(navigator, "locks", { configurable: true, value: browserLocks.locks });
 }
+
+/** The browser's Web Locks, shared by every form the test opens, as by the tabs of a browser. */
+let browserLocks = fakeLocks();
+/** The lock a form holds while it records or has continued the kept recording. */
+const HOLD = "eneo-flow-recording-holder:flow-1::step-1::0a1b2c3d-0000-4000-8000-000000000001";
+/** Whether a text is also spoken: the live region repeats it beside the banner that shows it. */
+const spoken = (text: string) =>
+  waitFor(() => expect(screen.getAllByText(text).length).toBeGreaterThan(1));
 
 /** When a kept part was captured: two hours ago (inside the keeper's 24 h window), a minute per part. */
 const KEPT_BASE = Math.floor(Date.now() / 60_000) * 60_000 - 2 * 60 * 60 * 1000;
@@ -1350,10 +1359,125 @@ describe("Keeping a recording on the device", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(device.db.parts.size).toBe(1);
 
-    // Opened again, the form offers it.
+    // The closed form let go of it.
+    await waitFor(() => expect(browserLocks.heldNames()).toEqual([]));
+
+    // Opened again in the same tab, the form offers it, and goes on with it.
     fireEvent.click(screen.getByRole("button", { name: "Kör" }));
     const again = await screen.findByRole("dialog", { name: "Kör Medborgarbrev" });
     expect(await within(again).findByText(messages.flow_transcript_resume_title)).toBeTruthy();
+    fireEvent.click(button(again, messages.flow_transcript_resume_continue));
+    expect(await within(again).findByText(/^Inspelning, del 1/)).toBeTruthy();
+    expect(within(again).queryByText(messages.flow_transcript_resume_problem_title)).toBeNull();
+    await waitFor(() => expect(FakeUpload.sent).toHaveLength(2));
+  });
+
+  it("does not continue a kept recording another tab has open: no rows, no upload", async () => {
+    installBrowser();
+    await device.db.putPart(keptPart(0));
+    browserLocks.holdElsewhere(HOLD);
+    const { dialog } = await openDialog(audioContract());
+    fireEvent.click(
+      await within(dialog).findByRole("button", { name: messages.flow_transcript_resume_continue })
+    );
+    const refused = messages.flow_transcript_resume_open_elsewhere;
+    expect(await within(dialog).findByText(refused)).toBeTruthy();
+    await spoken(refused);
+    expect(within(dialog).queryByText(/^Inspelning, del/)).toBeNull();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(FakeUpload.sent).toHaveLength(0);
+    expect(device.db.parts.size).toBe(1);
+
+    // Once the other tab has let go, it continues here.
+    browserLocks.releaseElsewhere(HOLD);
+    fireEvent.click(button(dialog, messages.flow_transcript_resume_continue));
+    expect(await within(dialog).findByText(/^Inspelning, del 1/)).toBeTruthy();
+  });
+
+  it("does not discard a kept recording another tab has open, and removes nothing", async () => {
+    installBrowser();
+    await device.db.putPart(keptPart(0));
+    browserLocks.holdElsewhere(HOLD);
+    const { dialog } = await openDialog(audioContract());
+    fireEvent.click(
+      await within(dialog).findByRole("button", { name: messages.flow_transcript_resume_discard })
+    );
+    const refused = messages.flow_transcript_resume_discard_open_elsewhere;
+    expect(await within(dialog).findByText(refused)).toBeTruthy();
+    await spoken(refused);
+    expect(device.db.parts.size).toBe(1);
+
+    // Once the other tab has let go, it can be discarded here.
+    browserLocks.releaseElsewhere(HOLD);
+    fireEvent.click(button(dialog, messages.flow_transcript_resume_discard));
+    await waitFor(() => expect(device.db.parts.size).toBe(0));
+    expect(browserLocks.isHeld(HOLD)).toBe(false);
+  });
+
+  it("says the recording could not be read, not that it is open elsewhere, when asking to hold it fails", async () => {
+    installBrowser();
+    await device.db.putPart(keptPart(0));
+    browserLocks.failRequests("eneo-flow-recording-holder:");
+    const { dialog } = await openDialog(audioContract());
+    fireEvent.click(
+      await within(dialog).findByRole("button", { name: messages.flow_transcript_resume_continue })
+    );
+    expect(
+      await within(dialog).findByText(messages.flow_transcript_resume_read_failed)
+    ).toBeTruthy();
+    expect(within(dialog).queryByText(/^Inspelning, del/)).toBeNull();
+    expect(device.db.parts.size).toBe(1);
+  });
+
+  it("holds the recording it records, and no recording after a start the microphone refused", async () => {
+    installBrowser();
+    microphone.mockRejectedValue(new DOMException("denied", "NotAllowedError"));
+    const { dialog } = await openDialog(audioContract());
+    fireEvent.click(button(dialog, messages.flow_transcript_rec_start));
+    await within(dialog).findByText(messages.flow_transcript_rec_problem_title);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(browserLocks.heldNames()).toEqual([]);
+
+    grantMicrophone();
+    await recordAndStop(dialog);
+    await waitFor(() =>
+      expect(browserLocks.heldNames().filter((name) => name.includes("-holder:"))).toHaveLength(1)
+    );
+  });
+
+  it("takes nothing over when the form closes while Fortsätt waits, in the app's strict mode", async () => {
+    installBrowser();
+    await device.db.putPart(keptPart(0));
+    api.routes[CONTRACT] = () => ({ body: audioContract() });
+    renderInApp(
+      <StrictMode>
+        <Harness onStarted={vi.fn()} />
+      </StrictMode>,
+      { appContext: testAppContext({ user: { id: "user-1" } }) }
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Kör" }));
+    const dialog = await screen.findByRole("dialog", { name: "Kör Medborgarbrev" });
+    const resume = await within(dialog).findByRole("button", {
+      name: messages.flow_transcript_resume_continue
+    });
+    const grant = browserLocks.deferGrants();
+    fireEvent.click(resume);
+    fireEvent.click(button(dialog, messages.cancel));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    grant();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(FakeUpload.sent).toHaveLength(0);
+    expect(browserLocks.heldNames()).toEqual([]);
+    expect(device.db.parts.size).toBe(1);
+
+    // The form opened again in strict mode still continues it.
+    fireEvent.click(screen.getByRole("button", { name: "Kör" }));
+    const again = await screen.findByRole("dialog", { name: "Kör Medborgarbrev" });
+    fireEvent.click(
+      await within(again).findByRole("button", { name: messages.flow_transcript_resume_continue })
+    );
+    expect(await within(again).findByText(/^Inspelning, del 1/)).toBeTruthy();
+    await waitFor(() => expect(FakeUpload.sent).toHaveLength(1));
   });
 
   it("throws the whole recording away after asking, its uploads and what the device kept", async () => {
