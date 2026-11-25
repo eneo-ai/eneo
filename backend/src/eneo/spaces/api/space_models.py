@@ -115,7 +115,7 @@ class AppSparse(ResourcePermissionsMixin, InDB):
     name: str
     description: Optional[str] = None
     published: bool
-    user_id: UUID
+    user_id: UUID | None = None
     icon_id: Optional[UUID] = Field(
         default=None,
         description="Icon ID referencing an uploaded icon",
@@ -303,7 +303,8 @@ class CreateSpaceServiceResponse(InDB, ResourcePermissionsMixin):
     groups: list[GroupPublicWithMetadata]
     completion_model: Optional[CompletionModelSparse]
     published: bool = False
-    user: UserSparse
+    # The person who made the service; empty when a service key made it.
+    user: UserSparse | None = None
 
 
 # Groups

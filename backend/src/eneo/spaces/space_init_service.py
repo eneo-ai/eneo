@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING
 
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.assistants.assistant_update import AssistantUpdate
+from eneo.authentication.principal import Principal
 from eneo.governance_policy.domain.policy_resolver import (
     select_effective_completion_model,
 )
@@ -66,7 +67,10 @@ class SpaceInitService:
         default_assistant = await self.assistant_service.create_default_assistant(
             "Default", space
         )
-        await self.assistant_repo.add(default_assistant)
+        await self.assistant_repo.add(
+            default_assistant,
+            creator=Principal.from_user(self.user).creator_columns(),
+        )
         return await self.space_repo.one(space_id)
 
     async def _ensure_tenant_space(self) -> "Space":

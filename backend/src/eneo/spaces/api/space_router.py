@@ -578,7 +578,6 @@ async def create_space_assistant(
     id: UUID,
     assistant_in: CreateSpaceAssistantRequest,
     container: Annotated[Container, Depends(get_container(with_user=True))],
-    _user_for_creation: None = Depends(require_user_for_creation),
 ):
     service = container.assistant_service()
     assembler = container.assistant_assembler()
@@ -662,7 +661,6 @@ async def create_app(
         Container,
         Depends(get_container(with_user=True, with_upload_admission=True)),
     ],
-    _user_for_creation: None = Depends(require_user_for_creation),
 ):
     space_service = container.space_service()
     app_service = container.app_service()
@@ -709,7 +707,6 @@ async def create_space_services(
     id: UUID,
     service_in: CreateSpaceServiceRequest,
     container: Annotated[Container, Depends(get_container(with_user=True))],
-    _user_for_creation: None = Depends(require_user_for_creation),
 ):
     service_service = container.service_service()
     assembler = container.space_assembler()

@@ -584,14 +584,12 @@ class BaseModelMigrationService:
     def _build_tenant_filter_condition(
         self, table: Any, entity_type: str, tenant_id: UUID
     ) -> ColumnElement[bool]:
-        from eneo.database.tables.users_table import Users
+        from eneo.database.tables.tenant_scope import in_tenant
 
         if entity_type in {"apps", "questions"}:
             return table.tenant_id == tenant_id
         elif entity_type in {"assistants", "services"}:
-            return table.user_id.in_(
-                select(Users.id).where(Users.tenant_id == tenant_id)
-            )
+            return in_tenant(table, tenant_id)
         elif entity_type in {"assistant_templates", "app_templates"}:
             # Templates carry their own tenant_id and soft-delete marker. Scope
             # strictly to this tenant and skip soft-deleted rows so a migration

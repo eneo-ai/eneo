@@ -28,6 +28,7 @@ from eneo.database.tables.assistant_template_table import AssistantTemplates
 from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.service_table import Services
 from eneo.database.tables.spaces_table import Spaces, SpacesCompletionModels
+from eneo.database.tables.tenant_scope import in_tenant
 from eneo.database.tables.users_table import Users
 
 if TYPE_CHECKING:
@@ -289,10 +290,8 @@ class CompletionModelUsageService:
             # Direct tenant_id field
             return table.tenant_id == tenant_id
         elif entity_type in {"assistant", "service"}:
-            # Via user relationship - need to join with Users table
-            return table.user_id.in_(
-                select(Users.id).where(Users.tenant_id == tenant_id)
-            )
+            # Neither table has a tenant_id: through the space.
+            return in_tenant(table, tenant_id)
         elif entity_type in {"assistant_template", "app_template"}:
             # Templates carry their own tenant_id and soft-delete marker. Scope
             # strictly to this tenant and skip soft-deleted rows so the impact

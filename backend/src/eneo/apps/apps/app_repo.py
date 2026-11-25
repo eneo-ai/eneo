@@ -229,6 +229,7 @@ class AppRepository:
                     app_id=app_in_db.id,
                     tenant_id=app_in_db.tenant_id,
                     user_id=app_in_db.user_id,
+                    created_by_service_id=app_in_db.created_by_service_id,
                 )
                 for input_field in input_fields
             ]
@@ -299,6 +300,7 @@ class AppRepository:
                 completion_model_kwargs=model_kwargs,
                 tenant_id=app.tenant_id,
                 user_id=app.user_id,
+                created_by_service_id=app.created_by_service_id,
                 space_id=app.space_id,
                 completion_model_id=completion_model_id,
                 published=app.published,
@@ -377,6 +379,7 @@ class AppRepository:
                 completion_model_kwargs=model_kwargs,
                 tenant_id=app.tenant_id,
                 user_id=app.user_id,
+                created_by_service_id=app.created_by_service_id,
                 space_id=app.space_id,
                 completion_model_id=completion_model_id,
                 transcription_model_id=transcription_model_id,

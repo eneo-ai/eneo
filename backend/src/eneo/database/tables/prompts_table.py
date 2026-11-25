@@ -15,11 +15,24 @@ class Prompts(BasePublic):
     description: Mapped[Optional[str]] = mapped_column()
 
     # Foreign keys
-    user_id: Mapped[UUID] = mapped_column(ForeignKey(Users.id, ondelete="CASCADE"))
+    # Who made the row: a person (user_id) or the service principal behind a
+    # service key. A trace, never a right: access comes from the space.
+    user_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Users.id, ondelete="SET NULL", name="fk_prompts_user_id"),
+        nullable=True,
+    )
+    created_by_service_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(
+            "service_principals.id",
+            ondelete="SET NULL",
+            name="fk_prompts_created_by_service",
+        ),
+        nullable=True,
+    )
     tenant_id: Mapped[UUID] = mapped_column(ForeignKey(Tenants.id, ondelete="CASCADE"))
 
     # Relationships
-    user: Mapped[Users] = relationship()
+    user: Mapped[Optional[Users]] = relationship()
     tenant: Mapped[Tenants] = relationship()
 
 

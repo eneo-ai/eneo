@@ -490,10 +490,10 @@ class AppService:
 
         prompt = None
         if prompt_text is not None:
-            # Attribute the prompt to the app's owner, not the caller.
-            # Keeps service-key edits FK-safe (synthetic id has no `users`
-            # row) and makes admin edits to others' apps attribute
-            # correctly.
+            # The prompt goes to the person who made the app, not the caller,
+            # so that person keeps the right to edit it when someone else
+            # changes the app. An app a service made has no such person, and
+            # the prompt then records the caller.
             prompt = await self.prompt_service.create_prompt(
                 text=prompt_text,
                 description=prompt_description,

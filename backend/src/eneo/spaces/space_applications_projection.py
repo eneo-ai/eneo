@@ -16,7 +16,7 @@ class AssistantApplicationsProjection:
     name: str
     completion_model_kwargs: ModelKwargs
     logging_enabled: bool
-    user_id: UUID
+    user_id: UUID | None
     published: bool
     description: str | None
     metadata_json: dict[str, object] | None
@@ -33,7 +33,7 @@ class AppApplicationsProjection:
     name: str
     description: str | None
     published: bool
-    user_id: UUID
+    user_id: UUID | None
     icon_id: UUID | None
 
 
@@ -45,7 +45,7 @@ class ServiceApplicationsProjection:
     name: str
     prompt: str
     completion_model_kwargs: ModelKwargs
-    user_id: UUID
+    user_id: UUID | None
 
 
 @dataclass(frozen=True, slots=True)

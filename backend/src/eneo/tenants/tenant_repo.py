@@ -13,8 +13,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute, selectinload
 
 from eneo.database.repositories.base import BaseRepositoryDelegate
+from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.module_table import Modules
+from eneo.database.tables.service_table import Services
 from eneo.database.tables.tenant_table import Tenants, tenants_modules_table
+from eneo.database.tables.users_table import Users
 from eneo.main import exceptions
 from eneo.main.logging import get_logger
 from eneo.modules.module import ModuleTenantAssignment
@@ -280,6 +283,18 @@ class TenantRepository:
         return cast(TenantInDB, model)
 
     async def delete_tenant_by_id(self, id: UUID) -> TenantInDB:
+        # An assistant or service in a space goes with its space. One outside
+        # any space hangs on its creator alone, and removing the creator only
+        # empties that trace, so such rows are removed here: they would
+        # otherwise be left behind with nothing tying them to an organisation.
+        tenant_users = sa.select(Users.id).where(Users.tenant_id == id)
+        for table in (Assistants, Services):
+            await self.session.execute(
+                sa.delete(table).where(
+                    table.space_id.is_(None),
+                    table.user_id.in_(tenant_users),
+                )
+            )
         return cast(TenantInDB, await self.delegate.delete(id))
 
     async def set_privacy_policy(

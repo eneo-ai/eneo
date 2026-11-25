@@ -56,7 +56,7 @@ from eneo.database.tables.prompts_table import PromptsAssistants
 from eneo.database.tables.service_table import Services
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import Spaces
-from eneo.database.tables.users_table import Users
+from eneo.database.tables.tenant_scope import tenant_id_of
 from eneo.database.tables.websites_table import CrawlRuns, Websites
 from eneo.info_blobs.info_blob_repo import InfoBlobRepository
 from eneo.main.config import get_settings
@@ -1550,15 +1550,19 @@ class UserService:
     async def _get_assistant_scope_context(
         self, assistant_id: UUID
     ) -> tuple[UUID, UUID]:
+        # The organisation comes from the assistant's space, not its creator:
+        # an assistant made by a service key has no person behind it.
         stmt = (
-            sa.select(Assistants.space_id, Users.tenant_id)
-            .join(Users, Users.id == Assistants.user_id)
+            sa.select(
+                Assistants.space_id,
+                tenant_id_of(Assistants).label("tenant_id"),
+            )
             .where(Assistants.id == assistant_id)
             .limit(1)
         )
         record = await self.repo.session.execute(stmt)
         row = record.first()
-        if row is None or row.space_id is None:
+        if row is None or row.space_id is None or row.tenant_id is None:
             raise ApiKeyValidationError(
                 status_code=404,
                 code="resource_not_found",

@@ -4,6 +4,7 @@
 from eneo.main.models import ResourcePermission
 from eneo.prompts.api.prompt_models import PromptPublic
 from eneo.prompts.prompt import Prompt
+from eneo.prompts.prompt_service import wrote_prompt
 from eneo.users.user import UserInDB, UserSparse
 
 
@@ -15,7 +16,7 @@ class PromptAssembler:
     def get_prompt_permissions(self, prompt: Prompt) -> list[ResourcePermission]:
         permissions = [ResourcePermission.READ]
 
-        if prompt.user_id == self.user.id:
+        if wrote_prompt(self.user, prompt):
             permissions.extend([ResourcePermission.EDIT, ResourcePermission.DELETE])
 
         return permissions
@@ -24,7 +25,6 @@ class PromptAssembler:
         permissions = self.get_prompt_permissions(prompt)
 
         assert prompt.id is not None, "Prompt must have an id before being assembled"
-        assert prompt.user is not None, "Prompt must have a user before being assembled"
 
         user = prompt.user
         # Help-assistant prompts are owned by the per-tenant system user so they
@@ -37,7 +37,7 @@ class PromptAssembler:
         # 500s here. This mirrors the model_construct used when the helper is
         # created in OrgSpaceAssistantRoleService; normal owners are unaffected
         # and still go through full validation.
-        if getattr(user, "is_system_user", False):
+        if user is not None and getattr(user, "is_system_user", False):
             user = UserSparse.model_construct(
                 id=user.id,
                 created_at=user.created_at,

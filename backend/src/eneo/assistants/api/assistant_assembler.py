@@ -229,8 +229,6 @@ class AssistantAssembler:
             for server in assistant.mcp_servers
         ]
 
-        assert assistant.user is not None
-
         effective_config_public = (
             self._build_effective_config_public(effective_config)
             if effective_config is not None

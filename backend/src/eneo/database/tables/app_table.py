@@ -27,7 +27,20 @@ class Apps(BasePublic):
 
     # Foreign keys
     tenant_id: Mapped[UUID] = mapped_column(ForeignKey(Tenants.id, ondelete="CASCADE"))
-    user_id: Mapped[UUID] = mapped_column(ForeignKey(Users.id, ondelete="SET NULL"))
+    # Who made the row: a person (user_id) or the service principal behind a
+    # service key. A trace, never a right: access comes from the space.
+    user_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Users.id, ondelete="SET NULL", name="fk_apps_user_id"),
+        nullable=True,
+    )
+    created_by_service_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(
+            "service_principals.id",
+            ondelete="SET NULL",
+            name="fk_apps_created_by_service",
+        ),
+        nullable=True,
+    )
     space_id: Mapped[UUID] = mapped_column(ForeignKey(Spaces.id, ondelete="CASCADE"))
     template_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(AppTemplates.id, ondelete="SET NULL")
@@ -110,7 +123,20 @@ class InputFields(BasePublic):
 
     # Foreign keys
     tenant_id: Mapped[UUID] = mapped_column(ForeignKey(Tenants.id, ondelete="CASCADE"))
-    user_id: Mapped[UUID] = mapped_column(ForeignKey(Users.id, ondelete="SET NULL"))
+    # Who made the row: a person (user_id) or the service principal behind a
+    # service key. A trace, never a right: access comes from the space.
+    user_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Users.id, ondelete="SET NULL", name="fk_input_fields_user_id"),
+        nullable=True,
+    )
+    created_by_service_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(
+            "service_principals.id",
+            ondelete="SET NULL",
+            name="fk_input_fields_created_by_service",
+        ),
+        nullable=True,
+    )
     app_id: Mapped[UUID] = mapped_column(ForeignKey(Apps.id, ondelete="CASCADE"))
 
 

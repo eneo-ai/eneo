@@ -15,7 +15,9 @@ class Prompt:
     id: UUID | None
     text: str
     description: str | None
-    user_id: UUID
+    # Who wrote the prompt: a person (user_id) or a service principal.
+    user_id: UUID | None
     tenant_id: UUID
     is_selected: bool | None
     user: UserSparse | None
+    created_by_service_id: UUID | None = None

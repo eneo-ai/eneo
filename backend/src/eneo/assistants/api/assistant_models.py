@@ -428,7 +428,8 @@ class AssistantResponse(BaseModel):
 
 
 class AssistantSparse(ResourcePermissionsMixin, AssistantBase, InDB):
-    user_id: UUID
+    # The person who made the assistant; empty when a service key made it.
+    user_id: UUID | None = None
     published: bool = False
     description: Optional[str] = None
     metadata_json: Optional[dict[str, object]] = Field(
@@ -484,7 +485,8 @@ class AssistantPublic(InDB, ResourcePermissionsMixin):
     )  # Tool-level overrides
     completion_model: Optional[CompletionModelSparse] = None
     published: bool = False
-    user: UserSparse
+    # The person who made the assistant; empty when a service key made it.
+    user: UserSparse | None = None
     tools: UseTools
     specialists: list[AssistantSpecialistPublic] = Field(
         default_factory=lambda: list[AssistantSpecialistPublic](),

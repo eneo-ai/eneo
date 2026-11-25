@@ -22,7 +22,8 @@ class PromptSparse(InDB, ResourcePermissionsMixin):
     description: Optional[str] = None
     is_selected: bool
 
-    user: UserSparse
+    # The person who wrote the prompt; empty when a service key wrote it.
+    user: UserSparse | None = None
 
 
 class PromptPublic(PromptSparse):

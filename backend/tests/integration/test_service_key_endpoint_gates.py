@@ -310,25 +310,12 @@ def _has_creation_gate_code(payload: dict) -> bool:
 # routes without a path resolver use a stub UUID directly.
 _STUB_ID = "00000000-0000-0000-0000-000000000001"
 _CREATION_ENDPOINTS: list[tuple[str, str, dict | None]] = [
-    ("POST", "/api/v1/assistants/", {"name": "x", "space_id": _STUB_ID}),
     ("POST", "/api/v1/spaces/", {"name": "x"}),
+    # A service outside a space has only its creator to tie it to an
+    # organisation, and a service key has no person to be that creator.
+    ("POST", "/api/v1/services/", {"name": "x"}),
     # An icon records its uploader, which a service key does not have.
     ("POST", "/api/v1/icons/", None),
-    (
-        "POST",
-        "/api/v1/spaces/{space_id}/applications/assistants/",
-        {"name": "x"},
-    ),
-    (
-        "POST",
-        "/api/v1/spaces/{space_id}/applications/apps/",
-        {"name": "x"},
-    ),
-    (
-        "POST",
-        "/api/v1/spaces/{space_id}/applications/services/",
-        {"name": "x"},
-    ),
     (
         "POST",
         "/api/v1/spaces/{space_id}/knowledge/groups/",
@@ -451,3 +438,215 @@ async def test_bearer_user_can_create_space(client, admin_token):
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     assert resp.status_code == 201, resp.text
+
+
+# ---------------------------------------------------------------------------
+# What a service key may create: assistants, apps and services in a space
+# ---------------------------------------------------------------------------
+
+
+async def _creator(db_container, table: str, row_id: str):
+    """Who made the row, and whether the service principal is the key's own."""
+    async with db_container() as container:
+        result = await container.session().execute(
+            sa.text(
+                f"SELECT r.user_id, r.created_by_service_id, p.state"
+                f" FROM {table} r"
+                f" LEFT JOIN service_principals p ON p.id = r.created_by_service_id"
+                f" WHERE r.id = :id"
+            ),
+            {"id": row_id},
+        )
+        return result.mappings().one()
+
+
+def _made_by_a_service(creator) -> bool:
+    return (
+        creator["user_id"] is None
+        and creator["created_by_service_id"] is not None
+        and creator["state"] == "active"
+    )
+
+
+async def test_service_key_creates_an_assistant_in_a_space(
+    client, db_container, admin_token, tenant_admin_service_secret, test_space_id
+):
+    key = {"X-API-Key": tenant_admin_service_secret}
+
+    created = await client.post(
+        f"/api/v1/spaces/{test_space_id}/applications/assistants/",
+        json={"name": "Invoice assistant"},
+        headers=key,
+    )
+    assert created.status_code in (200, 201), created.text
+    assistant_id = created.json()["id"]
+
+    assert _made_by_a_service(await _creator(db_container, "assistants", assistant_id))
+    # The key reads what it made, and so does a person in the space.
+    by_key = await client.get(f"/api/v1/assistants/{assistant_id}/", headers=key)
+    assert by_key.status_code == 200, by_key.text
+    by_person = await client.get(
+        f"/api/v1/spaces/{test_space_id}/applications/",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert by_person.status_code == 200, by_person.text
+    listed = {item["id"]: item for item in by_person.json()["assistants"]["items"]}
+    assert listed[assistant_id]["user_id"] is None
+
+
+async def test_service_key_creates_an_assistant_through_the_assistants_route(
+    client, db_container, tenant_admin_service_secret, test_space_id
+):
+    created = await client.post(
+        "/api/v1/assistants/",
+        json={"name": "Invoice assistant", "space_id": test_space_id},
+        headers={"X-API-Key": tenant_admin_service_secret},
+    )
+
+    assert created.status_code in (200, 201), created.text
+    assert _made_by_a_service(
+        await _creator(db_container, "assistants", created.json()["id"])
+    )
+
+
+async def test_service_key_writes_the_prompt_of_an_assistant(
+    client, db_container, tenant_admin_service_secret, test_space_id
+):
+    key = {"X-API-Key": tenant_admin_service_secret}
+    created = await client.post(
+        f"/api/v1/spaces/{test_space_id}/applications/assistants/",
+        json={"name": "Invoice assistant"},
+        headers=key,
+    )
+    assert created.status_code in (200, 201), created.text
+    assistant_id = created.json()["id"]
+
+    updated = await client.post(
+        f"/api/v1/assistants/{assistant_id}/",
+        json={"prompt": {"text": "Read the invoice and list the amounts."}},
+        headers=key,
+    )
+
+    assert updated.status_code == 200, updated.text
+    prompt = updated.json()["prompt"]
+    assert prompt["text"] == "Read the invoice and list the amounts."
+    assert _made_by_a_service(await _creator(db_container, "prompts", prompt["id"]))
+
+
+async def test_service_key_writes_the_prompt_of_an_assistant_a_person_made(
+    client, db_container, admin_token, tenant_admin_service_secret, test_space_id
+):
+    created = await client.post(
+        f"/api/v1/spaces/{test_space_id}/applications/assistants/",
+        json={"name": "A person's assistant"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert created.status_code in (200, 201), created.text
+    assistant_id = created.json()["id"]
+    person = await _creator(db_container, "assistants", assistant_id)
+    assert person["user_id"] is not None
+    assert person["created_by_service_id"] is None
+
+    updated = await client.post(
+        f"/api/v1/assistants/{assistant_id}/",
+        json={"prompt": {"text": "Answer in one sentence."}},
+        headers={"X-API-Key": tenant_admin_service_secret},
+    )
+
+    assert updated.status_code == 200, updated.text
+    assert _made_by_a_service(
+        await _creator(db_container, "prompts", updated.json()["prompt"]["id"])
+    )
+
+
+async def test_service_key_creates_an_app_in_a_space(
+    client, db_container, tenant_admin_service_secret, test_space_id
+):
+    key = {"X-API-Key": tenant_admin_service_secret}
+
+    created = await client.post(
+        f"/api/v1/spaces/{test_space_id}/applications/apps/",
+        json={"name": "Invoice app"},
+        headers=key,
+    )
+    if created.status_code == 400 and "transcription model" in created.text:
+        pytest.skip("This environment has no transcription model for apps")
+    assert created.status_code in (200, 201), created.text
+    app_id = created.json()["id"]
+
+    assert _made_by_a_service(await _creator(db_container, "apps", app_id))
+    read = await client.get(f"/api/v1/apps/{app_id}/", headers=key)
+    assert read.status_code == 200, read.text
+
+
+async def test_service_key_creates_a_service_in_a_space(
+    client, db_container, admin_token, tenant_admin_service_secret, test_space_id
+):
+    key = {"X-API-Key": tenant_admin_service_secret}
+
+    created = await client.post(
+        f"/api/v1/spaces/{test_space_id}/applications/services/",
+        json={"name": "Invoice service"},
+        headers=key,
+    )
+    assert created.status_code in (200, 201), created.text
+    service_id = created.json()["id"]
+
+    assert _made_by_a_service(await _creator(db_container, "services", service_id))
+    # A service without a person as creator still shows up in its space.
+    by_person = await client.get(
+        f"/api/v1/spaces/{test_space_id}/applications/",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert by_person.status_code == 200, by_person.text
+    assert service_id in {item["id"] for item in by_person.json()["services"]["items"]}
+
+
+async def test_an_assistant_key_reaches_an_assistant_a_service_key_made(
+    client, admin_token, tenant_admin_service_secret, test_space_id
+):
+    created = await client.post(
+        f"/api/v1/spaces/{test_space_id}/applications/assistants/",
+        json={"name": "Invoice assistant"},
+        headers={"X-API-Key": tenant_admin_service_secret},
+    )
+    assert created.status_code in (200, 201), created.text
+    assistant_id = created.json()["id"]
+    scoped = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": f"assistant-key-{uuid4().hex[:8]}",
+            "key_type": "sk_",
+            "permission": "read",
+            "scope_type": "assistant",
+            "scope_id": assistant_id,
+        },
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert scoped.status_code == 201, scoped.text
+
+    read = await client.get(
+        f"/api/v1/assistants/{assistant_id}/",
+        headers={"X-API-Key": scoped.json()["secret"]},
+    )
+
+    assert read.status_code == 200, read.text
+
+
+async def test_an_assistant_a_service_key_made_counts_for_its_organisation(
+    client, admin_token, tenant_admin_service_secret, test_space_id
+):
+    created = await client.post(
+        f"/api/v1/spaces/{test_space_id}/applications/assistants/",
+        json={"name": "Invoice assistant"},
+        headers={"X-API-Key": tenant_admin_service_secret},
+    )
+    assert created.status_code in (200, 201), created.text
+
+    listed = await client.get(
+        "/api/v1/assistants/?for_tenant=true",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+
+    assert listed.status_code == 200, listed.text
+    assert created.json()["id"] in {item["id"] for item in listed.json()["items"]}

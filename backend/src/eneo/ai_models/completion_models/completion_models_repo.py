@@ -18,7 +18,7 @@ from eneo.database.tables.assistant_template_table import AssistantTemplates
 from eneo.database.tables.model_providers_table import ModelProviders
 from eneo.database.tables.service_table import Services
 from eneo.database.tables.spaces_table import SpacesCompletionModels
-from eneo.database.tables.users_table import Users
+from eneo.database.tables.tenant_scope import in_tenant
 from eneo.main.exceptions import UniqueException
 from eneo.main.models import IdAndName
 
@@ -204,11 +204,8 @@ class CompletionModelsRepository:
         )
 
         if tenant_id is not None:
-            tenant_user_ids = sa.select(Users.id).where(Users.tenant_id == tenant_id)
-            assistant_stmt = assistant_stmt.where(
-                Assistants.user_id.in_(tenant_user_ids)
-            )
-            service_stmt = service_stmt.where(Services.user_id.in_(tenant_user_ids))
+            assistant_stmt = assistant_stmt.where(in_tenant(Assistants, tenant_id))
+            service_stmt = service_stmt.where(in_tenant(Services, tenant_id))
             app_stmt = app_stmt.where(Apps.tenant_id == tenant_id)
 
         for stmt in (

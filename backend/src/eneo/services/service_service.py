@@ -1,6 +1,7 @@
 from typing import TYPE_CHECKING
 from uuid import UUID
 
+from eneo.authentication.principal import Principal
 from eneo.groups_legacy.group_service import GroupService
 from eneo.main.exceptions import BadRequestException, UnauthorizedException
 from eneo.main.models import ResourcePermission
@@ -90,7 +91,10 @@ class ServiceService:
 
     @validate_permissions(Permission.SERVICES)
     async def create_service(self, service: ServiceCreatePublic):
-        service_create = ServiceCreate(**service.model_dump(), user_id=self.user.id)
+        service_create = ServiceCreate(
+            **service.model_dump(),
+            **Principal.from_user(self.user).creator_columns(),
+        )
 
         await self._validate(service_create)
         await self._validate_same_embedding_model(service_create)
@@ -116,7 +120,7 @@ class ServiceService:
         service_create = CreateSpaceService(
             name=name,
             prompt="",
-            user_id=self.user.id,
+            **Principal.from_user(self.user).creator_columns(),
             space_id=space_id,
             completion_model_id=completion_model.id,
         )

@@ -130,7 +130,11 @@ class AssistantFactory:
                 prompt_in_db=prompt, is_selected=True
             )
 
-        user = UserSparse.model_validate(assistant_in_db.user)
+        user = (
+            None
+            if assistant_in_db.user is None
+            else UserSparse.model_validate(assistant_in_db.user)
+        )
         # `is None` (not truthiness) so corrupt non-None JSONB still raises
         # ValidationError downstream rather than being silently dropped.
         if assistant_in_db.completion_model_kwargs is None:

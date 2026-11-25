@@ -41,6 +41,7 @@ from eneo.assistants.reference_tags import (
 from eneo.authentication.api_key_scope_revoker import ApiKeyScopeRevoker
 from eneo.authentication.auth_models import ApiKeyScopeType, ApiKeyStateReasonCode
 from eneo.authentication.auth_service import AuthService
+from eneo.authentication.principal import Principal
 from eneo.completion_models.domain.execution_budget import (
     ExecutionBudget,
     ExecutionLimitReached,
@@ -1059,7 +1060,9 @@ class AssistantService:
         space.add_assistant(assistant)
         if enable_model and model is not None:
             await self.space_repo.enable_completion_model(space.id, model.id)
-        await self.repo.add(assistant)
+        await self.repo.add(
+            assistant, creator=Principal.from_user(self.user).creator_columns()
+        )
 
     async def _create_from_template(
         self,
@@ -2081,17 +2084,11 @@ class AssistantService:
             # ``""`` as falsy here silently kept the previous prompt and
             # reverted the user's clear-and-save.
             #
-            # Attribute the prompt to the assistant's owner, not the
-            # caller. Keeps service-key edits FK-safe (synthetic id has
-            # no `users` row) and makes admin edits to others'
-            # assistants attribute correctly.
-            prompt_owner_id = (
-                assistant.user.id if assistant.user is not None else self.user.id
-            )
+            # The prompt records who wrote it: the caller, a person or the
+            # service principal behind a service key.
             prompt_obj = await self.prompt_service.create_prompt(
                 prompt.text,
                 prompt.description,
-                owner_user_id=prompt_owner_id,
             )
 
         completion_model = None

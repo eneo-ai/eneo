@@ -63,7 +63,20 @@ class Assistants(BasePublic):
     type: Mapped[str] = mapped_column(default="assistant")
 
     # Foreign keys
-    user_id: Mapped[UUID] = mapped_column(ForeignKey(Users.id, ondelete="CASCADE"))
+    # Who made the row: a person (user_id) or the service principal behind a
+    # service key. A trace, never a right: access comes from the space.
+    user_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Users.id, ondelete="SET NULL", name="fk_assistants_user_id"),
+        nullable=True,
+    )
+    created_by_service_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(
+            "service_principals.id",
+            ondelete="SET NULL",
+            name="fk_assistants_created_by_service",
+        ),
+        nullable=True,
+    )
     completion_model_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(CompletionModels.id),
     )
@@ -98,7 +111,7 @@ class Assistants(BasePublic):
     mcp_servers: Mapped[list[MCPServers]] = relationship(
         secondary="assistant_mcp_servers", order_by=MCPServers.created_at
     )
-    user: Mapped[Users] = relationship()
+    user: Mapped[Optional[Users]] = relationship()
     completion_model: Mapped[Optional[CompletionModels]] = relationship()
     attachments: Mapped[list["AssistantsFiles"]] = relationship(
         order_by="AssistantsFiles.created_at", viewonly=True
