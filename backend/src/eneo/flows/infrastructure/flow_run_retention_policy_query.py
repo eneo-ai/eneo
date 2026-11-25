@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import cast
+from uuid import UUID
 
 import sqlalchemy as sa
 
@@ -26,6 +27,40 @@ def flow_run_history_period_sql() -> RulePeriodSQL:
             PolicyLevel.FLOW: Flows.flow_run_history_retention_days.expression,
         },
     )
+
+
+def space_retention_is_on() -> sa.ColumnElement[bool]:
+    """The space's time is on: a shared space with a time. A personal space
+    has no automatic removal in this version, even with a stored time."""
+    return sa.and_(Spaces.data_retention_days.is_not(None), Spaces.user_id.is_(None))
+
+
+def started_under_space_retention(
+    *, flow_id: UUID, tenant_id: UUID
+) -> sa.ColumnElement[bool]:
+    """The mark of a run inserted now: whether its flow's space has its time
+    on. Read in the inserting statement, so it is the time committed then."""
+    return (
+        sa.select(Flows.id)
+        .join(
+            Spaces,
+            sa.and_(Flows.space_id == Spaces.id, Flows.tenant_id == Spaces.tenant_id),
+        )
+        .where(
+            Flows.id == flow_id,
+            Flows.tenant_id == tenant_id,
+            space_retention_is_on(),
+        )
+        .exists()
+    )
+
+
+def flow_run_automatic_retention_predicates() -> tuple[sa.ColumnElement[bool], ...]:
+    """What the automatic removal adds to the explicit purge's selection, on a
+    run joined to its Space: the run started while the time was on, and the
+    time is on now. Removing the space's time stops the removal; setting it
+    again resumes it for the runs marked before."""
+    return (FlowRuns.started_under_space_retention.is_(True), space_retention_is_on())
 
 
 def flow_run_retention_anchor() -> sa.ColumnElement[datetime]:

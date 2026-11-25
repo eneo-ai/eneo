@@ -64,7 +64,8 @@ afterEach(() => {
 
 function renderPhonePage(
   overrides: Partial<FlowPublic> = {},
-  permissions: Permission[] = ["flows_view", "flows_run"]
+  permissions: Permission[] = ["flows_view", "flows_run"],
+  space: Record<string, unknown> = {}
 ) {
   setViewport("phone");
   const flow = makeFlow({
@@ -77,7 +78,7 @@ function renderPhonePage(
   });
   const queryClient = testQueryClient();
   queryClient.setQueryData(flowKeys.flow(flow.id), flow);
-  queryClient.setQueryData(["spaces", "space-1"], makeSpace({}));
+  queryClient.setQueryData(["spaces", "space-1"], makeSpace({ overrides: space }));
   return renderInApp(
     <Suspense>
       <FlowPage flowId={flow.id} />
@@ -213,6 +214,29 @@ describe("FlowPage on a phone", () => {
     ).toBeTruthy();
     expect(screen.queryByText(/^Publicerad/)).toBeNull();
     expect(screen.queryByRole("button", { name: "Kör flödet" })).toBeNull();
+  });
+
+  it("says in a personal space that runs are not removed automatically", async () => {
+    renderPhonePage(
+      {
+        run_history_retention: {
+          state: "configured",
+          source: "flow",
+          effective_days: 30,
+          contributors: { space: null, flow: { days: 30 } }
+        }
+      },
+      undefined,
+      { personal: true }
+    );
+    const settings = await screen.findByRole("region", { name: "Inställningar" });
+    fireEvent.click(within(settings).getByRole("button", { name: "Inställningar" }));
+    expect(
+      within(settings).getByText(
+        "Körningar i personliga ytor tas inte bort automatiskt i den här versionen. Flödets tid gäller då bara en administratörs uttryckliga rensning."
+      )
+    ).toBeTruthy();
+    expect(within(settings).queryByText(/Ytan har ingen tid/)).toBeNull();
   });
 
   it("does not offer to run a flow the caller may not run", async () => {

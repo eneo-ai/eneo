@@ -35,22 +35,33 @@ function refusedCap(error: unknown): number | null {
 
 /**
  * What applies to the flow's run history, in a line: the days and where from. A saved
- * flow time longer than the space's is shown too, since the space's shorter time wins.
+ * flow time longer than the space's is shown too, since the space's shorter time wins,
+ * and so is a flow time that waits for the space's: without it nothing is removed. Runs
+ * in a personal space are never removed automatically, so it says that instead.
  */
-export function FlowRetentionSummary({ flow }: { flow: FlowPublic }) {
+export function FlowRetentionSummary({
+  flow,
+  personalSpace = false
+}: {
+  flow: FlowPublic;
+  personalSpace?: boolean;
+}) {
   const t = useTranslations();
   const retention = flow.run_history_retention;
   if (retention.state === "off") return <>{t("flows_retention_off")}</>;
   const saved = retention.contributors.flow?.days;
+  const note = personalSpace
+    ? t("flows_retention_personal")
+    : retention.contributors.space === null
+      ? t("flows_retention_applies_none")
+      : saved !== undefined && saved > retention.effective_days
+        ? t("flows_retention_longer_saved", { days: saved })
+        : null;
   return (
     <>
       {t("flows_retention_days", { days: retention.effective_days })},{" "}
       {t(`flows_retention_source_${retention.source}`)}
-      {saved !== undefined && saved > retention.effective_days ? (
-        <span className="text-ax-text-secondary mt-0.5 block text-sm">
-          {t("flows_retention_longer_saved", { days: saved })}
-        </span>
-      ) : null}
+      {note ? <span className="text-ax-text-secondary mt-0.5 block text-sm">{note}</span> : null}
     </>
   );
 }
@@ -58,18 +69,27 @@ export function FlowRetentionSummary({ flow }: { flow: FlowPublic }) {
 /**
  * The flow's own time, or none to use the space's. It has an endpoint of its own and
  * stays open on a published flow: it changes when runs may be purged, not the
- * definition, so it is no part of the settings form. Saving deletes nothing.
+ * definition, so it is no part of the settings form. Saving deletes nothing itself, but
+ * a shorter time lets the space's automatic removal take older runs at a coming check,
+ * so the first press of Save for a shorter time shows a warning instead of saving. In
+ * a personal space nothing is removed automatically, so it neither warns nor waits.
  */
 export function FlowRetentionDialog({
   flow,
   open,
-  onOpenChange
+  onOpenChange,
+  personalSpace = false
 }: {
   flow: FlowPublic;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Runs in a personal space are not removed automatically; the time serves the purge. */
+  personalSpace?: boolean;
 }) {
   const t = useTranslations();
+  const subtitle = t(
+    personalSpace ? "flows_retention_personal" : "flows_retention_dialog_subtitle"
+  );
   const phone = usePhoneScreen();
   const policy = useQuery({
     queryKey: policyKey(flow.id),
@@ -93,13 +113,19 @@ export function FlowRetentionDialog({
       aria-label={t("flows_retention_heading")}
     >
       {!open ? null : policy.data ? (
-        <RetentionForm flow={flow} settings={policy.data} onClose={() => onOpenChange(false)} />
+        <RetentionForm
+          flow={flow}
+          settings={policy.data}
+          personalSpace={personalSpace}
+          subtitle={subtitle}
+          onClose={() => onOpenChange(false)}
+        />
       ) : (
         <Layout
           header={
             <DialogHeader
               title={t("flows_retention_heading")}
-              subtitle={t("flows_retention_dialog_subtitle")}
+              subtitle={subtitle}
               onOpenChange={onOpenChange}
             />
           }
@@ -126,10 +152,14 @@ export function FlowRetentionDialog({
 function RetentionForm({
   flow,
   settings,
+  personalSpace,
+  subtitle,
   onClose
 }: {
   flow: FlowPublic;
   settings: PolicySettings;
+  personalSpace: boolean;
+  subtitle: string;
   onClose: () => void;
 }) {
   const t = useTranslations();
@@ -145,6 +175,8 @@ function RetentionForm({
   const spaceDays = settings.inherited_policy?.days ?? null;
   // The field's value is over the space's time; a new value clears it.
   const [overCap, setOverCap] = useState(false);
+  // The shorter time the warning has been shown for; Save then sends it.
+  const [warnedFor, setWarnedFor] = useState<number | null>(null);
   const field = useRef<HTMLInputElement>(null);
 
   /** Writes what the server just said; an older read still in flight must not replace it. */
@@ -154,11 +186,27 @@ function RetentionForm({
   };
 
   const save = useMutation({
-    mutationFn: (sent: number | null) =>
+    // `expected` and `expectedSpace` are the time that applied and the space's time when the
+    // warning was decided; the server refuses the save (409 `retention_time_changed`) when
+    // another administrator has changed either since. The space's time counts on its own:
+    // giving the space a time starts the removal without changing the time that applies.
+    mutationFn: ({
+      sent,
+      expected,
+      expectedSpace
+    }: {
+      sent: number | null;
+      expected: number | null;
+      expectedSpace: number | null;
+    }) =>
       unwrap(
         browserApi.PUT("/api/v1/settings/flow-run-retention-policy/flows/{flow_id}", {
           params: { path: { flow_id: flow.id } },
-          body: { policy: sent === null ? null : { days: sent } }
+          body: {
+            policy: sent === null ? null : { days: sent },
+            expected_effective_days: expected,
+            expected_inherited_days: expectedSpace
+          }
         })
       ),
     onSuccess: async (saved) => {
@@ -175,6 +223,18 @@ function RetentionForm({
       onClose();
     },
     onError: async (error) => {
+      if (error instanceof EneoApiError && error.reason === "retention_time_changed") {
+        // Changed by someone else: nothing was saved. The draft is dropped and the times are
+        // read again, so the field shows the time read and a time typed again is warned
+        // about against what applies now.
+        toastApiError(error, t);
+        setWarnedFor(null);
+        setDraft(null);
+        void queryClient.invalidateQueries({ queryKey: policyKey(flow.id), exact: true });
+        void queryClient.invalidateQueries({ queryKey: flowKeys.flow(flow.id), exact: true });
+        field.current?.focus();
+        return;
+      }
       const refusedAt = refusedCap(error);
       if (refusedAt === null) {
         toastApiError(error, t);
@@ -203,20 +263,36 @@ function RetentionForm({
         ? t("flows_retention_cap_space", { days: spaceDays })
         : undefined;
   const applies =
-    days !== null
-      ? spaceDays !== null && days === savedDays && days > spaceDays
-        ? t("flows_retention_longer_saved", { days })
-        : undefined
-      : spaceDays !== null
+    spaceDays === null
+      ? personalSpace
+        ? undefined
+        : t("flows_retention_applies_none")
+      : days === null
         ? t("flows_retention_applies_space", { days: spaceDays })
-        : t("flows_retention_applies_none");
+        : days === savedDays && days > spaceDays
+          ? t("flows_retention_longer_saved", { days })
+          : // The space's time caps the flow's; an error in the field already names the cap.
+            problem
+            ? undefined
+            : t("flows_retention_applies_space_cap", { days: spaceDays });
+  // Only a space time removes runs, and never in a personal space, so a shorter time
+  // matters only under one in a shared space.
+  const applied = (flowDays: number | null) =>
+    spaceDays === null || personalSpace ? null : Math.min(flowDays ?? spaceDays, spaceDays);
+  const current = applied(savedDays);
+  const next = applied(days);
+  const shortens = draft !== null && current !== null && next !== null && next < current;
+  const warning =
+    shortens && warnedFor === days && !problem
+      ? t("flows_retention_shorter_warning", { days: next ?? 0 })
+      : undefined;
 
   return (
     <Layout
       header={
         <DialogHeader
           title={t("flows_retention_heading")}
-          subtitle={t("flows_retention_dialog_subtitle")}
+          subtitle={subtitle}
           onOpenChange={(next) => {
             if (!next) onClose();
           }}
@@ -234,8 +310,16 @@ function RetentionForm({
               // Nothing edited is nothing to save: resending the time as read could
               // overwrite a newer one.
               if (!draft) onClose();
-              else if (days === null || retentionDaysValid(days)) save.mutate(days);
-              else setRefused(true);
+              else if (days !== null && !retentionDaysValid(days)) setRefused(true);
+              else if (shortens && warnedFor !== days) {
+                setWarnedFor(days);
+                field.current?.focus();
+              } else
+                save.mutate({
+                  sent: days,
+                  expected: settings.effective.effective_days ?? null,
+                  expectedSpace: spaceDays
+                });
             }}
           >
             <NumberInput
@@ -252,7 +336,13 @@ function RetentionForm({
               hasClear
               // Read-only, not disabled: it keeps focus, and a refusal marks the value sent.
               isReadOnly={save.isPending}
-              status={problem ? { type: "error", message: problem } : undefined}
+              status={
+                problem
+                  ? { type: "error", message: problem }
+                  : warning
+                    ? { type: "warning", message: warning }
+                    : undefined
+              }
             />
           </form>
         </LayoutContent>
@@ -265,7 +355,8 @@ function RetentionForm({
               type="submit"
               form={formId}
               variant="primary"
-              label={t("flows_settings_save")}
+              // While the warning shows, the next press saves the shorter time.
+              label={warning ? t("flows_retention_save_anyway") : t("flows_settings_save")}
               isLoading={save.isPending}
               isInterruptible
             />

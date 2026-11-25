@@ -125,6 +125,10 @@ class ErrorCodes(int, Enum):
     # when the organisation or a flow set the cap; the context carries the cap
     # in days and the level that chose it.
     RETENTION_EXCEEDS_SPACE = 9086
+    # A change of a retention time sent with the time it replaces, which another
+    # change has replaced since (data_retention.domain.rules.
+    # RetentionTimeChangedError). The context carries the time stored now.
+    RETENTION_TIME_CHANGED = 9087
     # Browser-session protocol for the Vite app. Keep distinct from Skill errors
     # so a refused configuration save never triggers session recovery.
     SESSION_GENERATION_MISMATCH = 9090

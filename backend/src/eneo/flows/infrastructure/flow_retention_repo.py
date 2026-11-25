@@ -31,12 +31,12 @@ from eneo.flows.infrastructure.flow_retention_hold_repo import flow_run_held_pre
 from eneo.flows.infrastructure.flow_run_history_purge_repo import (
     FlowRunHistoryPurgeCounts,
     FlowRunHistoryPurgeRepository,
-    FlowRunHistoryPurgeResult,
     FlowTemplateAssetPurgeCounts,
     flow_run_undelivered_audit_exists,
     flow_run_unresolved_webhook_exists,
 )
 from eneo.flows.infrastructure.flow_run_retention_policy_query import (
+    flow_run_automatic_retention_predicates,
     flow_run_history_due_predicates,
     flow_run_history_period_sql,
     flow_run_retention_anchor,
@@ -168,15 +168,44 @@ class FlowRetentionRepository:
             self.session
         ).purge_soft_deleted_template_assets(limit=limit)
 
-    async def purge_old_flow_run_history_batch(
-        self, *, now: datetime, limit: int
-    ) -> FlowRunHistoryPurgeResult:
-        run_ids = await self._select_flow_run_history_purge_batch(
-            now=now,
-            limit=limit,
+    async def next_run_due_for_removal(
+        self, *, now: datetime, after: tuple[datetime, UUID] | None
+    ) -> tuple[datetime, UUID] | None:
+        """The next run the automatic removal takes, by retention anchor and id
+        after ``after``, unlocked: the caller locks and checks it again.
+
+        The caller holds the gallring lock, so the times and holds read here
+        stay as they are until it commits. A run another transaction has locked
+        is returned like any other, so it is reported rather than skipped."""
+        anchor = flow_run_retention_anchor()
+        stmt = self._build_automatic_removal_candidates(now=now).add_columns(
+            anchor.label("anchor")
         )
-        return await FlowRunHistoryPurgeRepository(self.session).purge_run_history(
-            run_ids
+        if after is not None:
+            at, run_id = after
+            stmt = stmt.where(
+                sa.tuple_(anchor, FlowRuns.id)
+                > sa.tuple_(sa.literal(at), sa.literal(run_id))
+            )
+        row = (
+            await self.session.execute(stmt.order_by(anchor, FlowRuns.id).limit(1))
+        ).one_or_none()
+        if row is None:
+            return None
+        return cast(datetime, row.anchor), cast(UUID, row.run_id)
+
+    async def has_run_due_for_removal(self, *, now: datetime) -> bool:
+        """Whether the automatic removal has a run to take at ``now``: the same
+        selection, read without a lock and without ordering."""
+        return bool(
+            await self.session.scalar(
+                sa.select(self._build_automatic_removal_candidates(now=now).exists())
+            )
+        )
+
+    def _build_automatic_removal_candidates(self, *, now: datetime) -> sa.Select[Any]:
+        return self._build_flow_run_history_purge_candidates(now=now).where(
+            *flow_run_automatic_retention_predicates()
         )
 
     async def count_blocked_flow_run_history_purge_candidates(
@@ -312,14 +341,6 @@ class FlowRetentionRepository:
             blocked=blocked,
         )
 
-    async def _select_flow_run_history_purge_batch(
-        self, *, now: datetime, limit: int
-    ) -> list[UUID]:
-        result = await self.session.scalars(
-            self._build_flow_run_history_purge_batch_query(now=now, limit=limit)
-        )
-        return list(result.all())
-
     def _build_flow_run_history_purge_batch_query(
         self,
         *,
@@ -330,6 +351,25 @@ class FlowRetentionRepository:
         flow_id: UUID | None = None,
     ) -> sa.Select[tuple[UUID]]:
         retention_anchor = flow_run_retention_anchor()
+        return (
+            self._build_flow_run_history_purge_candidates(
+                now=now, tenant_id=tenant_id, space_id=space_id, flow_id=flow_id
+            )
+            .order_by(retention_anchor, FlowRuns.id)
+            .limit(limit)
+        )
+
+    def _build_flow_run_history_purge_candidates(
+        self,
+        *,
+        now: datetime,
+        tenant_id: UUID | None = None,
+        space_id: UUID | None = None,
+        flow_id: UUID | None = None,
+    ) -> sa.Select[tuple[UUID]]:
+        """The runs a purge may take, before order and limit: due, and neither
+        held nor waiting for an audit or webhook delivery. The explicit purge,
+        the automatic removal and its probe all start from this."""
         return (
             self._build_due_flow_run_history_purge_query(
                 now=now, tenant_id=tenant_id, space_id=space_id, flow_id=flow_id
@@ -343,8 +383,6 @@ class FlowRetentionRepository:
                     )
                 )
             )
-            .order_by(retention_anchor, FlowRuns.id)
-            .limit(limit)
         )
 
     def _build_due_flow_run_history_purge_query(

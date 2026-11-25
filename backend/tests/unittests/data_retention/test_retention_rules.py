@@ -49,17 +49,16 @@ def test_an_exempt_rule_has_no_period_to_resolve():
         rule_chain(RetentionRule.WIDGET_CONVERSATIONS)
 
 
-def test_flow_run_history_has_levels_and_caps_but_no_task():
-    """Mutants: a task removes Flow run history before it may be switched on;
-    the organisation is a level for Flows; the space does not cap a flow.
-    One declaration gives Python and SQL the same levels."""
+def test_flow_run_history_has_its_task_levels_and_caps():
+    """Mutants: no task removes Flow run history, or another task does; the
+    organisation is a level for Flows; the space does not cap a flow. One
+    declaration gives Python and SQL the same levels."""
     disposition = rule_chain(RetentionRule.FLOW_RUN_HISTORY)
 
-    assert isinstance(disposition, RuleExemption)
+    assert disposition == rule_task(RetentionRule.FLOW_RUN_HISTORY)
+    assert disposition.task == "flows.run_history"
     assert disposition.levels == (SPACE, PolicyLevel.FLOW)
     assert disposition.bounding == frozenset({SPACE, PolicyLevel.FLOW})
-    with pytest.raises(ValueError):
-        rule_task(RetentionRule.FLOW_RUN_HISTORY)
     rule_period(
         disposition,
         {SPACE: sa.literal(7), PolicyLevel.FLOW: sa.literal(3)},

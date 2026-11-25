@@ -10,14 +10,16 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal, flushSync } from "react-dom";
 import { Banner } from "@astryxdesign/core/Banner";
 import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
+import { EmptyState } from "@/components/composites/empty-state";
 import { LoadingState } from "@/components/composites/loading-state";
 import { PageHeader } from "@/components/composites/page-header";
 import { blockingError, ListError, RefreshError } from "@/components/composites/query-state";
 import { StatusLabel } from "@/components/composites/status-label";
 import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
+import { EneoApiError } from "@/lib/api/errors";
 import { hasAnswered, pollEvery } from "@/lib/api/query";
-import { useFocusRescue } from "@/lib/focus-rescue";
+import { isFocusLost, useFocusRescue } from "@/lib/focus-rescue";
 import { usePhoneScreen } from "@/lib/hooks/use-media-match";
 import { useSpaceSections } from "@/features/spaces/frame/use-space-sections";
 import { useSpaceDisplayName } from "@/features/spaces/space-display-name";
@@ -91,6 +93,9 @@ const INPUT_LOSS_CODES = new Set([
 
 /** The step's diagnostic for a step that sends the run's result once the run has completed. */
 const SENT_AFTER_RUN = "run_result_sent_after_run";
+
+/** How often an open page checks that its finished run still exists (retention can remove it). */
+const FINISHED_RUN_CHECK_MS = 60_000;
 
 /**
  * Where the run's sent result stands, in the result's words: the same state
@@ -428,12 +433,14 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
     ...runProgressQueryOptions(flowId, runId),
     // One clock: while the run moves, it follows what the run shows; once the run has finished, it
     // follows the result sent after it, its status alone, until it has landed or was given up.
+    // After that, a check once a minute while the tab shows sees a run removed under the page
+    // (its 404 says so below); the detail and steps are read again only when this pair moved.
     refetchInterval: pollEvery<RunProgress>((data) => {
       if (!data) return false;
       const { status, graph } = data;
       const delivery = status.result_delivery;
       return isTerminal(status.status)
-        ? clock(deliverySignature(delivery), deliveryUnderWay(delivery))
+        ? clock(deliverySignature(delivery), deliveryUnderWay(delivery)) || FINISHED_RUN_CHECK_MS
         : clock(progressSignature(status, graph), shouldPoll(status.status));
     }),
     refetchIntervalInBackground: false,
@@ -768,6 +775,40 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
   const actionsAfterReview = phone && awaitingReview;
   const view = status ? runStatusView(status) : null;
   const duration = summary ? runDurationMs(summary) : null;
+
+  // The run is not there: a wrong id, or removed, also while the page is open. Reading it
+  // again cannot bring it back, so the page says so instead of offering a retry.
+  const gone = [progress, detail, steps].some(
+    (read) => read.error instanceof EneoApiError && read.error.status === 404
+  );
+  // Gone under an open page, the focused control went with it: the message takes the focus.
+  const goneRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (gone && isFocusLost()) goneRef.current?.focus();
+  }, [gone]);
+  if (gone) {
+    return (
+      <div className="flex min-w-0 flex-1 flex-col">
+        <div
+          ref={goneRef}
+          tabIndex={-1}
+          className="flex w-full max-w-5xl flex-col py-4 outline-none md:py-5"
+        >
+          <EmptyState
+            headingLevel={1}
+            title={t("flow_run_gone_title")}
+            description={t("flow_run_gone_description")}
+            actions={
+              <Button
+                label={t("flow_run_gone_back")}
+                href={`/spaces/${routeId}/flows/${flowId}?tab=runs`}
+              />
+            }
+          />
+        </div>
+      </div>
+    );
+  }
 
   if (!shown) {
     return (

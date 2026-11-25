@@ -26,6 +26,7 @@ from eneo.flows.infrastructure.flow_run_retention_policy_repo import (
     FlowRunRetentionPolicyRepository,
 )
 from eneo.main.exceptions import UnauthorizedException
+from eneo.main.models import NOT_PROVIDED, NotProvided
 from eneo.settings.settings import (
     FlowRunHistoryPurgeBlockedPublic,
     FlowRunHistoryPurgePublic,
@@ -93,6 +94,8 @@ class FlowRunRetentionPolicyService:
         *,
         flow_id: UUID,
         policy: FlowRunRetentionPolicy | None,
+        expected_effective_days: int | None | NotProvided = NOT_PROVIDED,
+        expected_inherited_days: int | None | NotProvided = NOT_PROVIDED,
     ) -> FlowRunRetentionPolicySettings:
         require_retention_manage(self.user)
         await self._require_space_retention_role(flow_id)
@@ -100,6 +103,8 @@ class FlowRunRetentionPolicyService:
             tenant_id=self.user.tenant_id,
             flow_id=flow_id,
             policy=policy,
+            expected_effective_days=expected_effective_days,
+            expected_inherited_days=expected_inherited_days,
         )
         await self._audit_change(change)
         return change.after
