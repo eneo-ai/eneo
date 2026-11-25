@@ -28,7 +28,11 @@ import {
   QueryStateBoundary,
   RefreshError
 } from "@/components/composites/query-state";
-import { SaveStatusIndicator, SaveStatusProvider } from "@/components/composites/save-status";
+import {
+  SaveStatusIndicator,
+  SaveStatusProvider,
+  useSetSaveStatus
+} from "@/components/composites/save-status";
 import {
   SectionedSettings,
   type SettingsSection
@@ -444,6 +448,7 @@ function RetentionSection() {
   const queryClient = useQueryClient();
   const update = useUpdateSpace();
   const autosave = useAutosave("retention-days");
+  const setStatus = useSetSaveStatus();
   const announce = useAnnounce();
   const readOnlyHintId = useId();
   const editsSpace = can("edit", "space");
@@ -469,6 +474,7 @@ function RetentionSection() {
 
   /** Saves `next` in place of `expected`, the time it was compared with. */
   async function save(next: number | null, expected: number | null) {
+    let changed = false;
     const result = await autosave(() =>
       update
         .mutateAsync({ data_retention_days: next, expected_data_retention_days: expected })
@@ -477,6 +483,7 @@ function RetentionSection() {
           // read again its usual way, so the field shows the time read and nothing is sent
           // until a time is typed again, which is then decided on that time.
           if (error instanceof EneoApiError && error.reason === "retention_time_changed") {
+            changed = true;
             setAsked(null);
             setDraft(null);
             void queryClient.invalidateQueries({ queryKey: ["spaces", routeId], exact: true });
@@ -484,6 +491,10 @@ function RetentionSection() {
           throw error;
         })
     );
+    // With the draft dropped nothing is left unsaved, so the header has no failure to link to
+    // and leaving the page asks nothing; the toast said what happened. Cleared here, after
+    // `autosave` has marked the field failed.
+    if (changed) setStatus?.("retention-days", null);
     if (result === undefined) return false;
     // A value typed while the save ran stays the draft.
     setDraft((current) =>

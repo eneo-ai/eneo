@@ -4,7 +4,12 @@ import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-libra
 import { afterEach, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import type { Permission } from "@/lib/auth/permissions";
-import { recordAnnouncements, renderInApp, testAppContext } from "@/test/render";
+import {
+  flushAnnouncements,
+  recordAnnouncements,
+  renderInApp,
+  testAppContext
+} from "@/test/render";
 import { router } from "@/test/navigation";
 import messages from "@/lib/i18n/messages/sv.json";
 import { setViewport } from "@/test/setup-dom";
@@ -646,9 +651,15 @@ function answerSavesAsServer() {
   });
 }
 
+/** Whether the browser would ask before the page is left (`useBeforeUnloadWarning`). */
+function asksBeforeLeaving() {
+  return !window.dispatchEvent(new Event("beforeunload", { cancelable: true }));
+}
+
 it("saves nothing when another administrator changed the time, shows the time read, and asks before a shorter retry", async () => {
   showSettings();
   answerSavesAsServer();
+  const said = recordAnnouncements();
   const section = document.getElementById("security")!;
   // Another administrator lengthened the time after this page read 30.
   state.space = { ...state.space, data_retention_days: 90 };
@@ -668,13 +679,23 @@ it("saves nothing when another administrator changed the time, shows the time re
   await waitFor(() => expect(field.value).toBe("90"));
   expect(field.readOnly).toBe(false);
   expect(within(section).queryByText(/äldre än 60 dagar/)).toBeNull();
+  // Nothing is left unsaved: the header neither says the save failed nor that it landed,
+  // and the page can be left without a question.
+  expect(screen.queryByRole("link", { name: messages.save_failed })).toBeNull();
+  expect(asksBeforeLeaving()).toBe(false);
+  await flushAnnouncements();
+  expect(said.some((text) => text.includes(messages.all_changes_saved))).toBe(false);
   // Leaving the field again sends nothing: no time the person has not typed since.
   fireEvent.blur(field);
   expect(screen.queryByRole("alertdialog")).toBeNull();
   expect(api.PATCH).toHaveBeenCalledTimes(1);
 
-  // Typed again, 60 is shorter than the 90 read, so it asks first.
-  enterRetention("60");
+  // A time typed again is unsaved again, as any edit is.
+  fireEvent.change(field, { target: { value: "60" } });
+  expect(await screen.findByText("1 osparad ändring")).toBeTruthy();
+  expect(asksBeforeLeaving()).toBe(true);
+  // 60 is shorter than the 90 read, so it asks first.
+  fireEvent.blur(field);
   const dialog = await screen.findByRole("alertdialog", {
     name: "Ta bort innehåll som är äldre än 60 dagar?"
   });
@@ -689,6 +710,9 @@ it("saves nothing when another administrator changed the time, shows the time re
   });
   await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
   expect(state.space.data_retention_days).toBe(60);
+  expect(screen.queryByRole("link", { name: messages.save_failed })).toBeNull();
+  // The refusal was said once, by the toast.
+  expect(toastError).toHaveBeenCalledTimes(1);
 });
 
 it("closes the confirmation and shows the time read when the time changed before it was confirmed", async () => {
@@ -711,6 +735,8 @@ it("closes the confirmation and shows the time read when the time changed before
   // The field shows the 10 read, not the 7 that was refused, and a blur asks nothing.
   await waitFor(() => expect(field.value).toBe("10"));
   expect(field.readOnly).toBe(false);
+  expect(screen.queryByRole("link", { name: messages.save_failed })).toBeNull();
+  expect(asksBeforeLeaving()).toBe(false);
   fireEvent.blur(field);
   expect(screen.queryByRole("alertdialog")).toBeNull();
   // Typed again, 7 is decided on the 10 read, not sent with the 30 it was compared with.
@@ -726,6 +752,21 @@ it("closes the confirmation and shows the time read when the time changed before
     expected_data_retention_days: 10
   });
   expect(state.space.data_retention_days).toBe(7);
+});
+
+it("keeps the header's link to the field when the time was not saved for another reason", async () => {
+  showSettings();
+  api.PATCH.mockResolvedValueOnce({
+    error: { message: "Temporary failure" },
+    response: new Response("{}", { status: 503 })
+  });
+  enterRetention("60");
+  await waitFor(() => expect(toastError).toHaveBeenCalledTimes(1));
+  // The typed time is still the person's and still unsaved: the header leads back to it.
+  expect(
+    (await screen.findByRole("link", { name: messages.save_failed })).getAttribute("href")
+  ).toBe("#retention-days");
+  expect(retentionField().value).toBe("60");
 });
 
 /** Space reads from here on, and a hook to hold the next one. */
