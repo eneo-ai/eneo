@@ -351,6 +351,7 @@ function RetentionForm({
   onClose: () => void;
 }) {
   const t = useTranslations();
+  const phone = usePhoneScreen();
   const format = useFormatter();
   const announce = useAnnounce();
   const formId = useId();
@@ -512,6 +513,15 @@ function RetentionForm({
       });
   }
 
+  const cancel = (
+    <Button
+      label={t("cancel")}
+      isDisabled={save.isPending}
+      width={phone ? "100%" : undefined}
+      onClick={onClose}
+    />
+  );
+
   return (
     <Layout
       header={
@@ -592,8 +602,10 @@ function RetentionForm({
       }
       footer={
         <LayoutFooter>
-          <div className="flex flex-wrap justify-end gap-2">
-            <Button label={t("cancel")} isDisabled={save.isPending} onClick={onClose} />
+          {/* On a phone stacked across the width, the primary on top (first in the reading
+              order too); elsewhere in a row with Cancel first. */}
+          <div className={phone ? "flex flex-col gap-2" : "flex flex-wrap justify-end gap-2"}>
+            {phone ? null : cancel}
             <Button
               type="submit"
               form={formId}
@@ -601,7 +613,9 @@ function RetentionForm({
               label={warning ? t("flows_retention_save_anyway") : t("save")}
               isLoading={save.isPending}
               isInterruptible
+              width={phone ? "100%" : undefined}
             />
+            {phone ? cancel : null}
           </div>
         </LayoutFooter>
       }

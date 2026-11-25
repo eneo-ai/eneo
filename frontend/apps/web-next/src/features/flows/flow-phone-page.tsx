@@ -10,7 +10,11 @@ import { PageBar } from "@/components/shell/page-bar";
 import { browserApi } from "@/lib/api/browser";
 import { useSpace } from "@/features/spaces/use-space";
 import { flowQueryOptions } from "./flows-api";
-import { FlowRetentionFoldedLine } from "./flow-retention";
+import {
+  FlowRetentionDialog,
+  FlowRetentionFoldedLine,
+  useFlowRetentionAccess
+} from "./flow-retention";
 import { SettingsSummary } from "./flow-settings";
 import { flowKindLine } from "./flow-labels";
 import { FlowStatusBadge } from "./flow-status";
@@ -22,7 +26,8 @@ import { FlowRunsList } from "./runs/runs-list";
  * runs, then how it is set up, folded (what it is for among that, so the
  * header does not say it too), and "Kör flödet" docked under the thumb (the
  * form it opens is the flow page's). The steps and the flow's chat are not
- * here: nothing offers to edit. FlowPage
+ * here: the definition is edited on a computer. Only the retention time
+ * changes here, as it is one field outside the definition. FlowPage
  * shows it only on a phone held either way (HANDHELD_QUERY), a phone's layout,
  * so its chrome is the phone's: the page bar and the dock.
  */
@@ -31,10 +36,12 @@ export function FlowPhonePage({ flowId, onStart }: { flowId: string; onStart: ()
   const { routeId, space } = useSpace();
   const settingsHeadingId = useId();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [retentionOpen, setRetentionOpen] = useState(false);
   const { data: flow } = useSuspenseQuery(flowQueryOptions(browserApi, flowId));
   const isPublished = flow.published_version != null;
   const canRun = isPublished && flow.permissions.can_run;
   const kind = flowKindLine(flow, t);
+  const retention = useFlowRetentionAccess(flow.permissions.can_edit);
 
   return (
     <div className="flex min-w-0 flex-1 flex-col">
@@ -84,6 +91,16 @@ export function FlowPhonePage({ flowId, onStart }: { flowId: string; onStart: ()
                 // The toggle is a button, which a heading cannot hold, so its sections
                 // are the page's second level.
                 headingLevel={2}
+                retentionAction={
+                  retention.mayChange ? (
+                    <Button
+                      label={t("flows_retention_change")}
+                      width="100%"
+                      onClick={() => setRetentionOpen(true)}
+                    />
+                  ) : undefined
+                }
+                spaceRetentionHref={retention.spaceSettingsHref}
               />
             </div>
           </Collapsible>
@@ -96,6 +113,13 @@ export function FlowPhonePage({ flowId, onStart }: { flowId: string; onStart: ()
             />
           )}
         </section>
+        <FlowRetentionDialog
+          flow={flow}
+          open={retentionOpen}
+          onOpenChange={setRetentionOpen}
+          personalSpace={space.personal}
+          spaceSettingsHref={retention.spaceSettingsHref}
+        />
         {flow.permissions.can_edit ? (
           <p className="text-ax-text-secondary m-0 text-sm">{t("flow_edit_on_desktop")}</p>
         ) : null}
