@@ -137,6 +137,48 @@ def _ids(
     return sa.bindparam(name, value=value, type_=ARRAY(PostgreSQLUUID(as_uuid=True)))
 
 
+def _uses_in_space(space_id: UUID, *, of_files: Select[Any]) -> dict[str, sa.Delete]:
+    """Per table, the statement that removes the uses some Files have in one space."""
+    assistants = sa.select(Assistants.id).where(Assistants.space_id == space_id)
+    apps = sa.select(Apps.id).where(Apps.space_id == space_id)
+    services = sa.select(Services.id).where(Services.space_id == space_id)
+    runs = sa.select(AppRuns.id).where(AppRuns.app_id.in_(apps))
+    conversations = sa.select(Sessions.id).where(
+        sa.or_(Sessions.assistant_id.in_(assistants), Sessions.service_id.in_(services))
+    )
+    questions = sa.select(Questions.id).where(
+        sa.or_(
+            Questions.session_id.in_(conversations),
+            Questions.service_id.in_(services),
+        )
+    )
+    return {
+        "assistants_files": sa.delete(AssistantsFiles).where(
+            AssistantsFiles.file_id.in_(of_files),
+            AssistantsFiles.assistant_id.in_(assistants),
+        ),
+        "apps_files": sa.delete(AppsFiles).where(
+            AppsFiles.file_id.in_(of_files), AppsFiles.app_id.in_(apps)
+        ),
+        "app_runs_files": sa.delete(AppRunsFiles).where(
+            AppRunsFiles.file_id.in_(of_files), AppRunsFiles.app_run_id.in_(runs)
+        ),
+        "questions_files": sa.delete(QuestionsFiles).where(
+            QuestionsFiles.file_id.in_(of_files),
+            QuestionsFiles.question_id.in_(questions),
+        ),
+    }
+
+
+_RELEASED_WITH_A_SPACE = set(_uses_in_space(UUID(int=0), of_files=sa.select(Files.id)))
+_TABLES_WITH_USES = {table for table, _ in _DECLARED_USES}
+if _RELEASED_WITH_A_SPACE != _TABLES_WITH_USES:
+    raise FileUsePathUndeclaredError(
+        "Deleting a space must release every kind of File use: "
+        f"{sorted(_RELEASED_WITH_A_SPACE ^ _TABLES_WITH_USES)}"
+    )
+
+
 class FileHomes:
     """Set, take, inherit, check and move the home of File families."""
 
@@ -257,16 +299,32 @@ class FileHomes:
             .values(home_space_id=source.home_space_id)
         )
 
-    async def delete_families_living_in(
-        self, space_id: UUID, *, tenant_id: UUID
-    ) -> int:
-        """Remove the Files whose home is a space that is being deleted.
+    async def remove_with_space(self, space_id: UUID) -> int:
+        """Remove the Files that live in a space that is being deleted.
 
-        Called after what used the Files in the space is gone and before the
-        space itself. Each family is locked and its use checked again. A
-        family still in use somewhere stops the deletion: its home cannot be
-        emptied, and removing it would break what uses it.
+        Call it in the transaction that deletes the space, before the space
+        row goes. In this order: the space is locked, so no File gets it as
+        its home meanwhile; the uses those Files have in the space are
+        removed; each family is locked and its use checked again; the unused
+        families are removed. A family still used somewhere else stops the
+        deletion: a home is never emptied, and removing the File would break
+        what uses it.
+
+        A File without a home is left alone, also one that was used only in
+        this space: an empty home never means "may be deleted". The cleanup
+        of unused Files takes it later, as before.
         """
+        tenant_id = await self._session.scalar(
+            sa.select(Spaces.tenant_id).where(Spaces.id == space_id).with_for_update()
+        )
+        if tenant_id is None:
+            return 0
+        living_here = sa.select(Files.id).where(Files.home_space_id == space_id)
+        if not await self._session.scalar(sa.select(living_here.exists())):
+            return 0
+        for release in _uses_in_space(space_id, of_files=living_here).values():
+            await self._session.execute(release)
+
         roots = (
             await self._session.scalars(
                 sa.select(Files.id)
@@ -290,14 +348,9 @@ class FileHomes:
                 sa.delete(Files).where(Files.id == sa.any_(_ids("unused", unused)))
             )
             deleted = affected_row_count(result)
-        left = await self._session.scalar(
-            sa.select(sa.func.count())
-            .select_from(Files)
-            .where(Files.home_space_id == space_id)
-        )
-        if left:
+        if await self._session.scalar(sa.select(living_here.exists())):
             raise FileInUseElsewhereError(
-                f"{left} file(s) that belong to the space could not be removed."
+                "Some files that belong to the space could not be removed."
             )
         return deleted
 
@@ -482,10 +535,15 @@ class FileHomes:
         )
 
     async def _require_space(self, space_id: UUID, *, tenant_id: UUID) -> None:
+        """The space exists in the organisation and stays until this commits.
+
+        Deleting a space locks its row first, so a home is never written for
+        a space that is on its way out: one of the two waits for the other.
+        """
         found = await self._session.scalar(
-            sa.select(Spaces.id).where(
-                Spaces.id == space_id, Spaces.tenant_id == tenant_id
-            )
+            sa.select(Spaces.id)
+            .where(Spaces.id == space_id, Spaces.tenant_id == tenant_id)
+            .with_for_update(read=True, key_share=True)
         )
         if found is None:
             raise FileHomeSpaceNotFoundError("The space does not exist.")
