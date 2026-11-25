@@ -12,6 +12,7 @@ from sqlalchemy.orm import aliased
 
 from eneo.database.tables.info_blobs_table import InfoBlobs, active_info_blob_version
 from eneo.database.tables.job_table import Jobs
+from eneo.database.tables.service_principals_table import ServicePrincipals
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.users_table import Users
 from eneo.database.tables.websites_table import CrawlAttempts, CrawlRunFailures
@@ -195,11 +196,23 @@ class CrawlUserMetadata:
 
 
 @dataclass(frozen=True, slots=True)
+class CrawlServiceMetadata:
+    """The service principal behind a service key, by the name its key has."""
+
+    id: UUID
+    name: str
+
+
+@dataclass(frozen=True, slots=True)
 class CrawlDetails:
     item: CrawlOverviewItem
     space_id: UUID | None
     owner: CrawlUserMetadata | None
+    # Set instead of ``owner`` when a service key created the source.
+    created_by_service: CrawlServiceMetadata | None
     initiated_by: CrawlUserMetadata | None
+    # Set instead of ``initiated_by`` when a service key requested the crawl.
+    initiated_by_service: CrawlServiceMetadata | None
     indexed_size: int
     stored_resources: int
     update_interval: str
@@ -475,9 +488,14 @@ class CrawlRunRepository:
                     Users.id.label("owner_id"),
                     Users.username,
                     Users.email,
+                    ServicePrincipals.id.label("creator_service_id"),
+                    ServicePrincipals.display_name.label("creator_service_name"),
                     initial_attempt.dispatch_payload["user_id"].astext.label(
                         "initiator_id"
                     ),
+                    initial_attempt.dispatch_payload[
+                        "service_principal_id"
+                    ].astext.label("initiator_service_id"),
                 )
                 .join(
                     WebsitesTable,
@@ -492,6 +510,13 @@ class CrawlRunRepository:
                     Users,
                     sa.and_(
                         Users.id == WebsitesTable.user_id, Users.tenant_id == tenant_id
+                    ),
+                )
+                .outerjoin(
+                    ServicePrincipals,
+                    sa.and_(
+                        ServicePrincipals.id == WebsitesTable.created_by_service_id,
+                        ServicePrincipals.tenant_id == tenant_id,
                     ),
                 )
                 .outerjoin(
@@ -539,6 +564,25 @@ class CrawlRunRepository:
                 ).one_or_none()
                 if initiator is not None:
                     initiated_by = CrawlUserMetadata(*initiator)
+        initiated_by_service = None
+        if run.origin == CrawlOrigin.MANUAL and row.initiator_service_id:
+            try:
+                initiator_service_id = UUID(row.initiator_service_id)
+            except ValueError:
+                initiator_service_id = None
+            if initiator_service_id is not None:
+                service = (
+                    await self.session.execute(
+                        sa.select(
+                            ServicePrincipals.id, ServicePrincipals.display_name
+                        ).where(
+                            ServicePrincipals.id == initiator_service_id,
+                            ServicePrincipals.tenant_id == tenant_id,
+                        )
+                    )
+                ).one_or_none()
+                if service is not None:
+                    initiated_by_service = CrawlServiceMetadata(*service)
 
         stored_resources = await self.session.scalar(
             sa.select(sa.func.count())
@@ -563,7 +607,13 @@ class CrawlRunRepository:
             owner=CrawlUserMetadata(row.owner_id, row.username, row.email)
             if row.owner_id is not None
             else None,
+            created_by_service=CrawlServiceMetadata(
+                row.creator_service_id, row.creator_service_name
+            )
+            if row.creator_service_id is not None
+            else None,
             initiated_by=initiated_by,
+            initiated_by_service=initiated_by_service,
             indexed_size=row.size,
             stored_resources=stored_resources or 0,
             update_interval=row.update_interval,

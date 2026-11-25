@@ -646,7 +646,7 @@ async def test_service_key_creates_a_website_in_a_space_and_its_crawl_is_its_own
         job = (
             await container.session().execute(
                 sa.text(
-                    "SELECT j.user_id, j.service_principal_id FROM jobs j"
+                    "SELECT j.user_id, j.service_principal_id, r.id AS run_id FROM jobs j"
                     " JOIN crawl_attempts a ON a.dispatch_id = j.id"
                     " JOIN crawl_runs r ON r.id = a.crawl_run_id"
                     " WHERE r.website_id = :website_id"
@@ -656,6 +656,18 @@ async def test_service_key_creates_a_website_in_a_space_and_its_crawl_is_its_own
         ).one()
     assert job.user_id is None
     assert job.service_principal_id is not None
+    # The admin view names the service as creator and as the one who asked.
+    details = await client.get(
+        f"/api/v1/admin/crawler/runs/{job.run_id}/",
+        headers={"X-API-Key": tenant_admin_service_secret},
+    )
+    assert details.status_code == 200, details.text
+    named = details.json()["created_by_service"]
+    assert details.json()["owner"] is None
+    assert named["id"] == str(job.service_principal_id)
+    assert named["name"].startswith("svc-key-")
+    assert details.json()["initiated_by"] is None
+    assert details.json()["initiated_by_service"] == named
 
 
 async def test_an_assistant_key_reaches_an_assistant_a_service_key_made(

@@ -373,7 +373,7 @@ The person who created an assistant, an app, a service, a prompt, a collection, 
 
 What changes for the API:
 
-- `user_id` may be `null` or missing on assistants, services and apps, and `user` may be `null` or missing on assistants, services, prompts and app runs. `owner` may be `null` in the admin crawler details. A client that reads these must accept that there is no person.
+- `user_id` may be `null` or missing on assistants, services and apps, and `user` may be `null` or missing on assistants, services, prompts and app runs. `owner` may be `null` in the admin crawler details; when a service key created the source or requested the crawl, the new `created_by_service` and `initiated_by_service` name the service. A client that reads these must accept that there is no person.
 - A service key creates assistants, apps, services, collections, websites, info blobs and integration knowledge in a space, starts syncs and crawls, and runs apps. These calls answered `403 service_key_cannot_create_resources` and now answer as they do for a person. The resource records the key's service principal as its creator. See [What service keys cannot do](/docs/api-key-management#what-service-keys-cannot-do) for what still needs a person.
 - `POST /api/v1/services/` (a service outside a space) with a service key answers `403 service_key_cannot_create_resources`. The call failed before.
 - New: `GET /api/v1/spaces/{id}/storage/` answers how much one space stores, for the admins of that space. There is no limit per space.

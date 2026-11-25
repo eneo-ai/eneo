@@ -986,6 +986,19 @@ async def test_service_admin_key_can_read_start_and_cancel_crawls(
     # The run belongs to the service principal behind the key, not a person.
     assert job.user_id is None
     assert job.service_principal_id is not None
+    # The view names the service that asked, since no person did.
+    details = await client.get(
+        f"/api/v1/admin/crawler/runs/{started.json()['id']}/", headers=headers
+    )
+    assert details.status_code == 200, details.text
+    assert details.json()["initiated_by"] is None
+    assert details.json()["initiated_by_service"] == {
+        "id": str(job.service_principal_id),
+        "name": key["api_key"]["name"],
+    }
+    # A person created the source, so no service is named as its creator.
+    assert details.json()["owner"] is not None
+    assert details.json()["created_by_service"] is None
     cancelled = await client.post(
         f"/api/v1/admin/crawler/runs/{started.json()['id']}/cancel/",
         headers=key_headers,

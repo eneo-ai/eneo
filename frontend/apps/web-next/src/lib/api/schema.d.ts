@@ -2291,7 +2291,7 @@ export interface paths {
     };
     /**
      * Get Crawler Details
-     * @description Read a crawl's owning space, the person who created the source when there is one, recorded manual initiator, indexed storage and current source state. Requires tenant admin permission; does not grant access to indexed content.
+     * @description Read a crawl's owning space, the person or service that created the source, the person or service that requested a manual crawl, indexed storage and current source state. Requires tenant admin permission; does not grant access to indexed content.
      */
     get: operations["get_crawler_details_api_v1_admin_crawler_runs__id___get"];
     put?: never;
@@ -10614,7 +10614,9 @@ export interface components {
       /** Space Id */
       space_id: string | null;
       owner: components["schemas"]["AdminCrawlerUser"] | null;
+      created_by_service?: components["schemas"]["AdminCrawlerService"] | null;
       initiated_by: components["schemas"]["AdminCrawlerUser"] | null;
+      initiated_by_service?: components["schemas"]["AdminCrawlerService"] | null;
       /** Indexed Size */
       indexed_size: number;
       /** Stored Resources */
@@ -10786,6 +10788,19 @@ export interface components {
        * @description Of those, how many could not be admitted; see the worker log.
        */
       failed: number | null;
+    };
+    /**
+     * AdminCrawlerService
+     * @description The service behind a service key: the name the key has.
+     */
+    AdminCrawlerService: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
     };
     /** AdminCrawlerSummary */
     AdminCrawlerSummary: {

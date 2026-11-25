@@ -184,10 +184,21 @@ class AdminCrawlerUser(BaseModel):
     email: str
 
 
+class AdminCrawlerService(BaseModel):
+    """The service behind a service key: the name the key has."""
+
+    id: UUID
+    name: str
+
+
 class AdminCrawlerDetails(AdminCrawlerItem):
     space_id: UUID | None
     owner: AdminCrawlerUser | None
+    # The service whose key created the source, when no person did.
+    created_by_service: AdminCrawlerService | None = None
     initiated_by: AdminCrawlerUser | None
+    # The service whose key requested the crawl, when no person did.
+    initiated_by_service: AdminCrawlerService | None = None
     indexed_size: int
     stored_resources: int
     update_interval: UpdateInterval
@@ -371,7 +382,7 @@ async def list_admin_scheduled_websites(
 @router.get(
     "/runs/{id}/",
     response_model=AdminCrawlerDetails,
-    description="Read a crawl's owning space, the person who created the source when there is one, recorded manual initiator, indexed storage and current source state. Requires tenant admin permission; does not grant access to indexed content.",
+    description="Read a crawl's owning space, the person or service that created the source, the person or service that requested a manual crawl, indexed storage and current source state. Requires tenant admin permission; does not grant access to indexed content.",
     responses=responses.get_responses([403, 404]),
 )
 @endpoint_access(
@@ -397,10 +408,20 @@ async def get_crawler_details(
         owner=AdminCrawlerUser.model_validate(details.owner, from_attributes=True)
         if details.owner
         else None,
+        created_by_service=AdminCrawlerService.model_validate(
+            details.created_by_service, from_attributes=True
+        )
+        if details.created_by_service
+        else None,
         initiated_by=AdminCrawlerUser.model_validate(
             details.initiated_by, from_attributes=True
         )
         if details.initiated_by
+        else None,
+        initiated_by_service=AdminCrawlerService.model_validate(
+            details.initiated_by_service, from_attributes=True
+        )
+        if details.initiated_by_service
         else None,
         indexed_size=details.indexed_size,
         stored_resources=details.stored_resources,

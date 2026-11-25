@@ -1,6 +1,6 @@
 ---
 title: Uppgraderingsanteckningar
-translationSource: guides/upgrade-notes.mdx@54c3063870da
+translationSource: guides/upgrade-notes.mdx@e66619dc838a
 ---
 
 import { Callout } from "nextra/components";
@@ -378,7 +378,7 @@ Den som skapade en assistent, en app, en tjänst, en prompt, en samling, en webb
 
 Det här ändras i API:t:
 
-- `user_id` kan vara `null` eller saknas på assistenter, tjänster och appar, och `user` kan vara `null` eller saknas på assistenter, tjänster, promptar och appkörningar. `owner` kan vara `null` i adminvyns crawl-detaljer. En klient som läser fälten måste godta att det inte finns någon person.
+- `user_id` kan vara `null` eller saknas på assistenter, tjänster och appar, och `user` kan vara `null` eller saknas på assistenter, tjänster, promptar och appkörningar. `owner` kan vara `null` i adminvyns crawl-detaljer; när en tjänstenyckel har skapat källan eller begärt crawlningen namnger de nya fälten `created_by_service` och `initiated_by_service` tjänsten. En klient som läser fälten måste godta att det inte finns någon person.
 - En tjänstenyckel skapar assistenter, appar, tjänster, samlingar, webbplatser, info-blobbar och integrationskunskap i ett space, startar synkningar och crawlningar och kör appar. Anropen svarade `403 service_key_cannot_create_resources` och svarar nu som för en person. Resursen får nyckelns tjänsteprincipal som skapare. Se [Vad tjänstenycklar inte kan göra](/docs/api-key-management#what-service-keys-cannot-do) för det som fortfarande kräver en person.
 - `POST /api/v1/services/` (en tjänst utanför ett space) med en tjänstenyckel svarar `403 service_key_cannot_create_resources`. Tidigare misslyckades anropet.
 - Nytt: `GET /api/v1/spaces/{id}/storage/` svarar hur mycket ett space lagrar, för spacets administratörer. Det finns ingen gräns per space.
