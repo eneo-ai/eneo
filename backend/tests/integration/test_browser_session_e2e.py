@@ -705,7 +705,7 @@ async def federated_callback(
     async with db_container() as container:
         slug = await container.tenant_repo().generate_slug_for_tenant(test_tenant.id)
 
-    async def callback():
+    async def callback(**claims: Any):
         initiated = await client.get(
             "/api/v1/auth/browser/initiate",
             params={"tenant": slug, "next": "/dashboard"},
@@ -714,7 +714,7 @@ async def federated_callback(
         assert initiated.status_code == 303, initiated.text
         location = initiated.headers["location"]
         [state] = parse_qs(urlsplit(location).query)["state"]
-        answer = provider.authorize(location)
+        answer = provider.authorize(location, **claims)
         [txn] = initiated.headers.get_list("set-cookie")
         return await client.get(
             "/login/callback",
@@ -763,6 +763,29 @@ async def test_federated_browser_sign_in_records_a_session(
     rows = await _rows(first["user_id"])
     assert rows.keys() == {first["sid"], second["sid"]}
     assert rows[first["sid"]][:2] == (UUID(first["user_id"]), test_tenant.id)
+
+
+async def test_a_federated_sign_in_survives_optional_claims_in_the_wrong_form(
+    client,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    browser_session_on,
+    federated_callback,
+):
+    """How the person signed in is not who they are: a provider that sends
+    acr, amr and auth_time in a form Eneo cannot read still signs them in."""
+    callback = await federated_callback(
+        acr=2, amr="pwd", auth_time="2026-01-01T00:00:00Z"
+    )
+
+    assert callback.status_code == 303, callback.text
+    assert callback.headers["location"] == "/dashboard"
+    [session] = _session_cookies(callback)
+    token = session.removeprefix(f"{SESSION}=").split(";", 1)[0]
+    me = await client.get(
+        "/api/v1/users/me/", headers=SAME_ORIGIN | {"Cookie": f"{SESSION}={token}"}
+    )
+    assert me.status_code == 200, me.text
 
 
 @pytest.mark.integration

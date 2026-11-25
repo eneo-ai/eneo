@@ -490,7 +490,7 @@ uv run python -m eneo.cli.generate_encryption_key
 
 ### Claims Validated
 
-`authentication/oidc/verification.py` owns the response check; `FederatedIdentity` owns the validated email identity. Every failure is refused with `401` (`oidc_response_not_verified`) and logged as `oidc_response_refused` with a reason, never with the token:
+`authentication/oidc/verification.py` owns the response check; `FederatedIdentity` owns the validated email identity. A failed check of who signed in is refused with `401` (`oidc_response_not_verified`) and logged as `oidc_response_refused` with a reason, never with the token. The claims that say how the person signed in (`auth_time`, `acr`, `amr`) never refuse a sign-in:
 
 | Claim | Validated? | Details |
 |-------|------------|---------|
@@ -502,13 +502,16 @@ uv run python -m eneo.cli.generate_encryption_key
 | `iat` | **Yes** | Required; a token issued more than the clock leeway in the future is rejected as not yet valid |
 | `sub` | **Yes** | Required; a configured subject claim (`claims_mapping.subject`) is required as well |
 | `nonce` | **Yes** | Must equal the transaction's nonce |
-| `auth_time` | Conditional | When present, a number not in the future |
-| `acr`, `amr` | Conditional | When present, text and a list of text |
+| `auth_time` | Never refuses | Kept when it is a number from zero up to now (plus the clock leeway); otherwise counted as missing |
+| `acr` | Never refuses | Kept when it is non-empty text; otherwise counted as missing |
+| `amr` | Never refuses | Kept when it is a list of text, an empty list included; otherwise counted as missing, as a whole |
 | `at_hash` | Conditional | If present, must match access token hash |
 | `email_verified` | Conditional | For the standard `email`, explicit `false` rejects login before account lookup when this claim decides; omission is allowed for existing active members, while JIT requires `true` |
 | `xms_edov` | Conditional | Entra ID's "email domain owner verified" claim; a positive value verifies the standard `email` for JIT when `email_verified` is absent |
 
 The verification claims and their order come from the provider's `email_verified_claims` (default `["email_verified", "xms_edov"]`); the first one present decides. A claim left out of that list decides nothing, `email_verified` included.
+
+A claim counted as missing is logged as `oidc_optional_claim_ignored` with the claim's name and a reason, never with its value, so a provider that changed its format is noticed without locking anyone out. Claims Eneo does not use are neither stored nor logged.
 
 **Clock skew tolerance:** 120 seconds (2 minutes) - configurable via `oidc_clock_leeway_seconds`
 

@@ -90,10 +90,12 @@ What Eneo expects from any OIDC provider on the generic sign-in (`/api/v1/auth/i
 - The ID token's signature against the provider's JWKS, using only the allowed algorithms (never `none` or a symmetric algorithm)
 - `iss` equals the issuer the sign-in started with. If the provider's issuer changes during a sign-in, that sign-in ends with `400` (`oidc_transaction_invalid`) before the code is sent anywhere. When the provider's discovery said at the start that it sends the `iss` parameter on its redirect ([RFC 9207](https://www.rfc-editor.org/rfc/rfc9207)), that parameter must be present and equal too; otherwise it may be missing, but one that is sent must be equal
 - `aud` contains Eneo's client ID; `azp`, when present, equals it, and it is required when `aud` names several clients
-- `exp`, `iat` and `sub` are present, the token has not expired, and `iat` and `auth_time` are not in the future (`oidc_clock_leeway_seconds`, default 120 seconds, allows for clock skew)
+- `exp`, `iat` and `sub` are present, the token has not expired, and `iat` is not in the future (`oidc_clock_leeway_seconds`, default 120 seconds, allows for clock skew)
 - `nonce` equals the one Eneo sent for this sign-in
 
 A response that fails any check ends the sign-in with `401` (`oidc_response_not_verified`); nothing falls back to a weaker check.
+
+`auth_time`, `acr` and `amr` say how the person signed in, not who they are, and never end a sign-in. One that Eneo cannot trust (the wrong form, or an `auth_time` in the future) counts as missing, and the backend log names it (`oidc_optional_claim_ignored`, with the claim and a reason, never its value).
 
 **Eneo's requests to the provider** (discovery, token and JWKS, when the provider is saved, tested and at sign-in) follow these rules, so neither a discovery document nor a stored setting can send the code and client secret elsewhere:
 
