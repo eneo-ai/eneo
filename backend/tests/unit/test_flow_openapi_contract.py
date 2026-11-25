@@ -79,6 +79,7 @@ def test_both_retention_time_writers_can_name_the_time_they_replace(openapi_spec
     for schema, field in (
         ("PartialUpdateSpaceRequest", "expected_data_retention_days"),
         ("FlowRunRetentionPolicyReplaceRequest", "expected_effective_days"),
+        ("FlowRunRetentionPolicyReplaceRequest", "expected_inherited_days"),
     ):
         assert _schema_allows_null(schemas[schema]["properties"][field])
         assert field not in schemas[schema].get("required", [])

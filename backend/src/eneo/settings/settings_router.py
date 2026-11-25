@@ -251,9 +251,10 @@ def _flow_retention_time_conflict_response() -> dict[str, object]:
         "description": (
             "Another retention change or history deletion held the retention lock "
             f"too long (`{_FLOW_RETENTION_LOCK_BUSY_CODE}`); retry. Or the time "
-            "that applies to the Flow is no longer `expected_effective_days` "
-            "(`retention_time_changed`); `context.current_days` names it. Nothing "
-            "changed."
+            "that applies to the Flow is no longer `expected_effective_days`, or "
+            "the Space's time is no longer `expected_inherited_days` "
+            "(`retention_time_changed`); `context.current_days` names the time "
+            "that applies. Nothing changed."
         ),
         "content": {
             "application/json": {
@@ -1224,7 +1225,9 @@ async def get_flow_run_retention_policy(
         "runs."
         " A deleted Flow is accepted. The change waits for an open history deletion "
         "to finish. A change sent with `expected_effective_days` is refused when "
-        "the time that applies is another (409 `retention_time_changed`)."
+        "the time that applies is another, and one sent with "
+        "`expected_inherited_days` when the Space's time is another (409 "
+        "`retention_time_changed`)."
     ),
     responses={
         400: _settings_error_response(
@@ -1258,6 +1261,11 @@ async def replace_flow_run_retention_policy(
         expected_effective_days=(
             payload.expected_effective_days
             if "expected_effective_days" in payload.model_fields_set
+            else NOT_PROVIDED
+        ),
+        expected_inherited_days=(
+            payload.expected_inherited_days
+            if "expected_inherited_days" in payload.model_fields_set
             else NOT_PROVIDED
         ),
     )

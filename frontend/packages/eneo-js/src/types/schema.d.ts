@@ -8939,7 +8939,7 @@ export interface paths {
     get: operations["get_flow_run_retention_policy"];
     /**
      * Replace a Flow run-history retention policy
-     * @description Replace the Flow's own time, or clear it to follow the Space. Operational retention remains editable after a Flow definition is published because it does not mutate the published definition. A run that started while its shared Space had a time is removed automatically once the shorter of the Space's and the Flow's time has passed, as long as the Space keeps its time. Without a Space time, only an explicit administrator purge removes runs. A deleted Flow is accepted. The change waits for an open history deletion to finish. A change sent with `expected_effective_days` is refused when the time that applies is another (409 `retention_time_changed`).
+     * @description Replace the Flow's own time, or clear it to follow the Space. Operational retention remains editable after a Flow definition is published because it does not mutate the published definition. A run that started while its shared Space had a time is removed automatically once the shorter of the Space's and the Flow's time has passed, as long as the Space keeps its time. Without a Space time, only an explicit administrator purge removes runs. A deleted Flow is accepted. The change waits for an open history deletion to finish. A change sent with `expected_effective_days` is refused when the time that applies is another, and one sent with `expected_inherited_days` when the Space's time is another (409 `retention_time_changed`).
      */
     put: operations["replace_flow_run_retention_policy"];
     post?: never;
@@ -25550,6 +25550,11 @@ export interface components {
        * @description The time that applied to the Flow when the caller chose `policy` (`effective.effective_days`: the shorter of the Flow's and its Space's time), or null when none applied. When `policy` changes the Flow's time, it is compared with the time that applies now, under the lock the change takes; if they differ, nothing changes and the answer is 409 `retention_time_changed`, with the time that applies in `context.current_days`. Omit to save without the comparison. Ignored when `policy` is the stored one.
        */
       expected_effective_days?: number | null;
+      /**
+       * Expected Inherited Days
+       * @description The Space's time when the caller chose `policy` (`inherited_policy.days`), or null when the Space had none. When `policy` changes the Flow's time, it is compared with the Space's time now, under the lock the change takes; if they differ, nothing changes and the answer is 409 `retention_time_changed`, with the time that applies in `context.current_days`. Compared on its own, beside `expected_effective_days`. Omit to save without the comparison. Ignored when `policy` is the stored one.
+       */
+      expected_inherited_days?: number | null;
       /** @description The Flow's own time, at most its Space's, or null to follow the Space. */
       policy: components["schemas"]["FlowRunRetentionPolicy"] | null;
     };
@@ -77729,7 +77734,7 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Another retention change or history deletion held the retention lock too long (`flow_retention_lock_busy`); retry. Or the time that applies to the Flow is no longer `expected_effective_days` (`retention_time_changed`); `context.current_days` names it. Nothing changed. */
+      /** @description Another retention change or history deletion held the retention lock too long (`flow_retention_lock_busy`); retry. Or the time that applies to the Flow is no longer `expected_effective_days`, or the Space's time is no longer `expected_inherited_days` (`retention_time_changed`); `context.current_days` names the time that applies. Nothing changed. */
       409: {
         headers: {
           [name: string]: unknown;

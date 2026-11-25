@@ -917,6 +917,22 @@ class FlowRunRetentionPolicyReplaceRequest(BaseModel):
             "comparison. Ignored when `policy` is the stored one."
         ),
     )
+    # The Space's time decides whether runs are removed at all, which the time
+    # that applies does not show: 60 days under a Space without a time and
+    # under one of 90 apply alike.
+    expected_inherited_days: int | None = Field(
+        default=None,
+        description=(
+            "The Space's time when the caller chose `policy` "
+            "(`inherited_policy.days`), or null when the Space had none. When "
+            "`policy` changes the Flow's time, it is compared with the Space's "
+            "time now, under the lock the change takes; if they differ, nothing "
+            "changes and the answer is 409 `retention_time_changed`, with the "
+            "time that applies in `context.current_days`. Compared on its own, "
+            "beside `expected_effective_days`. Omit to save without the "
+            "comparison. Ignored when `policy` is the stored one."
+        ),
+    )
 
 
 class SkillExecutionBlockUpdate(BaseModel):
