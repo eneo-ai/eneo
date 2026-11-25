@@ -1162,6 +1162,24 @@ describe("the model step for a server at an address of its own", () => {
     await expectNoAxeViolations(document.body);
   });
 
+  it("says at the id field what is missing when the server lists nothing to pick", async () => {
+    const { dialog } = renderStep(vllm, []);
+    await within(dialog).findByText(
+      "Eneo hittade ingen modell av typen Transkription i serverns lista"
+    );
+    const hosting = within(dialog).getByRole("combobox", { name: /^Hosting-region/ });
+    fireEvent.keyDown(hosting, { key: "Enter" });
+    fireEvent.click(await screen.findByRole("option", { name: "Sverige" }));
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till modeller" }));
+
+    const id = within(dialog).getByRole("textbox", { name: "Saknas modellen? Lägg till med id" });
+    expect(document.activeElement).toBe(id);
+    expect(describedBy(id)).toContain("Välj minst en modell, eller lägg till en med dess id.");
+    expect(api.POST).not.toHaveBeenCalled();
+    await expectNoAxeViolations(document.body);
+  });
+
   it("says the server sent no list, never its own error text", async () => {
     const { dialog } = renderStep(vllm, [
       { error: "Failed to list models: ConnectError('All connection attempts failed')" }

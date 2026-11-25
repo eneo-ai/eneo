@@ -702,7 +702,7 @@ export function ModelCatalogStep({
                     type: "error",
                     message: t("provider_form_model_added_error", { name: manualTaken })
                   }
-                : noSelection && !canList
+                : noSelection && (!canList || listed.length === 0)
                   ? { type: "error", message: t("provider_form_select_model_required") }
                   : undefined
             }
