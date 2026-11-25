@@ -533,17 +533,49 @@ describe("session expiry and renewal", () => {
       .mockReturnValueOnce(new Promise<Response>((resolve) => (answer = resolve)));
 
     const checking = owner.checkBrowserSession();
+    // Already waiting for the check when the renewal takes over.
+    const held = owner.prepareBrowserRequest(new Request("https://eneo.test/api"));
     const renewal = owner.extendBrowserSession();
     finishCheck(probe());
     await checking;
     await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
     // The check that settled first must not release requests the renewal holds.
-    const held = owner.prepareBrowserRequest(new Request("https://eneo.test/api"));
     expect(await settled(held)).toBe(false);
     answer(renewed());
     await renewal;
     expect(await settled(held)).toBe(true);
   });
+
+  it(
+    "holds nothing once a check, a failed check or a renewal that took over has ended",
+    { timeout: 2000 },
+    async () => {
+      await bound();
+      // A new check asks the server only when nothing holds requests any more.
+      const released = async () => {
+        fetcher.mockClear();
+        await owner.checkBrowserSession();
+        expect(fetcher).toHaveBeenCalledTimes(1);
+      };
+      await owner.checkBrowserSession();
+      await released();
+      fetcher.mockRejectedValueOnce(new TypeError("Offline"));
+      await expect(owner.checkBrowserSession()).rejects.toThrow("Offline");
+      await released();
+      let finishCheck!: (response: Response) => void;
+      fetcher
+        .mockReturnValueOnce(new Promise<Response>((resolve) => (finishCheck = resolve)))
+        .mockResolvedValueOnce(renewed());
+      const checking = owner.checkBrowserSession();
+      const renewal = owner.extendBrowserSession();
+      finishCheck(probe());
+      await Promise.all([checking, renewal]);
+      await released();
+      expect(await settled(owner.prepareBrowserRequest(new Request("https://eneo.test/api")))).toBe(
+        true
+      );
+    }
+  );
 
   it("loses nothing when the renewal's answer is lost after the server changed the cookie", async () => {
     await bound();
