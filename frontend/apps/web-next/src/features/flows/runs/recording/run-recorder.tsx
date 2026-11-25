@@ -722,12 +722,9 @@ export function RunRecorder({
     // Recording again while the last recording's parts are on the form goes on with it.
     const sessionId = before.length > 0 && current ? current : crypto.randomUUID();
     // Numbered after, and timed with, every part the recording keeps: a refused part's copy on
-    // the device keeps its own place, and so does a part left unfinished there (the keeper's floor).
+    // the device keeps its own place.
     const kept = keptPartsOf(sessionId, now);
-    const firstIndex = kept.reduce(
-      (next, part) => Math.max(next, part.index + 1),
-      keeper.nextIndex(stepId, sessionId)
-    );
+    const firstIndex = kept.reduce((next, part) => Math.max(next, part.index + 1), 0);
     const recordedBeforeMs = kept.reduce((sum, part) => sum + part.durationMs, 0);
     if (
       byItself &&
