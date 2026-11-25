@@ -456,6 +456,9 @@ function RetentionSection() {
   const [daysVisited, setDaysVisited] = useState(false);
   // A time that removes content, waiting for its confirmation, and the time it was compared with.
   const [asked, setAsked] = useState<{ days: number; expected: number | null } | null>(null);
+  // The dialog stays in the page after it closes, so its title keeps the days it asked about.
+  const [askedDays, setAskedDays] = useState(0);
+  if (asked !== null && asked.days !== askedDays) setAskedDays(asked.days);
   // What applies from now, after this page saved a time, and that time. The line shows only
   // while the space has that time, so a read that brings another administrator's change hides it.
   const [note, setNote] = useState<{ days: number | null; text: string } | null>(null);
@@ -569,8 +572,13 @@ function RetentionSection() {
           setAsked(null);
           setDraft(null);
         }}
-        title={t("space_retention_shorten_title")}
-        description={t("space_retention_shorten_description", { days: asked?.days ?? 0 })}
+        title={t("space_retention_shorten_title", { days: askedDays })}
+        // Runs in a personal space are not removed automatically: it says nothing of runs.
+        description={t(
+          space.personal
+            ? "space_retention_shorten_description_personal"
+            : "space_retention_shorten_description"
+        )}
         confirmLabel={t("space_retention_shorten_confirm")}
         pending={update.isPending}
         // Its blur asked: after a click elsewhere nothing focused opened it.

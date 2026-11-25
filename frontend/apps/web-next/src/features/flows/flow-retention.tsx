@@ -283,7 +283,9 @@ function RetentionForm({
   const next = applied(days);
   const shortens = draft !== null && current !== null && next !== null && next < current;
   const warning =
-    shortens && warnedFor === days && !problem ? t("flows_retention_shorter_warning") : undefined;
+    shortens && warnedFor === days && !problem
+      ? t("flows_retention_shorter_warning", { days: next ?? 0 })
+      : undefined;
 
   return (
     <Layout
@@ -353,7 +355,8 @@ function RetentionForm({
               type="submit"
               form={formId}
               variant="primary"
-              label={t("flows_settings_save")}
+              // While the warning shows, the next press saves the shorter time.
+              label={warning ? t("flows_retention_save_anyway") : t("flows_settings_save")}
               isLoading={save.isPending}
               isInterruptible
             />

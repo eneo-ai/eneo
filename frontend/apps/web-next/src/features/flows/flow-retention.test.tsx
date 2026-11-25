@@ -152,14 +152,15 @@ function CachedFlowSettings() {
 
 /**
  * Presses Save as a person does, the button taking focus first. A shorter time is
- * sent on the press after its warning, so the second press follows when it shows.
+ * sent on the press after its warning ("Spara ändå"), so the second press follows when
+ * it shows.
  */
 function pressSave() {
   const button = screen.getByRole("button", { name: "Spara inställningar" });
   button.focus();
   fireEvent.click(button);
   // The status text, not the live region that speaks it on its own timer.
-  if (screen.queryByText(/Spara igen/, { ignore: "[aria-live], [aria-live] *" })) {
+  if (screen.queryByText(/Välj Spara ändå/, { ignore: "[aria-live], [aria-live] *" })) {
     button.focus();
     fireEvent.click(button);
   }
@@ -318,16 +319,19 @@ describe("flow retention", () => {
     fireEvent.change(days, { target: { value: "30" } });
     fireEvent.blur(days);
     fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
-    // The first press shows the warning instead of saving: it was not on screen before.
+    // The first press shows the warning instead of saving: it was not on screen before, and
+    // it names the days.
     const warning = await screen.findByText(
-      "Körningar som redan är äldre än den nya tiden räknas som förfallna och tas bort vid en kommande kontroll. Det går inte att återställa. Spara igen för att använda den."
+      "Flödets körningar som startade medan ytan hade en tid och är äldre än 30 dagar tas bort vid en kommande kontroll. Det går inte att återställa. Välj Spara ändå för att använda tiden."
     );
     expect(days.getAttribute("aria-describedby")).toContain(
       warning.closest("[id]")?.getAttribute("id")
     );
     expect(backend.PUT).not.toHaveBeenCalled();
     await expectNoAxeViolations(document.body);
-    fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
+    // While the warning shows, the button says what the next press does.
+    expect(screen.queryByRole("button", { name: "Spara inställningar" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Spara ändå" }));
     await waitFor(() => expect(backend.PUT).toHaveBeenCalledTimes(1));
     expect(backend.PUT.mock.calls[0]![1].body).toEqual({
       policy: { days: 30 },
@@ -368,9 +372,9 @@ describe("flow retention", () => {
     fireEvent.change(days, { target: { value: "30" } });
     fireEvent.blur(days);
     fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
-    expect(await screen.findByText(/Spara igen för att använda den/)).toBeTruthy();
+    expect(await screen.findByText(/Välj Spara ändå för att använda tiden/)).toBeTruthy();
     expect(backend.PUT).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
+    fireEvent.click(screen.getByRole("button", { name: "Spara ändå" }));
     await waitFor(() => expect(backend.PUT).toHaveBeenCalledTimes(2));
     expect(backend.PUT.mock.calls[1]![1].body).toEqual({
       policy: { days: 30 },
@@ -431,9 +435,9 @@ describe("flow retention", () => {
     fireEvent.change(days, { target: { value: "30" } });
     fireEvent.blur(days);
     fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
-    expect(await screen.findByText(/Spara igen för att använda den/)).toBeTruthy();
+    expect(await screen.findByText(/Välj Spara ändå för att använda tiden/)).toBeTruthy();
     expect(backend.PUT).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
+    fireEvent.click(screen.getByRole("button", { name: "Spara ändå" }));
     await waitFor(() => expect(backend.PUT).toHaveBeenCalledTimes(2));
     expect(backend.PUT.mock.calls[1]![1].body).toEqual({
       policy: { days: 30 },

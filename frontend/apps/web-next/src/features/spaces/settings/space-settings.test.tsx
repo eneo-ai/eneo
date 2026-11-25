@@ -346,7 +346,7 @@ it.each([
   const note =
     sent === null
       ? messages.space_retention_saved_off
-      : `Körningar i ytans flöden som startar medan ytan har en tid räknas som förfallna när de är äldre än ${sent} dagar, eller flödets kortare tid, och tas bort vid en kommande kontroll. Kontrollen görs var femte minut; en spärr, en kö eller ett lås kan fördröja borttagningen. Körningar som startade medan ytan saknade tid rörs inte.`;
+      : `Sparat. Körningar i ytans flöden som startar medan ytan har en tid tas bort när de är äldre än ${sent} dagar, eller flödets kortare tid. Kontrollen görs var femte minut. Andra körningar tas inte bort automatiskt.`;
   // Shown under the field and said once, politely, without moving the focus.
   const section = document.getElementById("security")!;
   expect(await within(section).findByText(note)).toBeTruthy();
@@ -458,10 +458,11 @@ it("keeps a confirmation open while the space is read again after a save", async
   const section = document.getElementById("security")!;
   const { land } = await saveWhileTheNextReadIsHeld(queryClient);
   enterRetention("7");
-  const dialog = await screen.findByRole("alertdialog", { name: "Spara gallringstiden?" });
+  const title = { name: "Ta bort innehåll som är äldre än 7 dagar?" };
+  const dialog = await screen.findByRole("alertdialog", title);
   await land();
   await waitFor(() => expect(within(section).queryByText(/äldre än 60 dagar/)).toBeNull());
-  expect(screen.getByRole("alertdialog", { name: "Spara gallringstiden?" })).toBe(dialog);
+  expect(screen.getByRole("alertdialog", title)).toBe(dialog);
   expect(retentionField().value).toBe("7");
 });
 
@@ -505,7 +506,7 @@ it.each([
     return;
   }
   enterRetention(typed);
-  const title = { name: messages.space_retention_shorten_title };
+  const title = { name: "Ta bort innehåll som är äldre än 7 dagar?" };
   fireEvent.click(
     within(await screen.findByRole("alertdialog", title)).getByRole("button", { name: "Avbryt" })
   );
@@ -544,9 +545,22 @@ it("promises nothing about flow runs in a personal space", async () => {
   const section = document.getElementById("security")!;
   expect(
     within(section).getByText(
-      "Gäller assistenter och appar i ytan som inte har en egen tid. Det som har passerat tiden räknas som förfallet och tas bort vid en kommande kontroll. Det går inte att återställa."
+      "Gäller assistenter och appar i ytan utan egen tid. Innehåll som är äldre än tiden tas bort automatiskt, normalt vid nästa dagliga kontroll, och går inte att återställa."
     )
   ).toBeTruthy();
+  // A shorter time asks first, and says nothing of runs or the five-minute check.
+  enterRetention("7");
+  const dialog = await screen.findByRole("alertdialog", {
+    name: "Ta bort innehåll som är äldre än 7 dagar?"
+  });
+  expect(
+    within(dialog).getByText(
+      "Det gäller innehåll som följer ytans tid. Det går inte att återställa. Kontrollen görs en gång per dygn."
+    )
+  ).toBeTruthy();
+  expect(within(dialog).queryByText(/körningar|femte minut/)).toBeNull();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Avbryt" }));
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
   enterRetention("45");
   expect(
     await within(section).findByText(
@@ -559,11 +573,14 @@ it("promises nothing about flow runs in a personal space", async () => {
 it("asks before a shorter time is saved and saves it once confirmed", async () => {
   showSettings();
   enterRetention("7");
-  const dialog = await screen.findByRole("alertdialog", { name: "Spara gallringstiden?" });
+  // The question names what goes, and the answer both saves and removes.
+  const dialog = await screen.findByRole("alertdialog", {
+    name: "Ta bort innehåll som är äldre än 7 dagar?"
+  });
   expect(api.PATCH).not.toHaveBeenCalled();
   expect(
     within(dialog).getByText(
-      "Innehåll som följer ytans tid och redan är äldre än 7 dagar räknas som förfallet och tas bort vid en kommande kontroll. Det går inte att återställa."
+      "Det gäller innehåll som följer ytans tid. Det går inte att återställa. Kontrollen görs var femte minut för körningar och en gång per dygn för annat innehåll."
     )
   ).toBeTruthy();
   // The least destructive choice has the focus.
@@ -572,7 +589,7 @@ it("asks before a shorter time is saved and saves it once confirmed", async () =
   ).toBe(true);
   await expectNoAxeViolations(dialog);
 
-  fireEvent.click(within(dialog).getByRole("button", { name: "Spara tiden" }));
+  fireEvent.click(within(dialog).getByRole("button", { name: "Spara och ta bort" }));
   await waitFor(() =>
     expect(api.PATCH).toHaveBeenCalledExactlyOnceWith("/api/v1/spaces/{id}/", {
       params: { path: { id: "space-1" } },
@@ -601,6 +618,8 @@ it.each([
   await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
   expect(retentionField().value).toBe("30");
   expect(api.PATCH).not.toHaveBeenCalled();
+  // The closed dialog stays in the page: its title keeps the days it asked about.
+  expect(screen.queryByText(/äldre än 0 dagar/)).toBeNull();
 });
 
 /** Answers a space save as the server does: refused while the time it carries is out of date. */
@@ -656,7 +675,9 @@ it("saves nothing when another administrator changed the time, shows the time re
 
   // Typed again, 60 is shorter than the 90 read, so it asks first.
   enterRetention("60");
-  const dialog = await screen.findByRole("alertdialog", { name: "Spara gallringstiden?" });
+  const dialog = await screen.findByRole("alertdialog", {
+    name: "Ta bort innehåll som är äldre än 60 dagar?"
+  });
   expect(api.PATCH).toHaveBeenCalledTimes(1);
   fireEvent.click(
     within(dialog).getByRole("button", { name: messages.space_retention_shorten_confirm })
@@ -674,7 +695,7 @@ it("closes the confirmation and shows the time read when the time changed before
   showSettings();
   answerSavesAsServer();
   const field = enterRetention("7");
-  const title = { name: "Spara gallringstiden?" };
+  const title = { name: "Ta bort innehåll som är äldre än 7 dagar?" };
   const dialog = await screen.findByRole("alertdialog", title);
   // Another administrator shortened the time while the dialog was open.
   state.space = { ...state.space, data_retention_days: 10 };
@@ -817,7 +838,9 @@ it("keeps a grant another tab saved, which a refresh on its way brings, so the n
     .catch(() => {});
   await waitFor(() => expect(counted.reads).toBe(1));
   enterRetention("7");
-  const dialog = await screen.findByRole("alertdialog", { name: "Spara gallringstiden?" });
+  const dialog = await screen.findByRole("alertdialog", {
+    name: "Ta bort innehåll som är äldre än 7 dagar?"
+  });
   await act(async () => answer({ data: state.space, response: new Response("{}") }));
   fireEvent.click(within(dialog).getByRole("button", { name: "Avbryt" }));
   await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
