@@ -16,6 +16,19 @@ vi.mock("./runs-api", () => ({ deleteRuntimeFile: vi.fn(async () => undefined) }
 const probe = (generation = "a") =>
   new Response(null, { status: 204, headers: { "Eneo-Session-Generation": generation } });
 const offline = () => Promise.reject(new TypeError("Failed to fetch"));
+const busy = async () =>
+  new Response(JSON.stringify({ message: "Unavailable" }), {
+    status: 503,
+    headers: { "content-type": "application/json" }
+  });
+/** A server that never answers: the check ends only when it is aborted. */
+const silent = (_: unknown, init?: RequestInit) =>
+  new Promise<Response>((_, reject) => {
+    const signal = init!.signal!;
+    signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+  });
+/** The session check's time limit. */
+const CHECK_LIMIT_MS = 15_000;
 
 let fetcher: ReturnType<typeof vi.fn<typeof fetch>>;
 let owner: typeof import("@/lib/api/refusal");
@@ -118,4 +131,29 @@ describe("recorded parts waiting when the browser comes back online", () => {
       stop();
     }
   });
+});
+
+it("fails a part whose session check never answers at the check's limit, in the row's own words", async () => {
+  await checkFails(busy);
+  // The server is back but does not answer: the upload's check waits for it.
+  fetcher.mockImplementation(silent);
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  const hook = form();
+  record(hook, 0);
+  await act(() => vi.advanceTimersByTimeAsync(CHECK_LIMIT_MS - 1));
+  expect(row(hook).state).toBe("uploading");
+  expect(fetcher).toHaveBeenCalledTimes(1);
+
+  await act(() => vi.advanceTimersByTimeAsync(1));
+  await vi.waitFor(() =>
+    expect(row(hook)).toMatchObject({
+      state: "failed",
+      retryable: true,
+      nextRetryAt: expect.any(Number)
+    })
+  );
+  expect(row(hook).problem).toBe(
+    "Filen kom inte fram. Försök igen med knappen, eller ta bort filen."
+  );
+  expect(UploadRequest.sent).toHaveLength(0);
 });

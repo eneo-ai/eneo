@@ -55,8 +55,13 @@ async function sendFile(
   try {
     request = await onBrowserApiRequest({ request: prepared });
   } catch (error) {
-    // Fetch's network error from the session check: it is checked again once back online.
-    throw error instanceof TypeError ? new UploadNetworkError() : error;
+    // The session check did not get through (fetch's network error, its time limit, a busy
+    // server): the file did not reach the server and may be sent again. The session gate checks
+    // again when it is next sent with the browser online. A refusal (4xx) and the page's end stay
+    // as they are.
+    const onTheWay =
+      error instanceof TypeError || (error instanceof EneoApiError && error.status >= 500);
+    throw onTheWay ? new UploadNetworkError() : error;
   }
   request.signal.throwIfAborted();
   return new Promise((resolve, reject) => {
