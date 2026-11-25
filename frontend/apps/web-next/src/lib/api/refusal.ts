@@ -9,6 +9,12 @@ import { navigateTo } from "@/lib/navigate-to";
 export const SESSION_GENERATION_HEADER = "Eneo-Session-Generation";
 const SESSION_PROBE = "/api/v1/auth/session/";
 const SESSION_EXTEND = "/api/v1/auth/session/extend/";
+/**
+ * How long a session check or renewal may take, body included. Requests in
+ * the tab wait for it, and a renewal holds the other tabs' renewals; both are
+ * small, so this only cuts off a server that has stopped answering.
+ */
+const SESSION_CHECK_TIMEOUT_MS = 15_000;
 /** Whole seconds the session has left, on the probe. */
 const SESSION_EXPIRES_IN_HEADER = "Eneo-Session-Expires-In";
 /** Whole seconds the session was issued for, on the probe; older servers omit it. */
@@ -146,13 +152,42 @@ function checkAnswerSession(response: Response): void {
 
 /** Why the server refused, read from a copy so the body stays for its consumer. */
 async function refusalOf(response: Response): Promise<EneoApiError> {
+  // A body that was cut off fails here: it may have named another person's
+  // session (9090), and read as a plain refusal it would resume this page's
+  // deep link as them.
+  const text = await response.clone().text();
   let body: unknown;
   try {
-    body = await response.clone().json();
+    body = text ? JSON.parse(text) : undefined;
   } catch {
+    // Only a body that arrived whole and is not JSON has no reason in it.
     body = undefined;
   }
   return apiErrorFromResponse(response, body);
+}
+
+/**
+ * Sends a session check or renewal under the time limit, until its body is
+ * read. At the limit the request is aborted, never raced. Nothing is granted
+ * after it: a check's 204 has no body to wait for, and a renewal checks the
+ * limit after its body. What fails then fails as a 504, which queries and
+ * streams retry (an AbortError would stop a stream from reconnecting). A
+ * refusal that arrived whole still applies when its body is read just after
+ * the limit: another sign-in ends the page at once, not as a time-out.
+ */
+async function withinTimeLimit<T>(send: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  const deadline = new AbortController();
+  const timer = setTimeout(() => deadline.abort(), SESSION_CHECK_TIMEOUT_MS);
+  try {
+    return await send(AbortSignal.any([requests.signal, deadline.signal]));
+  } catch (error) {
+    // By the limit, not by the error: a body read may have swallowed the abort.
+    if (deadline.signal.aborted && !requests.signal.aborted)
+      throw new EneoApiError("The session request timed out.", { status: 504 });
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** What a 401 or 403 does to the document, once its reason is known. */
@@ -171,9 +206,29 @@ function applyRefusal(response: Response, error: EneoApiError): void {
   }
 }
 
+/** A check that failed on the way (network, time limit, 5xx), not by a refusal (4xx). */
+const failedOnTheWay = (error: unknown): boolean =>
+  error !== undefined &&
+  !(error instanceof EneoApiError && error.status >= 400 && error.status < 500);
+
 /** Cookie requests and cache-only route gates share this document's session check. */
 export async function requireBrowserSession(): Promise<string> {
-  if (pendingProbe) await pendingProbe;
+  // Wait for the check or renewal holding requests, and for a renewal that
+  // takes over meanwhile; a failure rejects the request. The loop ends: each
+  // holder clears `pendingProbe` in a callback attached before anyone can wait
+  // for it, so that runs before a waiter resumes.
+  while (pendingProbe) await pendingProbe;
+  if (
+    snapshot.status === "bound" &&
+    failedOnTheWay(snapshot.checkError) &&
+    navigator.onLine !== false
+  ) {
+    // The server may be back: check again rather than refuse until something
+    // else does. One check per request, shared by requests at the same time;
+    // its failure is the request's. The checks below decide as for any check.
+    await checkBrowserSession();
+    while (pendingProbe) await pendingProbe;
+  }
   assertCurrent();
   if (snapshot.status === "unbound") {
     throw new EneoApiError("The browser session has not been checked.", { status: 503 });
@@ -236,16 +291,18 @@ async function probeSession(): Promise<void> {
     headers.set(SESSION_GENERATION_HEADER, expected);
   }
   try {
-    // Deliberately native fetch: this is the check that prepares other requests.
-    const response = await fetch(SESSION_PROBE, {
-      headers,
-      cache: "no-store",
-      credentials: "same-origin",
-      signal: requests.signal
+    const { response, refused } = await withinTimeLimit(async (signal) => {
+      // Deliberately native fetch: this is the check that prepares other requests.
+      const response = await fetch(SESSION_PROBE, {
+        headers,
+        cache: "no-store",
+        credentials: "same-origin",
+        signal
+      });
+      // Reading why it was refused is the last wait. Nothing is applied before
+      // it, so a renewal adopted while the answer arrived is never undone.
+      return { response, refused: response.status === 204 ? undefined : await refusalOf(response) };
     });
-    // Reading why it was refused is the last wait. Nothing is applied before
-    // it, so a renewal adopted while the answer arrived is never undone.
-    const refused = response.status === 204 ? undefined : await refusalOf(response);
     assertCurrent();
     if (superseded()) return;
     let generation: string | null;
@@ -357,30 +414,36 @@ async function renewSession(seen: number): Promise<void> {
   // page as it was: renewed or not, the cookie is still this page's session
   // (a renewal keeps its generation), so the next request works and Retry
   // renews again.
-  // Native, like the probe.
-  const response = await fetch(SESSION_EXTEND, {
-    method: "POST",
-    headers: { [SESSION_GENERATION_HEADER]: generation },
-    cache: "no-store",
-    credentials: "same-origin",
-    signal: requests.signal
-  });
-  assertCurrent();
-  if (!response.ok) {
-    await handleRefusal(response, SESSION_EXTEND);
-    let body: unknown;
-    try {
-      body = await response.json();
-    } catch {
-      body = undefined;
+  // The limit ends this lock holder's turn, so tabs waiting for the lock go on.
+  await withinTimeLimit(async (signal) => {
+    // Native, like the probe.
+    const response = await fetch(SESSION_EXTEND, {
+      method: "POST",
+      headers: { [SESSION_GENERATION_HEADER]: generation },
+      cache: "no-store",
+      credentials: "same-origin",
+      signal
+    });
+    assertCurrent();
+    if (!response.ok) {
+      await handleRefusal(response, SESSION_EXTEND);
+      let body: unknown;
+      try {
+        body = await response.json();
+      } catch {
+        body = undefined;
+      }
+      throw apiErrorFromResponse(response, body);
     }
-    throw apiErrorFromResponse(response, body);
-  }
-  const body = (await response.json()) as components["schemas"]["BrowserSessionExtension"];
-  const renewal: Renewal = { generation, expiresAt: Date.now() + body.expires_in * 1000 };
-  renewals += 1;
-  publish({ status: "bound", generation, ...renewedSession(renewal.expiresAt) });
-  sessionChannel()?.postMessage(renewal);
+    const body = (await response.json()) as components["schemas"]["BrowserSessionExtension"];
+    // The page may have ended, or the limit passed, while the body was read.
+    assertCurrent();
+    signal.throwIfAborted();
+    const renewal: Renewal = { generation, expiresAt: Date.now() + body.expires_in * 1000 };
+    renewals += 1;
+    publish({ status: "bound", generation, ...renewedSession(renewal.expiresAt) });
+    sessionChannel()?.postMessage(renewal);
+  });
 }
 
 /** The root owns this subscription's lifetime; StrictMode can mount it again. */
