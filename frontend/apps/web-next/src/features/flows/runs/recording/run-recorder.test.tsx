@@ -49,6 +49,8 @@ class FakeUpload {
   static failAll = false;
   /** The core refuses the next upload for good (a 4xx that sending again does not change). */
   static refuseNext = false;
+  /** The core refuses every upload whose file name matches, for good. */
+  static refuseNamed: RegExp | null = null;
   status = 0;
   responseText = "";
   upload = { onprogress: null as ((event: ProgressEvent) => void) | null };
@@ -69,7 +71,7 @@ class FakeUpload {
         this.onerror?.();
         return;
       }
-      if (FakeUpload.refuseNext) {
+      if (FakeUpload.refuseNext || FakeUpload.refuseNamed?.test(file.name)) {
         FakeUpload.refuseNext = false;
         this.status = 422;
         this.responseText = JSON.stringify({ message: "Refused" });
@@ -281,6 +283,7 @@ beforeEach(async () => {
   FakeUpload.failNext = false;
   FakeUpload.failAll = false;
   FakeUpload.refuseNext = false;
+  FakeUpload.refuseNamed = null;
   FakeSocket.instances = [];
   FakeNode.instances = [];
   microphone.mockReset();
@@ -1133,6 +1136,61 @@ describe("Keeping a recording on the device", () => {
     });
     // The run took the recording: nothing of it stays on the device.
     await waitFor(() => expect(device.db.parts.size).toBe(0));
+  });
+
+  /**
+   * Continues a kept recording of a first part of an hour, which uploads, and a second of
+   * `refusedMinutes`, which the core refuses for good; answers the refused part's remove button.
+   */
+  async function continueWithRefusedPart(refusedMinutes: number, uploadedMinutes = 60) {
+    installBrowser();
+    grantMicrophone();
+    FakeUpload.refuseNamed = /-seg01-/;
+    await device.db.putPart(keptPart(0, { durationMs: uploadedMinutes * 60_000 }));
+    await device.db.putPart(keptPart(1, { durationMs: refusedMinutes * 60_000 }));
+    const { dialog } = await openDialog(audioContract());
+    fireEvent.click(
+      await within(dialog).findByRole("button", { name: messages.flow_transcript_resume_continue })
+    );
+    await waitFor(() => expect(FakeUpload.sent).toHaveLength(1));
+    const remove = await within(dialog).findByRole("button", {
+      name: /^Ta bort Inspelning, del 2/
+    });
+    return { dialog, remove };
+  }
+
+  it("counts a part the core refused for good in the recording's length", async () => {
+    // Two hours less a minute's room and the handovers: an hour and 59 minutes fill it.
+    const { dialog } = await continueWithRefusedPart(59);
+    fireEvent.click(button(dialog, messages.flow_transcript_rec_continue));
+    expect(
+      await within(dialog).findByText(
+        new RegExp(`^${messages.flow_transcript_rec_ended_length.replace(/\./g, "\\.")}`),
+        {},
+        { timeout: 2_000 }
+      )
+    ).toBeTruthy();
+    // A manual start is not held back: the part it began, under a second, is handed over.
+    expect(await within(dialog).findByText(/^Inspelning, del 3 \(00:0[01]\)/)).toBeTruthy();
+  });
+
+  it("gives the time back once the refused part is taken off the form", async () => {
+    const { dialog, remove } = await continueWithRefusedPart(59);
+    fireEvent.click(remove);
+    // Two hours less a minute's room, a handover and the hour uploaded.
+    expect(await within(dialog).findByText(/Du kan spela in 58 min till\./)).toBeTruthy();
+    fireEvent.click(button(dialog, messages.flow_transcript_rec_continue));
+    await within(dialog).findByRole("button", { name: messages.flow_transcript_rec_stop });
+    // Past the recorder's first check of the time left: still recording.
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    expect(button(dialog, messages.flow_transcript_rec_stop)).toBeTruthy();
+    expect(within(dialog).queryByText(messages.flow_transcript_rec_ended_title)).toBeNull();
+  });
+
+  it("says the time left as the recorder counts it, a refused part included", async () => {
+    const { dialog } = await continueWithRefusedPart(30);
+    // Two hours less a minute's room, two handovers, the hour uploaded and the refused half hour.
+    expect(await within(dialog).findByText(/Du kan spela in 28 min till\./)).toBeTruthy();
   });
 
   it("records more after continuing a kept recording whose parts have not uploaded yet", async () => {
