@@ -2,7 +2,7 @@ import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
 import { FileInput } from "@astryxdesign/core/FileInput";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { ProgressBar } from "@astryxdesign/core/ProgressBar";
-import { useMediaQuery } from "@astryxdesign/core/hooks";
+import { useAnnounce, useMediaQuery } from "@astryxdesign/core/hooks";
 import { CircleAlert, CircleCheck, Download, RotateCw, X } from "lucide-react";
 import { Fragment, useState } from "react";
 import { useLocale, useTranslations } from "use-intl";
@@ -12,7 +12,7 @@ import { formatBytes } from "@/lib/format";
 import { useFocusRescue } from "@/lib/focus-rescue";
 import { HANDHELD_QUERY } from "@/lib/hooks/use-media-match";
 import { UploadRetryHint } from "./recording/upload-retry-hint";
-import { stays, type InputProblem, type UploadEntry } from "./run-contract";
+import { stays, type InputProblem, type RecordingPartInfo, type UploadEntry } from "./run-contract";
 import { inputLimitsText } from "./run-format";
 import type { RuntimeInput } from "./runs-api";
 
@@ -76,12 +76,15 @@ async function downloadUploaded(
 
 function UploadRow({
   entry,
+  saveProblem,
   onRemove,
   onRetry,
   onSave,
   onDownload
 }: {
   entry: UploadEntry;
+  /** Why the last "Spara som fil" saved nothing. */
+  saveProblem: string | null;
   onRemove: () => void;
   onRetry: (() => void) | null;
   onSave: (() => void) | null;
@@ -124,6 +127,7 @@ function UploadRow({
             <UploadRetryHint nextRetryAt={entry.nextRetryAt} />
           </span>
         ) : null}
+        {saveProblem ? <span className="text-ax-error text-xs">{saveProblem}</span> : null}
       </span>
       {onRetry ? (
         <IconButton
@@ -183,6 +187,7 @@ export function RunFileInput({
   onRemove,
   onRetry,
   fileOf,
+  readKept,
   singleRecording,
   recorder
 }: {
@@ -196,12 +201,15 @@ export function RunFileInput({
   onRetry?: (key: string) => void;
   /** The file the form keeps for an entry, which the person may save. */
   fileOf?: (key: string) => File | null;
+  /** A recorded part read from the device, once the form let go of its own copy; null when gone. */
+  readKept?: (part: RecordingPartInfo) => Promise<File | null>;
   singleRecording: { offered: boolean; value: boolean; onChange: (value: boolean) => void };
   /** Records the step's audio instead of picking files. */
   recorder?: React.ReactNode;
 }) {
   const t = useTranslations();
   const locale = useLocale();
+  const announce = useAnnounce();
   const coarse = useMediaQuery("(pointer: coarse)");
   // A phone held in a hand: the microphone is the way in a phone has and a desktop lacks, so
   // recording comes first, and a picked file is a field, not a drop zone with nothing to drop.
@@ -214,6 +222,28 @@ export function RunFileInput({
   // name) says more than the form's earlier one, which would otherwise cover it.
   const [pickRejected, setPickRejected] = useState(false);
   const counted = entries.filter(stays).length;
+  // Rows whose "Spara som fil" found no copy, by key.
+  const [unsaved, setUnsaved] = useState<ReadonlySet<string>>(new Set());
+
+  /**
+   * Saves a recorded part: the form's own copy, at once; once the form let go of it (it is
+   * uploaded and on the device), the device's. Without either, the row says why, and the part
+   * still goes with the run.
+   */
+  async function saveRecorded(entry: UploadEntry) {
+    const own = fileOf?.(entry.key);
+    if (own) return saveFile(own);
+    const kept =
+      entry.recording && readKept ? await readKept(entry.recording).catch(() => null) : null;
+    setUnsaved((current) => {
+      const next = new Set(current);
+      if (kept) next.delete(entry.key);
+      else next.add(entry.key);
+      return next;
+    });
+    if (kept) saveFile(kept);
+    else announce(t("flow_transcript_upload_save_unavailable"));
+  }
   // A removed row takes its button with it: focus goes back to the field, not to the page.
   const rescue = useFocusRescue();
   const fieldControl = () =>
@@ -275,6 +305,9 @@ export function RunFileInput({
             <UploadRow
               key={entry.key}
               entry={entry}
+              saveProblem={
+                unsaved.has(entry.key) ? t("flow_transcript_upload_save_unavailable") : null
+              }
               onRemove={() => {
                 rescue(fieldControl);
                 onRemove(entry.key);
@@ -284,16 +317,9 @@ export function RunFileInput({
                   ? () => onRetry(entry.key)
                   : null
               }
-              onSave={
-                entry.recording && fileOf
-                  ? () => {
-                      const file = fileOf(entry.key);
-                      if (file) saveFile(file);
-                    }
-                  : null
-              }
+              onSave={entry.recording && fileOf ? () => void saveRecorded(entry) : null}
               onDownload={
-                // A recorded part is saved from the form's own copy (onSave).
+                // A recorded part is saved from the form's or the device's copy (onSave).
                 entry.state === "done" && entry.fileId && !entry.recording
                   ? () => void downloadUploaded(entry.fileId as string, entry.name, t)
                   : null

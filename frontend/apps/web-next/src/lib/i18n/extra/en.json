@@ -3554,6 +3554,7 @@
   "flow_transcript_discard_partly": "The recording was removed from the form but could not be removed from this browser. It may be offered again the next time you open the flow, and you can discard it then.",
   "flow_transcript_upload_retry_at": "Trying again at {time}, or as soon as the connection is back.",
   "flow_transcript_upload_retry_exhausted": "No more timed attempts. Choose Try again or save the part as a file. After a network outage, the part is sent again when the connection is back.",
+  "flow_transcript_upload_save_unavailable": "The part cannot be saved as a file, because its copy on this device could not be read. It is uploaded and goes with the run.",
   "flow_transcript_speaker_menu": "{name}, change the speaker of {context}",
   "flow_transcript_speaker_menu_line": "the line at {time}",
   "flow_transcript_speaker_menu_part": "part {part} of the line at {time}",

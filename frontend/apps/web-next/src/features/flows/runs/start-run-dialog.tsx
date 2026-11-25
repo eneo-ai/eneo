@@ -9,7 +9,16 @@ import { TextArea } from "@astryxdesign/core/TextArea";
 import { useAnnounce, useMediaQuery } from "@astryxdesign/core/hooks";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
-import { Fragment, useId, useImperativeHandle, useRef, useState, type Ref } from "react";
+import {
+  Fragment,
+  useEffect,
+  useId,
+  useImperativeHandle,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type Ref
+} from "react";
 import { flushSync } from "react-dom";
 import { useAppContext } from "@/components/providers/app-context";
 import { blockingError, ListError, RefreshError } from "@/components/composites/query-state";
@@ -19,7 +28,7 @@ import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { formFieldsOf, restrictedBeforeApproval } from "../flow-form-fields";
 import type { FlowPublic } from "../flows-api";
-import { RecordingKeeper } from "./recording/recording-keeper";
+import { RecordingKeeper, storedPartFile } from "./recording/recording-keeper";
 import { RunRecorder, type RecorderHandle } from "./recording/run-recorder";
 import {
   blockingTemplates,
@@ -37,7 +46,8 @@ import {
   speakersBlockRun,
   takesFreeText,
   type FieldValue,
-  type FormValues
+  type FormValues,
+  type RecordingPartInfo
 } from "./run-contract";
 import {
   inputAnchorId,
@@ -190,7 +200,7 @@ function StartRunForm({
   const queryClient = useQueryClient();
   const summaryRef = useRef<HTMLDivElement>(null);
   const lastRequest = useRef<{ body: string; key: string } | null>(null);
-  const { uploads, add, remove, retry, fileOf, claim } = useRuntimeUploads(
+  const { uploads, add, remove, retry, fileOf, release, claim } = useRuntimeUploads(
     flow.id,
     contract.runtime_upload_policy
   );
@@ -204,6 +214,27 @@ function StartRunForm({
   // Only the signed-in person's recordings are kept and offered: others may use this browser.
   const { user } = useAppContext();
   const [keeper] = useState(() => new RecordingKeeper(flow.id, user.id));
+
+  // A recorded part the device keeps needs no copy in this tab once it is uploaded (`release`
+  // waits for that): "Spara som fil" reads it from the device. One only this tab holds stays.
+  useSyncExternalStore(keeper.subscribe, keeper.getVersion, keeper.getVersion);
+  useEffect(() => {
+    for (const [stepId, entries] of Object.entries(uploads)) {
+      for (const { key, recording } of entries) {
+        if (!recording) continue;
+        if (keeper.keeping(stepId, recording.sessionId, recording.index) === "device") {
+          release(stepId, key);
+        }
+      }
+    }
+  });
+
+  /** A recorded part as the device keeps it, for "Spara som fil"; null when it is not there. */
+  async function readKept(stepId: string, part: RecordingPartInfo): Promise<File | null> {
+    const parts = await keeper.readSession(stepId, part.sessionId);
+    const kept = parts.find((candidate) => candidate.index === part.index);
+    return kept ? storedPartFile(kept) : null;
+  }
 
   function recorderRef(stepId: string) {
     return (handle: RecorderHandle | null) => {
@@ -497,6 +528,7 @@ function StartRunForm({
             retry(input.step_id, key);
           }}
           fileOf={fileOf}
+          readKept={(part) => readKept(input.step_id, part)}
           recorder={
             input.input_format === "audio" ? (
               <RunRecorder

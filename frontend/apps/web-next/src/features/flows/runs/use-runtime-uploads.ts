@@ -282,8 +282,8 @@ export function useRuntimeUploads(flowId: string, policy: UploadPolicy | undefin
           nextRetryAt: undefined
         })
       ) {
-        // Stored: nothing will send it again. A recording's part stays, so it
-        // can still be saved as a file: it exists nowhere else on the device.
+        // Stored: nothing will send it again. A recording's part stays, so it can still be
+        // saved as a file, until the form knows the device keeps it too (`release`).
         if (!entry.recording) files.current.delete(entry.key);
         announce(t("flow_runs_upload_finished", { name: entry.name }));
       } else {
@@ -425,9 +425,21 @@ export function useRuntimeUploads(flowId: string, policy: UploadPolicy | undefin
     latestSend.current = send;
   });
 
-  /** The file behind an entry, while the form keeps it (a recording's part, a failed upload). */
+  /**
+   * The file behind an entry, while the form keeps it (a recording's part until `release`, a
+   * failed upload).
+   */
   function fileOf(key: string): File | null {
     return files.current.get(key)?.file ?? null;
+  }
+
+  /**
+   * Lets go of the form's copy of a stored file the caller keeps elsewhere (a recorded part
+   * on the device). Only once its upload is done: until then it is the copy that is sent.
+   */
+  function release(stepId: string, key: string) {
+    const entry = current.current[stepId]?.find((candidate) => candidate.key === key);
+    if (entry?.state === "done") files.current.delete(key);
   }
 
   // Back online: a recording's parts waiting for their next attempt go now, and so do those whose
@@ -443,5 +455,5 @@ export function useRuntimeUploads(flowId: string, policy: UploadPolicy | undefin
     claimed.current = true;
   }
 
-  return { uploads, add, remove, retry, fileOf, claim };
+  return { uploads, add, remove, retry, fileOf, release, claim };
 }
