@@ -39,7 +39,7 @@ from eneo.audit.domain.removable_names import (
     CONVERSATION_TARGET_NAME,
     FILE_TARGET_NAME,
 )
-from eneo.authentication.auth_models import is_service_api_key
+from eneo.authentication.auth_models import is_service_api_key, is_space_actor
 
 
 def _target_name(target: Any) -> str | None:
@@ -70,8 +70,17 @@ def _actor_snapshot(actor: Any) -> dict[str, Any]:
     For service-key actors we emit a service-shaped block keyed by the
     actual API key id and name, with no email field.
 
+    A space running its own scheduled work is neither: the block names the
+    space, since no person and no key is behind it.
+
     For real users we keep the existing shape (id, name, email).
     """
+    if is_space_actor(actor):
+        return {
+            "type": "space",
+            "id": str(actor.acting_space_id),
+            "name": actor.active_api_key.name,
+        }
     if is_service_api_key(actor):
         key = actor.active_api_key
         return {

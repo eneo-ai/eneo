@@ -1287,7 +1287,7 @@ class UserService:
             ownership=ApiKeyOwnership.SERVICE,
             key_prefix="space",
             key_suffix="space",
-            name=f"Space {name}",
+            name=name,
             key_type=ApiKeyType.SK,
             permission=ApiKeyPermission.ADMIN,
             scope_type=ApiKeyScopeType.SPACE,

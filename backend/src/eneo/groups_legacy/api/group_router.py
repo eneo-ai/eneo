@@ -8,7 +8,10 @@ from eneo.ai_models.embedding_models.datastore.datastore_models import (
     SemanticSearchRequest,
     SemanticSearchResponse,
 )
-from eneo.authentication.auth_dependencies import get_scope_filter
+from eneo.authentication.auth_dependencies import (
+    get_scope_filter,
+    require_user_for_creation,
+)
 from eneo.authentication.endpoint_access import (
     Authentication,
     Authorization,
@@ -110,6 +113,8 @@ async def get_group_by_id(
 async def create_group(
     group: CreateGroupRequest,
     container: Annotated[Container, Depends(get_container(with_user=True))],
+    # A collection made here is in no space, and a service key acts in spaces.
+    _user_for_creation: None = Depends(require_user_for_creation),
 ):
     """
     Valid values for `embedding_model` are the provided by `GET /api/v1/settings/models/`.

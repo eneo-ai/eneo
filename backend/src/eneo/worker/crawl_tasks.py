@@ -700,6 +700,15 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
                 if website_row is None:
                     raise Exception(f"Website {params.website_id} not found")
+                # A space runs its own websites only, whatever the job names.
+                if (
+                    params.acting_space_id is not None
+                    and website_row.space_id != params.acting_space_id
+                ):
+                    raise Exception(
+                        f"Website {params.website_id} is not in the space "
+                        "this crawl runs as"
+                    )
 
                 website = website_row
 

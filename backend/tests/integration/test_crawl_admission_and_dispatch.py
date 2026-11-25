@@ -37,6 +37,7 @@ from eneo.database.tables.info_blobs_table import (
 )
 from eneo.database.tables.job_table import Jobs
 from eneo.database.tables.model_providers_table import ModelProviders
+from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.users_table import Users
 from eneo.database.tables.websites_table import CrawlAttempts, CrawlRunFailures
@@ -2711,6 +2712,108 @@ async def test_worker_audits_failure_as_the_initiating_user(
     assert audit_params["actor_id"] == str(admin_user.id)
     assert audit_params["outcome"] == Outcome.FAILURE.value
     assert audit_params["error_message"] == "The website blocked the crawler"
+
+
+async def test_a_scheduled_crawl_runs_as_its_space_after_its_creator_is_gone(
+    db_session,
+    admin_user,
+    monkeypatch,
+) -> None:
+    async with db_session() as session:
+        hub_id = await session.scalar(
+            sa.select(Spaces.id).where(
+                Spaces.tenant_id == admin_user.tenant_id,
+                Spaces.user_id.is_(None),
+                Spaces.tenant_space_id.is_(None),
+            )
+        )
+        if hub_id is None:
+            hub = Spaces(name="Organization", tenant_id=admin_user.tenant_id)
+            session.add(hub)
+            await session.flush()
+            hub_id = hub.id
+        space = Spaces(
+            name="Scheduled crawl",
+            tenant_id=admin_user.tenant_id,
+            tenant_space_id=hub_id,
+        )
+        session.add(space)
+        await session.flush()
+        website = await _persist_website(
+            session,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            label="Scheduled without creator",
+        )
+        # The person who added the website is gone; the schedule is the space's.
+        await session.execute(
+            sa.update(WebsitesTable)
+            .where(WebsitesTable.id == website.id)
+            .values(space_id=space.id, user_id=None)
+        )
+        scheduled_as = (
+            await Container(session=providers.Object(session))
+            .user_service()
+            .get_space_actor_user(space_id=space.id, tenant_id=admin_user.tenant_id)
+        )
+        assert scheduled_as is not None
+        run = await _admit(
+            session,
+            website=website,
+            user=scheduled_as,
+            origin=CrawlOrigin.SCHEDULED,
+        )
+        attempt = await session.scalar(
+            sa.select(CrawlAttempts).where(CrawlAttempts.crawl_run_id == run.id)
+        )
+        assert attempt is not None
+        task = CrawlTask.model_validate(attempt.dispatch_payload)
+        dispatch_id = attempt.dispatch_id
+        run_id = cast(UUID, run.id)
+        space_id = space.id
+
+    class CrawlEngine:
+        async def crawl(self, request: CrawlRequest) -> AsyncIterator[CrawlEvent]:
+            yield PageCrawled(
+                url=f"{request.url}/start",
+                title="Page",
+                content="Page content",
+                etag=None,
+                last_modified=None,
+            )
+
+    published_as: list[tuple[UUID | None, UUID | None]] = []
+
+    async def publish(*, page_buffer, ctx, **kwargs):
+        published_as.append((ctx.user_id, ctx.created_by_service_id))
+        urls = [page["url"] for page in page_buffer]
+        return len(urls), 0, urls, {}, 0
+
+    monkeypatch.setattr(
+        crawl_tasks_module, "persist_batch", AsyncMock(side_effect=publish)
+    )
+    enqueue_audit = AsyncMock()
+    monkeypatch.setattr(audit_service_module.job_manager, "enqueue", enqueue_audit)
+    container = Container(session=providers.Object(SessionProxy()))
+    container.crawler.override(providers.Object(CrawlEngine()))
+
+    result = await crawl_task(job_id=dispatch_id, params=task, container=container)
+
+    assert result["status"] == CrawlOutcome.SUCCEEDED.value
+    assert (task.user_id, task.service_principal_id) == (None, None)
+    assert task.acting_space_id == space_id
+    # What the space publishes has no creator: neither a person nor a service.
+    assert published_as == [(None, None)]
+    async with db_session() as session:
+        finished = await CrawlRunRepository(session).one(run_id)
+        assert finished.outcome == CrawlOutcome.SUCCEEDED
+        job = await session.get(Jobs, dispatch_id)
+        assert job is not None
+        assert (job.user_id, job.service_principal_id) == (None, None)
+        assert job.status == Status.COMPLETE.value
+    audit_params = enqueue_audit.await_args.args[2]
+    assert audit_params["actor_id"] is None
+    assert audit_params["actor_type"] == "system"
 
 
 async def test_dispatch_capacity_serves_another_tenant_before_one_tenant_backlog(

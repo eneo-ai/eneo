@@ -317,6 +317,12 @@ _CREATION_ENDPOINTS: list[tuple[str, str, dict | None]] = [
     ("POST", "/api/v1/services/", {"name": "x"}),
     # An icon records its uploader, which a service key does not have.
     ("POST", "/api/v1/icons/", None),
+    # A collection made through the legacy route is in no space.
+    (
+        "POST",
+        "/api/v1/groups/",
+        {"name": "x", "embedding_model": {"id": _STUB_ID}},
+    ),
     ("POST", "/api/v1/roles/", {"name": "x", "permissions": []}),
     ("POST", "/api/v1/mcp-servers/", {"name": "x", "url": "https://example.com"}),
     ("POST", "/api/v1/mcp-servers/bundled/compute/", {}),
@@ -472,6 +478,34 @@ async def test_service_key_creates_an_assistant_through_the_assistants_route(
     assert _made_by_a_service(
         await _creator(db_container, "assistants", created.json()["id"])
     )
+
+
+async def test_a_key_for_one_assistant_creates_no_assistant_beside_it(
+    client, admin_token, tenant_admin_service_secret, test_space_id
+):
+    created = await client.post(
+        f"/api/v1/spaces/{test_space_id}/applications/assistants/",
+        json={"name": "Invoice assistant"},
+        headers={"X-API-Key": tenant_admin_service_secret},
+    )
+    assert created.status_code in (200, 201), created.text
+    scoped = await _create_service_key(
+        client,
+        token=admin_token,
+        scope_type="assistant",
+        scope_id=created.json()["id"],
+        permission="write",
+        expires_at=(datetime.now(timezone.utc) + timedelta(days=7)).isoformat(),
+    )
+
+    beside = await client.post(
+        "/api/v1/assistants/",
+        json={"name": "Second assistant", "space_id": test_space_id},
+        headers={"X-API-Key": scoped["secret"]},
+    )
+
+    assert beside.status_code == 403, beside.text
+    assert beside.json()["code"] == "insufficient_scope"
 
 
 async def test_service_key_writes_the_prompt_of_an_assistant(
