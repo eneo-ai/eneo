@@ -593,22 +593,49 @@ export function RunRecorder({
   const [handled, setHandled] = useState<ReadonlySet<string>>(new Set());
   const [promptDismissed, setPromptDismissed] = useState(false);
   const [resumeBusy, setResumeBusy] = useState<"continue" | "discard" | null>(null);
-  const [resumeProblem, setResumeProblem] = useState<string | null>(null);
+  /** Why a kept recording was refused, by recording: said only where that recording is offered. */
+  const [resumeProblems, setResumeProblems] = useState<ReadonlyMap<string, string>>(new Map());
+  /** Refused recordings passed over with "Inte nu", in turn: each goes last. */
+  const [passed, setPassed] = useState<readonly string[]>([]);
   /** The continued recording whose part left unfinished could not be read in. */
   const [leftOut, setLeftOut] = useState<string | null>(null);
   const onForm = new Set(entries.flatMap((entry) => entry.recording?.sessionId ?? []));
-  const offered = (scan.data?.saved ?? []).find(
+  const offers = (scan.data?.saved ?? []).filter(
     (saved) => !onForm.has(saved.sessionId) && !handled.has(saved.sessionId)
   );
+  // Refused offers take turns, so the others can be reached and a refused one tried again.
+  const offered =
+    offers.find((saved) => !passed.includes(saved.sessionId)) ??
+    passed.flatMap((id) => offers.filter((saved) => saved.sessionId === id))[0];
+  const resumeProblem = offered ? (resumeProblems.get(offered.sessionId) ?? null) : null;
+
+  function setResumeProblem(saved: SavedRecording, problem: string | null) {
+    setResumeProblems((current) => {
+      const next = new Map(current);
+      if (problem === null) next.delete(saved.sessionId);
+      else next.set(saved.sessionId, problem);
+      return next;
+    });
+  }
 
   function settle(saved: SavedRecording) {
     setHandled((current) => new Set(current).add(saved.sessionId));
-    setResumeProblem(null);
+    setResumeProblem(saved, null);
+  }
+
+  /** "Inte nu": a refused offer goes last when there are others; otherwise the prompt goes. */
+  function passOver(saved: SavedRecording) {
+    if (resumeProblems.has(saved.sessionId) && offers.length > 1) {
+      setPassed((current) => [...current.filter((id) => id !== saved.sessionId), saved.sessionId]);
+      return;
+    }
+    setPromptDismissed(true);
+    setResumeProblem(saved, null);
   }
 
   async function continueSaved(saved: SavedRecording) {
     setResumeBusy("continue");
-    setResumeProblem(null);
+    setResumeProblem(saved, null);
     // The keeper takes the recording over only when no other tab holds it, and the step takes it.
     const outcome = await keeper.resume(stepId, saved.sessionId, snapshotOfContract());
     // A second press while the first goes on: the first answers.
@@ -620,7 +647,7 @@ export function RunRecorder({
       return;
     }
     if (outcome.kind === "refused") {
-      setResumeProblem(resumeRefusalText(outcome.refusal, t));
+      setResumeProblem(saved, resumeRefusalText(outcome.refusal, t));
       return;
     }
     setSession(saved.sessionId);
@@ -644,13 +671,13 @@ export function RunRecorder({
 
   async function discardSaved(saved: SavedRecording) {
     setResumeBusy("discard");
-    setResumeProblem(null);
+    setResumeProblem(saved, null);
     // Only the form that holds the recording discards it: not while another tab has it open.
     const outcome = await keeper.discard(stepId, saved.sessionId);
     setResumeBusy(null);
     if (outcome === "closed") return;
     if (outcome !== "discarded") {
-      setResumeProblem(discardRefusalText(outcome, t));
+      setResumeProblem(saved, discardRefusalText(outcome, t));
       return;
     }
     settle(saved);
@@ -882,10 +909,7 @@ export function RunRecorder({
             busy={resumeBusy}
             onContinue={() => void continueSaved(offered)}
             onDiscard={() => void discardSaved(offered)}
-            onDismiss={() => {
-              setPromptDismissed(true);
-              setResumeProblem(null);
-            }}
+            onDismiss={() => passOver(offered)}
           />
           {resumeProblem ? (
             <Banner

@@ -1494,6 +1494,45 @@ describe("Keeping a recording on the device", () => {
     expect(device.db.journals.size).toBe(1);
   });
 
+  it("keeps a refusal with its recording and lets refused offers take turns", async () => {
+    installBrowser();
+    grantMicrophone();
+    const other = "0a1b2c3d-0000-4000-8000-000000000002";
+    // The newest recording, offered first, has two parts; an older one has one.
+    await device.db.putPart(keptPart(0));
+    await device.db.putPart(keptPart(1));
+    await device.db.putPart(keptPart(0, { sessionId: other, capturedAt: keptAt(-5) }));
+    browserLocks.holdElsewhere(HOLD);
+    browserLocks.holdElsewhere(`eneo-flow-recording-holder:flow-1::step-1::${other}`);
+    const { dialog } = await openDialog(audioContract());
+    const refused = messages.flow_transcript_resume_open_elsewhere;
+
+    fireEvent.click(
+      await within(dialog).findByRole("button", { name: messages.flow_transcript_resume_continue })
+    );
+    expect(await within(dialog).findByText(refused)).toBeTruthy();
+    expect(within(dialog).getByText(/består av 2 delar/)).toBeTruthy();
+
+    // Not now: the next recording is offered, without the first one's refusal.
+    fireEvent.click(button(dialog, messages.flow_transcript_resume_not_now));
+    expect(await within(dialog).findByText(/består av en del/)).toBeTruthy();
+    expect(within(dialog).queryByText(refused)).toBeNull();
+    fireEvent.click(button(dialog, messages.flow_transcript_resume_continue));
+    expect(await within(dialog).findByText(refused)).toBeTruthy();
+
+    // Every offer refused: they take turns, each with its own refusal.
+    fireEvent.click(button(dialog, messages.flow_transcript_resume_not_now));
+    expect(await within(dialog).findByText(/består av 2 delar/)).toBeTruthy();
+    expect(within(dialog).getByText(refused)).toBeTruthy();
+
+    // A new recording can start meanwhile, and the refused one is tried again once the other
+    // tab let go.
+    await recordAndStop(dialog);
+    browserLocks.releaseElsewhere(HOLD);
+    fireEvent.click(button(dialog, messages.flow_transcript_resume_continue));
+    expect(await within(dialog).findByText("Inspelning, del 2 (00:30)")).toBeTruthy();
+  });
+
   it("takes nothing over when the form closes while Fortsätt waits, in the app's strict mode", async () => {
     installBrowser();
     await device.db.putPart(keptPart(0));
