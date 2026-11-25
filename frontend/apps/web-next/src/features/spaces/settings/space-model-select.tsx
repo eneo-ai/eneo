@@ -25,6 +25,7 @@ export type SelectableModel = {
   deprecation_date?: string | null;
   meets_security_classification?: boolean | null;
   org?: string | null;
+  provider_name?: string | null;
   provider_type?: string | null;
   vision?: boolean | null;
   reasoning?: boolean | null;
@@ -45,7 +46,13 @@ function label(model: SelectableModel): string {
   return model.nickname ?? model.name;
 }
 
+/**
+ * The provider's name as the administrator wrote it: two servers of the same
+ * type are two groups. Org first, as in the chat model picker, would merge them.
+ */
 function groupName(model: SelectableModel, fallback: string): string {
+  const name = model.provider_name?.trim();
+  if (name) return name;
   const raw = model.org || model.provider_type || fallback;
   return raw.charAt(0).toUpperCase() + raw.slice(1);
 }
@@ -153,7 +160,9 @@ export function SpaceModelSelect({
       ...group,
       visible: matchesSearch([group.name], search)
         ? group.models
-        : group.models.filter((model) => matchesSearch([label(model), model.provider_type], search))
+        : group.models.filter((model) =>
+            matchesSearch([label(model), model.org, model.provider_type], search)
+          )
     }))
     .filter((group) => group.visible.length > 0);
 

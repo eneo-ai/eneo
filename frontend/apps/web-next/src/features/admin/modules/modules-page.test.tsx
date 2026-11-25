@@ -127,6 +127,55 @@ it("shows each problem at its field on install, and moves focus to the first", a
   expect(api.PUT).not.toHaveBeenCalled();
 });
 
+it("shows the speech-to-text module's own values as examples, and where the key comes from", () => {
+  renderInApp(<ModulesPage title="Moduler" />);
+
+  const key = screen.getByLabelText("Modulnyckel") as HTMLInputElement;
+  expect(key.placeholder).toBe("speech-to-text");
+  expect(key.getAttribute("aria-describedby")).toContain("module-key-help");
+  expect(document.getElementById("module-key-help")?.textContent).toBe(
+    "Samma värde som MODULE_KEY i modulens inställningar, till exempel speech-to-text. Använd gemener, siffror och bindestreck. Nyckeln kan inte ändras efter installationen."
+  );
+  expect((screen.getByLabelText("Callback-URL:er") as HTMLTextAreaElement).placeholder).toBe(
+    "https://tal.example.se/api/auth/callback"
+  );
+  expect(document.getElementById("redirect-uris-help")?.textContent).toBe(
+    "Ange en exakt callback-URL per rad, oftast modulens adress följd av /api/auth/callback. Eneo skickar inloggningsbiljetter bara till dessa URL:er."
+  );
+});
+
+it("says why an installed module is incomplete, and nothing under a configured one", async () => {
+  const callback = ["https://tal.example.se/api/auth/callback"];
+  api.installations = [
+    { module_id: "m1", module_key: "utan-nyckel", configured: false, redirect_uris: callback },
+    {
+      module_id: "m2",
+      module_key: "utan-callback",
+      configured: false,
+      redirect_uris: [],
+      service_key_id: "k9"
+    },
+    { module_id: "m3", module_key: "utan-bada", configured: false, redirect_uris: [] },
+    // As the backend says: configured decides, not the fields read here.
+    { module_id: "m4", module_key: "klar", configured: true, redirect_uris: [] }
+  ];
+  const { container } = renderInApp(<ModulesPage title="Moduler" />);
+
+  const card = async (moduleKey: string) =>
+    (await screen.findByRole("heading", { name: moduleKey })).closest("li")!.textContent;
+  const noKey = "Ingen tjänstenyckel är vald.";
+  const noCallback = "Ingen callback-URL är angiven.";
+  const effect = "Användare kan inte logga in i modulen.";
+
+  expect(await card("utan-nyckel")).toContain(`Ofullständig${noKey} ${effect}`);
+  expect(await card("utan-callback")).toContain(`Ofullständig${noCallback} ${effect}`);
+  expect(await card("utan-bada")).toContain(`Ofullständig${noKey} ${noCallback} ${effect}`);
+  const done = await card("klar");
+  expect(done).toContain("Konfigurerad");
+  expect(done).not.toContain(effect);
+  await expectNoAxeViolations(container);
+});
+
 it("reports a failed read once, in the user's language, with a retry", async () => {
   api.GET.mockImplementationOnce(() =>
     Promise.resolve({
