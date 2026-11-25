@@ -200,17 +200,15 @@ describe("immutable document session", () => {
     fetcher.mockRejectedValueOnce(new TypeError("Offline"));
     await expect(owner.checkBrowserSession()).rejects.toThrow("Offline");
     expect(owner.getSessionSnapshot().status).toBe("bound");
-    await expect(owner.prepareBrowserRequest(new Request("https://eneo.test/api"))).rejects.toThrow(
-      "Offline"
-    );
     fetcher.mockResolvedValueOnce(refusal(undefined, 503));
     await expect(owner.checkBrowserSession()).rejects.toMatchObject({ status: 503 });
     expect(navigate).not.toHaveBeenCalled();
-    fetcher.mockResolvedValueOnce(probe());
-    await owner.checkBrowserSession();
+    // The next request checks again and goes once the server answers for this session.
+    fetcher.mockClear();
     await expect(
       owner.prepareBrowserRequest(new Request("https://eneo.test/api"))
     ).resolves.toBeInstanceOf(Request);
+    expect(fetcher).toHaveBeenCalledExactlyOnceWith("/api/v1/auth/session/", expect.anything());
   });
 
   it("gates work behind the one pending resume probe", async () => {
@@ -443,6 +441,124 @@ describe("refusal routing", () => {
   });
 });
 
+describe("checking again after a failed check", () => {
+  afterEach(() => vi.restoreAllMocks());
+  const failures = [
+    ["the connection was lost", () => Promise.reject(new TypeError("Offline"))],
+    ["the server answered 503", () => Promise.resolve(refusal(undefined, 503))]
+  ] as const;
+  /** A bound page whose last check failed with `answer`. */
+  async function failedCheck(answer: () => Promise<Response>): Promise<unknown> {
+    await bound();
+    fetcher.mockImplementationOnce(answer);
+    const failure = await owner.checkBrowserSession().catch((error: unknown) => error);
+    expect(owner.getSessionSnapshot()).toMatchObject({ status: "bound", checkError: failure });
+    fetcher.mockClear();
+    return failure;
+  }
+  const prepare = () => owner.prepareBrowserRequest(new Request("https://eneo.test/api"));
+
+  it.each(failures)(
+    "checks once again for requests prepared together after %s",
+    async (_, answer) => {
+      await failedCheck(answer);
+      const requests = await Promise.all([prepare(), prepare()]);
+      expect(requests.map((request) => request.headers.get(GENERATION))).toEqual([
+        "document-session",
+        "document-session"
+      ]);
+      expect(fetcher).toHaveBeenCalledExactlyOnceWith("/api/v1/auth/session/", expect.anything());
+      expect(owner.getSessionSnapshot()).toEqual({
+        status: "bound",
+        generation: "document-session"
+      });
+    }
+  );
+
+  it.each(failures)(
+    "refuses a request at once while the browser is offline after %s",
+    async (_, answer) => {
+      const failure = await failedCheck(answer);
+      vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+      await expect(prepare()).rejects.toBe(failure);
+      expect(fetcher).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([403, 429])(
+    "does not check again for a request after a %i refusal, but still does when the tab is shown",
+    async (status) => {
+      await bound();
+      fetcher.mockResolvedValueOnce(refusal(undefined, status));
+      const refused = await owner.checkBrowserSession().catch((error: unknown) => error);
+      expect(refused).toMatchObject({ status });
+      fetcher.mockClear();
+      await expect(prepare()).rejects.toBe(refused);
+      expect(fetcher).not.toHaveBeenCalled();
+      const stop = owner.listenForSessionResume();
+      try {
+        document.dispatchEvent(new Event("visibilitychange", { bubbles: true }));
+        expect(fetcher).toHaveBeenCalledTimes(1);
+        await owner.checkBrowserSession();
+        expect(fetcher).toHaveBeenCalledTimes(1);
+      } finally {
+        stop();
+      }
+    }
+  );
+
+  it("checks again once per request and refuses it with that check's failure", async () => {
+    await failedCheck(() => Promise.reject(new TypeError("Offline")));
+    const still = new TypeError("Still offline");
+    // Two answers only: a third check would get a success and fail the counts below.
+    fetcher.mockRejectedValueOnce(still).mockRejectedValueOnce(still);
+    await expect(prepare()).rejects.toBe(still);
+    await expect(prepare()).rejects.toBe(still);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(owner.getSessionSnapshot()).toMatchObject({ status: "bound", checkError: still });
+  });
+
+  it.each([
+    ["another person signed in", () => probe("another-account"), "/login"],
+    ["the server names the session superseded", () => refusal(9090), "/login"],
+    ["the session expired", () => refusal(9005), "/login?next=%2Fspaces%2Fx%3Fa%3D1"],
+    ["the account is inactive", () => refusal(9019, 403), "/deactivated"],
+    ["the organisation is deactivated", () => refusal(9025, 403), "/deactivated"]
+  ])("ends the page as any check does when, checked again, %s", async (_, answer, destination) => {
+    await failedCheck(() => Promise.reject(new TypeError("Offline")));
+    fetcher.mockResolvedValueOnce(answer());
+    await expect(prepare()).rejects.toThrow();
+    expect(navigate).toHaveBeenCalledExactlyOnceWith(destination, { replace: true });
+    expect(owner.getSessionSnapshot()).toMatchObject({ status: "stale", destination });
+  });
+
+  it("gives every request waiting on the new check the same refusal", async () => {
+    await failedCheck(() => Promise.resolve(refusal(undefined, 503)));
+    fetcher.mockResolvedValueOnce(refusal(9019, 403));
+    const [first, second] = await Promise.allSettled([prepare(), prepare()]);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(first).toMatchObject({ status: "rejected", reason: { status: 403, code: 9019 } });
+    expect((second as PromiseRejectedResult).reason).toBe((first as PromiseRejectedResult).reason);
+    expect(navigate).toHaveBeenCalledExactlyOnceWith("/deactivated", { replace: true });
+  });
+
+  it("lets a session that must change its password through, then the request's refusal sends it there", async () => {
+    await failedCheck(() => Promise.reject(new TypeError("Offline")));
+    // The server answers the session check before the password is changed.
+    const request = await prepare();
+    expect(request.headers.get(GENERATION)).toBe("document-session");
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    await expect(owner.handleRefusal(refusal(9070, 403), request.url)).rejects.toMatchObject({
+      status: 403,
+      code: 9070
+    });
+    expect(navigate).toHaveBeenCalledExactlyOnceWith(
+      "/password-change?next=%2Fspaces%2Fx%3Fa%3D1",
+      { replace: true }
+    );
+  });
+});
+
 describe("session expiry and renewal", () => {
   const EXPIRES_IN = "Eneo-Session-Expires-In";
   const LIFETIME = "Eneo-Session-Lifetime";
@@ -578,17 +694,49 @@ describe("session expiry and renewal", () => {
       .mockReturnValueOnce(new Promise<Response>((resolve) => (answer = resolve)));
 
     const checking = owner.checkBrowserSession();
+    // Already waiting for the check when the renewal takes over.
+    const held = owner.prepareBrowserRequest(new Request("https://eneo.test/api"));
     const renewal = owner.extendBrowserSession();
     finishCheck(probe());
     await checking;
     await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
     // The check that settled first must not release requests the renewal holds.
-    const held = owner.prepareBrowserRequest(new Request("https://eneo.test/api"));
     expect(await settled(held)).toBe(false);
     answer(renewed());
     await renewal;
     expect(await settled(held)).toBe(true);
   });
+
+  it(
+    "holds nothing once a check, a failed check or a renewal that took over has ended",
+    { timeout: 2000 },
+    async () => {
+      await bound();
+      // A new check asks the server only when nothing holds requests any more.
+      const released = async () => {
+        fetcher.mockClear();
+        await owner.checkBrowserSession();
+        expect(fetcher).toHaveBeenCalledTimes(1);
+      };
+      await owner.checkBrowserSession();
+      await released();
+      fetcher.mockRejectedValueOnce(new TypeError("Offline"));
+      await expect(owner.checkBrowserSession()).rejects.toThrow("Offline");
+      await released();
+      let finishCheck!: (response: Response) => void;
+      fetcher
+        .mockReturnValueOnce(new Promise<Response>((resolve) => (finishCheck = resolve)))
+        .mockResolvedValueOnce(renewed());
+      const checking = owner.checkBrowserSession();
+      const renewal = owner.extendBrowserSession();
+      finishCheck(probe());
+      await Promise.all([checking, renewal]);
+      await released();
+      expect(await settled(owner.prepareBrowserRequest(new Request("https://eneo.test/api")))).toBe(
+        true
+      );
+    }
+  );
 
   it("loses nothing when the renewal's answer is lost after the server changed the cookie", async () => {
     await bound();
@@ -636,6 +784,40 @@ describe("session expiry and renewal", () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(owner.getSessionSnapshot()).toEqual({ status: "bound", generation: "document-session" });
     expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("never applies a renewal whose answer is read after another sign-in ended the page", async () => {
+    await bound();
+    let reading!: () => void;
+    const started = new Promise<void>((resolve) => (reading = resolve));
+    let body!: ReadableStreamDefaultController<Uint8Array>;
+    const stream = new ReadableStream<Uint8Array>(
+      { start: (controller) => void (body = controller), pull: () => reading() },
+      { highWaterMark: 0 }
+    );
+    fetcher.mockResolvedValueOnce(
+      new Response(stream, {
+        headers: { "content-type": "application/json", [GENERATION]: "document-session" }
+      })
+    );
+
+    const renewal = owner.extendBrowserSession().catch((reason: unknown) => reason);
+    await started;
+    // Another request is refused: another person's sign-in now holds the cookie.
+    await expect(owner.handleRefusal(refusal(9090), "/api/v1/spaces/")).rejects.toMatchObject({
+      code: 9090
+    });
+    body.enqueue(
+      new TextEncoder().encode(
+        JSON.stringify({ generation: "document-session", expires_in: 86_400 })
+      )
+    );
+    body.close();
+
+    expect(await renewal).toMatchObject({ name: "EneoApiError", status: 401, code: 9090 });
+    expect(owner.getSessionSnapshot()).toEqual({ status: "stale", destination: "/login" });
+    expect(navigate).toHaveBeenCalledExactlyOnceWith("/login", { replace: true });
+    expect(FakeChannel.all.flatMap((channel) => channel.posted)).toEqual([]);
   });
 
   const sessionNow = (generation: string, seconds: string) =>
@@ -799,6 +981,93 @@ describe("session expiry and renewal", () => {
     }
   );
 
+  it("holds a request whose new check a renewal takes over until the renewal answers", async () => {
+    await bound();
+    fetcher.mockRejectedValueOnce(new TypeError("Offline"));
+    await expect(owner.checkBrowserSession()).rejects.toThrow("Offline");
+    fetcher.mockClear();
+    let finishCheck!: (response: Response) => void;
+    let answer!: (response: Response) => void;
+    fetcher
+      .mockReturnValueOnce(new Promise<Response>((resolve) => (finishCheck = resolve)))
+      .mockReturnValueOnce(new Promise<Response>((resolve) => (answer = resolve)));
+
+    const held = owner.prepareBrowserRequest(new Request("https://eneo.test/api"));
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    const renewal = owner.extendBrowserSession();
+    finishCheck(probe());
+    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+    expect(await settled(held)).toBe(false);
+    answer(renewed());
+    await renewal;
+    expect(await settled(held)).toBe(true);
+  });
+
+  it("refuses a request whose new check another tab's renewal ended unanswered", async () => {
+    await bound();
+    const stop = owner.listenForSessionResume();
+    fetcher.mockResolvedValueOnce(refusal(undefined, 503));
+    const failure = await owner.checkBrowserSession().catch((error: unknown) => error);
+    let finishCheck!: (response: Response) => void;
+    fetcher.mockReturnValueOnce(new Promise<Response>((resolve) => (finishCheck = resolve)));
+    const request = owner
+      .prepareBrowserRequest(new Request("https://eneo.test/api"))
+      .catch((error: unknown) => error);
+    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+    deliver({ generation: "document-session", expiresAt: Date.now() + 86_400_000 });
+    // The answer may be about the token the renewal replaced: it is not applied.
+    finishCheck(probe());
+    expect(await request).toBe(failure);
+    expect(owner.getSessionSnapshot()).toMatchObject({ status: "bound", checkError: failure });
+    expect(navigate).not.toHaveBeenCalled();
+    stop();
+  });
+
+  it.each([
+    ["succeeds", () => Promise.resolve(probe())],
+    ["fails", () => Promise.reject(new TypeError("Still offline"))]
+  ])(
+    "lets a request that joined a new check another tab's renewal ended go only when its own check %s",
+    async (outcome, answer) => {
+      await bound();
+      const stop = owner.listenForSessionResume();
+      fetcher.mockResolvedValueOnce(refusal(undefined, 503));
+      const failure = await owner.checkBrowserSession().catch((error: unknown) => error);
+      fetcher.mockClear();
+      let finishCheck!: (response: Response) => void;
+      fetcher
+        .mockReturnValueOnce(new Promise<Response>((resolve) => (finishCheck = resolve)))
+        .mockImplementationOnce(answer);
+      const prepare = () =>
+        owner
+          .prepareBrowserRequest(new Request("https://eneo.test/api"))
+          .catch((error: unknown) => error);
+      // The first starts the new check; the second joins it.
+      const starter = prepare();
+      const joiner = prepare();
+      await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+      deliver({ generation: "document-session", expiresAt: Date.now() + 86_400_000 });
+      expect(await settled(joiner)).toBe(false);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      // The answer may be about the token the renewal replaced: it is not applied.
+      finishCheck(probe());
+
+      expect(await starter).toBe(failure);
+      const joined = await joiner;
+      // The joiner made its own check; nothing goes without one that succeeded.
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      if (outcome === "succeeds") {
+        expect((joined as Request).headers.get(GENERATION)).toBe("document-session");
+        expect(owner.getSessionSnapshot()).not.toHaveProperty("checkError");
+      } else {
+        expect(joined).toMatchObject({ message: "Still offline" });
+        expect(owner.getSessionSnapshot()).toMatchObject({ checkError: joined });
+      }
+      expect(navigate).not.toHaveBeenCalled();
+      stop();
+    }
+  );
+
   it("does not renew again after waiting for another tab that already did", async () => {
     await bound();
     const stop = owner.listenForSessionResume();
@@ -819,5 +1088,269 @@ describe("session expiry and renewal", () => {
     expect(fetcher).not.toHaveBeenCalled();
     expect(owner.getSessionSnapshot()).toMatchObject({ generation: "document-session", expiresAt });
     stop();
+  });
+
+  describe("time limit", () => {
+    const LIMIT = 15_000;
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    });
+
+    /** A server that never answers: the request ends only when it is aborted. */
+    const silent = (_: unknown, init?: RequestInit) =>
+      new Promise<Response>((_, reject) => {
+        const signal = init!.signal!;
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    /** A refusal naming another person's session (9090) whose body never arrives whole. */
+    const cutOff = (lost?: Error) => (_: unknown, init?: RequestInit) => {
+      const signal = init!.signal!;
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('{"message":"Refused","eneo_error_code":90'));
+          if (lost) controller.error(lost);
+          else
+            signal.addEventListener("abort", () => controller.error(signal.reason), { once: true });
+        }
+      });
+      return Promise.resolve(
+        new Response(body, { status: 401, headers: { "content-type": "application/json" } })
+      );
+    };
+    /** An answer whose body stops after its headers until the request is aborted. */
+    const stalled = (status: number) => (_: unknown, init?: RequestInit) => {
+      const signal = init!.signal!;
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          signal.addEventListener("abort", () => controller.error(signal.reason), { once: true });
+        }
+      });
+      return Promise.resolve(
+        new Response(body, {
+          status,
+          headers: { "content-type": "application/json", [GENERATION]: "document-session" }
+        })
+      );
+    };
+    /** Whether a promise has settled, once pending callbacks have run. */
+    const done = async (promise: Promise<unknown>) => {
+      let settled = false;
+      void promise.then(
+        () => (settled = true),
+        () => (settled = true)
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      return settled;
+    };
+    const asks = [
+      ["check", () => owner.checkBrowserSession()],
+      ["renewal", () => owner.extendBrowserSession()]
+    ] as const;
+
+    it("gives up a check that has no answer at the limit and lets the next check start", async () => {
+      await bound();
+      fetcher.mockImplementationOnce(silent);
+      const checking = owner.checkBrowserSession();
+      await vi.advanceTimersByTimeAsync(LIMIT - 1);
+      expect(await done(checking)).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await done(checking)).toBe(true);
+      const error = await checking.catch((reason: unknown) => reason);
+      expect(error).toMatchObject({ name: "EneoApiError", status: 504 });
+      // Aborted, not raced: an answer that never came cannot arrive later.
+      expect(fetcher.mock.calls[0]![1]!.signal!.aborted).toBe(true);
+      expect(owner.getSessionSnapshot()).toEqual({
+        status: "bound",
+        generation: "document-session",
+        checkError: error
+      });
+      // Nothing holds requests any more: the next check asks the server again.
+      await owner.checkBrowserSession();
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      await expect(
+        owner.prepareBrowserRequest(new Request("https://eneo.test/api"))
+      ).resolves.toBeInstanceOf(Request);
+    });
+
+    it("checks again for the next request after a check ran out of time", async () => {
+      await bound();
+      fetcher.mockImplementationOnce(silent);
+      const checking = owner.checkBrowserSession().catch((reason: unknown) => reason);
+      await vi.advanceTimersByTimeAsync(LIMIT);
+      expect(await checking).toMatchObject({ name: "EneoApiError", status: 504 });
+      await expect(
+        owner.prepareBrowserRequest(new Request("https://eneo.test/api"))
+      ).resolves.toBeInstanceOf(Request);
+      expect(fetcher).toHaveBeenCalledTimes(2);
+    });
+
+    it("gives up a renewal that has no answer at the limit and keeps the session for a retry", async () => {
+      await bound();
+      fetcher.mockImplementationOnce(silent);
+      const renewal = owner.extendBrowserSession();
+      const held = owner
+        .prepareBrowserRequest(new Request("https://eneo.test/api", { method: "POST" }))
+        .catch((reason: unknown) => reason);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(LIMIT);
+      expect(await done(renewal)).toBe(true);
+      const error = await renewal.catch((reason: unknown) => reason);
+      // Never an AbortError: streams do not reconnect after one.
+      expect(error).toMatchObject({ name: "EneoApiError", status: 504 });
+      expect(await held).toBe(error);
+      expect(owner.getSessionSnapshot()).toEqual({
+        status: "bound",
+        generation: "document-session"
+      });
+      expect(FakeChannel.all.flatMap((channel) => channel.posted)).toEqual([]);
+      expect(navigate).not.toHaveBeenCalled();
+    });
+
+    it.each([200, 500])(
+      "gives up a %i renewal whose body stops after its headers, for it and the requests it holds",
+      async (status) => {
+        await bound();
+        fetcher.mockRejectedValueOnce(new TypeError("Offline"));
+        const failure = await owner.checkBrowserSession().catch((reason: unknown) => reason);
+        fetcher.mockImplementationOnce(stalled(status));
+        const renewal = owner.extendBrowserSession().catch((reason: unknown) => reason);
+        const held = owner
+          .prepareBrowserRequest(new Request("https://eneo.test/api", { method: "POST" }))
+          .catch((reason: unknown) => reason);
+        await vi.advanceTimersByTimeAsync(LIMIT - 1);
+        expect(await done(renewal)).toBe(false);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(await done(renewal)).toBe(true);
+        const error = await renewal;
+        expect(error).toMatchObject({ name: "EneoApiError", status: 504 });
+        expect(await held).toBe(error);
+        expect(fetcher).toHaveBeenCalledTimes(2);
+        // The renewal changed nothing: the earlier failure still stands.
+        expect(owner.getSessionSnapshot()).toEqual({
+          status: "bound",
+          generation: "document-session",
+          checkError: failure
+        });
+        expect(FakeChannel.all.flatMap((channel) => channel.posted)).toEqual([]);
+        expect(navigate).not.toHaveBeenCalled();
+      }
+    );
+
+    it("never applies a renewal whose answer is read after the limit", async () => {
+      await bound();
+      // This body goes on after the abort, as a late answer would.
+      let body!: ReadableStreamDefaultController<Uint8Array>;
+      fetcher.mockResolvedValueOnce(
+        new Response(
+          new ReadableStream<Uint8Array>({ start: (controller) => void (body = controller) }),
+          { headers: { "content-type": "application/json", [GENERATION]: "document-session" } }
+        )
+      );
+      const renewal = owner.extendBrowserSession().catch((reason: unknown) => reason);
+      await vi.advanceTimersByTimeAsync(LIMIT);
+      body.enqueue(
+        new TextEncoder().encode(
+          JSON.stringify({ generation: "document-session", expires_in: 86_400 })
+        )
+      );
+      body.close();
+      expect(await done(renewal)).toBe(true);
+      expect(await renewal).toMatchObject({ name: "EneoApiError", status: 504 });
+      expect(owner.getSessionSnapshot()).toEqual({
+        status: "bound",
+        generation: "document-session"
+      });
+      expect(FakeChannel.all.flatMap((channel) => channel.posted)).toEqual([]);
+    });
+
+    it.each(asks)(
+      "still ends the page on a whole %s refusal for another sign-in read after the limit",
+      async (_, ask) => {
+        await bound();
+        // The refusal arrived whole; only reading its body ends after the limit.
+        let body!: ReadableStreamDefaultController<Uint8Array>;
+        fetcher.mockResolvedValueOnce(
+          new Response(
+            new ReadableStream<Uint8Array>({ start: (controller) => void (body = controller) }),
+            { status: 401, headers: { "content-type": "application/json" } }
+          )
+        );
+        const asking = ask().catch((reason: unknown) => reason);
+        await vi.advanceTimersByTimeAsync(LIMIT);
+        expect(await done(asking)).toBe(false);
+        expect(fetcher.mock.calls[0]![1]!.signal!.aborted).toBe(true);
+        expect(navigate).not.toHaveBeenCalled();
+        body.enqueue(
+          new TextEncoder().encode(JSON.stringify({ message: "Refused", eneo_error_code: 9090 }))
+        );
+        body.close();
+        expect(await done(asking)).toBe(true);
+        const error = await asking;
+        expect(error).toMatchObject({ name: "EneoApiError", status: 401, code: 9090 });
+        expect(navigate).toHaveBeenCalledExactlyOnceWith("/login", { replace: true });
+        expect(owner.getSessionSnapshot()).toEqual({ status: "stale", destination: "/login" });
+      }
+    );
+
+    it("aborts a running check when the page ends, and not as a time-out", async () => {
+      await bound();
+      fetcher.mockImplementationOnce(silent);
+      const checking = owner.checkBrowserSession().catch((reason: unknown) => reason);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      await expect(owner.handleRefusal(refusal(9090), "/api/v1/spaces/")).rejects.toMatchObject({
+        code: 9090
+      });
+      expect(await done(checking)).toBe(true);
+      expect(fetcher.mock.calls[0]![1]!.signal!.aborted).toBe(true);
+      const error = await checking;
+      expect(error).toMatchObject({ name: "AbortError" });
+      expect(error).not.toMatchObject({ status: 504 });
+      expect(owner.getSessionSnapshot()).toEqual({ status: "stale", destination: "/login" });
+    });
+
+    it.each(asks)("never takes a %s refusal the limit cut off for an expiry", async (_, ask) => {
+      await bound();
+      fetcher.mockImplementationOnce(cutOff());
+      const asking = ask();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(LIMIT);
+      expect(await done(asking)).toBe(true);
+      await expect(asking).rejects.toMatchObject({ name: "EneoApiError", status: 504 });
+      expect(navigate).not.toHaveBeenCalled();
+      expect(owner.getSessionSnapshot()).toMatchObject({
+        status: "bound",
+        generation: "document-session"
+      });
+      expect(FakeChannel.all.flatMap((channel) => channel.posted)).toEqual([]);
+    });
+
+    it.each(asks)(
+      "never takes a %s refusal a lost connection cut off for an expiry",
+      async (_, ask) => {
+        await bound();
+        fetcher.mockImplementationOnce(cutOff(new TypeError("network error")));
+        await expect(ask()).rejects.toThrow("network error");
+        expect(navigate).not.toHaveBeenCalled();
+        expect(owner.getSessionSnapshot()).toMatchObject({
+          status: "bound",
+          generation: "document-session"
+        });
+      }
+    );
+
+    it.each([
+      ...asks.map(([kind, ask]) => [kind, ask, ""] as const),
+      ...asks.map(([kind, ask]) => [kind, ask, "<html>"] as const)
+    ])("still takes a %s refusal whose whole body is %j for an expiry", async (_, ask, body) => {
+      await bound();
+      fetcher.mockResolvedValueOnce(new Response(body, { status: 401 }));
+      await expect(ask()).rejects.toMatchObject({ status: 401 });
+      expect(navigate).toHaveBeenCalledExactlyOnceWith("/login?next=%2Fspaces%2Fx%3Fa%3D1", {
+        replace: true
+      });
+    });
   });
 });
