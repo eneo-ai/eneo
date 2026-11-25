@@ -168,9 +168,12 @@ async function refusalOf(response: Response): Promise<EneoApiError> {
 
 /**
  * Sends a session check or renewal under the time limit, until its body is
- * read. At the limit the request is aborted, never raced, so a late answer
- * cannot apply; it fails as a 504, which queries and streams retry (an
- * AbortError would stop a stream from reconnecting).
+ * read. At the limit the request is aborted, never raced. Nothing is granted
+ * after it: a check's 204 has no body to wait for, and a renewal checks the
+ * limit after its body. What fails then fails as a 504, which queries and
+ * streams retry (an AbortError would stop a stream from reconnecting). A
+ * refusal that arrived whole still applies when its body is read just after
+ * the limit: another sign-in ends the page at once, not as a time-out.
  */
 async function withinTimeLimit<T>(send: (signal: AbortSignal) => Promise<T>): Promise<T> {
   const deadline = new AbortController();
