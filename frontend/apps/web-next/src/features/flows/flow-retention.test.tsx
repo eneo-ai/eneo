@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { Button } from "@astryxdesign/core/Button";
 import { useQuery } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -7,10 +8,17 @@ import { EneoApiError } from "@/lib/api/errors";
 import type { Permission } from "@/lib/auth/permissions";
 import messages from "@/lib/i18n/messages/sv.json";
 import { expectNoAxeViolations } from "@/test/axe";
-import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
+import {
+  flushAnnouncements,
+  recordAnnouncements,
+  renderInApp,
+  testAppContext,
+  testQueryClient
+} from "@/test/render";
+import { setViewport } from "@/test/setup-dom";
 import { makeFlow, makeStep } from "./flow-fixtures";
 import { FlowSettings, SettingsSummary } from "./flow-settings";
-import { flowKeys, flowQueryOptions } from "./flows-api";
+import { flowKeys, flowQueryOptions, type FlowPublic } from "./flows-api";
 
 const backend = vi.hoisted(() => ({ GET: vi.fn(), PUT: vi.fn() }));
 const toastError = vi.hoisted(() => vi.fn());
@@ -68,6 +76,17 @@ const capText = "Ytan tillåter högst 7 dagar.";
 /** The cap's status text, not the live region that speaks it on its own timer. */
 const capStatus = () => screen.queryByText(capText, { ignore: "[aria-live], [aria-live] *" });
 
+const FIELD = "Flödets gallringstid";
+const SAVE = "Spara";
+const SAVE_AND_REMOVE = "Spara och ta bort";
+/** The warning's title, which names a date that changes by the day. */
+const WARNING_TITLE = /^Körningar avslutade omkring den .+ eller tidigare kan tas bort$/;
+const warningShown = () =>
+  screen.queryByText(WARNING_TITLE, { ignore: "[aria-live], [aria-live] *" }) !== null;
+const PERSONAL =
+  "Körningar i en personlig yta tas inte bort automatiskt. Flödets gallringstid används bara när en administratör rensar körningar för hand.";
+const SPACE_HREF = "/spaces/space-1/settings?section=security#security";
+
 /** A GET that answers only when released, as a slow read in flight. */
 function heldRead() {
   let release: (value: unknown) => void = () => {};
@@ -118,17 +137,18 @@ function likeTheServer(times: SavedTimes) {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   backend.GET.mockReset();
   backend.PUT.mockReset();
   toastError.mockReset();
 });
 
-function renderSettings(permissions: Permission[], setsSpaceRetention = true) {
+function renderSettings(permissions: Permission[], mayChangeRetention = true) {
   return renderInApp(
     <FlowSettings
       flow={makeFlow({ run_history_retention: configured })}
       canEdit
-      setsSpaceRetention={setsSpaceRetention}
+      mayChangeRetention={mayChangeRetention}
       transcription={resources}
       onSave={vi.fn()}
     />,
@@ -143,7 +163,7 @@ function CachedFlowSettings() {
     <FlowSettings
       flow={flow}
       canEdit
-      setsSpaceRetention
+      mayChangeRetention
       transcription={resources}
       onSave={vi.fn()}
     />
@@ -151,78 +171,310 @@ function CachedFlowSettings() {
 }
 
 /**
- * Presses Save as a person does, the button taking focus first. A shorter time is
- * sent on the press after its warning ("Spara ändå"), so the second press follows when
- * it shows.
+ * Presses the dialog's save button as a person does, the button taking focus first. It
+ * says "Spara och ta bort" while a shorter time's warning shows, and one press saves.
  */
 function pressSave() {
-  const button = screen.getByRole("button", { name: "Spara inställningar" });
+  const button = screen.getByRole("button", {
+    name: new RegExp(`^(${SAVE}|${SAVE_AND_REMOVE})$`)
+  });
   button.focus();
   fireEvent.click(button);
-  // The status text, not the live region that speaks it on its own timer.
-  if (screen.queryByText(/Välj Spara ändå/, { ignore: "[aria-live], [aria-live] *" })) {
-    button.focus();
-    fireEvent.click(button);
-  }
+}
+
+/**
+ * Enter in the field, as a keyboard or a phone's Go key sends it, `repeat` while the key is
+ * held. The dialog decides every Enter itself: the browser's own submit is always prevented.
+ */
+function pressEnter(field: HTMLElement, repeat = false) {
+  expect(fireEvent.keyDown(field, { key: "Enter", code: "Enter", repeat })).toBe(false);
+}
+
+/** The unit the number's box draws after itself (CSS content), empty when it draws none. */
+const drawnUnit = (field: HTMLElement) =>
+  (field.closest("[style*='12rem']") as HTMLElement).style.getPropertyValue("--unit");
+
+/** A press on the button as a pointer makes it, down, up and the click. */
+function press(button: HTMLElement) {
+  fireEvent.pointerDown(button);
+  fireEvent.pointerUp(button);
+  fireEvent.click(button);
 }
 
 async function openDialog() {
   renderSettings(["retention_manage"]);
   fireEvent.click(screen.getByRole("button", { name: "Ändra gallring" }));
-  return screen.findByRole("spinbutton", { name: /Egen tid för det här flödet/ });
+  return (await screen.findByRole("textbox", { name: FIELD })) as HTMLInputElement;
 }
 
-describe("flow retention", () => {
-  it("says what applies, and where it comes from, to anyone reading the flow", () => {
-    renderInApp(
-      <SettingsSummary
-        flow={makeFlow({ run_history_retention: configured })}
-        transcription={resources}
-      />
+type Retention = FlowPublic["run_history_retention"];
+/** The run history retention the server resolves for a space time and a flow time. */
+function retentionOf(space: number | null, flow: number | null): Retention {
+  return effectiveOf(
+    flow === null ? null : { days: flow },
+    space === null ? null : { days: space }
+  ) as Retention;
+}
+
+/** The section on its own, as the flow's page shows it to someone reading. */
+function renderSection(
+  retention: Retention,
+  {
+    personalSpace = false,
+    action,
+    spaceHref
+  }: { personalSpace?: boolean; action?: React.ReactNode; spaceHref?: string } = {}
+) {
+  renderInApp(
+    <SettingsSummary
+      flow={makeFlow({ run_history_retention: retention })}
+      transcription={resources}
+      personalSpace={personalSpace}
+      retentionAction={action}
+      spaceRetentionHref={spaceHref}
+    />
+  );
+  return screen.getByRole("region", { name: "Gallring" });
+}
+
+/** What a row of the section says, by its label. */
+function rowValue(section: HTMLElement, label: string) {
+  return within(section).queryByText(label, { selector: "dt" })?.nextElementSibling?.textContent;
+}
+
+const changeButton = <Button label="Ändra gallring" size="sm" />;
+
+describe("the retention section", () => {
+  it("says nothing is removed while the space has no retention time, why, and where it is set", async () => {
+    const section = renderSection(retentionOf(null, null), {
+      action: changeButton,
+      spaceHref: SPACE_HREF
+    });
+    expect(within(section).getByRole("heading", { level: 3, name: "Gallring" })).toBeTruthy();
+    expect(within(section).getByText("Inga körningar tas bort automatiskt.")).toBeTruthy();
+    // The icon tells the modes apart by its shape, not its colour.
+    expect(section.querySelector("svg.lucide-ban[aria-hidden='true']")).toBeTruthy();
+    expect(section.querySelector("svg.lucide-clock")).toBeNull();
+    expect(within(section).getByText(messages.flows_retention_applies_none)).toBeTruthy();
+    // On a line of its own, as the space's row has no link.
+    const link = within(section).getByRole("link", {
+      name: "Sätt gallringstid i ytans inställningar"
+    });
+    expect(link.getAttribute("href")).toBe(SPACE_HREF);
+    expect(link.closest("dd")).toBeNull();
+    expect(rowValue(section, "Flödets gallringstid")).toBe("Ingen");
+    expect(rowValue(section, "Ytans gallringstid")).toBe("Ingen");
+    expect(rowValue(section, "Gäller")).toBeUndefined();
+    expect(within(section).getByRole("button", { name: "Ändra gallring" })).toBeTruthy();
+    // The one who may change it is not told who does.
+    expect(within(section).queryByText(/Gallringen ändras av/)).toBeNull();
+    await expectNoAxeViolations(document.body);
+  });
+
+  it("says a flow time of its own waits for the space's", async () => {
+    const section = renderSection(retentionOf(null, 30), { spaceHref: SPACE_HREF });
+    expect(within(section).getByText("Inga körningar tas bort automatiskt.")).toBeTruthy();
+    expect(
+      within(section).getByText(
+        "Ytan har ingen gallringstid, så flödets gallringstid, 30 dagar, används bara när en administratör rensar körningar för hand. När ytan får en tid blir den taket, och avslutade körningar som startat medan ytan har en tid tas bort automatiskt när tiden har gått."
+      )
+    ).toBeTruthy();
+    expect(
+      within(section).getByRole("link", { name: "Sätt gallringstid i ytans inställningar" })
+    ).toBeTruthy();
+    expect(rowValue(section, "Flödets gallringstid")).toBe("30 dagar");
+    expect(rowValue(section, "Ytans gallringstid")).toBe("Ingen");
+    await expectNoAxeViolations(document.body);
+  });
+
+  it("says when runs that follow the space's time are removed, which ones, what goes and what stays", async () => {
+    const section = renderSection(retentionOf(90, null), {
+      action: changeButton,
+      spaceHref: SPACE_HREF
+    });
+    expect(
+      within(section).getByText(
+        "Körningar kan tas bort automatiskt 90 dagar efter att de avslutades."
+      )
+    ).toBeTruthy();
+    expect(section.querySelector("svg.lucide-clock[aria-hidden='true']")).toBeTruthy();
+    expect(section.querySelector("svg.lucide-ban")).toBeNull();
+    expect(rowValue(section, "Flödets gallringstid")).toBe("Ingen, följer ytans");
+    // The link stands after the space's value, in its row.
+    expect(rowValue(section, "Ytans gallringstid")).toBe(
+      "90 dagar, taket för flödetÄndra i ytans inställningar"
     );
-    expect(screen.getByText(/60 dagar, ärvt från ytan/)).toBeTruthy();
-    expect(screen.queryByText(/sparat på flödet/)).toBeNull();
+    const link = within(section).getByRole("link", { name: "Ändra i ytans inställningar" });
+    expect(link.getAttribute("href")).toBe(SPACE_HREF);
+    expect(link.closest("dd")).toBeTruthy();
+    expect(rowValue(section, "Gäller")).toBe(
+      "Flödets körningar som startar medan ytan har en gallringstid. Körningar som startade medan ytan saknade gallringstid, eller före uppgraderingen som införde automatisk gallring, tas inte bort automatiskt: de tas bort först när en administratör rensar körningar för hand. Varje körning räknas från när den avslutades, också om den misslyckades eller avbröts."
+    );
+    expect(rowValue(section, "Tas bort")).toBe(
+      "Körningen med steg, transkript och de filer som ingen kvarvarande körning använder. Det går inte att återställa."
+    );
+    expect(rowValue(section, "Står kvar")).toBe(
+      "Bland annat körningar som inte har avslutats, körningar med rättslig spärr och körningar som startade medan ytan saknade gallringstid eller före uppgraderingen som införde automatisk gallring."
+    );
+    await expectNoAxeViolations(document.body);
+  });
+
+  it("says a shorter flow time of its own applies under the space's cap", () => {
+    const section = renderSection(retentionOf(90, 30), { spaceHref: SPACE_HREF });
+    expect(
+      within(section).getByText(
+        "Körningar kan tas bort automatiskt 30 dagar efter att de avslutades."
+      )
+    ).toBeTruthy();
+    expect(rowValue(section, "Flödets gallringstid")).toBe("30 dagar");
+    expect(rowValue(section, "Ytans gallringstid")).toBe(
+      "90 dagar, taket för flödetÄndra i ytans inställningar"
+    );
+    expect(rowValue(section, "Gäller")).toBeTruthy();
+  });
+
+  it("says the space's shorter time applies over a longer one saved on the flow", () => {
+    const section = renderSection(retentionOf(90, 120));
+    expect(
+      within(section).getByText(
+        "Körningar kan tas bort automatiskt 90 dagar efter att de avslutades."
+      )
+    ).toBeTruthy();
+    expect(rowValue(section, "Flödets gallringstid")).toBe(
+      "120 dagar sparat på flödet. Ytans kortare tid gäller."
+    );
+    // Without the right to change the space's time, its row has no link.
+    expect(rowValue(section, "Ytans gallringstid")).toBe("90 dagar, taket för flödet");
+    expect(within(section).queryByRole("link")).toBeNull();
+  });
+
+  it.each([
+    ["with a flow time", 30, "30 dagar"],
+    ["without one", null, "Ingen"]
+  ])(
+    "says runs in a personal space are not removed automatically, %s",
+    async (_, flowDays, value) => {
+      const section = renderSection(retentionOf(60, flowDays), {
+        personalSpace: true,
+        action: changeButton,
+        spaceHref: SPACE_HREF
+      });
+      expect(within(section).getByText("Inga körningar tas bort automatiskt.")).toBeTruthy();
+      expect(section.querySelector("svg.lucide-ban")).toBeTruthy();
+      expect(within(section).getByText(PERSONAL)).toBeTruthy();
+      expect(rowValue(section, "Flödets gallringstid")).toBe(value);
+      // No row about the space's time, no link to it, and no rows of what is removed.
+      expect(rowValue(section, "Ytans gallringstid")).toBeUndefined();
+      expect(rowValue(section, "Gäller")).toBeUndefined();
+      expect(within(section).queryByRole("link")).toBeNull();
+      expect(within(section).getByRole("button", { name: "Ändra gallring" })).toBeTruthy();
+      await expectNoAxeViolations(document.body);
+    }
+  );
+
+  it("tells someone who may not change it who does, under the status line", async () => {
+    const section = renderSection(retentionOf(90, null));
+    const status = within(section).getByText(
+      "Körningar kan tas bort automatiskt 90 dagar efter att de avslutades."
+    );
+    const who = within(section).getByText(
+      "Gallringen ändras av den som administrerar ytan och har behörigheten ”Gallring – hantera regler”."
+    );
+    // The permission's name stays on one line.
+    expect(who.textContent).toContain("”Gallring\u00a0–\u00a0hantera\u00a0regler”");
+    expect(status.compareDocumentPosition(who) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(who.closest("dl")).toBeNull();
+    expect(within(section).queryByRole("button")).toBeNull();
+    expect(within(section).queryByRole("link")).toBeNull();
+    await expectNoAxeViolations(document.body);
+  });
+
+  it("puts who changes it after the explanation, and names a personal space's own rule", () => {
+    const section = renderSection(retentionOf(null, null));
+    const explanation = within(section).getByText(messages.flows_retention_applies_none);
+    const who = within(section).getByText(/^Gallringen ändras av/);
+    expect(
+      explanation.compareDocumentPosition(who) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    cleanup();
+    const personal = renderSection(retentionOf(null, 30), { personalSpace: true });
+    expect(
+      within(personal).getByText(
+        "För att ändra gallringen behöver du kunna redigera flödet och ha behörigheten ”Gallring – hantera regler”."
+      )
+    ).toBeTruthy();
+  });
+
+  it("is a section of its own after the transcription, with the change in it, not by the settings heading", () => {
+    const flow = makeFlow({
+      steps: [makeStep(1, { input_type: "audio", output_mode: "transcribe_only" })],
+      metadata_json: { wizard: { transcription_enabled: true } },
+      run_history_retention: configured
+    });
+    renderInApp(
+      <FlowSettings
+        flow={flow}
+        canEdit
+        mayChangeRetention
+        transcription={resources}
+        onSave={vi.fn()}
+        spaceRetentionHref={SPACE_HREF}
+      />,
+      { appContext: testAppContext({ permissions: ["retention_manage"] }) }
+    );
+    const section = screen.getByRole("region", { name: "Gallring" });
+    const transcription = screen.getByRole("heading", { level: 3, name: "Transkribering" });
+    expect(
+      transcription.compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    // The change is in the section; the settings heading keeps only its own.
+    expect(within(section).getByRole("button", { name: "Ändra gallring" })).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: "Ändra gallring" })).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Ändra inställningar" })).toBeTruthy();
+    // The old row among the other settings is gone.
+    expect(screen.queryByText("Gallring av körhistorik")).toBeNull();
+    expect(within(section).getByRole("link", { name: "Ändra i ytans inställningar" })).toBeTruthy();
+  });
+
+  it("leaves while the settings form is open, and comes back with it closed", () => {
+    renderSettings(["retention_manage"]);
+    fireEvent.click(screen.getByRole("button", { name: "Ändra inställningar" }));
+    expect(screen.queryByRole("region", { name: "Gallring" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Ändra gallring" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Avbryt" }));
+    expect(screen.getByRole("button", { name: "Ändra gallring" })).toBeTruthy();
   });
+});
 
-  it("shows a longer saved flow time beside the space's shorter one that applies", () => {
-    renderInApp(
-      <SettingsSummary
-        flow={makeFlow({
-          run_history_retention: {
-            ...configured,
-            contributors: { space: { days: 60 }, flow: { days: 90 } }
-          }
-        })}
-        transcription={resources}
-      />
-    );
-    expect(screen.getByText(/60 dagar, ärvt från ytan/)).toBeTruthy();
-    expect(screen.getByText("90 dagar sparat på flödet. Ytans kortare tid gäller.")).toBeTruthy();
-  });
-
-  it("offers the change only to someone who manages retention", () => {
-    renderSettings(["flows"]);
+describe("flow retention", () => {
+  it("offers the change only as the page decided, which is who may change it", () => {
+    renderSettings(["retention_manage"], false);
     expect(screen.queryByRole("button", { name: "Ändra gallring" })).toBeNull();
     cleanup();
     renderSettings(["retention_manage"]);
     expect(screen.getByRole("button", { name: "Ändra gallring" })).toBeTruthy();
   });
 
-  it("does not offer the change without the right to set retention in the flow's space", () => {
-    renderSettings(["retention_manage"], false);
-    expect(screen.queryByRole("button", { name: "Ändra gallring" })).toBeNull();
-  });
-
-  it("shows the space's time while the field is empty, and saves a flow time", async () => {
+  it("says what an empty field means, and saves a flow time", async () => {
     backend.GET.mockResolvedValue(settings(null, { days: 60 }));
     backend.PUT.mockResolvedValue(settings({ days: 30 }, { days: 60 }));
     const days = await openDialog();
-    expect(screen.getByText(/Från ytan: 60 dagar/)).toBeTruthy();
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByRole("heading", { name: "Ändra gallring" })).toBeTruthy();
+    expect(within(dialog).getByText(messages.flows_retention_dialog_subtitle)).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Tomt fält: flödet följer ytans gallringstid, 60 dagar. Ange en kortare tid för att ta bort flödets körningar tidigare."
+      )
+    ).toBeTruthy();
+    expect(days.placeholder).toBe("Följer ytan");
+    // The unit is drawn after the field only with a value, so the placeholder reads alone.
+    expect(drawnUnit(days)).toBe("");
+    expect(within(dialog).getByRole("button", { name: SAVE })).toBeTruthy();
     await expectNoAxeViolations(document.body);
 
     fireEvent.change(days, { target: { value: "30" } });
-    fireEvent.blur(days);
+    expect(drawnUnit(days)).toBe('"dagar"');
     pressSave();
     await waitFor(() => expect(backend.PUT).toHaveBeenCalledTimes(1));
     expect(backend.PUT.mock.calls[0]![1].body).toEqual({
@@ -236,19 +488,17 @@ describe("flow retention", () => {
     backend.GET.mockResolvedValue(settings(null, { days: 60 }));
     const { queryClient } = renderSettings(["retention_manage"]);
     fireEvent.click(screen.getByRole("button", { name: "Ändra gallring" }));
-    expect(await screen.findByText(/Från ytan: 60 dagar/)).toBeTruthy();
+    expect(await screen.findByText(/följer ytans gallringstid, 60 dagar/)).toBeTruthy();
     backend.GET.mockResolvedValue(settings(null, { days: 14 }));
     await queryClient.refetchQueries({ queryKey: ["flows", "retention", "flow-1"] });
-    expect(await screen.findByText(/Från ytan: 14 dagar/)).toBeTruthy();
+    expect(await screen.findByText(/följer ytans gallringstid, 14 dagar/)).toBeTruthy();
   });
 
   it("lets an untouched field follow a later read, and an untouched save sends nothing", async () => {
     backend.GET.mockResolvedValue(settings({ days: 3 }, { days: 60 }));
     const { queryClient } = renderSettings(["retention_manage"]);
     fireEvent.click(screen.getByRole("button", { name: "Ändra gallring" }));
-    const days = (await screen.findByRole("spinbutton", {
-      name: /Egen tid för det här flödet/
-    })) as HTMLInputElement;
+    const days = (await screen.findByRole("textbox", { name: FIELD })) as HTMLInputElement;
     expect(days.value).toBe("3");
     // Another admin saved 10 meanwhile; the dialog reads it.
     backend.GET.mockResolvedValue(settings({ days: 10 }, { days: 60 }));
@@ -259,7 +509,7 @@ describe("flow retention", () => {
     void queryClient.refetchQueries({ queryKey: policyKey, exact: true });
     await waitFor(() => expect(backend.GET).toHaveBeenCalledTimes(3));
     pressSave();
-    await waitFor(() => expect(screen.queryByRole("spinbutton")).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("textbox", { name: FIELD })).toBeNull());
     release(settings({ days: 10 }, { days: 60 }));
     await settle();
     expect(backend.PUT).not.toHaveBeenCalled();
@@ -270,15 +520,19 @@ describe("flow retention", () => {
     backend.PUT.mockResolvedValue(settings({ days: 5 }, { days: 60 }));
     const { queryClient } = renderSettings(["retention_manage"]);
     fireEvent.click(screen.getByRole("button", { name: "Ändra gallring" }));
-    const days = (await screen.findByRole("spinbutton", {
-      name: /Egen tid för det här flödet/
-    })) as HTMLInputElement;
+    const days = (await screen.findByRole("textbox", { name: FIELD })) as HTMLInputElement;
     fireEvent.change(days, { target: { value: "5" } });
-    fireEvent.blur(days);
     backend.GET.mockResolvedValue(settings({ days: 10 }, { days: 60 }));
     await queryClient.refetchQueries({ queryKey: policyKey, exact: true });
     await settle();
     expect(days.value).toBe("5");
+    // 5 is shorter than the 10 read: the warning shows, though nothing was typed.
+    expect(warningShown()).toBe(true);
+    // The time that applies changed since the 5 was typed: the press is held.
+    pressSave();
+    await settle();
+    expect(backend.PUT).not.toHaveBeenCalled();
+    expect(warningShown()).toBe(true);
     pressSave();
     await waitFor(() => expect(backend.PUT).toHaveBeenCalledTimes(1));
     expect(backend.PUT.mock.calls[0]![1].body).toEqual({
@@ -294,11 +548,8 @@ describe("flow retention", () => {
     backend.PUT.mockResolvedValue(settings(null, { days: 60 }));
     const { queryClient } = renderSettings(["retention_manage"]);
     fireEvent.click(screen.getByRole("button", { name: "Ändra gallring" }));
-    const days = (await screen.findByRole("spinbutton", {
-      name: /Egen tid för det här flödet/
-    })) as HTMLInputElement;
+    const days = (await screen.findByRole("textbox", { name: FIELD })) as HTMLInputElement;
     fireEvent.change(days, { target: { value: "" } });
-    fireEvent.blur(days);
     backend.GET.mockResolvedValue(settings({ days: 10 }, { days: 60 }));
     await queryClient.refetchQueries({ queryKey: policyKey, exact: true });
     await settle();
@@ -312,26 +563,51 @@ describe("flow retention", () => {
     });
   });
 
-  it("warns before a shorter time is saved, and saves it on the next press", async () => {
+  it("shows the warning with its date while a shorter time is typed, and a click on Spara och ta bort saves it", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-25T12:00:00"));
     backend.GET.mockResolvedValue(settings(null, { days: 60 }));
     backend.PUT.mockResolvedValue(settings({ days: 30 }, { days: 60 }));
+    const said = recordAnnouncements();
     const days = await openDialog();
+    expect(
+      within(screen.getByRole("dialog")).getByText(
+        "Gäller flödets körningar som startar medan ytan har en gallringstid, inte äldre körningar. Varje körning räknas från när den avslutades."
+      )
+    ).toBeTruthy();
+    expect(warningShown()).toBe(false);
+    fireEvent.change(days, { target: { value: "3" } });
     fireEvent.change(days, { target: { value: "30" } });
-    fireEvent.blur(days);
-    fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
-    // The first press shows the warning instead of saving: it was not on screen before, and
-    // it names the days.
-    const warning = await screen.findByText(
-      "Flödets körningar som startade medan ytan hade en tid och är äldre än 30 dagar tas bort. Kontrollen görs var femte minut. Det går inte att återställa. Välj Spara ändå för att använda tiden."
+    // Shown as it is typed, before any press, with the date the new time reaches back to.
+    const title = screen.getByText(
+      "Körningar avslutade omkring den 26 oktober 2026 eller tidigare kan tas bort",
+      { ignore: "[aria-live], [aria-live] *" }
     );
-    expect(days.getAttribute("aria-describedby")).toContain(
-      warning.closest("[id]")?.getAttribute("id")
-    );
+    // The date stays on one line.
+    expect(title.textContent).toContain("26\u00a0oktober\u00a02026");
+    const banner = title.closest("[id]")!;
+    expect(
+      within(banner as HTMLElement).getByText(
+        "Gallringstiden kortas från 60 dagar till 30 dagar. Kontrollen görs var femte minut. Körningen med steg, transkript och de filer som ingen kvarvarande körning använder tas bort och går inte att återställa. Datumet är ungefärligt: servern räknar från klockslaget då körningen avslutades, och körningen kan tas bort när den nya gallringstiden har gått sedan dess. Körningar med rättslig spärr och körningar som startade medan ytan saknade gallringstid, eller före uppgraderingen som införde automatisk gallring, står kvar."
+      )
+    ).toBeTruthy();
+    expect(days.getAttribute("aria-describedby")).toContain(banner.getAttribute("id"));
     expect(backend.PUT).not.toHaveBeenCalled();
+    // The button says what a press does, in the destructive look.
+    expect(screen.queryByRole("button", { name: SAVE })).toBeNull();
+    const button = screen.getByRole("button", { name: SAVE_AND_REMOVE });
+    expect(button.getAttribute("data-variant")).toBe("destructive");
+    // Said once, for the value left when the typing stopped, not for the 3 on the way.
+    await waitFor(async () => {
+      await flushAnnouncements();
+      expect(said.filter((text) => WARNING_TITLE.test(text))).toEqual([
+        "Körningar avslutade omkring den 26 oktober 2026 eller tidigare kan tas bort"
+      ]);
+    });
     await expectNoAxeViolations(document.body);
-    // While the warning shows, the button says what the next press does.
-    expect(screen.queryByRole("button", { name: "Spara inställningar" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Spara ändå" }));
+
+    // The warning is on screen: one click saves.
+    fireEvent.click(button);
     await waitFor(() => expect(backend.PUT).toHaveBeenCalledTimes(1));
     expect(backend.PUT.mock.calls[0]![1].body).toEqual({
       policy: { days: 30 },
@@ -340,17 +616,331 @@ describe("flow retention", () => {
     });
   });
 
+  it("calls the warning's date approximate, as a run that finished late that day may not be due yet", async () => {
+    // At 23:30, a run that finished at 23:45 on the date shown is due only in a quarter of an
+    // hour: the server counts from the time the run finished, not from the date.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-25T23:30:00"));
+    backend.GET.mockResolvedValue(settings(null, { days: 60 }));
+    const days = await openDialog();
+    fireEvent.change(days, { target: { value: "30" } });
+    const title = screen.getByText(
+      "Körningar avslutade omkring den 26 oktober 2026 eller tidigare kan tas bort",
+      { ignore: "[aria-live], [aria-live] *" }
+    );
+    const banner = title.closest("[id]") as HTMLElement;
+    expect(
+      within(banner).getByText(/Datumet är ungefärligt: servern räknar från klockslaget/)
+    ).toBeTruthy();
+  });
+
+  it("drops the warning and its button when the time is no longer shorter", () => {
+    backend.GET.mockResolvedValue(settings({ days: 30 }, { days: 60 }));
+    return openDialog().then((days) => {
+      fireEvent.change(days, { target: { value: "20" } });
+      expect(warningShown()).toBe(true);
+      fireEvent.change(days, { target: { value: "45" } });
+      expect(warningShown()).toBe(false);
+      const button = screen.getByRole("button", { name: SAVE });
+      expect(button.getAttribute("data-variant")).toBe("primary");
+    });
+  });
+
+  it("reads the field at every key, blanks around the number too", async () => {
+    backend.GET.mockResolvedValue(settings(null, { days: 60 }));
+    backend.PUT.mockResolvedValue(settings({ days: 30 }, { days: 60 }));
+    const days = await openDialog();
+    fireEvent.change(days, { target: { value: " 30 " } });
+    expect(warningShown()).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: SAVE_AND_REMOVE }));
+    await waitFor(() => expect(backend.PUT).toHaveBeenCalledTimes(1));
+    expect(backend.PUT.mock.calls[0]![1].body.policy).toEqual({ days: 30 });
+  });
+
+  it("holds the first Enter for a shorter time, so its warning is read, and saves on the next", async () => {
+    backend.GET.mockResolvedValue(settings(null, { days: 60 }));
+    backend.PUT.mockResolvedValue(settings({ days: 20 }, { days: 60 }));
+    const days = await openDialog();
+    fireEvent.change(days, { target: { value: "30" } });
+    // Enter right after the last digit: nothing is sent, the warning stays and the field keeps focus.
+    pressEnter(days);
+    await settle();
+    expect(backend.PUT).not.toHaveBeenCalled();
+    expect(warningShown()).toBe(true);
+    // A new value is held again on its first Enter.
+    fireEvent.change(days, { target: { value: "20" } });
+    pressEnter(days);
+    await settle();
+    expect(backend.PUT).not.toHaveBeenCalled();
+    pressEnter(days);
+    await waitFor(() => expect(backend.PUT).toHaveBeenCalledTimes(1));
+    expect(backend.PUT.mock.calls[0]![1].body).toEqual({
+      policy: { days: 20 },
+      expected_effective_days: 60,
+      expected_inherited_days: 60
+    });
+  });
+
+  it("does nothing on the repeats of a held Enter, which still keep the browser from submitting", async () => {
+    backend.GET.mockResolvedValue(settings(null, { days: 60 }));
+    backend.PUT.mockResolvedValue(settings({ days: 30 }, { days: 60 }));
+    const days = await openDialog();
+    fireEvent.change(days, { target: { value: "30" } });
+    pressEnter(days);
+    pressEnter(days, true);
+    pressEnter(days, true);
+    await settle();
+    expect(backend.PUT).not.toHaveBeenCalled();
+    expect(warningShown()).toBe(true);
+    // A new press saves.
+    pressEnter(days);
+    await waitFor(() => expect(backend.PUT).toHaveBeenCalledTimes(1));
+  });
+
+  it("holds the first Enter again once the value is typed again, also the same value", async () => {
+    backend.GET.mockResolvedValue(settings(null, { days: 60 }));
+    backend.PUT.mockResolvedValue(settings({ days: 30 }, { days: 60 }));
+    const days = await openDialog();
+    fireEvent.change(days, { target: { value: "30" } });
+    pressEnter(days);
+    fireEvent.change(days, { target: { value: "" } });
+    fireEvent.change(days, { target: { value: "30" } });
+    pressEnter(days);
+    await settle();
+    expect(backend.PUT).not.toHaveBeenCalled();
+    pressEnter(days);
+    await waitFor(() => expect(backend.PUT).toHaveBeenCalledTimes(1));
+  });
+
+  it("holds an Enter again when a read changes the time that applies after a held one", async () => {
+    backend.GET.mockResolvedValue(settings(null, { days: 60 }));
+    backend.PUT.mockResolvedValue(settings({ days: 30 }, { days: 60 }));
+    const { queryClient } = renderSettings(["retention_manage"]);
+    fireEvent.click(screen.getByRole("button", { name: "Ändra gallring" }));
+    const days = (await screen.findByRole("textbox", { name: FIELD })) as HTMLInputElement;
+    fireEvent.change(days, { target: { value: "30" } });
+    pressEnter(days);
+    // Another administrator gave the flow 45 days; the dialog reads it.
+    backend.GET.mockResolvedValue(settings({ days: 45 }, { days: 60 }));
+    await act(() => queryClient.refetchQueries({ queryKey: policyKey, exact: true }));
+    await settle();
+    expect(days.value).toBe("30");
+    pressEnter(days);
+    await settle();
+    expect(backend.PUT).not.toHaveBeenCalled();
+    expect(warningShown()).toBe(true);
+    pressEnter(days);
+    await waitFor(() => expect(backend.PUT).toHaveBeenCalledTimes(1));
+    expect(backend.PUT.mock.calls[0]![1].body).toEqual({
+      policy: { days: 30 },
+      expected_effective_days: 45,
+      expected_inherited_days: 60
+    });
+  });
+
+  it("holds a press when a read between its pointerdown and click makes the time shorter, and saves on a new press", async () => {
+    backend.GET.mockResolvedValue(settings({ days: 3 }, { days: 60 }));
+    backend.PUT.mockResolvedValue(settings({ days: 5 }, { days: 60 }));
+    const { queryClient } = renderSettings(["retention_manage"]);
+    fireEvent.click(screen.getByRole("button", { name: "Ändra gallring" }));
+    const days = (await screen.findByRole("textbox", { name: FIELD })) as HTMLInputElement;
+    fireEvent.change(days, { target: { value: "5" } });
+    expect(warningShown()).toBe(false);
+    const button = screen.getByRole("button", { name: SAVE });
+    fireEvent.pointerDown(button);
+    // Another administrator gave the flow 10 days; the read lands while the button is down.
+    backend.GET.mockResolvedValue(settings({ days: 10 }, { days: 60 }));
+    await act(() => queryClient.refetchQueries({ queryKey: policyKey, exact: true }));
+    await settle();
+    fireEvent.pointerUp(button);
+    fireEvent.click(button);
+    await settle();
+    // Nothing is sent: the warning shows now, and the button says what a press does.
+    expect(backend.PUT).not.toHaveBeenCalled();
+    expect(warningShown()).toBe(true);
+    expect(screen.getByRole("button", { name: SAVE_AND_REMOVE })).toBe(button);
+    press(button);
+    await waitFor(() => expect(backend.PUT).toHaveBeenCalledTimes(1));
+    expect(backend.PUT.mock.calls[0]![1].body).toEqual({
+      policy: { days: 5 },
+      expected_effective_days: 10,
+      expected_inherited_days: 60
+    });
+  });
+
+  it("holds a press when the time that applies changes and comes back to the time typed against, and saves on a new press", async () => {
+    backend.GET.mockResolvedValue(settings({ days: 10 }, { days: 60 }));
+    backend.PUT.mockResolvedValue(settings({ days: 5 }, { days: 60 }));
+    const { queryClient } = renderSettings(["retention_manage"]);
+    fireEvent.click(screen.getByRole("button", { name: "Ändra gallring" }));
+    const days = (await screen.findByRole("textbox", { name: FIELD })) as HTMLInputElement;
+    fireEvent.change(days, { target: { value: "5" } });
+    expect(warningShown()).toBe(true);
+    // A read gives the flow 3 days: 5 is no longer shorter.
+    backend.GET.mockResolvedValue(settings({ days: 3 }, { days: 60 }));
+    await act(() => queryClient.refetchQueries({ queryKey: policyKey, exact: true }));
+    await settle();
+    expect(warningShown()).toBe(false);
+    const button = screen.getByRole("button", { name: SAVE });
+    fireEvent.pointerDown(button);
+    // While the button is down, a read gives the flow 10 days again.
+    backend.GET.mockResolvedValue(settings({ days: 10 }, { days: 60 }));
+    await act(() => queryClient.refetchQueries({ queryKey: policyKey, exact: true }));
+    await settle();
+    fireEvent.pointerUp(button);
+    fireEvent.click(button);
+    await settle();
+    // The warning was not on screen when the press began: nothing is sent.
+    expect(backend.PUT).not.toHaveBeenCalled();
+    expect(warningShown()).toBe(true);
+    press(screen.getByRole("button", { name: SAVE_AND_REMOVE }));
+    await waitFor(() => expect(backend.PUT).toHaveBeenCalledTimes(1));
+    expect(backend.PUT.mock.calls[0]![1].body).toEqual({
+      policy: { days: 5 },
+      expected_effective_days: 10,
+      expected_inherited_days: 60
+    });
+  });
+
+  it("holds an Enter again when the time that applies changes and comes back after a held one", async () => {
+    backend.GET.mockResolvedValue(settings({ days: 10 }, { days: 60 }));
+    backend.PUT.mockResolvedValue(settings({ days: 5 }, { days: 60 }));
+    const { queryClient } = renderSettings(["retention_manage"]);
+    fireEvent.click(screen.getByRole("button", { name: "Ändra gallring" }));
+    const days = (await screen.findByRole("textbox", { name: FIELD })) as HTMLInputElement;
+    fireEvent.change(days, { target: { value: "5" } });
+    pressEnter(days);
+    await settle();
+    expect(backend.PUT).not.toHaveBeenCalled();
+    backend.GET.mockResolvedValue(settings({ days: 3 }, { days: 60 }));
+    await act(() => queryClient.refetchQueries({ queryKey: policyKey, exact: true }));
+    await settle();
+    backend.GET.mockResolvedValue(settings({ days: 10 }, { days: 60 }));
+    await act(() => queryClient.refetchQueries({ queryKey: policyKey, exact: true }));
+    await settle();
+    pressEnter(days);
+    await settle();
+    expect(backend.PUT).not.toHaveBeenCalled();
+    expect(warningShown()).toBe(true);
+    pressEnter(days);
+    await waitFor(() => expect(backend.PUT).toHaveBeenCalledTimes(1));
+    expect(backend.PUT.mock.calls[0]![1].body).toEqual({
+      policy: { days: 5 },
+      expected_effective_days: 10,
+      expected_inherited_days: 60
+    });
+  });
+
+  it("gives the field's description and error the dialog's width, and keeps the box for the number narrow", async () => {
+    backend.GET.mockResolvedValue(settings(null, { days: 60 }));
+    const days = await openDialog();
+    /** Whether an element is inside the narrow box: an inline width of 12rem on it or above it. */
+    const narrow = (element: Element) => element.closest("[style*='12rem']") !== null;
+    const description = screen.getByText(/^Tomt fält: flödet följer ytans gallringstid/);
+    expect(narrow(description)).toBe(false);
+    expect(narrow(days)).toBe(true);
+    // The unit is drawn by the number's box, so it stays beside it whatever is under it.
+    expect(drawnUnit(days)).toBe("");
+    fireEvent.change(days, { target: { value: "tre" } });
+    pressSave();
+    const error = await screen.findByText("Ange ett heltal från 1 till 2555.", {
+      ignore: "[aria-live], [aria-live] *"
+    });
+    expect(narrow(error)).toBe(false);
+    expect(drawnUnit(days)).toBe('"dagar"');
+  });
+
+  it("keeps the repeats of an Enter held on the save button from pressing it again", async () => {
+    backend.GET.mockResolvedValue(settings(null, { days: 60 }));
+    const days = await openDialog();
+    fireEvent.change(days, { target: { value: "30" } });
+    const button = screen.getByRole("button", { name: SAVE_AND_REMOVE });
+    // A browser clicks a focused button on Enter, and again on each repeat of a held key:
+    // the repeats are prevented, so a held press cannot be followed by a save. jsdom
+    // clicks on no key, so this checks the prevention, not the click.
+    expect(fireEvent.keyDown(button, { key: "Enter", code: "Enter", repeat: true })).toBe(false);
+    expect(fireEvent.keyDown(button, { key: "Enter", code: "Enter" })).toBe(true);
+    await settle();
+    expect(backend.PUT).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["in a personal space, empty", { personal: true, typed: null }],
+    ["in a personal space, with a value", { personal: true, typed: "30" }],
+    ["while the space has no time, empty", { personal: false, typed: null }],
+    ["while the space has no time, with a value", { personal: false, typed: "5" }]
+  ])("tells a screen reader the field's unit %s", async (_, { personal, typed }) => {
+    backend.GET.mockResolvedValue(settings({ days: 45 }, personal ? { days: 60 } : null));
+    renderInApp(
+      <FlowSettings
+        flow={makeFlow({ run_history_retention: retentionOf(personal ? 60 : null, 45) })}
+        canEdit
+        mayChangeRetention
+        personalSpace={personal}
+        transcription={resources}
+        onSave={vi.fn()}
+      />,
+      { appContext: testAppContext({ permissions: ["retention_manage"] }) }
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Ändra gallring" }));
+    const days = await screen.findByRole("textbox", { name: FIELD });
+    fireEvent.change(days, { target: { value: typed ?? "" } });
+    expect(screen.getByRole("textbox", { name: FIELD, description: /\bdagar\b/ })).toBe(days);
+  });
+
+  it("tells a screen reader the field's unit beside an error", async () => {
+    backend.GET.mockResolvedValue(settings(null, { days: 60 }));
+    const days = await openDialog();
+    fireEvent.change(days, { target: { value: "tre" } });
+    pressSave();
+    expect(await screen.findByText("Ange ett heltal från 1 till 2555.")).toBeTruthy();
+    expect(screen.getByRole("textbox", { name: FIELD, description: /\bdagar\b/ })).toBe(days);
+  });
+
+  it("saves a time that removes nothing sooner on the first Enter", async () => {
+    backend.GET.mockResolvedValue(settings({ days: 30 }, { days: 60 }));
+    backend.PUT.mockResolvedValue(settings({ days: 45 }, { days: 60 }));
+    const days = await openDialog();
+    fireEvent.change(days, { target: { value: "45" } });
+    pressEnter(days);
+    await waitFor(() => expect(backend.PUT).toHaveBeenCalledTimes(1));
+    expect(backend.PUT.mock.calls[0]![1].body.policy).toEqual({ days: 45 });
+  });
+
+  it("saves a shorter time on the first tap on a phone, its warning already shown", async () => {
+    setViewport("phone");
+    backend.GET.mockResolvedValue(settings(null, { days: 60 }));
+    backend.PUT.mockResolvedValue(settings({ days: 30 }, { days: 60 }));
+    const days = await openDialog();
+    fireEvent.change(days, { target: { value: "30" } });
+    expect(warningShown()).toBe(true);
+    const button = screen.getByRole("button", { name: SAVE_AND_REMOVE });
+    fireEvent.pointerDown(button, { pointerType: "touch" });
+    fireEvent.pointerUp(button, { pointerType: "touch" });
+    fireEvent.click(button);
+    await waitFor(() => expect(backend.PUT).toHaveBeenCalledTimes(1));
+    expect(backend.PUT.mock.calls[0]![1].body.policy).toEqual({ days: 30 });
+    // The phone's Go key is an Enter: held for a shorter time as on a keyboard.
+    cleanup();
+    backend.PUT.mockClear();
+    const again = await openDialog();
+    fireEvent.change(again, { target: { value: "30" } });
+    pressEnter(again);
+    await settle();
+    expect(backend.PUT).not.toHaveBeenCalled();
+  });
+
   it("does not save a shorter time without its warning when another administrator changed the time meanwhile", async () => {
     const times: SavedTimes = { own: { days: 7 }, space: { days: 90 } };
     likeTheServer(times);
-    const days = (await openDialog()) as HTMLInputElement;
+    const days = await openDialog();
     expect(days.value).toBe("7");
     // Another administrator raises the flow's time to 60 while the dialog is open.
     times.own = { days: 60 };
     fireEvent.change(days, { target: { value: "30" } });
-    fireEvent.blur(days);
-    // Longer than the 7 the dialog read: sent on the first press, with the 7 it was compared with.
-    fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
+    // Longer than the 7 the dialog read: no warning, sent on the first press, with the 7.
+    expect(warningShown()).toBe(false);
+    pressSave();
     await waitFor(() => expect(backend.PUT).toHaveBeenCalledTimes(1));
     // Refused: the 60 stands.
     await settle();
@@ -366,15 +956,15 @@ describe("flow retention", () => {
     await waitFor(() => expect(days.value).toBe("60"));
     expect(document.activeElement).toBe(days);
     expect(
-      screen.getByText("Ytans tid är 90 dagar. Flödets tid kan inte vara längre.")
+      screen.getByText(
+        "Ytans gallringstid är 90 dagar. Flödets kan vara kortare, aldrig längre. Töm fältet för att följa ytan."
+      )
     ).toBeTruthy();
-    // Typed again, 30 is shorter than the 60 that applies now, so it warns first.
+    // Typed again, 30 is shorter than the 60 that applies now, so it warns before the press.
     fireEvent.change(days, { target: { value: "30" } });
-    fireEvent.blur(days);
-    fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
-    expect(await screen.findByText(/Välj Spara ändå för att använda tiden/)).toBeTruthy();
+    expect(warningShown()).toBe(true);
     expect(backend.PUT).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole("button", { name: "Spara ändå" }));
+    fireEvent.click(screen.getByRole("button", { name: SAVE_AND_REMOVE }));
     await waitFor(() => expect(backend.PUT).toHaveBeenCalledTimes(2));
     expect(backend.PUT.mock.calls[1]![1].body).toEqual({
       policy: { days: 30 },
@@ -387,16 +977,15 @@ describe("flow retention", () => {
   it("saves nothing after a refusal until a time is typed again", async () => {
     const times: SavedTimes = { own: { days: 7 }, space: { days: 90 } };
     likeTheServer(times);
-    const days = (await openDialog()) as HTMLInputElement;
+    const days = await openDialog();
     times.own = { days: 60 };
     fireEvent.change(days, { target: { value: "30" } });
-    fireEvent.blur(days);
-    fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
+    pressSave();
     await waitFor(() => expect(toastError).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(days.value).toBe("60"));
     // Nothing typed since: Save closes the dialog and sends nothing.
-    fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
-    await waitFor(() => expect(screen.queryByRole("spinbutton")).toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: SAVE }));
+    await waitFor(() => expect(screen.queryByRole("textbox", { name: FIELD })).toBeNull());
     expect(backend.PUT).toHaveBeenCalledTimes(1);
     expect(times.own).toEqual({ days: 60 });
   });
@@ -405,14 +994,14 @@ describe("flow retention", () => {
     // The flow keeps 60 days in a space without a time: no run is removed, so nothing warns.
     const times: SavedTimes = { own: { days: 60 }, space: null };
     likeTheServer(times);
-    const days = (await openDialog()) as HTMLInputElement;
+    const days = await openDialog();
     expect(days.value).toBe("60");
     // Another administrator gives the space 90 days. 60 still applies, but runs are now removed.
     times.space = { days: 90 };
     fireEvent.change(days, { target: { value: "30" } });
-    fireEvent.blur(days);
     // Nothing warns on the times the dialog read: sent on the first press, with both of them.
-    fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
+    expect(warningShown()).toBe(false);
+    pressSave();
     await waitFor(() => expect(backend.PUT).toHaveBeenCalledTimes(1));
     // Refused: the 60 stands.
     await settle();
@@ -425,19 +1014,13 @@ describe("flow retention", () => {
     await waitFor(() => expect(toastError).toHaveBeenCalledTimes(1));
     // The draft is dropped and the times are read again: the field shows the flow's 60, and
     // the line under it names the space's new time.
-    await waitFor(() =>
-      expect(
-        screen.getByText("Ytans tid är 90 dagar. Flödets tid kan inte vara längre.")
-      ).toBeTruthy()
-    );
+    await waitFor(() => expect(screen.getByText(/^Ytans gallringstid är 90 dagar\./)).toBeTruthy());
     expect(days.value).toBe("60");
     // Typed again, under the space's 90, 30 shortens the 60 that applies, so it warns.
     fireEvent.change(days, { target: { value: "30" } });
-    fireEvent.blur(days);
-    fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
-    expect(await screen.findByText(/Välj Spara ändå för att använda tiden/)).toBeTruthy();
+    expect(warningShown()).toBe(true);
     expect(backend.PUT).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole("button", { name: "Spara ändå" }));
+    fireEvent.click(screen.getByRole("button", { name: SAVE_AND_REMOVE }));
     await waitFor(() => expect(backend.PUT).toHaveBeenCalledTimes(2));
     expect(backend.PUT.mock.calls[1]![1].body).toEqual({
       policy: { days: 30 },
@@ -456,11 +1039,10 @@ describe("flow retention", () => {
     backend.PUT.mockResolvedValue(settings({ days: Number(typed) }, inherited));
     const days = await openDialog();
     fireEvent.change(days, { target: { value: typed } });
-    fireEvent.blur(days);
+    expect(warningShown()).toBe(false);
     // One press saves: no warning stands between it and the save.
-    fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
+    fireEvent.click(screen.getByRole("button", { name: SAVE }));
     await waitFor(() => expect(backend.PUT).toHaveBeenCalledTimes(1));
-    expect(screen.queryByText(/Välj Spara ändå/)).toBeNull();
     // It carries the time that applied as the server resolves it, also with no space time,
     // and the space's time as read.
     expect(backend.PUT.mock.calls[0]![1].body.expected_effective_days).toBe(
@@ -471,36 +1053,36 @@ describe("flow retention", () => {
     );
   });
 
-  it("says automatic removal is paused while the space has no time, also with a flow time", async () => {
+  it("says nothing is removed automatically while the space has no time, also with a flow time, and links to the space", async () => {
     backend.GET.mockResolvedValue(settings({ days: 30 }, null));
-    await openDialog();
-    expect(
-      screen.getByText(
-        "Ytan har ingen tid, så den automatiska gallringen står still tills ytan har en tid."
-      )
-    ).toBeTruthy();
-  });
-
-  it("says in the summary that a flow time waits for the space's", () => {
     renderInApp(
-      <SettingsSummary
-        flow={makeFlow({
-          run_history_retention: {
-            state: "configured",
-            source: "flow",
-            effective_days: 30,
-            contributors: { space: null, flow: { days: 30 } }
-          }
-        })}
+      <FlowSettings
+        flow={makeFlow({ run_history_retention: retentionOf(null, 30) })}
+        canEdit
+        mayChangeRetention
         transcription={resources}
-      />
+        onSave={vi.fn()}
+        spaceRetentionHref={SPACE_HREF}
+      />,
+      { appContext: testAppContext({ permissions: ["retention_manage"] }) }
     );
-    expect(screen.getByText(/30 dagar, satt på flödet/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Ändra gallring" }));
+    const days = (await screen.findByRole("textbox", { name: FIELD })) as HTMLInputElement;
+    const dialog = screen.getByRole("dialog");
     expect(
-      screen.getByText(
-        "Ytan har ingen tid, så den automatiska gallringen står still tills ytan har en tid."
+      within(dialog).getByText(
+        "Ytan har ingen gallringstid, så inga körningar tas bort automatiskt. Flödets tid används bara när en administratör rensar körningar för hand. När ytan får en tid blir den taket. Lämna fältet tomt för ingen egen tid."
       )
     ).toBeTruthy();
+    // No placeholder: an empty field follows nothing.
+    expect(days.placeholder).toBe("");
+    const link = within(dialog).getByRole("link", {
+      name: "Sätt gallringstid i ytans inställningar"
+    });
+    expect(link.getAttribute("href")).toBe(SPACE_HREF);
+    fireEvent.change(days, { target: { value: "5" } });
+    expect(warningShown()).toBe(false);
+    await expectNoAxeViolations(document.body);
   });
 
   it.each([
@@ -522,26 +1104,28 @@ describe("flow retention", () => {
             }
           })}
           canEdit
-          setsSpaceRetention
+          mayChangeRetention
           personalSpace
           transcription={resources}
           onSave={vi.fn()}
+          spaceRetentionHref={SPACE_HREF}
         />,
         { appContext: testAppContext({ permissions: ["retention_manage"] }) }
       );
-      const personal =
-        "Körningar i personliga ytor tas inte bort automatiskt i den här versionen. Flödets tid gäller då bara en administratörs uttryckliga rensning.";
-      expect(screen.getByText(personal)).toBeTruthy();
+      expect(screen.getByText(PERSONAL)).toBeTruthy();
       fireEvent.click(screen.getByRole("button", { name: "Ändra gallring" }));
-      const days = await screen.findByRole("spinbutton", { name: /Egen tid för det här flödet/ });
-      expect(screen.getAllByText(personal)).toHaveLength(2);
-      expect(screen.queryByText(/tas bort automatiskt när/)).toBeNull();
-      expect(screen.queryByText(/Ytan har ingen tid/)).toBeNull();
+      const days = (await screen.findByRole("textbox", { name: FIELD })) as HTMLInputElement;
+      const dialog = screen.getByRole("dialog");
+      expect(
+        within(dialog).getByText(`${PERSONAL} ${messages.flows_retention_empty_none}`)
+      ).toBeTruthy();
+      expect(days.placeholder).toBe("");
+      expect(within(dialog).queryByRole("link")).toBeNull();
+      expect(screen.queryByText(/Ytan har ingen gallringstid/)).toBeNull();
       fireEvent.change(days, { target: { value: "30" } });
-      fireEvent.blur(days);
-      fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
+      expect(warningShown()).toBe(false);
+      fireEvent.click(screen.getByRole("button", { name: SAVE }));
       await waitFor(() => expect(backend.PUT).toHaveBeenCalledTimes(1));
-      expect(screen.queryByText(/Välj Spara ändå/)).toBeNull();
       // The flow's 45 applies, as the server resolves it, though nothing warns here; the
       // space's time goes as read, also one stored on a personal space.
       expect(backend.PUT.mock.calls[0]![1].body.expected_effective_days).toBe(45);
@@ -553,18 +1137,15 @@ describe("flow retention", () => {
 
   it("names the space's time beside a flow time of its own", async () => {
     backend.GET.mockResolvedValue(settings({ days: 30 }, { days: 60 }));
-    const days = (await openDialog()) as HTMLInputElement;
+    const days = await openDialog();
     expect(days.value).toBe("30");
     expect(
-      screen.getByText("Ytans tid är 60 dagar. Flödets tid kan inte vara längre.")
+      screen.getByText(
+        "Ytans gallringstid är 60 dagar. Flödets kan vara kortare, aldrig längre. Töm fältet för att följa ytan."
+      )
     ).toBeTruthy();
+    expect(drawnUnit(days)).toBe('"dagar"');
     await expectNoAxeViolations(document.body);
-  });
-
-  it("says the space has no time when nothing applies", async () => {
-    backend.GET.mockResolvedValue(settings(null, null));
-    await openDialog();
-    expect(screen.getByText(/Ytan har ingen tid/)).toBeTruthy();
   });
 
   it("names the space's cap next to the field when the backend refuses a longer time", async () => {
@@ -575,14 +1156,12 @@ describe("flow retention", () => {
         refuse = reject;
       })
     );
-    const days = (await openDialog()) as HTMLInputElement;
+    const days = await openDialog();
     fireEvent.change(days, { target: { value: "10" } });
-    fireEvent.blur(days);
     pressSave();
     await waitFor(() => expect(backend.PUT).toHaveBeenCalledTimes(1));
     // An edit while the save is pending does not take, so a late refusal marks the value sent.
     fireEvent.change(days, { target: { value: "5" } });
-    fireEvent.blur(days);
     // The server is at 7 when it refuses, and the dialog reads its times again.
     backend.GET.mockResolvedValue(settings(null, { days: 7 }));
     refuse(
@@ -597,19 +1176,20 @@ describe("flow retention", () => {
     expect(days.value).toBe("10");
     expect(days.getAttribute("aria-invalid")).toBe("true");
     expect(document.activeElement).toBe(days);
-    // The error names the cap; the line about the space's time does not say it twice.
-    expect(screen.queryByText(/Ytans tid är/)).toBeNull();
+    // The error names the cap; the line about the space's time does not say it twice, no
+    // warning shows, and the button says Spara.
+    expect(screen.queryByText(/Ytans gallringstid är/)).toBeNull();
+    expect(warningShown()).toBe(false);
+    expect(screen.getByRole("button", { name: SAVE })).toBeTruthy();
     await waitFor(() => expect(days.readOnly).toBe(false));
     // A new value clears the refusal. The live region may still speak it, on its own timer.
     fireEvent.change(days, { target: { value: "5" } });
-    fireEvent.blur(days);
     expect(
       screen.queryByText("Ytan tillåter högst 7 dagar.", { ignore: "[aria-live], [aria-live] *" })
     ).toBeNull();
     // Emptied, the field inherits the time the space last named, not the one read at open.
     fireEvent.change(days, { target: { value: "" } });
-    fireEvent.blur(days);
-    expect(screen.getByText(/Från ytan: 7 dagar/)).toBeTruthy();
+    expect(screen.getByText(/följer ytans gallringstid, 7 dagar/)).toBeTruthy();
   });
 
   it("keeps the space's time a refusal named when an older read lands after it", async () => {
@@ -617,21 +1197,17 @@ describe("flow retention", () => {
     backend.PUT.mockImplementation(refusedAt7);
     const { queryClient } = renderSettings(["retention_manage"]);
     fireEvent.click(screen.getByRole("button", { name: "Ändra gallring" }));
-    const days = (await screen.findByRole("spinbutton", {
-      name: /Egen tid för det här flödet/
-    })) as HTMLInputElement;
+    const days = (await screen.findByRole("textbox", { name: FIELD })) as HTMLInputElement;
     const release = heldRead();
     void queryClient.refetchQueries({ queryKey: policyKey, exact: true });
     await waitFor(() => expect(backend.GET).toHaveBeenCalledTimes(2));
     fireEvent.change(days, { target: { value: "10" } });
-    fireEvent.blur(days);
     pressSave();
     expect(await screen.findByText(capText)).toBeTruthy();
     release(settings(null, { days: 60 }));
     await settle();
     fireEvent.change(days, { target: { value: "" } });
-    fireEvent.blur(days);
-    expect(screen.getByText(/Från ytan: 7 dagar/)).toBeTruthy();
+    expect(screen.getByText(/följer ytans gallringstid, 7 dagar/)).toBeTruthy();
   });
 
   it("reads the times again after a refusal, so a space time raised meanwhile clears the error", async () => {
@@ -651,11 +1227,8 @@ describe("flow retention", () => {
     );
     const { queryClient } = renderSettings(["retention_manage"]);
     fireEvent.click(screen.getByRole("button", { name: "Ändra gallring" }));
-    const days = (await screen.findByRole("spinbutton", {
-      name: /Egen tid för det här flödet/
-    })) as HTMLInputElement;
+    const days = (await screen.findByRole("textbox", { name: FIELD })) as HTMLInputElement;
     fireEvent.change(days, { target: { value: "10" } });
-    fireEvent.blur(days);
     pressSave();
     await waitFor(() => expect(backend.PUT).toHaveBeenCalledTimes(1));
 
@@ -679,7 +1252,7 @@ describe("flow retention", () => {
     expect(backend.PUT).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps the summary's saved time when an older Flow read lands after the save", async () => {
+  it("keeps the section's saved time when an older Flow read lands after the save", async () => {
     const byFlow = (days: number) =>
       ({
         state: "configured",
@@ -723,32 +1296,29 @@ describe("flow retention", () => {
       queryClient,
       appContext: testAppContext({ permissions: ["retention_manage"] })
     });
-    expect(screen.getByText(/7 dagar, satt på flödet/)).toBeTruthy();
+    expect(screen.getByText(/tas bort automatiskt 7 dagar efter/)).toBeTruthy();
     void queryClient.refetchQueries({ queryKey: flowKeys.flow("flow-1"), exact: true });
     await waitFor(() => expect(flowReads).toBe(1));
 
     fireEvent.click(screen.getByRole("button", { name: "Ändra gallring" }));
-    const days = await screen.findByRole("spinbutton", { name: /Egen tid för det här flödet/ });
+    const days = await screen.findByRole("textbox", { name: FIELD });
     fireEvent.change(days, { target: { value: "3" } });
-    fireEvent.blur(days);
     pressSave();
-    await waitFor(() => expect(screen.queryByRole("spinbutton")).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("textbox", { name: FIELD })).toBeNull());
     // The Flow is read again after the save; the read from before it lands last.
     await waitFor(() => expect(flowReads).toBe(2));
     await settle();
     releaseOlder(answered(makeFlow({ run_history_retention: byFlow(7) })));
     await settle();
 
-    expect(screen.getByText(/3 dagar, satt på flödet/)).toBeTruthy();
-    expect(screen.queryByText(/7 dagar, satt på flödet/)).toBeNull();
+    expect(screen.getByText(/tas bort automatiskt 3 dagar efter/)).toBeTruthy();
+    expect(screen.queryByText(/tas bort automatiskt 7 dagar efter/)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Ändra gallring" }));
-    const reopened = (await screen.findByRole("spinbutton", {
-      name: /Egen tid för det här flödet/
-    })) as HTMLInputElement;
+    const reopened = (await screen.findByRole("textbox", { name: FIELD })) as HTMLInputElement;
     expect(reopened.value).toBe("3");
   });
 
-  it("reads the Flow again after a refusal, so the summary shows the space's shorter time", async () => {
+  it("reads the Flow again after a refusal, so the section shows the space's shorter time", async () => {
     const retention = (source: "flow" | "space", days: number, space: number) =>
       ({
         state: "configured",
@@ -778,16 +1348,13 @@ describe("flow retention", () => {
       queryClient,
       appContext: testAppContext({ permissions: ["retention_manage"] })
     });
-    expect(screen.getByText(/30 dagar, satt på flödet/)).toBeTruthy();
+    expect(screen.getByText(/tas bort automatiskt 30 dagar efter/)).toBeTruthy();
     void queryClient.refetchQueries({ queryKey: flowKeys.flow("flow-1"), exact: true });
     await waitFor(() => expect(flowReads).toHaveLength(1));
 
     fireEvent.click(screen.getByRole("button", { name: "Ändra gallring" }));
-    const days = (await screen.findByRole("spinbutton", {
-      name: /Egen tid för det här flödet/
-    })) as HTMLInputElement;
+    const days = (await screen.findByRole("textbox", { name: FIELD })) as HTMLInputElement;
     fireEvent.change(days, { target: { value: "10" } });
-    fireEvent.blur(days);
     pressSave();
     // The cap shows without waiting for the Flow, which is read again behind it.
     expect(await screen.findByText(capText)).toBeTruthy();
@@ -804,9 +1371,9 @@ describe("flow retention", () => {
     flowReads[0]!(answered(makeFlow({ run_history_retention: retention("flow", 30, 60) })));
     await settle();
     fireEvent.click(screen.getByRole("button", { name: "Avbryt" }));
-    await waitFor(() => expect(screen.queryByRole("spinbutton")).toBeNull());
-    expect(screen.getByText(/7 dagar, ärvt från ytan/)).toBeTruthy();
-    expect(screen.queryByText(/30 dagar, satt på flödet/)).toBeNull();
+    await waitFor(() => expect(screen.queryByRole("textbox", { name: FIELD })).toBeNull());
+    expect(screen.getByText(/tas bort automatiskt 7 dagar efter/)).toBeTruthy();
+    expect(screen.queryByText(/tas bort automatiskt 30 dagar efter/)).toBeNull();
   });
 
   it("reads the Flow and its times again after a save, so a newer space time shows", async () => {
@@ -858,26 +1425,23 @@ describe("flow retention", () => {
     await waitFor(() => expect(flowReads).toBe(1));
 
     fireEvent.click(screen.getByRole("button", { name: "Ändra gallring" }));
-    const days = await screen.findByRole("spinbutton", { name: /Egen tid för det här flödet/ });
+    const days = await screen.findByRole("textbox", { name: FIELD });
     fireEvent.change(days, { target: { value: "30" } });
-    fireEvent.blur(days);
     pressSave();
-    await waitFor(() => expect(screen.queryByRole("spinbutton")).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("textbox", { name: FIELD })).toBeNull());
     // The read in flight saw the space's new time; the save's answer predates it.
     releaseOlder(newer());
     await settle();
-    expect(screen.getByText(/7 dagar, ärvt från ytan/)).toBeTruthy();
-    expect(screen.queryByText(/30 dagar, satt på flödet/)).toBeNull();
+    expect(screen.getByText(/tas bort automatiskt 7 dagar efter/)).toBeTruthy();
+    expect(screen.queryByText(/tas bort automatiskt 30 dagar efter/)).toBeNull();
 
     // Opened again, the dialog names the space's shorter time beside the saved one.
     fireEvent.click(screen.getByRole("button", { name: "Ändra gallring" }));
-    const reopened = (await screen.findByRole("spinbutton", {
-      name: /Egen tid för det här flödet/
-    })) as HTMLInputElement;
+    const reopened = (await screen.findByRole("textbox", { name: FIELD })) as HTMLInputElement;
     expect(reopened.value).toBe("30");
     expect(
       within(screen.getByRole("dialog")).getByText(
-        "30 dagar sparat på flödet. Ytans kortare tid gäller."
+        "30 dagar är sparat på flödet, men ytans gallringstid, 7 dagar, är taket och gäller. Ange en kortare tid eller töm fältet för att följa ytan."
       )
     ).toBeTruthy();
   });
@@ -891,20 +1455,17 @@ describe("flow retention", () => {
     });
     const { queryClient } = renderSettings(["retention_manage"]);
     fireEvent.click(screen.getByRole("button", { name: "Ändra gallring" }));
-    const days = await screen.findByRole("spinbutton", { name: /Egen tid för det här flödet/ });
+    const days = await screen.findByRole("textbox", { name: FIELD });
     const release = heldRead();
     void queryClient.refetchQueries({ queryKey: policyKey, exact: true });
     await waitFor(() => expect(backend.GET).toHaveBeenCalledTimes(2));
     fireEvent.change(days, { target: { value: "30" } });
-    fireEvent.blur(days);
     pressSave();
-    await waitFor(() => expect(screen.queryByRole("spinbutton")).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("textbox", { name: FIELD })).toBeNull());
     release(settings(null, { days: 60 }));
     await settle();
     fireEvent.click(screen.getByRole("button", { name: "Ändra gallring" }));
-    const reopened = (await screen.findByRole("spinbutton", {
-      name: /Egen tid för det här flödet/
-    })) as HTMLInputElement;
+    const reopened = (await screen.findByRole("textbox", { name: FIELD })) as HTMLInputElement;
     expect(reopened.value).toBe("30");
   });
 
@@ -913,11 +1474,8 @@ describe("flow retention", () => {
     backend.PUT.mockImplementation(refusedAt7);
     const { queryClient } = renderSettings(["retention_manage"]);
     fireEvent.click(screen.getByRole("button", { name: "Ändra gallring" }));
-    const days = (await screen.findByRole("spinbutton", {
-      name: /Egen tid för det här flödet/
-    })) as HTMLInputElement;
+    const days = (await screen.findByRole("textbox", { name: FIELD })) as HTMLInputElement;
     fireEvent.change(days, { target: { value: "10" } });
-    fireEvent.blur(days);
     pressSave();
     expect(await screen.findByText(capText)).toBeTruthy();
     backend.GET.mockResolvedValue(settings(null, { days: 14 }));
@@ -935,9 +1493,8 @@ describe("flow retention", () => {
     backend.PUT.mockImplementationOnce(refusedAt7).mockRejectedValueOnce(
       new EneoApiError("Internal error", { status: 500 })
     );
-    const days = (await openDialog()) as HTMLInputElement;
+    const days = await openDialog();
     fireEvent.change(days, { target: { value: "10" } });
-    fireEvent.blur(days);
     pressSave();
     expect(await screen.findByText(capText)).toBeTruthy();
     await waitFor(() => expect(days.readOnly).toBe(false));
@@ -952,9 +1509,15 @@ describe("flow retention", () => {
     backend.GET.mockResolvedValue(settings({ days: 90 }, { days: 60 }));
     backend.PUT.mockResolvedValue(settings(null, { days: 60 }));
     const days = await openDialog();
-    expect(screen.getByText("90 dagar sparat på flödet. Ytans kortare tid gäller.")).toBeTruthy();
-    fireEvent.change(days, { target: { value: "" } });
-    fireEvent.blur(days);
+    expect(
+      screen.getByText(
+        "90 dagar är sparat på flödet, men ytans gallringstid, 60 dagar, är taket och gäller. Ange en kortare tid eller töm fältet för att följa ytan."
+      )
+    ).toBeTruthy();
+    fireEvent.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Rensa Flödets gallringstid" })
+    );
+    expect(days.value).toBe("");
     pressSave();
     await waitFor(() => expect(backend.PUT).toHaveBeenCalledTimes(1));
     expect(backend.PUT.mock.calls[0]![1].body).toEqual({
@@ -962,6 +1525,16 @@ describe("flow retention", () => {
       expected_effective_days: 60,
       expected_inherited_days: 60
     });
+  });
+
+  it("asks for a whole number in range on a press, and sends nothing", async () => {
+    backend.GET.mockResolvedValue(settings(null, { days: 60 }));
+    const days = await openDialog();
+    fireEvent.change(days, { target: { value: "tre" } });
+    pressSave();
+    expect(await screen.findByText("Ange ett heltal från 1 till 2555.")).toBeTruthy();
+    expect(days.getAttribute("aria-invalid")).toBe("true");
+    expect(backend.PUT).not.toHaveBeenCalled();
   });
 });
 

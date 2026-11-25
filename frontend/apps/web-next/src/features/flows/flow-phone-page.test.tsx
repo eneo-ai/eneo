@@ -32,6 +32,19 @@ const api = vi.hoisted(() => ({
         response: new Response()
       };
     }
+    if (path === "/api/v1/settings/flow-run-retention-policy/flows/{flow_id}") {
+      const space = { days: 90 };
+      const effective = {
+        state: "configured",
+        source: "space",
+        effective_days: 90,
+        contributors: { space, flow: null }
+      };
+      return {
+        data: { local_policy: null, inherited_policy: space, effective },
+        response: new Response()
+      };
+    }
     if (path === "/api/v1/flows/{id}/run-contract/") {
       const { makeContract: contract } = await import("./runs/run-fixtures");
       return { data: contract(), response: new Response() };
@@ -124,6 +137,180 @@ describe("FlowPage on a phone", () => {
     expect(within(settings).getAllByRole("button")).toEqual([toggle]);
     expect(within(settings).queryByRole("textbox")).toBeNull();
     await expectNoAxeViolations(container);
+  });
+
+  it.each([
+    [
+      "the space has a time",
+      { space: { days: 90 }, flow: null },
+      {},
+      "Gallring: körningar kan tas bort automatiskt 90 dagar efter att de avslutades."
+    ],
+    [
+      "the space has no time, though the flow has",
+      { space: null, flow: { days: 30 } },
+      {},
+      "Gallring: inga körningar tas bort automatiskt."
+    ],
+    [
+      "the space is personal",
+      { space: { days: 90 }, flow: { days: 30 } },
+      { personal: true },
+      "Gallring: inga körningar tas bort automatiskt."
+    ]
+  ])(
+    "says under the folded settings whether runs are removed when %s",
+    async (_, contributors, space, line) => {
+      const { container } = renderPhonePage(
+        {
+          run_history_retention: {
+            state: "configured",
+            source: contributors.flow ? "flow" : "space",
+            effective_days: (contributors.flow ?? contributors.space)!.days,
+            contributors
+          }
+        },
+        undefined,
+        space
+      );
+      const settings = await screen.findByRole("region", { name: "Inställningar" });
+      const toggle = within(settings).getByRole("button", { name: "Inställningar" });
+      const folded = within(settings).getByText(line);
+      // Beside the toggle, not part of its name.
+      expect(toggle.contains(folded)).toBe(false);
+      await expectNoAxeViolations(container);
+      // Open, the section says it in full and the line goes.
+      fireEvent.click(toggle);
+      expect(within(settings).queryByText(line)).toBeNull();
+      expect(within(settings).getByRole("region", { name: "Gallring" })).toBeTruthy();
+    }
+  );
+
+  it("puts the settings' sections a level under the page's title, as the toggle is no heading", async () => {
+    renderPhonePage({
+      input_type: "audio",
+      metadata_json: { wizard: { transcription_enabled: true } }
+    });
+    const settings = await screen.findByRole("region", { name: "Inställningar" });
+    fireEvent.click(within(settings).getByRole("button", { name: "Inställningar" }));
+    expect(within(settings).getByRole("heading", { level: 2, name: "Gallring" })).toBeTruthy();
+    expect(within(settings).queryByRole("heading", { level: 3 })).toBeNull();
+  });
+
+  it("puts the retention change right under the status line, before the explanation and the link", async () => {
+    renderPhonePage(
+      {
+        run_history_retention: {
+          state: "configured",
+          source: "flow",
+          effective_days: 30,
+          contributors: { space: null, flow: { days: 30 } }
+        }
+      },
+      ["flows_view", "flows_run", "retention_manage"]
+    );
+    const settings = await screen.findByRole("region", { name: "Inställningar" });
+    fireEvent.click(within(settings).getByRole("button", { name: "Inställningar" }));
+    const section = within(settings).getByRole("region", { name: "Gallring" });
+    const order = [
+      within(section).getByText("Inga körningar tas bort automatiskt."),
+      within(section).getByRole("button", { name: "Ändra gallring" }),
+      within(section).getByText(/^Ytan har ingen gallringstid/),
+      within(section).getByRole("link", { name: "Sätt gallringstid i ytans inställningar" })
+    ];
+    for (const [before, after] of order.slice(0, -1).map((node, i) => [node, order[i + 1]!])) {
+      expect(
+        before!.compareDocumentPosition(after!) & Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy();
+    }
+  });
+
+  it("puts the link to the space's settings on a line of its own under the space's time", async () => {
+    renderPhonePage(
+      {
+        run_history_retention: {
+          state: "configured",
+          source: "space",
+          effective_days: 90,
+          contributors: { space: { days: 90 }, flow: null }
+        }
+      },
+      ["flows_view", "flows_run", "retention_manage"]
+    );
+    const settings = await screen.findByRole("region", { name: "Inställningar" });
+    fireEvent.click(within(settings).getByRole("button", { name: "Inställningar" }));
+    const section = within(settings).getByRole("region", { name: "Gallring" });
+    const link = within(section).getByRole("link", { name: "Ändra i ytans inställningar" });
+    // Stacked by the layout on a phone, not by how much room the row has: a column.
+    expect(link.parentElement!.classList.contains("flex-col")).toBe(true);
+    // Turned sideways it is 844 px wide, and still a phone's layout.
+    act(() => setViewport({ width: 844, height: 390, pointer: "coarse" }));
+    const turned = within(section).getByRole("link", { name: "Ändra i ytans inställningar" });
+    expect(turned.parentElement!.classList.contains("flex-col")).toBe(true);
+    const status = within(section).getByText(
+      "Körningar kan tas bort automatiskt 90 dagar efter att de avslutades."
+    );
+    const change = within(section).getByRole("button", { name: "Ändra gallring" });
+    expect(status.compareDocumentPosition(change) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(section).getAllByRole("button")).toEqual([change]);
+  });
+
+  it("offers the retention change, under the status line, to someone who may change it", async () => {
+    const { container } = renderPhonePage(
+      {
+        run_history_retention: {
+          state: "configured",
+          source: "space",
+          effective_days: 90,
+          contributors: { space: { days: 90 }, flow: null }
+        }
+      },
+      ["flows_view", "flows_run", "retention_manage"]
+    );
+    const settings = await screen.findByRole("region", { name: "Inställningar" });
+    fireEvent.click(within(settings).getByRole("button", { name: "Inställningar" }));
+    const section = within(settings).getByRole("region", { name: "Gallring" });
+    const status = within(section).getByText(
+      "Körningar kan tas bort automatiskt 90 dagar efter att de avslutades."
+    );
+    const change = within(section).getByRole("button", { name: "Ändra gallring" });
+    // Under the status line, across the width, and before the rows.
+    expect(status.compareDocumentPosition(change) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(
+      change.compareDocumentPosition(within(section).getByText("Flödets gallringstid")) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    expect(within(section).queryByText(/^Gallringen ändras av/)).toBeNull();
+    await expectNoAxeViolations(container);
+
+    fireEvent.click(change);
+    const dialog = await screen.findByRole("dialog", { name: "Ändra gallring" });
+    await within(dialog).findByRole("textbox", { name: "Flödets gallringstid" });
+    // Stacked, the primary on top and Cancel under it.
+    const actions = within(dialog)
+      .getAllByRole("button")
+      .map((button) => button.textContent)
+      .filter((name) => name === "Spara" || name === "Avbryt");
+    expect(actions).toEqual(["Spara", "Avbryt"]);
+  });
+
+  it("tells someone who may not change the retention who does, and offers no change", async () => {
+    renderPhonePage({
+      run_history_retention: {
+        state: "configured",
+        source: "space",
+        effective_days: 90,
+        contributors: { space: { days: 90 }, flow: null }
+      }
+    });
+    const settings = await screen.findByRole("region", { name: "Inställningar" });
+    fireEvent.click(within(settings).getByRole("button", { name: "Inställningar" }));
+    const section = within(settings).getByRole("region", { name: "Gallring" });
+    expect(within(section).queryByRole("button")).toBeNull();
+    expect(within(section).queryByRole("link")).toBeNull();
+    expect(
+      within(section).getByText(/^Gallringen ändras av den som administrerar ytan/)
+    ).toBeTruthy();
   });
 
   it("offers no editing, only where it is done", async () => {
@@ -233,10 +420,10 @@ describe("FlowPage on a phone", () => {
     fireEvent.click(within(settings).getByRole("button", { name: "Inställningar" }));
     expect(
       within(settings).getByText(
-        "Körningar i personliga ytor tas inte bort automatiskt i den här versionen. Flödets tid gäller då bara en administratörs uttryckliga rensning."
+        "Körningar i en personlig yta tas inte bort automatiskt. Flödets gallringstid används bara när en administratör rensar körningar för hand."
       )
     ).toBeTruthy();
-    expect(within(settings).queryByText(/Ytan har ingen tid/)).toBeNull();
+    expect(within(settings).queryByText(/Ytan har ingen gallringstid/)).toBeNull();
   });
 
   it("does not offer to run a flow the caller may not run", async () => {

@@ -10,16 +10,15 @@ import { Heading, Text } from "@astryxdesign/core/Text";
 import { TextArea } from "@astryxdesign/core/TextArea";
 import { ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { useEffect, useEffectEvent, useId, useRef, useState } from "react";
+import { type ReactNode, useEffect, useEffectEvent, useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { Collapsible } from "@/components/astryx/collapsible";
 import { TextInput } from "@/components/astryx/text-input";
 import { EmptyState } from "@/components/composites/empty-state";
 import { LeaveConfirmation } from "@/components/composites/leave-confirmation";
-import { useAppContext } from "@/components/providers/app-context";
 import { EditorSection } from "./editor/editor-fields";
 import { useFlowReadLabel } from "./flow-read-layout";
-import { FlowRetentionDialog, FlowRetentionSummary } from "./flow-retention";
+import { FlowRetentionDialog, FlowRetentionSection } from "./flow-retention";
 import type { FlowDefinitionUpdate, FlowPublic } from "./flows-api";
 import {
   evidenceExportAllowed,
@@ -108,23 +107,32 @@ function savedValues(draft: SettingsDraft): string {
 type SpaceClassification = { name: string; security_level: number };
 
 /**
- * The read view: what a run asks for, how its audio is transcribed and whether
- * its evidence may be downloaded. Without `transcription` (a page that has not
- * read the space) it says only whether the flow transcribes. The page's title
- * names the flow, so the list does not; rows with nothing to say (no run form,
- * no transcription) are left out.
+ * The read view: what a run asks for, how its audio is transcribed, whether
+ * its evidence may be downloaded and, last, its retention. Without
+ * `transcription` (a page that has not read the space) it says only whether the
+ * flow transcribes. The page's title names the flow, so the list does not; rows
+ * with nothing to say (no run form, no transcription) are left out.
  */
 export function SettingsSummary({
   flow,
   transcription,
   hideIdentity = false,
   classification,
-  personalSpace = false
+  personalSpace = false,
+  retentionAction,
+  spaceRetentionHref,
+  headingLevel = 3
 }: {
   flow: FlowPublic;
   transcription?: TranscriptionResources;
   /** Whether the flow's space is personal, where runs are not removed automatically. */
   personalSpace?: boolean;
+  /** The retention section's change, for the one who may change it. */
+  retentionAction?: ReactNode;
+  /** The space's settings, for the one who may set the space's time. */
+  spaceRetentionHref?: string;
+  /** Its sections' heading level: 2 where the summary has no heading of its own above them. */
+  headingLevel?: 2 | 3;
   /** Leaves out the description and the step count, for a page whose header and step list say them. */
   hideIdentity?: boolean;
   /** The space's security classification, when it has one. */
@@ -184,9 +192,6 @@ export function SettingsSummary({
             : "flow_editor_tools_off"
         )}
       </MetadataListItem>
-      <MetadataListItem label={t("flows_retention_heading")}>
-        <FlowRetentionSummary flow={flow} personalSpace={personalSpace} />
-      </MetadataListItem>
       {classification ? (
         <MetadataListItem label={t("flows_classification_heading")}>
           {raisingSteps > 0
@@ -206,7 +211,7 @@ export function SettingsSummary({
         <MetadataList
           label={label}
           title={
-            <Heading level={3} weight="semibold" className="text-base">
+            <Heading level={headingLevel} weight="semibold" className="text-base">
               {t("flow_editor_tools_transcription_heading")}
             </Heading>
           }
@@ -219,6 +224,14 @@ export function SettingsSummary({
           />
         </MetadataList>
       ) : null}
+      <FlowRetentionSection
+        flow={flow}
+        personalSpace={personalSpace}
+        label={label}
+        headingLevel={headingLevel}
+        action={retentionAction}
+        spaceSettingsHref={spaceRetentionHref}
+      />
     </div>
   );
 }
@@ -406,23 +419,20 @@ function FormFieldRow({
 export function FlowSettings({
   flow,
   canEdit,
-  setsSpaceRetention = false,
+  mayChangeRetention = false,
   personalSpace = false,
   transcription,
   onSave,
   onEditingChange,
   openRequest,
   classification,
-  onDirtyChange
+  onDirtyChange,
+  spaceRetentionHref
 }: {
   flow: FlowPublic;
   canEdit: boolean;
-  /**
-   * Whether the person sets retention in the flow's space: its admin, or a
-   * personal space's owner who may edit the flow. The backend refuses
-   * everyone else a flow time.
-   */
-  setsSpaceRetention?: boolean;
+  /** Whether the person may change the flow's retention, as `useFlowRetentionAccess` decides. */
+  mayChangeRetention?: boolean;
   /** Whether the flow's space is personal, where runs are not removed automatically. */
   personalSpace?: boolean;
   /** The space's transcription models and services. */
@@ -440,11 +450,11 @@ export function FlowSettings({
   classification?: SpaceClassification | null;
   /** Told true while the open form differs from the flow it was loaded from. */
   onDirtyChange?: (dirty: boolean) => void;
+  /** The space's settings, for the one who may set the space's time. */
+  spaceRetentionHref?: string;
 }) {
   const t = useTranslations();
-  const { can } = useAppContext();
   const [retentionOpen, setRetentionOpen] = useState(false);
-  const mayChangeRetention = setsSpaceRetention && can("retention_manage");
   const announce = useAnnounce();
   const headingId = useId();
   const formId = useId();
@@ -670,26 +680,14 @@ export function FlowSettings({
         <Heading level={2} id={headingId} weight="semibold" className="text-lg">
           {t("flows_settings_heading")}
         </Heading>
-        {/* Every way to change the settings sits here, each named for what it
-            changes; retention has its own dialog, open on a published flow too. */}
-        {!editing && (canEdit || mayChangeRetention) ? (
-          <div className="flex flex-wrap items-center gap-2">
-            {canEdit ? (
-              <Button
-                ref={editButtonRef}
-                label={t("flows_settings_edit")}
-                size="sm"
-                onClick={openForm}
-              />
-            ) : null}
-            {mayChangeRetention ? (
-              <Button
-                label={t("flows_retention_change")}
-                size="sm"
-                onClick={() => setRetentionOpen(true)}
-              />
-            ) : null}
-          </div>
+        {/* Retention has its own change in its section, open on a published flow too. */}
+        {!editing && canEdit ? (
+          <Button
+            ref={editButtonRef}
+            label={t("flows_settings_edit")}
+            size="sm"
+            onClick={openForm}
+          />
         ) : null}
       </div>
       {!editing ? (
@@ -699,6 +697,16 @@ export function FlowSettings({
           hideIdentity
           classification={classification}
           personalSpace={personalSpace}
+          retentionAction={
+            mayChangeRetention ? (
+              <Button
+                label={t("flows_retention_change")}
+                size="sm"
+                onClick={() => setRetentionOpen(true)}
+              />
+            ) : undefined
+          }
+          spaceRetentionHref={spaceRetentionHref}
         />
       ) : (
         <form
@@ -845,6 +853,7 @@ export function FlowSettings({
         open={retentionOpen}
         onOpenChange={setRetentionOpen}
         personalSpace={personalSpace}
+        spaceSettingsHref={spaceRetentionHref}
       />
     </section>
   );
