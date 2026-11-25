@@ -1038,6 +1038,43 @@ describe("FlowPage", () => {
     expect(change()).toBeTruthy();
   });
 
+  it.each([
+    ["edits the space and manages retention", ["read", "edit"], ["retention_manage"], {}, true],
+    ["edits the space without the permission", ["read", "edit"], [], {}, false],
+    ["manages retention without editing the space", ["read"], ["retention_manage"], {}, false],
+    [
+      "edits the organization's space and manages retention",
+      ["read", "edit"],
+      ["retention_manage"],
+      { organization: true },
+      false
+    ]
+  ] as const)(
+    "links to the space's retention time only for someone who %s",
+    (_, spacePermissions, extra, overrides, linked) => {
+      const space = makeSpace({ permissions: [...spacePermissions], overrides });
+      const flow = makeFlow({
+        steps,
+        run_history_retention: {
+          state: "configured",
+          source: "space",
+          effective_days: 90,
+          contributors: { space: { days: 90 }, flow: null }
+        }
+      });
+      renderPage(flow, ["flows_view", "flows_manage", ...extra], space);
+      const section = screen.getByRole("region", {
+        name: messages.flows_retention_section_heading
+      });
+      const link = within(section).queryByRole("link", {
+        name: messages.flows_retention_space_link
+      });
+      expect(link?.getAttribute("href") ?? null).toBe(
+        linked ? "/spaces/space-1/settings?section=security#security" : null
+      );
+    }
+  );
+
   it("says a personal space's runs are not removed automatically", () => {
     const personal = makeSpace({ permissions: ["read"], overrides: { personal: true } });
     const flow = makeFlow({

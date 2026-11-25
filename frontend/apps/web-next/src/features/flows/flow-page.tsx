@@ -84,6 +84,7 @@ import {
   suggestionsOnPage,
   type FlowSuggestion
 } from "./flow-suggestions";
+import { useFlowRetentionAccess } from "./flow-retention";
 import { FlowSettings } from "./flow-settings";
 import { FlowStatusBadge } from "./flow-status";
 import type { FieldAnchor } from "./editor/field-problems";
@@ -180,7 +181,7 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
   const announce = useAnnounce();
   const queryClient = useQueryClient();
   const rescue = useFocusRescue();
-  const { routeId, space, can: spaceCan } = useSpace();
+  const { routeId, space } = useSpace();
   // What the space offers for transcription, for the settings and the draft check.
   const transcription = {
     models: space.transcription_models,
@@ -198,6 +199,7 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
   const mayEdit = permissions.can_edit;
   const canEdit = mayEdit && !isPublished;
   const canPublish = permissions.can_publish;
+  const retention = useFlowRetentionAccess(mayEdit);
   // Unpublishing leads to editing only for someone who may do both.
   const canUnpublishToEdit = canPublish && mayEdit;
   const canRun = isPublished && permissions.can_run;
@@ -875,7 +877,8 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
       key="settings"
       flow={flow}
       canEdit={canEdit}
-      setsSpaceRetention={space.personal ? mayEdit : spaceCan("edit", "space")}
+      setsSpaceRetention={retention.mayChange}
+      spaceRetentionHref={retention.spaceSettingsHref}
       personalSpace={space.personal}
       transcription={transcription}
       onSave={saveSettings}

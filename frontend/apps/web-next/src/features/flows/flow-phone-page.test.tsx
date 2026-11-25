@@ -233,10 +233,10 @@ describe("FlowPage on a phone", () => {
     fireEvent.click(within(settings).getByRole("button", { name: "Inställningar" }));
     expect(
       within(settings).getByText(
-        "Körningar i personliga ytor tas inte bort automatiskt i den här versionen. Flödets tid gäller då bara en administratörs uttryckliga rensning."
+        "Körningar i en personlig yta tas inte bort automatiskt. Flödets gallringstid används bara när en administratör rensar körningar för hand."
       )
     ).toBeTruthy();
-    expect(within(settings).queryByText(/Ytan har ingen tid/)).toBeNull();
+    expect(within(settings).queryByText(/Ytan har ingen gallringstid/)).toBeNull();
   });
 
   it("does not offer to run a flow the caller may not run", async () => {
