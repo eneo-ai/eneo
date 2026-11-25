@@ -3,12 +3,11 @@ import { Button } from "@astryxdesign/core/Button";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
-import { useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
 import { DocumentLink } from "@/features/auth/document-link";
 import { extendBrowserSession, getSessionSnapshot, resumeLoginPath } from "@/lib/api/refusal";
 import { navigateTo } from "@/lib/navigate-to";
-import { recordingHeld, subscribeRecording } from "@/lib/recording-activity";
 
 /** Two minutes, as the UK government patterns. */
 const WARNING_LEAD_MS = 120_000;
@@ -22,8 +21,7 @@ const LONGEST_TIMEOUT_MS = 2 ** 31 - 1;
 /**
  * Warns before the browser session ends and offers to stay signed in
  * (ACCESSIBILITY.md rule 15). At the end it keeps the page and offers to sign
- * in again, back to the same place. While a recording runs it also says that
- * the recording stops at the end and can be continued after signing in.
+ * in again, back to the same place.
  */
 export function SessionExpiryDialog({
   expiresAt,
@@ -44,7 +42,6 @@ export function SessionExpiryDialog({
   const [dismissed, setDismissed] = useState<string>();
   const [limitedAt, setLimitedAt] = useState<number>();
   const announcedDown = useRef(Infinity);
-  const recording = useSyncExternalStore(subscribeRecording, recordingHeld, () => false);
 
   // A session shorter than four minutes is warned for half of it, so staying
   // signed in leaves time to work; never under 20 seconds while that remains.
@@ -154,7 +151,6 @@ export function SessionExpiryDialog({
                         clock: format.dateTime(new Date(expiresAt), { timeStyle: "short" })
                       }
                     )}
-                {!expired && recording ? ` ${t("session_expiring_recording")}` : null}
               </p>
               {!expired && (
                 <p aria-hidden="true" className="text-ax-text-secondary text-sm tabular-nums">

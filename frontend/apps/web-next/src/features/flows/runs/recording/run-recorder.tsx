@@ -23,7 +23,6 @@ import { Banner } from "@astryxdesign/core/Banner";
 import { EneoApiError } from "@/lib/api/errors";
 import { formatBytes } from "@/lib/format";
 import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
-import { holdRecording } from "@/lib/recording-activity";
 import { stays, type RecordingPartInfo, type UploadEntry } from "../run-contract";
 import {
   liveSocketUrl,
@@ -469,9 +468,6 @@ export function RunRecorder({
     recorder.getSnapshot
   );
   const text = useSyncExternalStore(live.subscribe, live.getSnapshot, live.getSnapshot);
-  // The warning before the sign-in ends says what happens to a recording that runs or is paused.
-  const holding = snapshot.phase === "recording" || snapshot.phase === "paused";
-  useEffect(() => (holding ? holdRecording() : undefined), [holding]);
   // Once the microphone is given, not while the browser asks for it: one question at a time.
   const capturing = snapshot.phase === "recording";
   useEffect(() => {

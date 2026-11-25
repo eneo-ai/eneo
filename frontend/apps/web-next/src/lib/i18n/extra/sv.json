@@ -1876,7 +1876,6 @@
   "preferred_copy_format_description": "Välj vad huvudknappen Kopiera lägger i urklipp: formaterad text, som ser rätt ut i Word och e-post, eller Markdown, med tecken som ** och #. Båda finns alltid i menyn Fler åtgärder.",
   "session_expiring_title": "Din session går snart ut",
   "session_expiring_description": "Du loggas ut kl. {clock}. Fortsätt vara inloggad för att stanna kvar där du är.",
-  "session_expiring_recording": "En inspelning pågår. Den stannar när du loggas ut, och det som är inspelat finns kvar på den här enheten: logga in igen för att fortsätta inspelningen.",
   "session_extend_limit_title": "Sessionen kan inte förlängas mer",
   "session_extend_limit_description": "Du har varit inloggad så länge det går utan att logga in igen och loggas ut kl. {clock}. Spara det du arbetar med.",
   "crawl_view_failed_pages_named": "Sidor: {count}, visa de som inte kunde indexeras",

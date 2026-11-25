@@ -4,7 +4,6 @@ import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { initializeBrowserSession, SESSION_GENERATION_HEADER } from "@/lib/api/refusal";
 import messages from "@/lib/i18n/messages/sv.json";
-import { recordingHeld } from "@/lib/recording-activity";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp, testAppContext } from "@/test/render";
 import { setViewport } from "@/test/setup-dom";
@@ -406,28 +405,6 @@ describe("RunRecorder in the start dialog", () => {
     fireEvent.click(button(dialog, messages.flow_runs_start_submit));
     await waitFor(() => expect(onStarted).toHaveBeenCalled());
     expect(startBody()?.step_inputs).toEqual({ "step-1": { file_ids: ["file-1"] } });
-  });
-
-  it("tells the page a recording runs while it records or is paused, for the sign-in warning", async () => {
-    installBrowser();
-    grantMicrophone();
-    const { dialog } = await openDialog(audioContract());
-    expect(recordingHeld()).toBe(false);
-    fireEvent.click(button(dialog, messages.flow_transcript_rec_start));
-    await within(dialog).findByRole("button", { name: messages.flow_transcript_rec_pause });
-    expect(recordingHeld()).toBe(true);
-    fireEvent.click(button(dialog, messages.flow_transcript_rec_pause));
-    expect(recordingHeld()).toBe(true);
-    fireEvent.click(button(dialog, messages.flow_transcript_rec_stop));
-    await within(dialog).findByText(/^Inspelning, del 1/);
-    expect(recordingHeld()).toBe(false);
-
-    // A form that goes away mid-recording lets go too.
-    fireEvent.click(button(dialog, messages.flow_transcript_rec_continue));
-    await within(dialog).findByRole("button", { name: messages.flow_transcript_rec_pause });
-    expect(recordingHeld()).toBe(true);
-    cleanup();
-    expect(recordingHeld()).toBe(false);
   });
 
   it("sends a second recording on the same step as the parts of one recording", async () => {
