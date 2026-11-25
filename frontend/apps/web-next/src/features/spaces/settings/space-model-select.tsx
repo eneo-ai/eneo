@@ -343,11 +343,8 @@ export function SpaceModelSelect({
                       provider={group.models[0]?.provider_type ?? group.name}
                       className="size-5 shrink-0"
                     />
-                    {/* Two lines, not one: provider names can share a long start. */}
-                    <span
-                      className="line-clamp-2 min-w-0 text-sm font-medium break-words"
-                      title={group.name}
-                    >
+                    {/* Wrapped, never cut: provider names can share a long start. */}
+                    <span className="min-w-0 text-sm font-medium break-words" title={group.name}>
                       {group.name}
                     </span>
                   </CollapsibleTrigger>

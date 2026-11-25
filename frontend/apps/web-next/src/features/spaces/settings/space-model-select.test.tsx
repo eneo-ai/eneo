@@ -200,7 +200,8 @@ describe("SpaceModelSelect", () => {
   });
 
   it("keeps a long provider name whole, so two names with the same start stay apart", () => {
-    // On a phone the heading wraps to two lines; the title carries the rest.
+    // On a phone the heading wraps on as many lines as it needs: a cap would
+    // cut names that differ only at the end.
     const first = "Talserver hos Regionförbundet Norra (vLLM) r2";
     const second = "Talserver hos Regionförbundet Norra (vLLM) EN";
     renderModels([
@@ -212,8 +213,8 @@ describe("SpaceModelSelect", () => {
     for (const name of [first, second]) {
       const heading = screen.getByText(name);
       expect(heading.getAttribute("title")).toBe(name);
-      expect(heading.className).toContain("line-clamp-2");
-      expect(heading.className).not.toContain("truncate");
+      expect(heading.className).toContain("break-words");
+      expect(heading.className).not.toMatch(/line-clamp|truncate/);
     }
   });
 
