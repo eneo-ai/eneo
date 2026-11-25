@@ -291,6 +291,49 @@ describe("RecordingKeeper", () => {
     expect(keeper.keeping("step-1", "rec-1", 0)).toBe("tab");
   });
 
+  it("does not let a removed part's late storing speak for the part recorded in its place", async () => {
+    const { keeper, db } = setup();
+    const finished = (body: string) => ({
+      sessionId: "rec-1",
+      index: 0,
+      blob: new Blob([body], { type: "audio/webm" }),
+      mimeType: "audio/webm",
+      durationMs: 1_000,
+      capturedAt: START,
+      contract: CONTRACT,
+      streamed: false
+    });
+    // The part's journal is still writing when the part is stored, so its storing waits.
+    let writeChunk = () => {};
+    const appendChunk = db.appendChunk.bind(db);
+    vi.spyOn(db, "appendChunk").mockImplementation(async (...args) => {
+      await new Promise<void>((resolve) => (writeChunk = resolve));
+      return appendChunk(...args);
+    });
+    const journal = keeper.journalFor(
+      "step-1",
+      () => CONTRACT,
+      () => false
+    );
+    journal.begin(part(0));
+    await settle();
+    journal.append(part(0), new Blob(["a"]), 500);
+    await settle();
+    const removed = keeper.keepPart("step-1", finished("removed"));
+    await settle();
+
+    // The row is taken off, and the part recorded again under the same number is refused.
+    await keeper.forgetPart("step-1", "rec-1", 0);
+    const putPart = vi.spyOn(db, "putPart").mockRejectedValue(new Error("QuotaExceededError"));
+    expect(await keeper.keepPart("step-1", finished("again"))).toBe("tab");
+    putPart.mockRestore();
+    writeChunk();
+    await removed;
+
+    expect(keeper.keeping("step-1", "rec-1", 0)).toBe("tab");
+    expect(db.parts.size).toBe(0);
+  });
+
   it("forgets a recording thrown away: its parts, its journal and parts handed over late", async () => {
     const { keeper, db } = setup();
     const journal = keeper.journalFor(

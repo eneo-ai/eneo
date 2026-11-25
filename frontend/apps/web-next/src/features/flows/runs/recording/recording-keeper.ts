@@ -158,6 +158,8 @@ export class RecordingKeeper {
   #keeping = new Map<string, PartKeeping>();
   /** Each part handed to `keepPart`, by its key, until it is stored or not. */
   #storing = new Map<string, Promise<PartKeeping>>();
+  /** The latest storing of each part, by its key, until the part is taken off the form. */
+  #current = new Map<string, object>();
   #listeners = new Set<() => void>();
   #degraded = new Map<string, JournalDegradation>();
   #version = 0;
@@ -313,6 +315,8 @@ export class RecordingKeeper {
       index: part.index
     };
     this.#track(stepId, part.sessionId);
+    const token = {};
+    this.#current.set(partKey(address), token);
     let keeping: PartKeeping = "tab";
     if (this.#db && !this.#isForgotten(stepId, part.sessionId)) {
       try {
@@ -328,6 +332,9 @@ export class RecordingKeeper {
       await this.#db?.deletePart(address).catch(() => undefined);
       return "tab";
     }
+    // A part taken off the form, or stored again, while this storing waited: a part recorded
+    // under its number may not be on the device, so this one does not say it is.
+    if (keeping === "device" && this.#current.get(partKey(address)) !== token) return keeping;
     this.#keeping.set(partKey(address), keeping);
     this.#changed();
     return keeping;
@@ -337,6 +344,7 @@ export class RecordingKeeper {
   async forgetPart(stepId: string, sessionId: string, index: number): Promise<void> {
     const address: PartAddress = { flowId: this.#flowId, stepId, sessionId, index };
     this.#keeping.delete(partKey(address));
+    this.#current.delete(partKey(address));
     this.#changed();
     try {
       await this.#db?.deletePart(address);
