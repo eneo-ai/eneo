@@ -6361,6 +6361,7 @@
   "provider_models_list_failed": "The server sent no model list",
   "provider_models_list_failed_description": "Check the address and the key. You can also enter the model's id below.",
   "hosting_region_own_server_help": "Where the server that runs the model is located. Eneo cannot detect this, so choose it yourself.",
+  "hosting_other": "Another location",
   "hosting_region_placeholder": "Choose a region",
   "form_problem_choose_hosting_region": "Choose where the server is located.",
   "price_per_million": "{price} / 1M",

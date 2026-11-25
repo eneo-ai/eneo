@@ -205,6 +205,7 @@
   "provider_models_list_failed": "Servern skickade ingen modellista",
   "provider_models_list_failed_description": "Kontrollera adressen och nyckeln. Du kan också skriva modellens id nedan.",
   "hosting_region_own_server_help": "Var servern som kör modellen står. Eneo kan inte se det, så välj själv.",
+  "hosting_other": "Annan plats",
   "hosting_region_placeholder": "Välj region",
   "form_problem_choose_hosting_region": "Välj var servern står.",
   "price_per_million": "{price} / 1M",

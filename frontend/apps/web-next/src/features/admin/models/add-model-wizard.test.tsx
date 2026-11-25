@@ -1242,6 +1242,21 @@ describe("the model step for a server at an address of its own", () => {
     });
   });
 
+  it("lets a server outside the listed regions say so", async () => {
+    const { dialog, onOpenChange } = renderStep(gateway, liveTranscriptionModels);
+    const hosting = await within(dialog).findByRole("combobox", { name: /^Hosting-region/ });
+    fireEvent.keyDown(hosting, { key: "Enter" });
+    fireEvent.click(await screen.findByRole("option", { name: "Annan plats" }));
+    fireEvent.click(await within(dialog).findByRole("checkbox", { name: /pianissimo-sv/ }));
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till 1 modell" }));
+
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+    expect(api.POST).toHaveBeenCalledWith("/api/v1/admin/tenant-models/transcription/", {
+      body: expect.objectContaining({ name: "pianissimo-sv", hosting: "other" })
+    });
+  });
+
   it("asks for the region of a provider just created with an address", async () => {
     const { dialog } = renderWizard({ fixedKind: "transcription", caps: catalogCaps });
     api.POST.mockImplementation(

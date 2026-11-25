@@ -9,7 +9,10 @@ export const HOSTING_REGIONS = [
   "kor",
   "deu",
   "fra",
-  "jpn"
+  "jpn",
+  // A server outside the listed regions: its location is then recorded as
+  // known to be elsewhere rather than guessed.
+  "other"
 ] as const;
 export type HostingRegion = (typeof HOSTING_REGIONS)[number];
 
