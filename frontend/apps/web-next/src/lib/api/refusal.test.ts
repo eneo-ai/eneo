@@ -775,4 +775,138 @@ describe("session expiry and renewal", () => {
     expect(owner.getSessionSnapshot()).toMatchObject({ generation: "document-session", expiresAt });
     stop();
   });
+
+  describe("time limit", () => {
+    const LIMIT = 15_000;
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    });
+
+    /** A server that never answers: the request ends only when it is aborted. */
+    const silent = (_: unknown, init?: RequestInit) =>
+      new Promise<Response>((_, reject) => {
+        const signal = init!.signal!;
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    /** A refusal naming another person's session (9090) whose body never arrives whole. */
+    const cutOff = (lost?: Error) => (_: unknown, init?: RequestInit) => {
+      const signal = init!.signal!;
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('{"message":"Refused","eneo_error_code":90'));
+          if (lost) controller.error(lost);
+          else
+            signal.addEventListener("abort", () => controller.error(signal.reason), { once: true });
+        }
+      });
+      return Promise.resolve(
+        new Response(body, { status: 401, headers: { "content-type": "application/json" } })
+      );
+    };
+    /** Whether a promise has settled, once pending callbacks have run. */
+    const done = async (promise: Promise<unknown>) => {
+      let settled = false;
+      void promise.then(
+        () => (settled = true),
+        () => (settled = true)
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      return settled;
+    };
+    const asks = [
+      ["check", () => owner.checkBrowserSession()],
+      ["renewal", () => owner.extendBrowserSession()]
+    ] as const;
+
+    it("gives up a check that has no answer at the limit and lets the next check start", async () => {
+      await bound();
+      fetcher.mockImplementationOnce(silent);
+      const checking = owner.checkBrowserSession();
+      await vi.advanceTimersByTimeAsync(LIMIT - 1);
+      expect(await done(checking)).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await done(checking)).toBe(true);
+      const error = await checking.catch((reason: unknown) => reason);
+      expect(error).toMatchObject({ name: "EneoApiError", status: 504 });
+      // Aborted, not raced: a late answer can never be applied.
+      expect(fetcher.mock.calls[0]![1]!.signal!.aborted).toBe(true);
+      expect(owner.getSessionSnapshot()).toEqual({
+        status: "bound",
+        generation: "document-session",
+        checkError: error
+      });
+      // Nothing holds requests any more: the next check asks the server again.
+      await owner.checkBrowserSession();
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      await expect(
+        owner.prepareBrowserRequest(new Request("https://eneo.test/api"))
+      ).resolves.toBeInstanceOf(Request);
+    });
+
+    it("gives up a renewal that has no answer at the limit and keeps the session for a retry", async () => {
+      await bound();
+      fetcher.mockImplementationOnce(silent);
+      const renewal = owner.extendBrowserSession();
+      const held = owner
+        .prepareBrowserRequest(new Request("https://eneo.test/api", { method: "POST" }))
+        .catch((reason: unknown) => reason);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(LIMIT);
+      expect(await done(renewal)).toBe(true);
+      const error = await renewal.catch((reason: unknown) => reason);
+      // Never an AbortError: streams do not reconnect after one.
+      expect(error).toMatchObject({ name: "EneoApiError", status: 504 });
+      expect(await held).toBe(error);
+      expect(owner.getSessionSnapshot()).toEqual({
+        status: "bound",
+        generation: "document-session"
+      });
+      expect(FakeChannel.all.flatMap((channel) => channel.posted)).toEqual([]);
+      expect(navigate).not.toHaveBeenCalled();
+    });
+
+    it.each(asks)("never takes a %s refusal the limit cut off for an expiry", async (_, ask) => {
+      await bound();
+      fetcher.mockImplementationOnce(cutOff());
+      const asking = ask();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(LIMIT);
+      expect(await done(asking)).toBe(true);
+      await expect(asking).rejects.toMatchObject({ name: "EneoApiError", status: 504 });
+      expect(navigate).not.toHaveBeenCalled();
+      expect(owner.getSessionSnapshot()).toMatchObject({
+        status: "bound",
+        generation: "document-session"
+      });
+      expect(FakeChannel.all.flatMap((channel) => channel.posted)).toEqual([]);
+    });
+
+    it.each(asks)(
+      "never takes a %s refusal a lost connection cut off for an expiry",
+      async (_, ask) => {
+        await bound();
+        fetcher.mockImplementationOnce(cutOff(new TypeError("network error")));
+        await expect(ask()).rejects.toThrow("network error");
+        expect(navigate).not.toHaveBeenCalled();
+        expect(owner.getSessionSnapshot()).toMatchObject({
+          status: "bound",
+          generation: "document-session"
+        });
+      }
+    );
+
+    it.each([
+      ...asks.map(([kind, ask]) => [kind, ask, ""] as const),
+      ...asks.map(([kind, ask]) => [kind, ask, "<html>"] as const)
+    ])("still takes a %s refusal whose whole body is %j for an expiry", async (_, ask, body) => {
+      await bound();
+      fetcher.mockResolvedValueOnce(new Response(body, { status: 401 }));
+      await expect(ask()).rejects.toMatchObject({ status: 401 });
+      expect(navigate).toHaveBeenCalledExactlyOnceWith("/login?next=%2Fspaces%2Fx%3Fa%3D1", {
+        replace: true
+      });
+    });
+  });
 });
