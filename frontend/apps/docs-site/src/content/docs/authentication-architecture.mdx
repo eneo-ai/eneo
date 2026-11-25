@@ -168,12 +168,13 @@ that binding. Resuming a hidden or cached page checks the session before more
 authenticated work. A changed session aborts active work, clears cached data
 and requests a new document; if the user cancels navigation, a blocking screen
 offers an explicit reload. A temporary network failure preserves the binding
-and unsaved form state, blocking new requests until a session check or renewal
-succeeds. A session check or renewal with no answer within 15 seconds counts as
-a temporary failure, and the requests waiting for it fail with it. After a check
-fails on the network, at that limit or with a server error, the next request
-checks the session again before it is sent, unless the browser reports that it
-is offline.
+and unsaved form state. A session check or renewal with no answer within 15
+seconds counts as a temporary failure, and the requests waiting for it fail with
+it. A failed session check blocks new requests until a session check or renewal
+succeeds. A renewal with no answer leaves the binding as it was, so a later
+request can use it. After a check fails on the network, at that limit or with a
+server error, the next request checks the session again before it is sent,
+unless the browser reports that it is offline.
 Signed downloads use their resource token instead of adopting the current cookie.
 
 The session check also answers `Eneo-Session-Expires-In`, the whole seconds the
