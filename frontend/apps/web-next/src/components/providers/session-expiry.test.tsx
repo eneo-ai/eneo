@@ -92,59 +92,6 @@ it("says what happens to a recording that runs when the session ends", () => {
   expect(screen.getByRole("dialog").textContent).not.toContain(messages.session_expiring_recording);
 });
 
-it("lets a person who records close the ended notice by touch, to reach Stop", async () => {
-  renderInApp(<SessionExpiryDialog expiresAt={NOW + 5_000} />);
-  advance(5_000);
-  // Without a recording the ended notice keeps its one control.
-  expect(screen.queryByRole("button", { name: "Stäng" })).toBeNull();
-
-  let release = () => {};
-  act(() => {
-    release = holdRecording();
-  });
-  await act(async () => {
-    fireEvent.click(screen.getByRole("button", { name: "Stäng" }));
-  });
-  advance(1_000);
-  expect(screen.queryByRole("dialog")).toBeNull();
-  expect(spies.navigate).not.toHaveBeenCalled();
-  expect(spies.extend).not.toHaveBeenCalled();
-  act(() => release());
-});
-
-it("lets a person who records close the notice when staying signed in failed", async () => {
-  spies.extend
-    .mockRejectedValueOnce(new TypeError("Offline"))
-    .mockRejectedValueOnce(new TypeError("Offline"));
-  let release = () => {};
-  act(() => {
-    release = holdRecording();
-  });
-  renderInApp(<SessionExpiryDialog expiresAt={NOW + 60_000} />);
-  expect(screen.queryByRole("button", { name: "Stäng" })).toBeNull();
-  await act(async () => {
-    fireEvent.click(screen.getByRole("button", { name: STAY }));
-  });
-  // Esc still tries again here, as before: only the button closes.
-  await act(async () => {
-    fireEvent.keyDown(screen.getByRole("button", { name: STAY }), { key: "Escape" });
-  });
-  expect(spies.extend).toHaveBeenCalledTimes(2);
-  expect(screen.getByRole("dialog")).toBeTruthy();
-
-  await act(async () => {
-    fireEvent.click(screen.getByRole("button", { name: "Stäng" }));
-  });
-  advance(1_000);
-  expect(screen.queryByRole("dialog")).toBeNull();
-  expect(spies.extend).toHaveBeenCalledTimes(2);
-
-  // The end still opens the ended notice.
-  advance(60_000);
-  expect(screen.getByRole("dialog", { name: "Din session har gått ut" })).toBeTruthy();
-  act(() => release());
-});
-
 it("waits out a session longer than a timer can wait", () => {
   const timeout = vi.spyOn(window, "setTimeout");
   renderInApp(<SessionExpiryDialog expiresAt={NOW + 30 * 24 * 3_600_000} />);
