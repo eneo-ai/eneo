@@ -30,6 +30,8 @@ const silent = (_: unknown, init?: RequestInit) =>
   });
 /** The session check's time limit. */
 const CHECK_LIMIT_MS = 15_000;
+/** The row's own words when the file did not reach the server. */
+const NOT_SENT = "Filen kom inte fram. Försök igen med knappen, eller ta bort filen.";
 
 let fetcher: ReturnType<typeof vi.fn<typeof fetch>>;
 let owner: typeof import("@/lib/api/refusal");
@@ -153,9 +155,7 @@ it("fails a part whose session check never answers at the check's limit, in the 
       nextRetryAt: expect.any(Number)
     })
   );
-  expect(row(hook).problem).toBe(
-    "Filen kom inte fram. Försök igen med knappen, eller ta bort filen."
-  );
+  expect(row(hook).problem).toBe(NOT_SENT);
   expect(UploadRequest.sent).toHaveLength(0);
 });
 
@@ -167,6 +167,8 @@ describe("a recorded part sent again after the session check failed", () => {
     const hook = form();
     record(hook, 0);
     await vi.waitFor(() => expect(row(hook)).toMatchObject({ state: "failed", retryable: true }));
+    // In the row's own words, also when the check answered 503.
+    expect(row(hook).problem).toBe(NOT_SENT);
     return hook;
   }
 
