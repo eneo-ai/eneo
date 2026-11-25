@@ -1,6 +1,5 @@
 from typing import TYPE_CHECKING
 
-from eneo.files.file_home import FileInUseElsewhereError
 from eneo.main.exceptions import (
     BadRequestException,
     NotFoundException,
@@ -131,16 +130,15 @@ class ResourceMoverService:
         )
         # The Files that live in the source space and that only the assistant
         # and its conversations use follow it. One that something else uses
-        # too can neither follow nor stay behind, so the move is refused.
-        try:
-            await self.file_homes.move_with_assistant(
-                assistant_id,
-                source_space_id=locked_source_space_id,
-                target_space_id=space_id,
-                tenant_id=self.user.tenant_id,
-            )
-        except FileInUseElsewhereError as refusal:
-            raise BadRequestException(str(refusal)) from refusal
+        # too can neither follow nor stay behind, so the move is refused, and
+        # the refusal says what else uses it.
+        await self.file_homes.move_with_assistant(
+            assistant_id,
+            source_space_id=locked_source_space_id,
+            target_space_id=space_id,
+            tenant_id=self.user.tenant_id,
+            viewer_user_id=self.user.id,
+        )
 
         target_space.add_assistant(assistant)
 

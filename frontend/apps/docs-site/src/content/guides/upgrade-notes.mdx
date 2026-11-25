@@ -416,7 +416,7 @@ What changes for API consumers:
 Deleting and moving:
 
 - Deleting a space, or removing a person and with them their own space, removes the files that live in the space. If one of them is still used in another space, the deletion is refused with `409` and `code: "file_in_use_elsewhere"` and nothing is changed. A file without a home is left alone, as before.
-- Moving an assistant or a service to another space moves the home of the files that only it and its conversations use. If one of them is also used by something else, the move is refused with `400` and the reason.
+- Moving an assistant or a service to another space moves the home of the files that only it and its conversations use. If one of them is also used by something else, the move is refused with `409` and `code: "file_in_use_elsewhere"`. `details.blockers` in the answer says what else uses the files: the other assistants, apps and services by name, the caller's own conversations by name, and only the number of conversations that belong to other people. The React app shows the list in the move dialog.
 
 Files from before the upgrade have no home until it is filled in. Run this once after the upgrade, inside the worker environment and at a quiet time:
 

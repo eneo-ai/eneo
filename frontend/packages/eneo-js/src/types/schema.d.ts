@@ -1415,7 +1415,7 @@ export interface paths {
     put?: never;
     /**
      * Transfer Assistant To Space
-     * @description Transfer an assistant to another space. Refused with 400 while the assistant has Skill bindings or a web widget that is not archived.
+     * @description Transfer an assistant to another space. Refused with 400 while the assistant has Skill bindings or a web widget that is not archived. Files that only the assistant and its conversations use follow it. Refused with 409 and `code: file_in_use_elsewhere` while one of them is also used by something else; `details.blockers` names the other assistants, apps and services, the caller's own conversations, and the number of conversations that belong to other people.
      */
     post: operations["transfer_assistant_to_space_api_v1_assistants__id__transfer__post"];
     delete?: never;
@@ -1955,7 +1955,7 @@ export interface paths {
     put?: never;
     /**
      * Transfer Service To Space
-     * @description Transfer a service to another space.
+     * @description Transfer a service to another space. Files that only the service's questions use follow it. Refused with 409 and `code: file_in_use_elsewhere` while one of them is also used by something else; `details.blockers` says what.
      */
     post: operations["transfer_service_to_space_api_v1_services__id__transfer__post"];
     delete?: never;
@@ -33485,6 +33485,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -36718,6 +36727,15 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };

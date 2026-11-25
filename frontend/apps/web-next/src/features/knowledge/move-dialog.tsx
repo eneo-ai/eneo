@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
-import { useId, useRef, useState } from "react";
+import { type ReactNode, useId, useRef, useState } from "react";
 import {
   FieldProblem,
   fieldProblemProps,
@@ -39,6 +39,7 @@ export function MoveResourceDialog({
   hint,
   confirmLabel,
   pending,
+  problem,
   onMove
 }: {
   open: boolean;
@@ -47,6 +48,8 @@ export function MoveResourceDialog({
   hint?: string;
   confirmLabel: string;
   pending: boolean;
+  /** Why the last move was refused, shown above the buttons. */
+  problem?: ReactNode;
   onMove: (targetSpaceId: string) => void;
 }) {
   const t = useTranslations();
@@ -109,6 +112,7 @@ export function MoveResourceDialog({
               {hint}
             </p>
           )}
+          {problem}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>

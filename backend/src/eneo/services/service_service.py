@@ -2,7 +2,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from eneo.authentication.principal import Principal
-from eneo.files.file_home import FileHomes, FileInUseElsewhereError
+from eneo.files.file_home import FileHomes
 from eneo.groups_legacy.group_service import GroupService
 from eneo.main.exceptions import BadRequestException, UnauthorizedException
 from eneo.main.models import ResourcePermission
@@ -257,14 +257,13 @@ class ServiceService:
             )
         # The Files that live in the source space and that only the service's
         # questions use follow it; one that something else uses too can
-        # neither follow nor stay behind, so the move is refused.
-        try:
-            await FileHomes(self.space_repo.session).move_with_service(
-                service_id,
-                source_space_id=source_space.id,
-                target_space_id=space_id,
-                tenant_id=self.user.tenant_id,
-            )
-        except FileInUseElsewhereError as refusal:
-            raise BadRequestException(str(refusal)) from refusal
+        # neither follow nor stay behind, so the move is refused, and the
+        # refusal says what else uses it.
+        await FileHomes(self.space_repo.session).move_with_service(
+            service_id,
+            source_space_id=source_space.id,
+            target_space_id=space_id,
+            tenant_id=self.user.tenant_id,
+            viewer_user_id=self.user.id,
+        )
         await self.repo.add_service_to_space(service_id=service_id, space_id=space_id)

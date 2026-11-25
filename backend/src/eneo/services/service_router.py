@@ -221,8 +221,11 @@ async def get_service_runs(
 @router.post(
     "/{id}/transfer/",
     status_code=204,
-    responses=responses.get_responses([400, 403, 404]),
-    description="Transfer a service to another space.",
+    responses=responses.get_responses([400, 403, 404, 409]),
+    description="Transfer a service to another space. Files that only the "
+    "service's questions use follow it. Refused with 409 and "
+    "`code: file_in_use_elsewhere` while one of them is also used by something "
+    "else; `details.blockers` says what.",
 )
 @endpoint_access(
     authentication=Authentication.USER,

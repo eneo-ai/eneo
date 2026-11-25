@@ -7687,5 +7687,14 @@
   "federation_admin_saving_leave_title": "Still saving",
   "federation_admin_saving_leave_description": "The save continues if you leave, but you will not see whether it succeeds.",
   "federation_admin_saving_leave_confirm": "Leave page",
-  "chat_extracted_pictures": "Pictures from the file"
+  "chat_extracted_pictures": "Pictures from the file",
+  "move_blocked_title": "The assistant cannot be moved yet",
+  "move_blocked_description": "{count, plural, one {A file the assistant uses is also used by something else.} other {# files the assistant uses are also used by something else.}} A file belongs to one space and cannot follow while something else uses it. Remove the uses below, or the files from the assistant, and try again.",
+  "move_blocked_assistant": "The assistant {name} has the file attached",
+  "move_blocked_app": "The app {name} uses the file",
+  "move_blocked_service": "The service {name} was asked about the file",
+  "move_blocked_own_conversation": "Your conversation {name}",
+  "move_blocked_own_conversation_with": "Your conversation {name} with {with}",
+  "move_blocked_other_conversations": "{count, plural, one {# conversation that belongs to someone else} other {# conversations that belong to other people}}",
+  "move_blocked_elsewhere": "{count, plural, one {# use in another space} other {# uses in other spaces}}"
 }

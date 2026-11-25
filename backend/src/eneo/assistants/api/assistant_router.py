@@ -1280,9 +1280,14 @@ async def leave_feedback(
     status_code=204,
     description=(
         "Transfer an assistant to another space. Refused with 400 while the "
-        "assistant has Skill bindings or a web widget that is not archived."
+        "assistant has Skill bindings or a web widget that is not archived. "
+        "Files that only the assistant and its conversations use follow it. "
+        "Refused with 409 and `code: file_in_use_elsewhere` while one of them "
+        "is also used by something else; `details.blockers` names the other "
+        "assistants, apps and services, the caller's own conversations, and "
+        "the number of conversations that belong to other people."
     ),
-    responses=responses.get_responses([400, 403, 404]),
+    responses=responses.get_responses([400, 403, 404, 409]),
 )
 @endpoint_access(
     authentication=Authentication.USER,

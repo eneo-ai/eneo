@@ -7687,5 +7687,14 @@
   "federation_admin_saving_leave_title": "Sparningen pågår",
   "federation_admin_saving_leave_description": "Sparningen fortsätter även om du lämnar sidan, men då ser du inte om den lyckas.",
   "federation_admin_saving_leave_confirm": "Lämna sidan",
-  "chat_extracted_pictures": "Bilder ur filen"
+  "chat_extracted_pictures": "Bilder ur filen",
+  "move_blocked_title": "Assistenten kan inte flyttas än",
+  "move_blocked_description": "{count, plural, one {En fil som assistenten använder används också av annat.} other {# filer som assistenten använder används också av annat.}} En fil hör hemma i ett space och kan inte följa med så länge något annat använder den. Ta bort användningarna nedan, eller filerna från assistenten, och försök igen.",
+  "move_blocked_assistant": "Assistenten {name} har filen bifogad",
+  "move_blocked_app": "Appen {name} använder filen",
+  "move_blocked_service": "Tjänsten {name} har fått filen i en fråga",
+  "move_blocked_own_conversation": "Din konversation {name}",
+  "move_blocked_own_conversation_with": "Din konversation {name} med {with}",
+  "move_blocked_other_conversations": "{count, plural, one {# konversation som tillhör någon annan} other {# konversationer som tillhör andra}}",
+  "move_blocked_elsewhere": "{count, plural, one {# användning i ett annat space} other {# användningar i andra space}}"
 }

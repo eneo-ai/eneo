@@ -1,6 +1,6 @@
 ---
 title: Uppgraderingsanteckningar
-translationSource: guides/upgrade-notes.mdx@a52f754c3a12
+translationSource: guides/upgrade-notes.mdx@fc38e88cb9e2
 ---
 
 import { Callout } from "nextra/components";
@@ -421,7 +421,7 @@ Det här ändras för API-klienter:
 Borttagning och flytt:
 
 - När ett space tas bort, eller en person tas bort och med den personens eget space, tas de filer bort som hör hemma i spacet. Om någon av dem fortfarande används i ett annat space nekas borttagningen med `409` och `code: "file_in_use_elsewhere"` och ingenting ändras. En fil utan hem lämnas i fred, som förut.
-- När en assistent eller en tjänst flyttas till ett annat space flyttas hemmet för de filer som bara den och dess konversationer använder. Om någon av dem också används av något annat nekas flytten med `400` och skälet.
+- När en assistent eller en tjänst flyttas till ett annat space flyttas hemmet för de filer som bara den och dess konversationer använder. Om någon av dem också används av något annat nekas flytten med `409` och `code: "file_in_use_elsewhere"`. `details.blockers` i svaret säger vad mer som använder filerna: andra assistenter, appar och tjänster med namn, anroparens egna konversationer med namn, och bara antalet konversationer som tillhör andra. React-appen visar listan i flyttdialogen.
 
 Filer från före uppgraderingen har inget hem förrän det fylls i. Kör det här en gång efter uppgraderingen, i worker-miljön och vid en lugn tidpunkt:
 

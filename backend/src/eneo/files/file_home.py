@@ -17,7 +17,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -42,6 +42,11 @@ class FileHomeError(Exception):
     """A File cannot be given, or keep, the home that was asked for."""
 
     code = "file_home_error"
+
+    def __init__(self, message: str, *, details: dict[str, object] | None = None):
+        super().__init__(message)
+        # What stands in the way, for a client to show. Sent with the refusal.
+        self.details = details or {}
 
 
 class FileHomeConflictError(FileHomeError):
@@ -304,6 +309,29 @@ if _RELEASED_WITH_A_SPACE != _TABLES_WITH_USES:
         "Deleting a space must release every kind of File use: "
         f"{sorted(_RELEASED_WITH_A_SPACE ^ _TABLES_WITH_USES)}"
     )
+
+
+def _in_words(blockers: dict[str, object]) -> str:
+    """One line naming how many of each kind stand in the way."""
+    counts = {
+        "assistant": len(cast("list[object]", blockers["assistants"])),
+        "app": len(cast("list[object]", blockers["apps"])),
+        "service": len(cast("list[object]", blockers["services"])),
+        "conversation of yours": len(cast("list[object]", blockers["conversations"])),
+        "conversation of other people": cast(int, blockers["other_conversations"]),
+        "use outside the space": cast(int, blockers["elsewhere"]),
+    }
+    plural = {
+        "conversation of yours": "conversations of yours",
+        "conversation of other people": "conversations of other people",
+        "use outside the space": "uses outside the space",
+    }
+    parts = [
+        f"{count} {kind if count == 1 else plural.get(kind, kind + 's')}"
+        for kind, count in counts.items()
+        if count
+    ]
+    return ", ".join(parts) or "another use"
 
 
 class FileHomes:
@@ -696,6 +724,7 @@ class FileHomes:
         source_space_id: UUID,
         target_space_id: UUID,
         tenant_id: UUID,
+        viewer_user_id: UUID | None = None,
     ) -> int:
         """Move the home of the Files an assistant takes along to another space.
 
@@ -703,6 +732,10 @@ class FileHomes:
         assistant or its conversations move. A family that something else
         uses too cannot follow, and cannot be left behind either while the
         assistant still uses it, so the move is refused. No copy is made.
+
+        The refusal says what else uses the Files. ``viewer_user_id`` is the
+        person moving the assistant: their own conversations are named, other
+        people's are only counted.
         """
         attached = sa.select(AssistantsFiles.file_id.label("file_id")).where(
             AssistantsFiles.assistant_id == assistant_id
@@ -716,9 +749,16 @@ class FileHomes:
         return await self._move_with(
             sa.union_all(attached, asked).subquery("moving_uses"),
             what="the assistant",
+            not_the_moving=sa.and_(
+                AssistantsFiles.assistant_id != assistant_id,
+            ),
+            not_asked_of_the_moving=Sessions.assistant_id.is_distinct_from(
+                assistant_id
+            ),
             source_space_id=source_space_id,
             target_space_id=target_space_id,
             tenant_id=tenant_id,
+            viewer_user_id=viewer_user_id,
         )
 
     async def move_with_service(
@@ -728,6 +768,7 @@ class FileHomes:
         source_space_id: UUID,
         target_space_id: UUID,
         tenant_id: UUID,
+        viewer_user_id: UUID | None = None,
     ) -> int:
         """Move the home of the Files a service takes along to another space.
 
@@ -749,9 +790,15 @@ class FileHomes:
         return await self._move_with(
             asked.subquery("moving_uses"),
             what="the service",
+            not_the_moving=sa.true(),
+            not_asked_of_the_moving=sa.and_(
+                Questions.service_id.is_distinct_from(service_id),
+                Sessions.service_id.is_distinct_from(service_id),
+            ),
             source_space_id=source_space_id,
             target_space_id=target_space_id,
             tenant_id=tenant_id,
+            viewer_user_id=viewer_user_id,
         )
 
     async def _move_with(
@@ -759,9 +806,12 @@ class FileHomes:
         own_uses: sa.Subquery,
         *,
         what: str,
+        not_the_moving: sa.ColumnElement[bool],
+        not_asked_of_the_moving: sa.ColumnElement[bool],
         source_space_id: UUID,
         target_space_id: UUID,
         tenant_id: UUID,
+        viewer_user_id: UUID | None,
     ) -> int:
         """Move the homes of the families that only ``own_uses`` use.
 
@@ -810,10 +860,18 @@ class FileHomes:
             root for root in set(moving.values()) if all_count[root] != own_count[root]
         )
         if shared:
+            blockers = await self._what_else_uses(
+                [member for member, root in moving.items() if root in shared],
+                not_the_moving=not_the_moving,
+                not_asked_of_the_moving=not_asked_of_the_moving,
+                space_id=source_space_id,
+                viewer_user_id=viewer_user_id,
+            )
             raise FileInUseElsewhereError(
                 f"{len(shared)} file(s) of {what} are also used by something "
-                f"else in the space. Remove those uses, or the files from {what}, "
-                "before moving it."
+                f"else: {_in_words(blockers)}. Remove those uses, or the files "
+                f"from {what}, before moving it.",
+                details={"files": len(shared), "blockers": blockers},
             )
         result = await self._session.execute(
             sa.update(Files)
@@ -821,6 +879,139 @@ class FileHomes:
             .values(home_space_id=target_space_id)
         )
         return affected_row_count(result)
+
+    async def _what_else_uses(
+        self,
+        member_ids: Sequence[UUID],
+        *,
+        not_the_moving: sa.ColumnElement[bool],
+        not_asked_of_the_moving: sa.ColumnElement[bool],
+        space_id: UUID,
+        viewer_user_id: UUID | None,
+    ) -> dict[str, object]:
+        """What, besides the thing that is moving, uses some Files.
+
+        Assistants, apps and services of the space are named: whoever may
+        move something out of the space can see them. A conversation is named
+        only to the person it belongs to; other people's are counted. A use
+        outside the space is counted without saying where.
+        """
+        members = _ids("blocked_members", sorted(member_ids))
+        elsewhere = 0
+
+        async def named(statement: Select[Any]) -> list[dict[str, str]]:
+            nonlocal elsewhere
+            listed: list[dict[str, str]] = []
+            for owner_id, name, owner_space_id in (
+                await self._session.execute(statement.distinct())
+            ).tuples():
+                if owner_space_id == space_id:
+                    listed.append({"id": str(owner_id), "name": name})
+                else:
+                    elsewhere += 1
+            return sorted(listed, key=lambda owner: (owner["name"], owner["id"]))
+
+        assistants = await named(
+            sa.select(Assistants.id, Assistants.name, Assistants.space_id)
+            .join(AssistantsFiles, AssistantsFiles.assistant_id == Assistants.id)
+            .where(AssistantsFiles.file_id == sa.any_(members), not_the_moving)
+        )
+        attached_apps = (
+            sa.select(Apps.id, Apps.name, Apps.space_id)
+            .join(AppsFiles, AppsFiles.app_id == Apps.id)
+            .where(AppsFiles.file_id == sa.any_(members))
+        )
+        run_apps = (
+            sa.select(Apps.id, Apps.name, Apps.space_id)
+            .join(AppRuns, AppRuns.app_id == Apps.id)
+            .join(AppRunsFiles, AppRunsFiles.app_run_id == AppRuns.id)
+            .where(AppRunsFiles.file_id == sa.any_(members))
+        )
+        apps = await named(
+            sa.select(sa.union(attached_apps, run_apps).subquery("apps_using"))
+        )
+
+        with_assistant = aliased(Assistants)
+        with_service = aliased(Services)
+        asked_of = aliased(Services)
+        # Outer joins: any of these may be empty, whatever the columns say.
+        asked = cast(
+            "list[tuple[Any, ...]]",
+            (
+                await self._session.execute(
+                    sa.select(
+                        Sessions.id,
+                        Sessions.name,
+                        Sessions.user_id,
+                        sa.func.coalesce(with_assistant.name, with_service.name),
+                        sa.func.coalesce(
+                            with_assistant.space_id, with_service.space_id
+                        ),
+                        asked_of.id,
+                        asked_of.name,
+                        asked_of.space_id,
+                    )
+                    .select_from(QuestionsFiles)
+                    .join(Questions, Questions.id == QuestionsFiles.question_id)
+                    .outerjoin(Sessions, Sessions.id == Questions.session_id)
+                    .outerjoin(
+                        with_assistant, with_assistant.id == Sessions.assistant_id
+                    )
+                    .outerjoin(with_service, with_service.id == Sessions.service_id)
+                    .outerjoin(asked_of, asked_of.id == Questions.service_id)
+                    .where(
+                        QuestionsFiles.file_id == sa.any_(members),
+                        not_asked_of_the_moving,
+                    )
+                    .distinct()
+                )
+            ).all(),
+        )
+        own_conversations: dict[str, dict[str, str | None]] = {}
+        other_conversations: set[UUID] = set()
+        services: dict[str, dict[str, str]] = {}
+        for (
+            conversation_id,
+            conversation_name,
+            owner_id,
+            with_name,
+            conversation_space_id,
+            service_id,
+            service_name,
+            service_space_id,
+        ) in asked:
+            if conversation_id is None:
+                if service_id is not None and service_space_id == space_id:
+                    services[str(service_id)] = {
+                        "id": str(service_id),
+                        "name": service_name,
+                    }
+                else:
+                    elsewhere += 1
+            elif conversation_space_id != space_id:
+                elsewhere += 1
+            elif viewer_user_id is not None and owner_id == viewer_user_id:
+                own_conversations[str(conversation_id)] = {
+                    "id": str(conversation_id),
+                    "name": conversation_name,
+                    "with": with_name,
+                }
+            else:
+                other_conversations.add(conversation_id)
+        return {
+            "assistants": assistants,
+            "apps": apps,
+            "services": sorted(services.values(), key=lambda owner: owner["name"]),
+            # The conversations of the person who is moving it.
+            "conversations": sorted(
+                own_conversations.values(),
+                key=lambda one: (one["name"] or "", one["id"]),
+            ),
+            # Conversations that belong to other people: a number, nothing more.
+            "other_conversations": len(other_conversations),
+            # Uses that are not in this space.
+            "elsewhere": elsewhere,
+        }
 
     async def _count_all_uses(self, root_of: dict[UUID, UUID]) -> dict[UUID, int]:
         uses = sa.union_all(*_USES_WITH_THEIR_SPACE.values()).subquery("file_uses")

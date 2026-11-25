@@ -617,3 +617,76 @@ async def test_the_space_of_a_question_is_known_before_the_question_exists(
         assert await held(with_nothing.id, service.id) == of_service
         assert await held(with_nothing.id, None) is None
         assert await held(None, None) is None
+
+
+async def test_a_refused_move_names_what_else_in_the_space_uses_the_file(
+    db_container, admin_user, assistant_factory, app_factory, completion_model_factory
+) -> None:
+    async with db_container() as container:
+        session = container.session()
+        source = await _space(container, "Source")
+        target = await _space(container, "Target")
+        elsewhere = await _space(container, "Elsewhere")
+        model = await completion_model_factory(session, f"Blockers model {uuid4()}")
+        moving = await assistant_factory(
+            session, "Minute taker", model.id, space_id=source
+        )
+        colleague = await assistant_factory(
+            session, "Bookkeeper", model.id, space_id=source
+        )
+        outside = await assistant_factory(
+            session, "Archivist", model.id, space_id=elsewhere
+        )
+        app = await app_factory(session, "Transcriber", model.id, space_id=source)
+        service = Services(
+            name="Classifier", prompt="Classify", user_id=admin_user.id, space_id=source
+        )
+        session.add(service)
+        await session.flush()
+        shared = await _file(session, admin_user)
+        homes = FileHomes(session)
+        await homes.set_home(shared, space_id=source, tenant_id=admin_user.tenant_id)
+        asked_of_service = Questions(
+            question="Classify",
+            answer="",
+            num_tokens_question=0,
+            num_tokens_answer=0,
+            tenant_id=admin_user.tenant_id,
+            service_id=service.id,
+        )
+        session.add(asked_of_service)
+        await session.flush()
+        session.add_all(
+            [
+                AssistantsFiles(assistant_id=moving.id, file_id=shared),
+                AssistantsFiles(assistant_id=colleague.id, file_id=shared),
+                # As earlier releases could leave it: also attached elsewhere.
+                AssistantsFiles(assistant_id=outside.id, file_id=shared),
+                AppsFiles(app_id=app.id, file_id=shared),
+                QuestionsFiles(
+                    question_id=asked_of_service.id, file_id=shared, type="user"
+                ),
+            ]
+        )
+        await session.flush()
+
+        with pytest.raises(FileInUseElsewhereError) as refusal:
+            await homes.move_with_assistant(
+                moving.id,
+                source_space_id=source,
+                target_space_id=target,
+                tenant_id=admin_user.tenant_id,
+                viewer_user_id=admin_user.id,
+            )
+
+        assert refusal.value.details["blockers"] == {
+            "assistants": [{"id": str(colleague.id), "name": "Bookkeeper"}],
+            "apps": [{"id": str(app.id), "name": "Transcriber"}],
+            "services": [{"id": str(service.id), "name": "Classifier"}],
+            "conversations": [],
+            "other_conversations": 0,
+            # Counted, but not said where: it is in a space the mover may not see.
+            "elsewhere": 1,
+        }
+        assert "Archivist" not in str(refusal.value.details)
+        assert await _home(session, shared) == source

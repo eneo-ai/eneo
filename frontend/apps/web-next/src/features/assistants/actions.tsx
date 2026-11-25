@@ -3,7 +3,7 @@ import { MoreMenu } from "@astryxdesign/core/MoreMenu";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowDownToLine, ArrowUpToLine, FolderInput, Pencil, Trash2 } from "lucide-react";
 import { useTranslations } from "use-intl";
-import type { ReactNode, RefObject } from "react";
+import { type ReactNode, type RefObject, useState } from "react";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { createResourceActions } from "@/components/composites/resource-action-scope";
 import { browserApi } from "@/lib/api/browser";
@@ -13,6 +13,7 @@ import { MoveResourceDialog } from "@/features/knowledge/move-dialog";
 import { useRemovalMutation } from "@/features/spaces/removal";
 import { useSpace } from "@/features/spaces/use-space";
 import type { ChatAppItem } from "./assistants";
+import { type MoveBlockers, MoveBlockersBanner, moveBlockersOf } from "./move-blockers";
 import { PublishDialog } from "./publish-dialog";
 import { invalidateExpiringApiKeys } from "@/features/api-keys/api-keys";
 
@@ -120,6 +121,7 @@ function ChatAppActionDialog({
     onError: (error) => toastApiError(error, t)
   });
 
+  const [moveBlockers, setMoveBlockers] = useState<MoveBlockers | null>(null);
   const move = useRemovalMutation({
     mutationFn: (targetSpaceId: string) =>
       unwrap(
@@ -129,7 +131,14 @@ function ChatAppActionDialog({
         })
       ),
     refresh: invalidate,
-    onRemoved: onClose
+    onRemoved: onClose,
+    onError: (error) => {
+      // A move refused because of shared files says what stands in the way;
+      // that stays in the dialog. Anything else is an ordinary failure.
+      const blockers = moveBlockersOf(error);
+      setMoveBlockers(blockers);
+      if (!blockers) toastApiError(error, t);
+    }
   });
 
   const remove = useRemovalMutation({
@@ -164,7 +173,11 @@ function ChatAppActionDialog({
         hint={t("move_assistant_knowledge_hint")}
         confirmLabel={t("move_assistant")}
         pending={move.isPending}
-        onMove={(targetSpaceId) => move.mutate(targetSpaceId)}
+        problem={moveBlockers && <MoveBlockersBanner blockers={moveBlockers} />}
+        onMove={(targetSpaceId) => {
+          setMoveBlockers(null);
+          move.mutate(targetSpaceId);
+        }}
       />
     );
   }
