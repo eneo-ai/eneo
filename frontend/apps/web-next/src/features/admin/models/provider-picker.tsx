@@ -1,4 +1,5 @@
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
+import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@/components/astryx/text-input";
 import { ToggleButton } from "@astryxdesign/core/ToggleButton";
 import { Token } from "@astryxdesign/core/Token";
@@ -11,6 +12,14 @@ import type { ProviderOption } from "./model-providers";
 import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 
 type CapabilityFilter = "all" | "embedding" | "transcription" | "image" | "rerank";
+
+/**
+ * The words an administrator looks for when the server is someone else's:
+ * vLLM is the type for any OpenAI-compatible server, its name says neither.
+ */
+const SEARCH_ALIASES: Record<string, string> = {
+  hosted_vllm: "openai compatible kompatibel gateway"
+};
 
 const CAPABILITY_FILTERS: CapabilityFilter[] = [
   "all",
@@ -81,9 +90,15 @@ function ProviderTile({
         </span>
         <div className="min-w-0">
           <div className="truncate text-sm font-medium">{option.name}</div>
-          {option.selfHosted && (
+          {/* vLLM is also the type for a server another host runs, which a
+              "self-hosted" label would steer away from. */}
+          {option.type === "hosted_vllm" ? (
+            <Text type="supporting" display="block">
+              {t("provider_vllm_tile_note")}
+            </Text>
+          ) : option.selfHosted ? (
             <div className="text-ax-text-secondary text-xs">{t("provider_filter_self_hosted")}</div>
-          )}
+          ) : null}
         </div>
         <ModeTokens modes={option.modes} />
       </div>
@@ -123,7 +138,7 @@ export function ProviderPicker({
     return options.filter((option) => {
       if (capability !== "all" && !option.modes.includes(capability)) return false;
       if (selfHostedOnly && !option.selfHosted) return false;
-      return matchesSearch([option.name, option.type], search);
+      return matchesSearch([option.name, option.type, SEARCH_ALIASES[option.type]], search);
     });
   }, [options, search, capability, selfHostedOnly]);
 

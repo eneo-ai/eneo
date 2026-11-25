@@ -251,10 +251,10 @@ describe("the add-provider wizard's credentials", () => {
 
   it("says the type is fixed and where live text streams from, before the provider is saved", async () => {
     const dialog = await toCredentials();
-    // One line: the gateway note follows the type note for the two types that carry live text.
+    // One line: for OpenAI the type note is followed by when vLLM fits better.
     expect(
       within(dialog).getByText(
-        "Typen kan inte ändras efteråt. Finns din gateway redan som OpenAI-leverantör kan du använda den för livetext."
+        "Typen kan inte ändras efteråt. Har en annan aktör modellen bakom ett OpenAI-kompatibelt API passar oftast vLLM bättre. Där är nyckeln valfri och utgående headers fungerar. OpenAI med egen Endpoint-URL fungerar också, men kräver en nyckel."
       )
     ).toBeTruthy();
     const endpoint = field(/^Endpoint-URL/);

@@ -474,11 +474,14 @@ export function AddModelWizard({
               {t("enter_provider_credentials")}
             </Text>
             <Text type="supporting" display="block">
-              {/* The two types that can carry live text: a gateway already added
-                  as OpenAI needs no second provider. */}
-              {providerType === "hosted_vllm" || providerType === "openai"
-                ? `${t("provider_type_fixed_note")} ${t("provider_gateway_as_openai_note")}`
-                : t("provider_type_fixed_note")}
+              {/* The two types that can carry live text. OpenAI says when vLLM
+                  fits a server another host runs better; vLLM that a gateway
+                  already added as OpenAI needs no second provider. */}
+              {providerType === "openai"
+                ? `${t("provider_type_fixed_note")} ${t("provider_openai_compatible_note")}`
+                : providerType === "hosted_vllm"
+                  ? `${t("provider_type_fixed_note")} ${t("provider_gateway_as_openai_note")}`
+                  : t("provider_type_fixed_note")}
             </Text>
           </div>
         </div>
