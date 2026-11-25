@@ -129,7 +129,7 @@ These stay:
 - a file that another remaining run still uses. A rerun, or a new run from a reviewed transcription, shares its source run's audio file. Each run counts from its own time, and the file goes with the last of them. A run that started while the space had no time is never removed automatically, so it keeps the shared file, and it has its own copy of the transcript;
 - audit rows, which can name a removed run's files. They follow the audit log's own retention.
 
-The space's time does not reach content that never became part of a run. The upload window under **Admin > Flow retention** sets when live text that is never bound to a run expires (fixed when the text is created), and the explicit purge removes such expired live text. Audio uploaded for a run that was never started, and debug evidence, are not removed in this version.
+The space's time does not reach content that never became part of a run. The upload window under **Admin > Flow retention** sets when live text that is never bound to a run expires (fixed when the text is created), and the explicit purge removes such expired live text. No scheduled task removes audio uploaded for a run that was never started, and neither does the explicit purge. The debug-evidence time on the same page is saved, but in this version nothing is removed when it has passed. When a run is removed, its debug evidence (step results with their stored prompts) is removed with it, and so are its files that nothing else uses.
 
 Create-run idempotency is tied to the run row. Once a run is removed, a request with the same `Idempotency-Key` creates a new run; if the upload it names has been removed too, that request can be refused when its input is checked.
 
@@ -365,7 +365,7 @@ The audit metadata records the scope, scope identifier, and the old and new time
 Flow run-history retention is separate from:
 
 - never-attached runtime uploads;
-- debug evidence eligibility;
+- a time of its own for debug evidence (a run's debug evidence is removed with the run);
 - conversation and App history, including flow authoring chats;
 - audit-log retention;
 - backups, external exports, and object-storage lifecycle rules.

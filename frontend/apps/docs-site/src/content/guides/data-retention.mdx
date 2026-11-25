@@ -197,12 +197,15 @@ with the explicit purge.
 
 Changing a Flow's time, or a shared space's time, writes the audit event
 `flow_run_retention_policy_changed` with the old and new time, not run content.
-The space's time does not reach content that never became part of a run. In
-this version, audio uploaded for a Flow run that was never started, and debug
-evidence, are not removed. The upload window under **Admin > Flow retention**
-sets when live text that is never bound to a run expires, and the explicit
-purge removes such expired live text. The cleanup of unused uploads keeps a file that a Flow upload refers
-to. A
+The space's time does not reach content that never became part of a run. The
+upload window under **Admin > Flow retention** sets when live text that is
+never bound to a run expires, and the explicit purge removes such expired live
+text. No scheduled task removes audio uploaded for a Flow run that was never
+started, and neither does the explicit purge. The debug-evidence time on the
+same page is saved, but in this version nothing is removed when it has passed.
+When a Flow run is removed, its debug evidence (step results with their stored
+prompts) is removed with it, and so are its files that nothing else uses. The
+cleanup of unused uploads keeps a file that a Flow upload refers to. A
 chat that edits a Flow is an ordinary conversation and follows the conversation
 times above.
 
