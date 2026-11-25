@@ -1427,6 +1427,23 @@ describe("Keeping a recording on the device", () => {
   describe("a part both uploaded and kept on the device", () => {
     beforeEach(() => {
       vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+      // jsdom's Blob cannot read its bytes, so every part would look unreadable on the device.
+      const own = Object.getOwnPropertyDescriptor(Blob.prototype, "arrayBuffer");
+      Object.defineProperty(Blob.prototype, "arrayBuffer", {
+        configurable: true,
+        value(this: Blob) {
+          return new Promise<ArrayBuffer>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as ArrayBuffer);
+            reader.onerror = () => reject(reader.error);
+            reader.readAsArrayBuffer(this);
+          });
+        }
+      });
+      onTestFinished(() => {
+        if (own) Object.defineProperty(Blob.prototype, "arrayBuffer", own);
+        else delete (Blob.prototype as Partial<Blob>).arrayBuffer;
+      });
     });
 
     const saveButton = (dialog: HTMLElement) =>
@@ -1485,6 +1502,19 @@ describe("Keeping a recording on the device", () => {
         "the device cannot be read",
         () => {
           device.db.listParts = () => Promise.reject(new DOMException("broken", "UnknownError"));
+        }
+      ],
+      [
+        "its bytes on the device cannot be read",
+        () => {
+          for (const [key, part] of device.db.parts) {
+            const blob = new Blob(["audio"], { type: part.mimeType });
+            blob.slice = () =>
+              ({
+                arrayBuffer: () => Promise.reject(new DOMException("gone", "NotReadableError"))
+              }) as unknown as Blob;
+            device.db.parts.set(key, { ...part, blob });
+          }
         }
       ]
     ])("says the part is uploaded and goes with the run when %s", async (_case, lose) => {

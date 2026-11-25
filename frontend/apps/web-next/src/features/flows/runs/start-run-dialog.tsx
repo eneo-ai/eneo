@@ -29,6 +29,7 @@ import { cn } from "@/lib/utils";
 import { formFieldsOf, restrictedBeforeApproval } from "../flow-form-fields";
 import type { FlowPublic } from "../flows-api";
 import { RecordingKeeper, storedPartFile } from "./recording/recording-keeper";
+import { readsBack } from "./recording/recording-store";
 import { RunRecorder, type RecorderHandle } from "./recording/run-recorder";
 import {
   blockingTemplates,
@@ -229,11 +230,14 @@ function StartRunForm({
     }
   });
 
-  /** A recorded part as the device keeps it, for "Spara som fil"; null when it is not there. */
+  /**
+   * A recorded part as the device keeps it, for "Spara som fil"; null when it is not there or its
+   * bytes cannot be read, so the row says so instead of a download that fails.
+   */
   async function readKept(stepId: string, part: RecordingPartInfo): Promise<File | null> {
     const parts = await keeper.readSession(stepId, part.sessionId);
     const kept = parts.find((candidate) => candidate.index === part.index);
-    return kept ? storedPartFile(kept) : null;
+    return kept && (await readsBack(kept.blob)) ? storedPartFile(kept) : null;
   }
 
   function recorderRef(stepId: string) {
