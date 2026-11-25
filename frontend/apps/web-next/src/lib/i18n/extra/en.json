@@ -2442,7 +2442,7 @@
   "flow_editor_tools_live_model_off_note": "The transcription model transcribes the files afterwards, and the text appears once the flow has run.",
   "flow_editor_tools_live_model_none_in_space": "The space has no live text model. The recording is still transcribed afterwards, and the text appears once the flow has run.",
   "flow_editor_tools_live_model_lost": "The chosen model can no longer show live text in the space, so the recording is transcribed afterwards. Choose another.",
-  "live_text_for_selected_models": "Live text for selected models",
+  "live_text_per_model_help": "Tick only models that show the text while someone records. A model for audio files should not have live text. The model's server needs to support vLLM's realtime API.",
   "live_text_saved_but_unused": "Live text not in use",
   "live_text_kept_unused_hint": "The mark is saved but not in use now. You can turn it off.",
   "live_text_provider_saved_unused": "The provider was saved, but live text is not in use for {models}. {reason} {count, plural, one {The mark is kept.} other {The marks are kept.}}",

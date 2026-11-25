@@ -8508,7 +8508,7 @@
   "flow_editor_tools_live_model_off_note": "Filerna transkriberas efteråt med transkriberingsmodellen, och texten visas när flödet har körts.",
   "flow_editor_tools_live_model_none_in_space": "Ytan saknar en modell för livetext. Inspelningen transkriberas ändå efteråt, och texten visas när flödet har körts.",
   "flow_editor_tools_live_model_lost": "Den valda modellen kan inte längre visa livetext i ytan, så inspelningen transkriberas efteråt. Välj en annan.",
-  "live_text_for_selected_models": "Livetext för valda modeller",
+  "live_text_per_model_help": "Markera bara modeller som visar texten medan någon spelar in. En modell för ljudfiler ska inte ha livetext. Modellens server behöver stödja vLLM:s realtids-API.",
   "live_text_saved_but_unused": "Livetext används inte",
   "live_text_kept_unused_hint": "Markeringen är sparad men används inte nu. Du kan stänga av den.",
   "live_text_provider_saved_unused": "Leverantören sparades, men livetext används inte för {models}. {reason} {count, plural, one {Markeringen står kvar.} other {Markeringarna står kvar.}}",

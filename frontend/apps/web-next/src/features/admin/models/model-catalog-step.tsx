@@ -229,7 +229,8 @@ export function ModelCatalogStep({
   const hostingRef = useRef<HTMLDivElement>(null);
   const [embeddingFamily, setEmbeddingFamily] = useState<EmbeddingFamily>("openai");
   const [classificationId, setClassificationId] = useState(NO_CLASSIFICATION);
-  const [realtime, setRealtime] = useState(false);
+  /** The picked models marked for live text, by id. */
+  const [liveNames, setLiveNames] = useState<Set<string>>(new Set());
   const realtimeAvailable = realtimeEligibility === "eligible";
   const realtimeRefusal = realtimeRefusalKey(realtimeEligibility);
   const realtimeReasonId = useId();
@@ -320,6 +321,7 @@ export function ModelCatalogStep({
   }
 
   const selectedModels = useMemo(() => [...selected.values()], [selected]);
+  const onlyPick = selectedModels.length === 1 ? selectedModels[0] : undefined;
   const needsLimits = selectedModels.filter((model) => missingTokenLimits(model, mode));
   const selectedClassification =
     classificationId === NO_CLASSIFICATION ? null : { id: classificationId };
@@ -401,7 +403,7 @@ export function ModelCatalogStep({
               family: providerType,
               hosting: region,
               cost_per_minute: model.cost_per_minute ?? null,
-              supports_realtime: realtime && realtimeAvailable,
+              supports_realtime: liveNames.has(model.name) && realtimeAvailable,
               security_classification: selectedClassification
             });
           }
@@ -520,6 +522,7 @@ export function ModelCatalogStep({
           onChange={(value) => {
             onModeChange(value as ModelKind);
             setSelected(new Map());
+            setLiveNames(new Set());
             setSubmitted(false);
             resetOutcome();
           }}
@@ -572,33 +575,6 @@ export function ModelCatalogStep({
           value={classificationId}
           onChange={setClassificationId}
         />
-      )}
-
-      {mode === "transcription" && (
-        <div className="flex flex-col gap-1">
-          {/* The reason is a line of its own under the help, so it reads as why
-              the box is locked rather than as more help; Astryx adds the
-              reason's id to its own description. */}
-          <CheckboxInput
-            label={t(
-              selected.size > 1 ? "live_text_for_selected_models" : "live_transcription_support"
-            )}
-            description={t("live_transcription_help")}
-            aria-describedby={realtimeRefusal ? realtimeReasonId : undefined}
-            value={realtime && realtimeAvailable}
-            onChange={setRealtime}
-            isDisabled={!realtimeAvailable}
-          />
-          {realtimeRefusal && (
-            <p id={realtimeReasonId} className="flex items-start gap-1.5 pl-8">
-              <Lock
-                aria-hidden="true"
-                className="text-ax-text-secondary mt-0.5 size-3.5 shrink-0"
-              />
-              <Text type="supporting">{t(realtimeRefusal)}</Text>
-            </p>
-          )}
-        </div>
       )}
 
       {canList && (
@@ -742,6 +718,59 @@ export function ModelCatalogStep({
           {t("add")}
         </Button>
       </div>
+
+      {/* Live text is marked per picked model, below the list they are picked
+          in: a model for audio files must not get it because a live model
+          was picked with it. Nothing to mark before a model is picked. */}
+      {mode === "transcription" &&
+        selected.size > 0 &&
+        (selected.size > 1 && realtimeAvailable ? (
+          <CheckboxList
+            label={t("live_transcription_support")}
+            description={t("live_text_per_model_help")}
+            value={selectedModels.map((model) => model.name).filter((name) => liveNames.has(name))}
+            onChange={(names) => setLiveNames(new Set(names))}
+            density="compact"
+          >
+            {selectedModels.map((model) => (
+              <CheckboxListItem
+                key={model.name}
+                value={model.name}
+                label={model.display_name ?? model.name}
+              />
+            ))}
+          </CheckboxList>
+        ) : (
+          <div className="flex flex-col gap-1">
+            {/* The reason is a line of its own under the help, so it reads as
+                why the box is locked rather than as more help; Astryx adds the
+                reason's id to its own description. Locked, it is one box
+                however many models are picked. */}
+            <CheckboxInput
+              label={t("live_transcription_support")}
+              description={t("live_transcription_help")}
+              aria-describedby={realtimeRefusal ? realtimeReasonId : undefined}
+              value={realtimeAvailable && Boolean(onlyPick && liveNames.has(onlyPick.name))}
+              onChange={(value) => {
+                if (!onlyPick) return;
+                const next = new Set(liveNames);
+                if (value) next.add(onlyPick.name);
+                else next.delete(onlyPick.name);
+                setLiveNames(next);
+              }}
+              isDisabled={!realtimeAvailable}
+            />
+            {realtimeRefusal && (
+              <p id={realtimeReasonId} className="flex items-start gap-1.5 pl-8">
+                <Lock
+                  aria-hidden="true"
+                  className="text-ax-text-secondary mt-0.5 size-3.5 shrink-0"
+                />
+                <Text type="supporting">{t(realtimeRefusal)}</Text>
+              </p>
+            )}
+          </div>
+        ))}
 
       {needsLimits.map((model) => (
         <fieldset key={model.name} className="flex min-w-0 flex-col gap-3">

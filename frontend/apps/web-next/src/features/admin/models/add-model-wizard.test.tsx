@@ -957,14 +957,51 @@ describe("the add-model wizard's catalog", () => {
     }
   );
 
-  it("names live text for each selected model when several are picked", async () => {
-    const { dialog } = renderTranscriptionStep("eligible");
-    fireEvent.click(await within(dialog).findByRole("checkbox", { name: /pianissimo-sv/ }));
-    expect(within(dialog).getByRole("checkbox", { name: /^Livetext$/ })).toBeTruthy();
-    fireEvent.click(within(dialog).getByRole("checkbox", { name: /forte-sv/ }));
+  it("marks live text per model when several are picked", async () => {
+    const { dialog, onOpenChange } = renderTranscriptionStep("eligible");
+    const catalog = await within(dialog).findByRole("group", { name: "Modeller att lägga till" });
+    // Nothing to mark before a model is picked.
+    expect(within(dialog).queryByRole("checkbox", { name: /^Livetext$/ })).toBeNull();
+    fireEvent.click(within(catalog).getByRole("checkbox", { name: /pianissimo-sv/ }));
+    fireEvent.click(within(dialog).getByRole("checkbox", { name: /^Livetext$/ }));
+    fireEvent.click(within(catalog).getByRole("checkbox", { name: /forte-sv/ }));
+
+    // One row per picked model, outside the list they were picked in; the
+    // mark made with one model picked stays with that model.
+    const live = within(dialog).getByRole("group", { name: "Livetext" });
     expect(
-      within(dialog).getByRole("checkbox", { name: /^Livetext för valda modeller/ })
+      within(dialog).getByText(
+        "Markera bara modeller som visar texten medan någon spelar in. En modell för ljudfiler ska inte ha livetext. Modellens server behöver stödja vLLM:s realtids-API."
+      )
     ).toBeTruthy();
+    const pianissimo = within(live).getByRole("checkbox", { name: "pianissimo-sv" });
+    const forte = within(live).getByRole("checkbox", { name: "forte-sv" });
+    expect((pianissimo as HTMLInputElement).checked).toBe(true);
+    expect((forte as HTMLInputElement).checked).toBe(false);
+    await expectNoAxeViolations(dialog);
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till 2 modeller" }));
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+    expect(api.POST).toHaveBeenCalledWith("/api/v1/admin/tenant-models/transcription/", {
+      body: expect.objectContaining({ name: "pianissimo-sv", supports_realtime: true })
+    });
+    expect(api.POST).toHaveBeenCalledWith("/api/v1/admin/tenant-models/transcription/", {
+      body: expect.objectContaining({ name: "forte-sv", supports_realtime: false })
+    });
+  });
+
+  it("keeps one locked live text box with its reason when several are picked", async () => {
+    const { dialog } = renderTranscriptionStep("endpoint_required");
+    const catalog = await within(dialog).findByRole("group", { name: "Modeller att lägga till" });
+    fireEvent.click(within(catalog).getByRole("checkbox", { name: /pianissimo-sv/ }));
+    fireEvent.click(within(catalog).getByRole("checkbox", { name: /forte-sv/ }));
+
+    const live = within(dialog).getByRole("checkbox", { name: /^Livetext$/ });
+    expect(live.getAttribute("aria-disabled")).toBe("true");
+    expect(describedBy(live)).toContain(
+      "Livetext kräver att leverantörens Endpoint-URL går till en server eller gateway med vLLM:s realtids-API."
+    );
+    expect(within(dialog).queryByRole("group", { name: "Livetext" })).toBeNull();
   });
 
   /** Creates a provider in the wizard; the list keeps answering without it, as a refetch still in flight would. */
