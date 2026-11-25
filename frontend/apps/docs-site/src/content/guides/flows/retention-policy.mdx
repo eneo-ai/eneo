@@ -229,7 +229,7 @@ A time change can carry the times it replaces. On the space's `PATCH` that is `e
 }
 ```
 
-A Flow time longer than the space's is still refused with 400 and 9086 (`retention_exceeds_space`, the cap in `context.cap_days`) first, before the fields are compared. A field left out is not compared; without them a save works as before. A request that leaves the time unchanged is not refused. After a change of the space's time, a Flow's save that carries the old space time is always refused, also when the time that applies is the same: giving a shared space a time can start the automatic removal. The new web app sends these fields with every change of either time, so a page read before another administrator's change asks again instead of saving.
+A Flow time longer than the space's is still refused with 400 and 9086 (`retention_exceeds_space`, the cap in `context.cap_days`) first, before the fields are compared. A field left out is not compared; without them a save works as before. After a change of the space's time, a Flow's save that changes the Flow's stored time within the cap and carries the old space time is refused, also when the time that applies is the same: giving a shared space a time can start the automatic removal. A request that sends the stored time again within the cap, or `null` when none is stored, is not refused, and its fields are not compared. The Flow's `PUT` answers it with 200 and the current policy. That answer does not show that the space's time is unchanged. The new web app sends these fields with every change of either time, so a page read before another administrator's change asks again instead of saving.
 
 The Flow's retention `GET` and `PUT` return `scope`, `scope_id` and these three fields:
 
