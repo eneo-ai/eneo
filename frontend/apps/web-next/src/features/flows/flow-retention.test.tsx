@@ -190,6 +190,10 @@ function pressEnter(field: HTMLElement, repeat = false) {
   expect(fireEvent.keyDown(field, { key: "Enter", code: "Enter", repeat })).toBe(false);
 }
 
+/** The unit the number's box draws after itself (CSS content), empty when it draws none. */
+const drawnUnit = (field: HTMLElement) =>
+  (field.closest("[style*='12rem']") as HTMLElement).style.getPropertyValue("--unit");
+
 /** A press on the button as a pointer makes it, down, up and the click. */
 function press(button: HTMLElement) {
   fireEvent.pointerDown(button);
@@ -458,14 +462,13 @@ describe("flow retention", () => {
       )
     ).toBeTruthy();
     expect(days.placeholder).toBe("Följer ytan");
-    // The unit stands after the field only with a value, so the placeholder reads alone.
-    // It stays in the document as the field's description, hidden.
-    expect(within(dialog).queryByText("dagar", { exact: true, ignore: "[hidden]" })).toBeNull();
+    // The unit is drawn after the field only with a value, so the placeholder reads alone.
+    expect(drawnUnit(days)).toBe("");
     expect(within(dialog).getByRole("button", { name: SAVE })).toBeTruthy();
     await expectNoAxeViolations(document.body);
 
     fireEvent.change(days, { target: { value: "30" } });
-    expect(within(dialog).getByText("dagar", { exact: true })).toBeTruthy();
+    expect(drawnUnit(days)).toBe('"dagar"');
     pressSave();
     await waitFor(() => expect(backend.PUT).toHaveBeenCalledTimes(1));
     expect(backend.PUT.mock.calls[0]![1].body).toEqual({
@@ -734,6 +737,39 @@ describe("flow retention", () => {
       expected_effective_days: 10,
       expected_inherited_days: 60
     });
+  });
+
+  it("gives the field's description and error the dialog's width, and keeps the box for the number narrow", async () => {
+    backend.GET.mockResolvedValue(settings(null, { days: 60 }));
+    const days = await openDialog();
+    /** Whether an element is inside the narrow box: an inline width of 12rem on it or above it. */
+    const narrow = (element: Element) => element.closest("[style*='12rem']") !== null;
+    const description = screen.getByText(/^Tomt fält: flödet följer ytans gallringstid/);
+    expect(narrow(description)).toBe(false);
+    expect(narrow(days)).toBe(true);
+    // The unit is drawn by the number's box, so it stays beside it whatever is under it.
+    expect(drawnUnit(days)).toBe("");
+    fireEvent.change(days, { target: { value: "tre" } });
+    pressSave();
+    const error = await screen.findByText("Ange ett heltal från 1 till 2555.", {
+      ignore: "[aria-live], [aria-live] *"
+    });
+    expect(narrow(error)).toBe(false);
+    expect(drawnUnit(days)).toBe('"dagar"');
+  });
+
+  it("keeps the repeats of an Enter held on the save button from pressing it again", async () => {
+    backend.GET.mockResolvedValue(settings(null, { days: 60 }));
+    const days = await openDialog();
+    fireEvent.change(days, { target: { value: "30" } });
+    const button = screen.getByRole("button", { name: SAVE_AND_REMOVE });
+    // A browser clicks a focused button on Enter, and again on each repeat of a held key:
+    // the repeats are prevented, so a held press cannot be followed by a save. jsdom
+    // clicks on no key, so this checks the prevention, not the click.
+    expect(fireEvent.keyDown(button, { key: "Enter", code: "Enter", repeat: true })).toBe(false);
+    expect(fireEvent.keyDown(button, { key: "Enter", code: "Enter" })).toBe(true);
+    await settle();
+    expect(backend.PUT).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -1016,7 +1052,7 @@ describe("flow retention", () => {
         "Ytans gallringstid är 60 dagar. Flödets kan vara kortare, aldrig längre. Töm fältet för att följa ytan."
       )
     ).toBeTruthy();
-    expect(within(screen.getByRole("dialog")).getByText("dagar", { exact: true })).toBeTruthy();
+    expect(drawnUnit(days)).toBe('"dagar"');
     await expectNoAxeViolations(document.body);
   });
 

@@ -12,7 +12,15 @@ import {
 import { Heading } from "@astryxdesign/core/Text";
 import { type QueryKey, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Ban, Clock } from "lucide-react";
-import { type ReactNode, useEffect, useEffectEvent, useId, useRef, useState } from "react";
+import {
+  type CSSProperties,
+  type ReactNode,
+  useEffect,
+  useEffectEvent,
+  useId,
+  useRef,
+  useState
+} from "react";
 import { useFormatter, useTranslations } from "use-intl";
 import { TextInput } from "@/components/astryx/text-input";
 import { LoadingState } from "@/components/composites/loading-state";
@@ -553,50 +561,53 @@ function RetentionForm({
             }}
           >
             <div className="flex flex-col gap-2">
-              <div className="flex items-start gap-3">
-                <TextInput
-                  ref={field}
-                  label={t("flows_retention_days_label")}
-                  description={applies}
-                  value={text}
-                  onChange={(value) => {
-                    setDraft({ text: value, against: current });
-                    setOverCap(false);
-                    setHeldAgainst(null);
-                  }}
-                  onKeyDown={(event) => {
-                    // Enter is decided here, so a browser's implicit submit never bypasses it.
-                    if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
-                    event.preventDefault();
-                    // A held key repeats: one press, not one per repeat.
-                    if (!event.repeat) submit(true);
-                  }}
-                  inputMode="numeric"
-                  autoComplete="off"
-                  placeholder={
-                    personalSpace || spaceDays === null
-                      ? undefined
-                      : t("flows_retention_days_placeholder")
-                  }
-                  width="12rem"
-                  hasClear
-                  // Read-only, not disabled: it keeps focus, and a refusal marks the value sent.
-                  isReadOnly={save.isPending}
-                  // The unit, as the visible one is hidden from a screen reader, then the warning.
-                  aria-describedby={warning ? `${unitId} ${warningId}` : unitId}
-                  status={problem ? { type: "error", message: problem } : undefined}
-                />
-                {/* After the field only with a value, so the placeholder reads on its own. It is
-                    the field's description in every state, by its id, so never removed. */}
-                <span
-                  id={unitId}
-                  aria-hidden="true"
-                  hidden={text.trim() === ""}
-                  className="text-ax-text-secondary mt-auto py-1.5"
-                >
-                  {t("days")}
-                </span>
-              </div>
+              <TextInput
+                ref={field}
+                label={t("flows_retention_days_label")}
+                description={applies}
+                value={text}
+                onChange={(value) => {
+                  setDraft({ text: value, against: current });
+                  setOverCap(false);
+                  setHeldAgainst(null);
+                }}
+                onKeyDown={(event) => {
+                  // Enter is decided here, so a browser's implicit submit never bypasses it.
+                  if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
+                  event.preventDefault();
+                  // A held key repeats: one press, not one per repeat.
+                  if (!event.repeat) submit(true);
+                }}
+                inputMode="numeric"
+                autoComplete="off"
+                placeholder={
+                  personalSpace || spaceDays === null
+                    ? undefined
+                    : t("flows_retention_days_placeholder")
+                }
+                // The field, its description and its error take the dialog's width; only the
+                // box for the number is narrow. The box draws the unit after itself, only with
+                // a value so the placeholder reads on its own, and beside the box whatever
+                // stands under it.
+                controlStyle={
+                  {
+                    width: "12rem",
+                    "--unit": text.trim() === "" ? undefined : JSON.stringify(t("days"))
+                  } as CSSProperties
+                }
+                controlClassName="after:text-ax-text-secondary after:pointer-events-none after:absolute after:start-full after:ms-3 after:whitespace-nowrap after:content-[var(--unit)]"
+                statusVariant="detached"
+                hasClear
+                // Read-only, not disabled: it keeps focus, and a refusal marks the value sent.
+                isReadOnly={save.isPending}
+                // The unit, as the drawn one is no text, then the warning.
+                aria-describedby={warning ? `${unitId} ${warningId}` : unitId}
+                status={problem ? { type: "error", message: problem } : undefined}
+              />
+              {/* The unit as the field's description, in every state. */}
+              <span id={unitId} hidden>
+                {t("days")}
+              </span>
               {spaceDays === null && spaceSettingsHref ? (
                 <SpaceLink href={spaceSettingsHref}>
                   {t("flows_retention_space_link_set")}
@@ -629,6 +640,11 @@ function RetentionForm({
               isLoading={save.isPending}
               isInterruptible
               width={phone ? "100%" : undefined}
+              // A browser presses a focused button on Enter and again on each repeat of a held
+              // key, which would follow a held press with a save. Space presses on release.
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && event.repeat) event.preventDefault();
+              }}
             />
             {phone ? cancel : null}
           </div>
