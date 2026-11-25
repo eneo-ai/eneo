@@ -180,6 +180,8 @@ export function FlowRetentionSection({
             ? t("flows_retention_status_off")
             : t("flows_retention_status_on", { days: removes })}
         </p>
+        {/* On a phone the change stands right under the status line, before the why. */}
+        {phone && action ? <div className="my-2">{action}</div> : null}
         {explanation ? (
           <p className="text-ax-text-secondary m-0 ps-6 text-sm">{explanation}</p>
         ) : null}
@@ -190,7 +192,6 @@ export function FlowRetentionSection({
           </span>
         ) : null}
       </div>
-      {phone && action ? action : null}
       <MetadataList label={label}>
         <MetadataListItem label={t("flows_retention_row_flow")}>
           {flowDays === null
@@ -208,7 +209,12 @@ export function FlowRetentionSection({
             {spaceDays === null ? (
               t("flows_retention_none")
             ) : (
-              <span className="flex flex-wrap items-baseline gap-x-3">
+              // On a phone the link has a line of its own under the value, whatever the width.
+              <span
+                className={
+                  phone ? "flex flex-col items-start" : "flex flex-wrap items-baseline gap-x-3"
+                }
+              >
                 {t("flows_retention_space_cap_value", { days: spaceDays })}
                 {href ? <SpaceLink href={href}>{t("flows_retention_space_link")}</SpaceLink> : null}
               </span>

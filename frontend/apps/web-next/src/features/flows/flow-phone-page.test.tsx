@@ -197,6 +197,54 @@ describe("FlowPage on a phone", () => {
     expect(within(settings).queryByRole("heading", { level: 3 })).toBeNull();
   });
 
+  it("puts the retention change right under the status line, before the explanation and the link", async () => {
+    renderPhonePage(
+      {
+        run_history_retention: {
+          state: "configured",
+          source: "flow",
+          effective_days: 30,
+          contributors: { space: null, flow: { days: 30 } }
+        }
+      },
+      ["flows_view", "flows_run", "retention_manage"]
+    );
+    const settings = await screen.findByRole("region", { name: "Inställningar" });
+    fireEvent.click(within(settings).getByRole("button", { name: "Inställningar" }));
+    const section = within(settings).getByRole("region", { name: "Gallring" });
+    const order = [
+      within(section).getByText("Inga körningar tas bort automatiskt."),
+      within(section).getByRole("button", { name: "Ändra gallring" }),
+      within(section).getByText(/^Ytan har ingen gallringstid/),
+      within(section).getByRole("link", { name: "Sätt gallringstid i ytans inställningar" })
+    ];
+    for (const [before, after] of order.slice(0, -1).map((node, i) => [node, order[i + 1]!])) {
+      expect(
+        before!.compareDocumentPosition(after!) & Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy();
+    }
+  });
+
+  it("puts the link to the space's settings on a line of its own under the space's time", async () => {
+    renderPhonePage(
+      {
+        run_history_retention: {
+          state: "configured",
+          source: "space",
+          effective_days: 90,
+          contributors: { space: { days: 90 }, flow: null }
+        }
+      },
+      ["flows_view", "flows_run", "retention_manage"]
+    );
+    const settings = await screen.findByRole("region", { name: "Inställningar" });
+    fireEvent.click(within(settings).getByRole("button", { name: "Inställningar" }));
+    const section = within(settings).getByRole("region", { name: "Gallring" });
+    const link = within(section).getByRole("link", { name: "Ändra i ytans inställningar" });
+    // Stacked by the layout on a phone, not by how much room the row has: a column.
+    expect(link.parentElement!.classList.contains("flex-col")).toBe(true);
+  });
+
   it("offers the retention change, under the status line, to someone who may change it", async () => {
     const { container } = renderPhonePage(
       {
