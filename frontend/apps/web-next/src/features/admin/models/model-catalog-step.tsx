@@ -120,7 +120,8 @@ function missingTokenLimits(model: CatalogModel, mode: ModelKind): boolean {
 
 /**
  * The wizard's model step: the provider's live model list (`/models`), else
- * the static LiteLLM catalog, to pick several from, plus models added by id.
+ * the static LiteLLM catalog (never for a server of its own), to pick several
+ * from, plus models added by id.
  * Picks the catalog knows no token limits for ask for them. All picks are
  * validated with the provider and created in one batch.
  *
@@ -130,6 +131,7 @@ function missingTokenLimits(model: CatalogModel, mode: ModelKind): boolean {
 export function ModelCatalogStep({
   providerId,
   providerType,
+  hasOwnEndpoint,
   realtimeEligibility,
   mode = "completion",
   supportedModes,
@@ -141,6 +143,8 @@ export function ModelCatalogStep({
 }: {
   providerId: string;
   providerType: string;
+  /** A server at an address of its own: only its list says what it has (`hasOwnEndpoint`). */
+  hasOwnEndpoint: boolean;
   /** The provider's answer to whether it can carry live text. */
   realtimeEligibility: RealtimeEligibility | undefined;
   mode?: ModelKind;
@@ -190,8 +194,25 @@ export function ModelCatalogStep({
   );
 
   const liveModels = liveQuery.data?.models ?? [];
-  const catalog = liveModels.length > 0 ? liveModels : staticModels;
+  // The type's built-in models say nothing about a server of its own, so
+  // they are never offered for one (they came with the type's prices).
+  const catalog = liveModels.length > 0 || hasOwnEndpoint ? liveModels : staticModels;
   const usedFallback = liveModels.length === 0 && Boolean(liveQuery.data?.error);
+  /** Why a server of its own offers nothing: one banner instead of the count. */
+  const listNotice =
+    hasOwnEndpoint && liveModels.length === 0
+      ? liveQuery.data?.error
+        ? {
+            status: "warning" as const,
+            title: t("provider_models_list_failed"),
+            description: t("provider_models_list_failed_description")
+          }
+        : {
+            status: "info" as const,
+            title: t("provider_models_none_of_type", { type: typeLabel(mode) }),
+            description: t("provider_models_none_of_type_description")
+          }
+      : null;
   const loading = liveQuery.isLoading || capsQuery.isLoading || modelsQuery.isLoading;
 
   const [selected, setSelected] = useState<Map<string, CatalogModel>>(new Map());
@@ -214,10 +235,13 @@ export function ModelCatalogStep({
     { model: string; message: string }[]
   >([]);
 
-  const countText = `${t("models_found_count", { count: catalog.length })}${
-    usedFallback ? ` · ${t("provider_models_fallback_notice")}` : ""
-  }`;
-  // How many models the list offers, once it has loaded (WCAG 4.1.3).
+  const countText =
+    listNotice?.title ??
+    `${t("models_found_count", { count: catalog.length })}${
+      usedFallback ? ` · ${t("provider_models_fallback_notice")}` : ""
+    }`;
+  // How many models the list offers, or the banner's title when it offers
+  // none, once it has loaded (WCAG 4.1.3).
   const wasLoading = useRef(loading);
   useEffect(() => {
     if (wasLoading.current && !loading) announce(countText);
@@ -589,9 +613,19 @@ export function ModelCatalogStep({
             <LoadingState rows={3} label={t("loading")} />
           ) : (
             <>
-              <Text type="supporting">{countText}</Text>
+              {listNotice ? (
+                <Banner
+                  status={listNotice.status}
+                  title={listNotice.title}
+                  description={listNotice.description}
+                />
+              ) : (
+                <Text type="supporting">{countText}</Text>
+              )}
               {listed.length === 0 ? (
-                <Text type="supporting">{t("no_models_found")}</Text>
+                listNotice ? null : (
+                  <Text type="supporting">{t("no_models_found")}</Text>
+                )
               ) : (
                 <CheckboxList
                   ref={focus.ref("list")}

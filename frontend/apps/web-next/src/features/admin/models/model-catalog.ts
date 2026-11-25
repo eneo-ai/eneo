@@ -28,6 +28,20 @@ export interface CatalogModel {
 /** Providers whose API can't enumerate models (Azure lists deployments, not models). */
 export const NO_SUGGESTIONS_PROVIDERS = new Set(["azure"]);
 
+/**
+ * The provider is a server at an address of its own, not the type's cloud
+ * service: its models are whatever that server has, and where it stands is
+ * unknown. vLLM always is (its address is required); Azure always has an
+ * address but is a cloud service; any other type is when an address is set.
+ * See backend/src/eneo/tenants/provider_field_config.py.
+ */
+export function hasOwnEndpoint(providerType: string, endpoint: unknown): boolean {
+  const type = providerType.toLowerCase();
+  if (type === "hosted_vllm" || type === "vllm") return true;
+  if (type === "azure") return false;
+  return typeof endpoint === "string" && endpoint.trim() !== "";
+}
+
 function num(value: unknown): number | undefined {
   return typeof value === "number" ? value : undefined;
 }

@@ -108,7 +108,8 @@ function renderWizard({
   onCreated,
   imageModels = liveImageModels,
   providerList = [existing],
-  capsLoaded = true
+  capsLoaded = true,
+  transcriptionList = liveTranscriptionModels
 }: {
   initialProviderId?: string;
   models?: AdminModel[];
@@ -122,6 +123,8 @@ function renderWizard({
   imageModels?: typeof liveImageModels;
   providerList?: ModelProvider[];
   capsLoaded?: boolean;
+  /** What the provider's list answers for transcription: models, or `[{ error }]`. */
+  transcriptionList?: unknown[];
 } = {}) {
   api.GET.mockImplementation(
     (path: string, options?: { params?: { query?: { mode?: string } } }) => {
@@ -129,7 +132,7 @@ function renderWizard({
         const mode = options?.params?.query?.mode;
         if (mode === "image") return ok(imageModels);
         if (mode === "rerank") return ok(liveRerankModels);
-        if (mode === "transcription") return ok(liveTranscriptionModels);
+        if (mode === "transcription") return ok(transcriptionList);
         if (mode === "embedding")
           return ok([
             { name: "multilingual-e5-large", mode: "embedding", output_vector_size: 1024 }
@@ -1057,6 +1060,122 @@ describe("the add-model wizard's catalog", () => {
 
     await act(async () => {});
     expect(within(dialog).getByText("2 modeller valda")).toBeTruthy();
+  });
+});
+
+describe("the model step for a server at an address of its own", () => {
+  const whisper = { name: "whisper-1", mode: "transcription", cost_per_minute: 0.006 };
+  const catalogCaps = {
+    providers: {
+      openai: {
+        ...capabilities.providers.openai,
+        modes: ["transcription"],
+        models: { transcription: [whisper] }
+      },
+      hosted_vllm: {
+        modes: ["transcription"],
+        models: { transcription: [whisper] },
+        fields: [{ name: "endpoint", required: true, secret: false, in: "config" }]
+      },
+      azure: { ...capabilities.providers.openai, modes: ["transcription"], models: {} }
+    },
+    default_fields: capabilities.default_fields
+  };
+  const gateway: ModelProvider = {
+    ...existing,
+    id: "p-gw",
+    name: "Gateway",
+    config: { endpoint: "https://gateway.example/v1" }
+  };
+  const vllm: ModelProvider = {
+    ...existing,
+    id: "p-own-vllm",
+    name: "Aktörens vLLM",
+    provider_type: "hosted_vllm",
+    config: { endpoint: "https://vllm.example/v1" }
+  };
+  const liveRegion = () =>
+    document.querySelector("[data-astryx-live-region='polite']")?.textContent;
+
+  function renderStep(provider: ModelProvider, transcriptionList: unknown[]) {
+    return renderWizard({
+      initialProviderId: provider.id,
+      fixedKind: "transcription",
+      providerList: [provider],
+      caps: catalogCaps,
+      transcriptionList
+    });
+  }
+
+  it("shows no built-in models when the server lists none, and says it once", async () => {
+    const { dialog } = renderStep(gateway, []);
+
+    const title = "Eneo hittade ingen modell av typen Transkription i serverns lista";
+    expect(await within(dialog).findByText(title)).toBeTruthy();
+    expect(
+      within(dialog).getByText("Skriv modellens id nedan, som det står hos den som kör servern.")
+    ).toBeTruthy();
+    expect(within(dialog).queryByRole("checkbox", { name: /whisper-1/ })).toBeNull();
+    expect(within(dialog).queryByText(/modeller hittade/)).toBeNull();
+    expect(within(dialog).queryByText("Inga modeller hittades")).toBeNull();
+    expect(
+      within(dialog).getByRole("textbox", { name: "Saknas modellen? Lägg till med id" })
+    ).toBeTruthy();
+    await waitFor(() => expect(liveRegion()).toBe(title));
+    await expectNoAxeViolations(document.body);
+  });
+
+  it("says the server sent no list, never its own error text", async () => {
+    const { dialog } = renderStep(vllm, [
+      { error: "Failed to list models: ConnectError('All connection attempts failed')" }
+    ]);
+
+    const title = "Servern skickade ingen modellista";
+    expect(await within(dialog).findByText(title)).toBeTruthy();
+    expect(
+      within(dialog).getByText(
+        "Kontrollera adressen och nyckeln. Du kan också skriva modellens id nedan."
+      )
+    ).toBeTruthy();
+    expect(within(dialog).queryByText(/Failed to list models/)).toBeNull();
+    expect(within(dialog).queryByText(/Visar den inbyggda katalogen/)).toBeNull();
+    expect(within(dialog).queryByRole("checkbox", { name: /whisper-1/ })).toBeNull();
+    await waitFor(() => expect(liveRegion()).toBe(title));
+    await expectNoAxeViolations(document.body);
+  });
+
+  it("lists the server's own models as before", async () => {
+    const { dialog } = renderStep(gateway, liveTranscriptionModels);
+
+    expect(await within(dialog).findByRole("checkbox", { name: /pianissimo-sv/ })).toBeTruthy();
+    expect(within(dialog).getByText("2 modeller hittade")).toBeTruthy();
+    expect(within(dialog).queryByRole("checkbox", { name: /whisper-1/ })).toBeNull();
+  });
+
+  it("keeps the built-in catalog for a provider without an address", async () => {
+    const { dialog } = renderStep(existing, []);
+
+    expect(await within(dialog).findByRole("checkbox", { name: /whisper-1/ })).toBeTruthy();
+    expect(within(dialog).getByText("1 modell hittad")).toBeTruthy();
+    expect(within(dialog).queryByText(/Eneo hittade/)).toBeNull();
+  });
+
+  it("treats Azure, which always has an address, as the cloud service it is", async () => {
+    const { dialog } = renderStep(
+      {
+        ...existing,
+        id: "p-azure",
+        provider_type: "azure",
+        config: { endpoint: "https://kommun.openai.azure.com" }
+      },
+      []
+    );
+
+    const hosting = await within(dialog).findByRole("combobox", { name: /^Hosting-region/ });
+    expect(hosting.textContent).toContain("Sverige");
+    expect(within(dialog).getByRole("textbox", { name: "Ange ett modell-id" })).toBeTruthy();
+    expect(within(dialog).queryByText(/Eneo hittade/)).toBeNull();
+    expect(within(dialog).queryByText(/Servern skickade/)).toBeNull();
   });
 });
 

@@ -25,6 +25,7 @@ import {
 import { blockingError, QueryStateBoundary } from "@/components/composites/query-state";
 import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { KeyExpiryField } from "./key-expiry-field";
+import { hasOwnEndpoint } from "./model-catalog";
 import { ModelCatalogStep } from "./model-catalog-step";
 import {
   createProvider,
@@ -597,6 +598,12 @@ export function AddModelWizard({
                 <ModelCatalogStep
                   providerId={targetProviderId}
                   providerType={targetProviderType}
+                  // A provider made in this session is the create call's
+                  // answer, so its config is what the form sent.
+                  hasOwnEndpoint={hasOwnEndpoint(
+                    targetProviderType,
+                    existingProvider?.config.endpoint
+                  )}
                   realtimeEligibility={
                     mode === "existing" ? existingProvider?.realtime_eligibility : undefined
                   }
