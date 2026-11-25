@@ -4610,7 +4610,7 @@
   "flow_retention_admin_title": "Flow retention",
   "flow_retention_admin_description": "Decide when live text that is never bound to a run expires. The administrator's purge, an API call, then removes it. Saving removes nothing. Runs follow the space's time, set in the space, or the flow's shorter time: those that start while the space has a time are removed automatically once the time has passed, others are not removed automatically. Debug evidence and files that nothing else uses are removed together with their run.",
   "flow_retention_admin_windows_heading": "Live text and debug evidence",
-  "flow_retention_admin_windows_description": "An empty field means the organisation has set no period.",
+  "flow_retention_admin_windows_description": "An empty field means the organisation has set no time.",
   "flow_retention_admin_upload_label": "Live text without a run, days",
   "flow_retention_admin_upload_description": "Live text that is never bound to a run expires this many days after it was created. A changed time applies to new live text. Neither the automatic removal nor the purge removes files that were uploaded but never used in a run.",
   "flow_retention_admin_debug_label": "Debug evidence, days",

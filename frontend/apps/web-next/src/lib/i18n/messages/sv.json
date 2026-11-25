@@ -10666,7 +10666,7 @@
   "flow_retention_admin_windows_heading": "Livetext och felsökningsunderlag",
   "flow_retention_admin_windows_description": "Tomt fält betyder att organisationen inte har satt någon tid.",
   "flow_retention_admin_upload_label": "Livetext utan körning, dagar",
-  "flow_retention_admin_upload_description": "Livetext som aldrig knöts till en körning går ut så här många dagar efter att den skapades. En ändrad tid gäller ny livetext. Varken den automatiska borttagningen eller rensningen tar bort filer som laddades upp men aldrig användes i en körning.",
+  "flow_retention_admin_upload_description": "Livetext som aldrig knöts till en körning går ut så här många dagar efter att den skapades. En ändrad tid gäller ny livetext. Varken den automatiska gallringen eller rensningen tar bort filer som laddades upp men aldrig användes i en körning.",
   "flow_retention_admin_debug_label": "Felsökningsunderlag, dagar",
   "flow_retention_admin_debug_description": "Sparade prompter och svar från körningar. Tiden sparas, men i den här versionen tas inget bort när den har gått. Underlaget tas bort tillsammans med sin körning.",
   "flow_retention_lock_busy": "En annan ändring av gallringen eller en rensning pågår. Försök igen om en stund.",
