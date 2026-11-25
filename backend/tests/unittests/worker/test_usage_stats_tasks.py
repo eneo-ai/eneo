@@ -306,108 +306,64 @@ async def test_recalculate_tenant_usage_stats_isolated_between_tenants():
     assert container_b.user() is None
 
 
-@pytest.mark.asyncio
-async def test_recalculate_all_tenants_usage_stats_processes_active_tenants_only():
+class _NoUserLookupSession(FakeSession):
+    """The nightly recalculation reads no user: a lookup fails the test."""
+
+    def __init__(self):
+        super().__init__([None])
+
+    async def scalar(self, statement):  # noqa: ARG002
+        raise AssertionError("The recalculation looked a user up")
+
+
+def _nightly_container(tenants):
+    return FakeContainer(
+        tenant=tenants[0],
+        user_row=None,
+        user_obj=None,
+        job_service=FakeJobService(),
+        tenant_list=tenants,
+        user_rows=[],
+        users=[],
+    )
+
+
+@asynccontextmanager
+async def _fresh_session():
+    yield _NoUserLookupSession()
+
+
+async def test_the_nightly_recalculation_covers_active_organisations_with_no_person():
+    """The statistics are the organisation's own, so the recalculation runs
+    for an organisation whoever is or is not left in it."""
     tenant_a = build_tenant()
     tenant_b = build_tenant()
     suspended_tenant = build_tenant()
     suspended_tenant.state = TenantState.SUSPENDED
-
-    user_a = build_user(tenant_a.id, tenant_a)
-    user_b = build_user(tenant_b.id, tenant_b)
-
-    user_rows = [SimpleNamespace(id=user_a.id), SimpleNamespace(id=user_b.id), None]
-
-    job_service = FakeJobService()
-    container = FakeContainer(
-        tenant=tenant_a,
-        user_row=None,
-        user_obj=None,
-        job_service=job_service,
-        tenant_list=[tenant_a, tenant_b, suspended_tenant],
-        user_rows=user_rows,
-        users=[user_a, user_b],
-    )
-
-    # Create a mock sessionmanager that returns FakeSession with correct user per iteration
-    iteration = [0]
-
-    @asynccontextmanager
-    async def mock_session():
-        # First call is for getting tenant list, subsequent calls are per-tenant
-        if iteration[0] == 0:
-            # Initial tenant list fetch - doesn't query users
-            yield FakeSession([None])
-        else:
-            # Per-tenant iteration - return the correct user row
-            user_idx = iteration[0] - 1
-            if user_idx < len(user_rows):
-                yield FakeSession([user_rows[user_idx]])
-            else:
-                yield FakeSession([None])
-        iteration[0] += 1
+    container = _nightly_container([tenant_a, tenant_b, suspended_tenant])
 
     with patch("eneo.worker.usage_stats_tasks.sessionmanager") as mock_sm:
-        mock_sm.session = mock_session
+        mock_sm.session = _fresh_session
         result = await recalculate_all_tenants_usage_stats(container)
 
     assert result is True
     usage_calls = container.completion_model_usage_service().calls
-    assert len(usage_calls) == 2
-
-    processed_ids = {tenant_id for tenant_id, _, _ in usage_calls}
-    assert processed_ids == {tenant_a.id, tenant_b.id}
-
+    assert [tenant_id for tenant_id, _, _ in usage_calls] == [tenant_a.id, tenant_b.id]
     for tenant_id, user_ctx, tenant_ctx in usage_calls:
         assert tenant_ctx.id == tenant_id
-        assert user_ctx.tenant_id == tenant_id
+        assert user_ctx is None
+    # Nothing of one organisation is left for the next one.
+    assert container.tenant() is None
 
-    assert suspended_tenant.id not in processed_ids
 
-
-@pytest.mark.asyncio
-async def test_recalculate_all_tenants_usage_stats_balances_multiple_tenants():
+async def test_the_nightly_recalculation_takes_organisations_in_order():
     tenants = [build_tenant() for _ in range(5)]
-    users = [build_user(t.id, t) for t in tenants]
-    user_rows = [SimpleNamespace(id=u.id) for u in users]
-
-    job_service = FakeJobService()
-    container = FakeContainer(
-        tenant=tenants[0],
-        user_row=None,
-        user_obj=None,
-        job_service=job_service,
-        tenant_list=tenants,
-        user_rows=user_rows,
-        users=users,
-    )
-
-    # Create a mock sessionmanager that returns FakeSession with correct user per iteration
-    iteration = [0]
-
-    @asynccontextmanager
-    async def mock_session():
-        # First call is for getting tenant list, subsequent calls are per-tenant
-        if iteration[0] == 0:
-            # Initial tenant list fetch - doesn't query users
-            yield FakeSession([None])
-        else:
-            # Per-tenant iteration - return the correct user row
-            user_idx = iteration[0] - 1
-            if user_idx < len(user_rows):
-                yield FakeSession([user_rows[user_idx]])
-            else:
-                yield FakeSession([None])
-        iteration[0] += 1
+    container = _nightly_container(tenants)
 
     with patch("eneo.worker.usage_stats_tasks.sessionmanager") as mock_sm:
-        mock_sm.session = mock_session
+        mock_sm.session = _fresh_session
         result = await recalculate_all_tenants_usage_stats(container)
 
     assert result is True
     usage_calls = container.completion_model_usage_service().calls
-    assert len(usage_calls) == len(tenants)
-    ordered_ids = [tenant_id for tenant_id, _, _ in usage_calls]
-    expected_order = [t.id for t in tenants]
-    assert ordered_ids == expected_order
-    assert {tenant_id for tenant_id in ordered_ids} == set(expected_order)
+    assert [tenant_id for tenant_id, _, _ in usage_calls] == [t.id for t in tenants]

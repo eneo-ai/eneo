@@ -2,7 +2,7 @@ import base64
 import json
 import logging
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Optional, cast
+from typing import Any, Awaitable, Callable, Optional, cast
 from uuid import UUID
 
 from sqlalchemy import and_, func, select, true
@@ -31,12 +31,6 @@ from eneo.database.tables.spaces_table import Spaces, SpacesCompletionModels
 from eneo.database.tables.tenant_scope import in_tenant
 from eneo.database.tables.users_table import Users
 
-if TYPE_CHECKING:
-    from eneo.completion_models.domain.completion_model_repo import (
-        CompletionModelRepository,
-    )
-
-
 EntityDetailsFetcher = Callable[
     [UUID, UUID, int, dict[str, Any] | None],
     Awaitable[tuple[list["ModelUsageDetail"], bool]],
@@ -46,14 +40,9 @@ EntityDetailsFetcher = Callable[
 class CompletionModelUsageService:
     """Service for tracking and retrieving completion model usage statistics."""
 
-    def __init__(
-        self,
-        session: AsyncSession,
-        completion_model_repo: "CompletionModelRepository",
-    ):
+    def __init__(self, session: AsyncSession):
         super().__init__()
         self.session = session
-        self.completion_model_repo = completion_model_repo
         self.logger = logging.getLogger(__name__)
 
     async def get_model_usage_statistics(

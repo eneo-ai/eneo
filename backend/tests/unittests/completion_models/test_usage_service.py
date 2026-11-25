@@ -14,9 +14,7 @@ def _service_with_count(count: int = 3) -> CompletionModelUsageService:
     result = MagicMock()
     result.scalar_one.return_value = count
     session.execute.return_value = result
-    return CompletionModelUsageService(
-        session=session, completion_model_repo=AsyncMock()
-    )
+    return CompletionModelUsageService(session=session)
 
 
 @pytest.mark.asyncio

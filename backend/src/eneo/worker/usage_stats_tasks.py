@@ -274,7 +274,6 @@ async def recalculate_tenant_usage_stats_direct(container: Container, tenant_id:
         try:
             async with session.begin():
                 tenant_repo = container.tenant_repo()
-                user_repo = container.user_repo()
 
                 tenant = await tenant_repo.get(tenant_id)
                 if not tenant:
@@ -297,31 +296,9 @@ async def recalculate_tenant_usage_stats_direct(container: Container, tenant_id:
                     )
                     return False
 
-                # Get a user from this tenant to set the context (needed for domain repo)
-                from sqlalchemy import select
-
-                from eneo.database.tables.users_table import Users
-
-                stmt = select(Users).where(Users.tenant_id == tenant_id).limit(1)
-                user_id = cast(
-                    UUID | None,
-                    await session.scalar(stmt.with_only_columns(Users.id)),  # type: ignore[union-attr]
-                )
-
-                if user_id is None:
-                    logger.error(
-                        f"No users found for tenant {tenant_id}, cannot perform recalculation",
-                        extra={"tenant_id": str(tenant_id)},
-                    )
-                    return False
-
-                # Get the user object
-                user = await user_repo.get_user_by_id(user_id)
-
-                # Override container context with this user and tenant
-                user_provider: Any = container.user
+                # The statistics are the organisation's own: the service reads
+                # by its id, and no person is behind the recalculation.
                 tenant_provider: Any = container.tenant
-                user_provider.override(providers.Object(user))
                 tenant_provider.override(providers.Object(tenant))
 
                 # Get the usage service with proper context
@@ -343,7 +320,6 @@ async def recalculate_tenant_usage_stats_direct(container: Container, tenant_id:
             # Always reset all overrides, even on exception
             container.session.reset_override()
             try:
-                container.user.reset_override()
                 container.tenant.reset_override()
             except Exception:
                 pass  # Best effort - may not have been overridden yet
@@ -422,39 +398,10 @@ async def recalculate_all_tenants_usage_stats(container: Container):
                 session_provider.override(providers.Object(session))
                 try:
                     async with session.begin():
-                        # Get a user from this tenant to set the context
-                        from sqlalchemy import select
-
-                        from eneo.database.tables.users_table import Users
-
-                        stmt = (
-                            select(Users).where(Users.tenant_id == tenant.id).limit(1)
-                        )
-                        user_id = cast(
-                            UUID | None,
-                            await session.scalar(  # type: ignore[union-attr]
-                                stmt.with_only_columns(Users.id)
-                            ),
-                        )
-
-                        if user_id is None:
-                            logger.warning(
-                                f"No users found for tenant {tenant.id}, skipping usage stats recalculation",
-                                extra={
-                                    "tenant_id": str(tenant.id),
-                                    "tenant_name": tenant.name,
-                                },
-                            )
-                            continue
-
-                        # Get the user repo with fresh session context
-                        user_repo = container.user_repo()
-                        user = await user_repo.get_user_by_id(user_id)
-
-                        # Override container context with this user and tenant
-                        user_provider: Any = container.user
+                        # The statistics are the organisation's own: the
+                        # service reads by its id, and no person is behind
+                        # the recalculation.
                         tenant_provider: Any = container.tenant
-                        user_provider.override(providers.Object(user))
                         tenant_provider.override(providers.Object(tenant))
 
                         # Get the usage service with proper context
@@ -480,10 +427,9 @@ async def recalculate_all_tenants_usage_stats(container: Container):
                         )
                 finally:
                     # Always reset all overrides, even on exception
-                    # Reset user/tenant to prevent leakage to next tenant iteration
+                    # Reset the tenant to prevent leakage to next tenant iteration
                     container.session.reset_override()
                     try:
-                        container.user.reset_override()
                         container.tenant.reset_override()
                     except Exception:
                         pass  # Best effort - may not have been overridden yet

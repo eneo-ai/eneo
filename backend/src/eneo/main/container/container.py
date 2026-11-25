@@ -1033,10 +1033,11 @@ class Container(containers.DeclarativeContainer):
         CompletionModelService,
         completion_model_repo=completion_model_repo2,
     )
+    # Built from the session alone: the statistics belong to the organisation,
+    # so the nightly recalculation can read them with no person signed in.
     completion_model_usage_service = providers.Factory(
         CompletionModelUsageService,
         session=session,
-        completion_model_repo=completion_model_repo2,
     )
     completion_model_migration_service = providers.Factory(
         CompletionModelMigrationService,
