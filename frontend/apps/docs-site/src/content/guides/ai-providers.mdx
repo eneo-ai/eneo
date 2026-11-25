@@ -148,7 +148,7 @@ When adding a custom provider in the Admin UI (e.g., using `hosted_vllm`, `opena
 
 1. **Name**: A descriptive name (e.g., "Internal vLLM Cluster")
 2. **API Key**: Your server's API key (if authentication is enabled)
-3. **Endpoint**: The address of your server. For a provider of type vLLM (`hosted_vllm`) it ends in `/v1` (e.g., `http://vllm-server:8000/v1`): Eneo sends requests to that address as written.
+3. **Endpoint**: The address of your server. For a provider of type vLLM (`hosted_vllm`) it ends in `/v1` (e.g., `http://vllm-server:8000/v1`). Chat and transcription requests are sent to paths under that address as written; the model list and live text work with or without `/v1`.
 
 The system will query your server's `/v1/models` endpoint to discover available models automatically.
 
