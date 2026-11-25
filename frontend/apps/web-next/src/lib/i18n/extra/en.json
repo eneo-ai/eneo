@@ -1876,7 +1876,7 @@
   "preferred_copy_format_description": "Choose what the main Copy button puts on the clipboard: formatted text, which looks right in Word and email, or Markdown, with characters such as ** and #. Both are always in the More actions menu.",
   "session_expiring_title": "Your session is about to end",
   "session_expiring_description": "You will be signed out at {clock}. Stay signed in to remain where you are.",
-  "session_expiring_recording": "A recording is in progress. Stop the recording before you sign in again, or the part being recorded now may be lost. Parts already saved on this device can be continued after you sign in.",
+  "session_expiring_recording": "A recording is in progress. It stops when you are signed out, and what was recorded stays on this device: sign in again to continue the recording.",
   "session_extend_limit_title": "The session cannot be extended again",
   "session_extend_limit_description": "You have been signed in for as long as allowed without signing in again and will be signed out at {clock}. Save your work.",
   "crawl_view_failed_pages_named": "Pages: {count}, view the ones that could not be indexed",

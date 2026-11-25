@@ -22,9 +22,8 @@ const LONGEST_TIMEOUT_MS = 2 ** 31 - 1;
 /**
  * Warns before the browser session ends and offers to stay signed in
  * (ACCESSIBILITY.md rule 15). At the end it keeps the page and offers to sign
- * in again, back to the same place. While a recording runs or is paused, before
- * and after the end, it says to stop the recording before signing in again:
- * in some browsers the part being recorded lives only in the tab.
+ * in again, back to the same place. While a recording runs it also says that
+ * the recording stops at the end and can be continued after signing in.
  */
 export function SessionExpiryDialog({
   expiresAt,
@@ -155,7 +154,7 @@ export function SessionExpiryDialog({
                         clock: format.dateTime(new Date(expiresAt), { timeStyle: "short" })
                       }
                     )}
-                {recording ? ` ${t("session_expiring_recording")}` : null}
+                {!expired && recording ? ` ${t("session_expiring_recording")}` : null}
               </p>
               {!expired && (
                 <p aria-hidden="true" className="text-ax-text-secondary text-sm tabular-nums">
