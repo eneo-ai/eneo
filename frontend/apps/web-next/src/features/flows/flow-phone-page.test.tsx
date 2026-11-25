@@ -243,6 +243,16 @@ describe("FlowPage on a phone", () => {
     const link = within(section).getByRole("link", { name: "Ändra i ytans inställningar" });
     // Stacked by the layout on a phone, not by how much room the row has: a column.
     expect(link.parentElement!.classList.contains("flex-col")).toBe(true);
+    // Turned sideways it is 844 px wide, and still a phone's layout.
+    act(() => setViewport({ width: 844, height: 390, pointer: "coarse" }));
+    const turned = within(section).getByRole("link", { name: "Ändra i ytans inställningar" });
+    expect(turned.parentElement!.classList.contains("flex-col")).toBe(true);
+    const status = within(section).getByText(
+      "Körningar tas bort automatiskt 90 dagar efter att de avslutades."
+    );
+    const change = within(section).getByRole("button", { name: "Ändra gallring" });
+    expect(status.compareDocumentPosition(change) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(section).getAllByRole("button")).toEqual([change]);
   });
 
   it("offers the retention change, under the status line, to someone who may change it", async () => {
