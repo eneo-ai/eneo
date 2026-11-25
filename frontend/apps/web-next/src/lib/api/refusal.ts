@@ -152,14 +152,15 @@ function checkAnswerSession(response: Response): void {
 
 /** Why the server refused, read from a copy so the body stays for its consumer. */
 async function refusalOf(response: Response): Promise<EneoApiError> {
+  // A body that was cut off fails here: it may have named another person's
+  // session (9090), and read as a plain refusal it would resume this page's
+  // deep link as them.
+  const text = await response.clone().text();
   let body: unknown;
   try {
-    body = await response.clone().json();
-  } catch (error) {
-    // Only a body that arrived whole (empty or not JSON) has no reason in it.
-    // One cut off may have named another person's session (9090); read as a
-    // plain refusal it would resume this page's deep link as them.
-    if (!(error instanceof SyntaxError)) throw error;
+    body = text ? JSON.parse(text) : undefined;
+  } catch {
+    // Only a body that arrived whole and is not JSON has no reason in it.
     body = undefined;
   }
   return apiErrorFromResponse(response, body);
@@ -168,8 +169,8 @@ async function refusalOf(response: Response): Promise<EneoApiError> {
 /**
  * Sends a session check or renewal under the time limit, until its body is
  * read. At the limit the request is aborted, never raced, so a late answer
- * cannot apply; it fails as a 504, which callers retry (an AbortError would
- * stop a stream from reconnecting).
+ * cannot apply; it fails as a 504, which queries and streams retry (an
+ * AbortError would stop a stream from reconnecting).
  */
 async function withinTimeLimit<T>(send: (signal: AbortSignal) => Promise<T>): Promise<T> {
   const deadline = new AbortController();
@@ -179,7 +180,7 @@ async function withinTimeLimit<T>(send: (signal: AbortSignal) => Promise<T>): Pr
   } catch (error) {
     // By the limit, not by the error: a body read may have swallowed the abort.
     if (deadline.signal.aborted && !requests.signal.aborted)
-      throw new EneoApiError("The session check timed out.", { status: 504 });
+      throw new EneoApiError("The session request timed out.", { status: 504 });
     throw error;
   } finally {
     clearTimeout(timer);
@@ -432,6 +433,9 @@ async function renewSession(seen: number): Promise<void> {
       throw apiErrorFromResponse(response, body);
     }
     const body = (await response.json()) as components["schemas"]["BrowserSessionExtension"];
+    // The page may have ended, or the limit passed, while the body was read.
+    assertCurrent();
+    signal.throwIfAborted();
     const renewal: Renewal = { generation, expiresAt: Date.now() + body.expires_in * 1000 };
     renewals += 1;
     publish({ status: "bound", generation, ...renewedSession(renewal.expiresAt) });
