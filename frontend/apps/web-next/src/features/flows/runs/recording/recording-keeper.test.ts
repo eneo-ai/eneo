@@ -348,6 +348,8 @@ describe("RecordingKeeper", () => {
       contract: CONTRACT,
       streamed: false
     });
+    // The form that recorded it went: no one holds it.
+    await keeper.close();
     later(RECORDING_TTL_MS + 2_000);
     expect((await keeper.scan("step-1")).saved).toEqual([]);
     expect(db.parts.size).toBe(0);
@@ -405,6 +407,7 @@ describe("RecordingKeeper", () => {
     await settle();
     // A tab left it without letting go: the journal is not rebuilt, only aged.
     lockManager.holdElsewhere("eneo-flow-recording:flow-1::step-1::rec-1::0001");
+    await keeper.close();
     later(RECORDING_TTL_MS + 120_000);
 
     await as("user-a").scan("step-1");
@@ -515,6 +518,7 @@ describe("RecordingKeeper", () => {
       contract: CONTRACT,
       streamed: false
     });
+    await keeper.close();
     later(RECORDING_TTL_MS + 2_000);
     await as("user-b").scan("step-1");
     expect(db.parts.size).toBe(0);
