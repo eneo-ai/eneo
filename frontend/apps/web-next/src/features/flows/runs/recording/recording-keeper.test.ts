@@ -754,7 +754,10 @@ describe("RecordingKeeper", () => {
     async function continueAndRecord(tab: RecordingKeeper): Promise<number> {
       const outcome = await tab.resume("step-1", "rec-1", CONTRACT);
       if (outcome.kind !== "continued") throw new Error(`not continued: ${outcome.kind}`);
-      const index = outcome.parts.reduce((next, kept) => Math.max(next, kept.index + 1), 0);
+      const index = outcome.parts.reduce(
+        (next, kept) => Math.max(next, kept.index + 1),
+        tab.nextIndex("step-1", "rec-1")
+      );
       const journal = tab.journalFor(
         "step-1",
         () => CONTRACT,
@@ -787,6 +790,33 @@ describe("RecordingKeeper", () => {
       ) as Record<string, string>;
     }
 
+    /** The device's parts in order: their numbers, whether rebuilt, and their audio. */
+    async function partsInOrder(db: ReturnType<typeof memoryRecordings>) {
+      const parts = [...db.parts.values()].sort((a, b) => a.index - b.index);
+      return Promise.all(
+        parts.map(async (kept) => [kept.index, kept.interrupted, await kept.blob.text()])
+      );
+    }
+
+    it("keeps the closed tab's audio when the other tab continues from an earlier scan", async () => {
+      const { db, as, closeA } = await tabClosesMidPart();
+      const tabB = as("user-a");
+      // B's form was open already: its scan ran while A still held the part's lock.
+      expect((await tabB.scan("step-1")).saved).toMatchObject([{ sessionId: "rec-1", parts: 2 }]);
+      closeA();
+
+      // Fortsätt reads in A's unfinished part before it counts the parts.
+      expect(await continueAndRecord(tabB)).toBe(3);
+      expect(await partsInOrder(db)).toEqual([
+        [0, false, "part0"],
+        [1, false, "part1"],
+        [2, true, "AAAA"],
+        [3, false, "BBBB"]
+      ]);
+      expect(db.journals.size).toBe(0);
+      expect(db.chunks.size).toBe(0);
+    });
+
     it("keeps the closed tab's audio when the other tab scans again before it continues", async () => {
       const { db, as, closeA } = await tabClosesMidPart();
       const tabB = as("user-a");
@@ -798,6 +828,170 @@ describe("RecordingKeeper", () => {
       await as("user-a").scan("step-1");
       const stored = await onDevice(db);
       expect(Object.values(stored), JSON.stringify(stored)).toContain("AAAA");
+    });
+  });
+
+  describe("Fortsätt reads in the recording's own unfinished parts", () => {
+    const JOURNAL: JournalMeta = {
+      flowId: "flow-1",
+      stepId: "step-1",
+      sessionId: "rec-1",
+      index: 2,
+      mimeType: "audio/webm;codecs=opus",
+      capturedAt: START + 120_000,
+      contract: CONTRACT,
+      streamed: false,
+      lastChunkAt: START + 120_000,
+      userId: "user-a"
+    };
+
+    /** Parts 0 and 1 kept by a form that let go, and a journal for part 2 with these chunks. */
+    async function keptWithJournal(
+      chunks: Record<number, string>,
+      { locks = true, journal = JOURNAL } = {}
+    ) {
+      const context = setup({ locks });
+      const { db } = context;
+      for (const index of [0, 1]) {
+        await db.putPart({
+          flowId: "flow-1",
+          stepId: "step-1",
+          sessionId: "rec-1",
+          index,
+          blob: new Blob([`part${index}`], { type: "audio/webm" }),
+          mimeType: "audio/webm",
+          durationMs: 1_000,
+          capturedAt: START + index * 60_000,
+          interrupted: false,
+          contract: CONTRACT,
+          streamed: false,
+          userId: "user-a"
+        });
+      }
+      await db.putJournal(journal);
+      for (const [seq, audio] of Object.entries(chunks)) {
+        await db.appendChunk(journal, Number(seq), {
+          blob: new Blob([audio], { type: "audio/webm" }),
+          recordedMs: (Number(seq) + 1) * 1_000,
+          at: journal.lastChunkAt
+        });
+      }
+      return context;
+    }
+
+    const continued = (outcome: Awaited<ReturnType<RecordingKeeper["resume"]>>) => {
+      if (outcome.kind !== "continued") throw new Error(`not continued: ${outcome.kind}`);
+      return outcome;
+    };
+
+    it("rebuilds a readable journal into its part, and numbers the next part after it", async () => {
+      const { keeper, db } = await keptWithJournal({ 0: "ab", 1: "cd" });
+      const outcome = continued(await keeper.resume("step-1", "rec-1", CONTRACT));
+      expect(outcome.parts.map((kept) => kept.index)).toEqual([0, 1, 2]);
+      expect(outcome.partLeftOut).toBe(false);
+      expect(await outcome.parts[2]!.blob.text()).toBe("abcd");
+      expect(keeper.nextIndex("step-1", "rec-1")).toBe(3);
+      expect(db.journals.size).toBe(0);
+    });
+
+    it.each([
+      ["reading its chunks throws", "throws"],
+      ["its chunks are not read in time", "null"],
+      ["its lock is held", "locked"],
+      ["it has no chunks", "empty"]
+    ])("takes the recording over and leaves a journal untouched when %s", async (_case, how) => {
+      const { keeper, db, lockManager } = await keptWithJournal(how === "empty" ? {} : { 0: "ab" });
+      if (how === "throws") vi.spyOn(db, "readChunks").mockRejectedValue(new Error("blocked"));
+      if (how === "null") vi.spyOn(db, "readChunks").mockResolvedValue(null);
+      if (how === "locked")
+        lockManager.holdElsewhere("eneo-flow-recording:flow-1::step-1::rec-1::0002");
+      const journals = JSON.stringify([...db.journals]);
+      const chunks = [...db.chunks.keys()];
+
+      const outcome = continued(await keeper.resume("step-1", "rec-1", CONTRACT));
+      expect(outcome.parts.map((kept) => kept.index)).toEqual([0, 1]);
+      expect(outcome.partLeftOut).toBe(true);
+      // The journal's number is never given to another part.
+      expect(keeper.nextIndex("step-1", "rec-1")).toBe(3);
+      expect(JSON.stringify([...db.journals])).toBe(journals);
+      expect([...db.chunks.keys()]).toEqual(chunks);
+      expect(db.parts.size).toBe(2);
+    });
+
+    it("rebuilds an expired journal instead of dropping it", async () => {
+      const old = START - RECORDING_TTL_MS - 1_000;
+      const { keeper, db } = await keptWithJournal(
+        { 0: "ab" },
+        { journal: { ...JOURNAL, lastChunkAt: old } }
+      );
+      const outcome = continued(await keeper.resume("step-1", "rec-1", CONTRACT));
+      expect(outcome.parts.map((kept) => kept.index)).toEqual([0, 1, 2]);
+      expect(await outcome.parts[2]!.blob.text()).toBe("ab");
+      expect(db.journals.size).toBe(0);
+    });
+
+    it("leaves another recording's journal in the step alone", async () => {
+      const { keeper, db } = await keptWithJournal({ 0: "ab" });
+      const other = { ...JOURNAL, sessionId: "rec-2", index: 0 };
+      await db.putJournal(other);
+      await db.appendChunk(other, 0, {
+        blob: new Blob(["zz"], { type: "audio/webm" }),
+        recordedMs: 1_000,
+        at: other.lastChunkAt
+      });
+      continued(await keeper.resume("step-1", "rec-1", CONTRACT));
+      expect([...db.journals.keys()]).toEqual(["flow-1::step-1::rec-2::0000"]);
+      expect([...db.chunks.keys()]).toEqual(["flow-1::step-1::rec-2::0000::000000"]);
+      expect(db.parts.has("flow-1::step-1::rec-2::0000")).toBe(false);
+    });
+
+    it("never gives two parts one number when another tab's scan rebuilds the journal meanwhile", async () => {
+      const { keeper, as, db, lockManager } = await keptWithJournal({ 0: "ab" });
+      const lock = "eneo-flow-recording:flow-1::step-1::rec-1::0002";
+      // Held while this form reads in; let go, and rebuilt by another tab, before it lists the parts.
+      lockManager.holdElsewhere(lock);
+      const listParts = db.listParts.bind(db);
+      vi.spyOn(db, "listParts").mockImplementationOnce(async (...args) => {
+        lockManager.releaseElsewhere(lock);
+        await as("user-a").scan("step-1");
+        return listParts(...args);
+      });
+      const outcome = continued(await keeper.resume("step-1", "rec-1", CONTRACT));
+      const next = outcome.parts.reduce(
+        (after, kept) => Math.max(after, kept.index + 1),
+        keeper.nextIndex("step-1", "rec-1")
+      );
+      expect(next).toBe(3);
+      expect([...db.parts.values()].map((kept) => kept.index).sort()).toEqual([0, 1, 2]);
+    });
+
+    it("keeps the number over a journal while the form has the recording, a removed part's row included", async () => {
+      const { keeper, db } = await keptWithJournal({ 0: "ab" });
+      vi.spyOn(db, "readChunks").mockRejectedValue(new Error("blocked"));
+      continued(await keeper.resume("step-1", "rec-1", CONTRACT));
+      expect(
+        await keeper.keepPart("step-1", {
+          sessionId: "rec-1",
+          index: 3,
+          blob: new Blob(["CCCC"], { type: "audio/webm" }),
+          mimeType: "audio/webm",
+          durationMs: 1_000,
+          capturedAt: START + 180_000,
+          contract: CONTRACT,
+          streamed: false
+        })
+      ).toBe("device");
+      await keeper.forgetPart("step-1", "rec-1", 3);
+      expect(keeper.nextIndex("step-1", "rec-1")).toBe(3);
+    });
+
+    it("reads in nothing without Web Locks, but numbers the next part over a journal left", async () => {
+      const { keeper, db } = await keptWithJournal({ 0: "ab" }, { locks: false });
+      const outcome = continued(await keeper.resume("step-1", "rec-1", CONTRACT));
+      expect(outcome.parts.map((kept) => kept.index)).toEqual([0, 1]);
+      expect(keeper.nextIndex("step-1", "rec-1")).toBe(3);
+      expect(db.journals.size).toBe(1);
+      expect(db.chunks.size).toBe(1);
     });
   });
 

@@ -1450,6 +1450,50 @@ describe("Keeping a recording on the device", () => {
     expect(await within(dialog).findByText(/^Inspelning, del 1/)).toBeTruthy();
   });
 
+  it("says a part left unfinished is not included, and never gives its number to a new part", async () => {
+    installBrowser();
+    grantMicrophone();
+    await device.db.putPart(keptPart(0));
+    await device.db.putPart(keptPart(1));
+    const journal = { ...keptPart(2), lastChunkAt: keptAt(2) };
+    await device.db.putJournal(journal);
+    await device.db.appendChunk(journal, 0, {
+      blob: new Blob(["cut"], { type: "audio/webm" }),
+      recordedMs: 1_000,
+      at: keptAt(2)
+    });
+    // A tab left part 3 mid-recording, and its chunks cannot be read now.
+    vi.spyOn(device.db, "readChunks").mockRejectedValue(new Error("blocked"));
+    const { dialog } = await openDialog(audioContract());
+    fireEvent.click(
+      await within(dialog).findByRole("button", { name: messages.flow_transcript_resume_continue })
+    );
+    expect(
+      await within(dialog).findByText(messages.flow_transcript_resume_part_left_out)
+    ).toBeTruthy();
+    expect(within(dialog).getByText("Inspelning, del 2 (00:30)")).toBeTruthy();
+    await waitFor(() => expect(FakeUpload.sent).toHaveLength(2));
+
+    fireEvent.click(button(dialog, messages.flow_transcript_rec_continue));
+    await within(dialog).findByRole("button", { name: messages.flow_transcript_rec_stop });
+    fireEvent.click(button(dialog, messages.flow_transcript_rec_stop));
+    fireEvent.click(
+      await within(dialog).findByRole("button", { name: /^Ta bort Inspelning, del 4/ })
+    );
+    await waitFor(() => expect(within(dialog).queryByText(/^Inspelning, del 4/)).toBeNull());
+
+    // Recorded again with that row gone, the new part still takes a number over the journal's.
+    fireEvent.click(button(dialog, messages.flow_transcript_rec_continue));
+    await within(dialog).findByRole("button", { name: messages.flow_transcript_rec_stop });
+    fireEvent.click(button(dialog, messages.flow_transcript_rec_stop));
+    await within(dialog).findByText(/^Inspelning, del 4/);
+    await waitFor(() =>
+      expect(device.db.parts.has(`flow-1::step-1::${keptPart(0).sessionId}::0003`)).toBe(true)
+    );
+    expect(device.db.parts.has(`flow-1::step-1::${keptPart(0).sessionId}::0002`)).toBe(false);
+    expect(device.db.journals.size).toBe(1);
+  });
+
   it("takes nothing over when the form closes while Fortsätt waits, in the app's strict mode", async () => {
     installBrowser();
     await device.db.putPart(keptPart(0));

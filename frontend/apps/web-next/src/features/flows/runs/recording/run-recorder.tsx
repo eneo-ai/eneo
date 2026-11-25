@@ -594,6 +594,8 @@ export function RunRecorder({
   const [promptDismissed, setPromptDismissed] = useState(false);
   const [resumeBusy, setResumeBusy] = useState<"continue" | "discard" | null>(null);
   const [resumeProblem, setResumeProblem] = useState<string | null>(null);
+  /** The continued recording whose part left unfinished could not be read in. */
+  const [leftOut, setLeftOut] = useState<string | null>(null);
   const onForm = new Set(entries.flatMap((entry) => entry.recording?.sessionId ?? []));
   const offered = (scan.data?.saved ?? []).find(
     (saved) => !onForm.has(saved.sessionId) && !handled.has(saved.sessionId)
@@ -622,6 +624,7 @@ export function RunRecorder({
       return;
     }
     setSession(saved.sessionId);
+    setLeftOut(outcome.partLeftOut ? saved.sessionId : null);
     for (const part of outcome.parts) {
       onPart(
         storedPartFile(part),
@@ -700,9 +703,12 @@ export function RunRecorder({
     // Recording again while the last recording's parts are on the form goes on with it.
     const sessionId = before.length > 0 && current ? current : crypto.randomUUID();
     // Numbered after, and timed with, every part the recording keeps: a refused part's copy on
-    // the device keeps its own place.
+    // the device keeps its own place, and so does a part left unfinished there.
     const kept = keptPartsOf(sessionId, now);
-    const firstIndex = kept.reduce((next, part) => Math.max(next, part.index + 1), 0);
+    const firstIndex = kept.reduce(
+      (next, part) => Math.max(next, part.index + 1),
+      keeper.nextIndex(stepId, sessionId)
+    );
     const recordedBeforeMs = kept.reduce((sum, part) => sum + part.durationMs, 0);
     if (
       byItself &&
@@ -890,6 +896,13 @@ export function RunRecorder({
             />
           ) : null}
         </div>
+      ) : null}
+      {leftOut && leftOut === recordingId ? (
+        <Banner
+          status="warning"
+          title={t("flow_transcript_resume_part_left_out")}
+          collapsible={false}
+        />
       ) : null}
       {scan.data?.incomplete || scan.isError ? (
         <Banner

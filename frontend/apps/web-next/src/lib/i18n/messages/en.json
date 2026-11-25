@@ -9575,6 +9575,7 @@
   "flow_transcript_resume_too_many_parts": "The recording has more parts than the step takes now. Discard the recording and record again.",
   "flow_transcript_resume_type_not_accepted": "The step no longer takes the recording's audio format. Discard the recording and record again.",
   "flow_transcript_resume_open_elsewhere": "The recording is open in another tab or window. Continue it there. To continue here: stop the recording there and choose Save and continue later.",
+  "flow_transcript_resume_part_left_out": "A part of the recording was not saved completely and could not be read in. It is not included.",
   "flow_transcript_resume_read_failed": "The saved recording could not be read. Try again.",
   "flow_transcript_resume_discard_failed": "The recording could not be discarded. Try again.",
   "flow_transcript_resume_discard_open_elsewhere": "The recording is open in another tab or window and cannot be discarded from here.",

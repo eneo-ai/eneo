@@ -70,7 +70,8 @@ export type ResumeRefusal =
  * ("busy"), or the form went meanwhile ("closed").
  */
 export type ResumeOutcome =
-  | { kind: "continued"; parts: StoredPart[] }
+  /** `partLeftOut`: a part left unfinished on the device could not be read in and is not included. */
+  | { kind: "continued"; parts: StoredPart[]; partLeftOut: boolean }
   | { kind: "refused"; refusal: ResumeRefusal }
   | { kind: "empty" }
   | { kind: "busy" }
@@ -223,6 +224,8 @@ export class RecordingKeeper {
   #closed = false;
   /** Recordings whose "Fortsätt" is under way: a second press continues none. */
   #resuming = new Set<string>();
+  /** Per recording this form continued: the lowest number its next part may have. */
+  #floors = new Map<string, number>();
 
   /** `userId`: the signed-in person, whose recordings are kept and offered; null while not known. */
   constructor(
@@ -615,24 +618,77 @@ export class RecordingKeeper {
     }
   }
 
+  /**
+   * The lowest number the next part of a recording this form continued may
+   * have: one over every number on the device for it, a part's or a journal's.
+   * A journal's number is never given to another part.
+   */
+  nextIndex(stepId: string, sessionId: string): number {
+    return this.#floors.get(`${stepId}::${sessionId}`) ?? 0;
+  }
+
   async #takeOver(
     stepId: string,
     sessionId: string,
     contract: ContractSnapshot
   ): Promise<ResumeOutcome> {
-    let parts: StoredPart[];
+    const db = this.#db;
+    if (!db) return { kind: "empty" };
+    let left: JournalMeta[];
+    let onDevice: StoredPart[];
     try {
-      parts = await this.readSession(stepId, sessionId);
+      // Journals first, parts after: a part another tab's scan rebuilds meanwhile is seen as one or the other.
+      left = await this.#during(stepId, sessionId, this.#readIn(db, stepId, sessionId));
+      onDevice = (await db.listParts(this.#flowId, stepId)).filter(
+        (part) => part.sessionId === sessionId
+      );
     } catch {
       return { kind: "refused", refusal: "read_failed" };
     }
     if (this.#closed) return { kind: "closed" };
+    const parts = onDevice.filter(this.#mine).sort((a, b) => a.index - b.index);
     if (parts.length === 0) return { kind: "empty" };
     // The flow may have changed since: its step must still take these parts as they are.
     const refusal = resumeRefusal(contract, parts);
     if (refusal) return { kind: "refused", refusal };
     this.#adopt(stepId, parts);
-    return { kind: "continued", parts };
+    this.#floors.set(
+      `${stepId}::${sessionId}`,
+      Math.max(-1, ...onDevice.map((part) => part.index), ...left.map((meta) => meta.index)) + 1
+    );
+    return { kind: "continued", parts, partLeftOut: left.length > 0 };
+  }
+
+  /**
+   * Reads in the recording's own journals as "Fortsätt" takes it over: a part
+   * a closed or crashed tab left mid-recording is rebuilt with the code the
+   * scan uses per journal, under the journal's lock taken without waiting.
+   * From here a journal is rebuilt or left as it is, never dropped without
+   * its part stored, and nothing ages out; no other recording's journal is
+   * touched. Answers the recording's journals left on the device.
+   */
+  async #readIn(db: RecordingDatabase, stepId: string, sessionId: string): Promise<JournalMeta[]> {
+    const journals = (await db.listJournals(this.#flowId, stepId)).filter(
+      (meta) => meta.sessionId === sessionId
+    );
+    const locks = this.#locks;
+    // Without Web Locks nothing was journaled here: a journal from elsewhere stays, and counts.
+    if (!locks) return journals;
+    const left: JournalMeta[] = [];
+    for (const meta of journals) {
+      let gone = false;
+      if (this.#mine(meta)) {
+        try {
+          await locks.request(journalLockName(meta), { ifAvailable: true }, async (lock) => {
+            if (lock) gone = await this.#recoverJournal(db, meta, { keep: true });
+          });
+        } catch {
+          // Left as it is, to be read another time.
+        }
+      }
+      if (!gone) left.push(meta);
+    }
+    return left;
   }
 
   /** A kept recording goes on in this form: its parts count as kept on the device. */
@@ -670,11 +726,16 @@ export class RecordingKeeper {
     });
   }
 
-  async #recoverJournal(db: RecordingDatabase, meta: JournalMeta): Promise<boolean> {
+  /** `keep`: a journal is dropped only once its part is stored, whatever its age ("Fortsätt"). */
+  async #recoverJournal(
+    db: RecordingDatabase,
+    meta: JournalMeta,
+    { keep = false } = {}
+  ): Promise<boolean> {
     const stored = await db.hasPart(meta);
     // Slow to read is not gone: nothing is replaced or dropped until an answer comes.
     if (stored === null) return false;
-    const expired = meta.lastChunkAt < this.#now() - RECORDING_TTL_MS;
+    const expired = !keep && meta.lastChunkAt < this.#now() - RECORDING_TTL_MS;
     if (!stored && !expired) {
       const chunks = await db.readChunks(meta);
       if (chunks === null) return false;
@@ -705,6 +766,8 @@ export class RecordingKeeper {
         } catch {
           return false;
         }
+      } else if (keep) {
+        return false;
       }
     }
     await db.dropJournal(meta).catch(() => undefined);
