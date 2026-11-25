@@ -1447,43 +1447,85 @@ describe("Keeping a recording on the device", () => {
     );
   });
 
-  it("puts a refused offer last, with its refusal shown only beside it", async () => {
-    installBrowser();
-    grantMicrophone();
-    const other = "0a1b2c3d-0000-4000-8000-000000000002";
-    // The newest recording, offered first, has two parts; an older one has one.
-    await device.db.putPart(keptPart(0));
-    await device.db.putPart(keptPart(1));
-    await device.db.putPart(keptPart(0, { sessionId: other, capturedAt: keptAt(-5) }));
-    browserLocks.holdElsewhere(HOLD);
-    browserLocks.holdElsewhere(`eneo-flow-recording-holder:flow-1::step-1::${other}`);
-    const { dialog } = await openDialog(audioContract());
-    const refused = messages.flow_transcript_resume_open_elsewhere;
-    expect(await within(dialog).findByText(/består av 2 delar/)).toBeTruthy();
+  describe("a refused offer stays, so the next press is for the same recording", () => {
+    /** The other kept recording, older, so offered after the first. */
+    const OTHER = "0a1b2c3d-0000-4000-8000-000000000002";
+    const otherKey = `flow-1::step-1::${OTHER}::0000`;
+    const otherAudio = new Blob(["other audio"], { type: "audio/webm" });
+    const keepOther = () =>
+      device.db.putPart(
+        keptPart(0, { sessionId: OTHER, capturedAt: keptAt(-5), blob: otherAudio })
+      );
 
-    // Refused, the newest goes last: the older one is offered, without the first one's refusal.
-    fireEvent.click(button(dialog, messages.flow_transcript_resume_continue));
-    expect(await within(dialog).findByText(/består av en del/)).toBeTruthy();
-    expect(within(dialog).queryByText(refused)).toBeNull();
-    await spoken(refused);
+    it("discards the refused recording, not the next one, after Fortsätt is refused", async () => {
+      installBrowser();
+      // The step no longer takes the first recording's format.
+      await device.db.putPart(keptPart(0, { mimeType: "audio/ogg" }));
+      await keepOther();
+      const { dialog } = await openDialog(audioContract());
+      fireEvent.click(
+        await within(dialog).findByRole("button", {
+          name: messages.flow_transcript_resume_continue
+        })
+      );
+      expect(
+        await within(dialog).findByText(messages.flow_transcript_resume_type_not_accepted)
+      ).toBeTruthy();
 
-    // Every offer refused: the first refused is offered again, with its own refusal.
-    fireEvent.click(button(dialog, messages.flow_transcript_resume_continue));
-    expect(await within(dialog).findByText(/består av 2 delar/)).toBeTruthy();
-    expect(within(dialog).getByText(refused)).toBeTruthy();
+      fireEvent.click(button(dialog, messages.flow_transcript_resume_discard));
+      await waitFor(() => expect(device.db.parts.size).toBe(1));
+      expect(device.db.parts.get(otherKey)?.blob).toBe(otherAudio);
+    });
 
-    // A new recording can start meanwhile, and the refused one is tried again once the other
-    // tab let go.
-    await recordAndStop(dialog);
-    browserLocks.releaseElsewhere(HOLD);
-    fireEvent.click(button(dialog, messages.flow_transcript_resume_continue));
-    expect(await within(dialog).findByText("Inspelning, del 2 (00:30)")).toBeTruthy();
+    it("discards the same recording on a second press after its removal failed once", async () => {
+      installBrowser();
+      await device.db.putPart(keptPart(0));
+      await keepOther();
+      vi.spyOn(device.db, "deleteSession").mockRejectedValueOnce(new Error("blocked"));
+      const { dialog } = await openDialog(audioContract());
+      fireEvent.click(
+        await within(dialog).findByRole("button", { name: messages.flow_transcript_resume_discard })
+      );
+      const failed = messages.flow_transcript_resume_discard_failed;
+      expect(await within(dialog).findByText(failed)).toBeTruthy();
+      await spoken(failed);
+      expect(within(dialog).getByText(/består av en del/)).toBeTruthy();
 
-    // "Inte nu" does as before: the prompt goes.
-    fireEvent.click(button(dialog, messages.flow_transcript_resume_not_now));
-    await waitFor(() =>
-      expect(within(dialog).queryByText(messages.flow_transcript_resume_title)).toBeNull()
-    );
+      fireEvent.click(button(dialog, messages.flow_transcript_resume_discard));
+      await waitFor(() => expect(device.db.parts.size).toBe(1));
+      expect(device.db.parts.get(otherKey)?.blob).toBe(otherAudio);
+    });
+
+    it("refuses a recording another tab holds again on a second press, and continues it once let go", async () => {
+      installBrowser();
+      // The first recording has two parts and another tab holds it; the other has one.
+      await device.db.putPart(keptPart(0));
+      await device.db.putPart(keptPart(1));
+      await keepOther();
+      browserLocks.holdElsewhere(HOLD);
+      const { dialog } = await openDialog(audioContract());
+      const refused = messages.flow_transcript_resume_open_elsewhere;
+      expect(await within(dialog).findByText(/består av 2 delar/)).toBeTruthy();
+
+      fireEvent.click(button(dialog, messages.flow_transcript_resume_continue));
+      expect(await within(dialog).findByText(refused)).toBeTruthy();
+      await spoken(refused);
+      expect(within(dialog).getByText(/består av 2 delar/)).toBeTruthy();
+
+      // The second press is for the same recording: refused again, nothing of the other added.
+      fireEvent.click(button(dialog, messages.flow_transcript_resume_continue));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(within(dialog).getByText(refused)).toBeTruthy();
+      expect(within(dialog).getByText(/består av 2 delar/)).toBeTruthy();
+      expect(within(dialog).queryByText(/^Inspelning, del/)).toBeNull();
+
+      // Once the other tab has let go, the press continues it: its two parts, no more.
+      browserLocks.releaseElsewhere(HOLD);
+      fireEvent.click(button(dialog, messages.flow_transcript_resume_continue));
+      expect(await within(dialog).findByText("Inspelning, del 2 (00:30)")).toBeTruthy();
+      expect(within(dialog).getAllByText(/^Inspelning, del/)).toHaveLength(2);
+      expect(device.db.parts.has(otherKey)).toBe(true);
+    });
   });
 
   it("takes nothing over when the form closes while Fortsätt waits, in the app's strict mode", async () => {

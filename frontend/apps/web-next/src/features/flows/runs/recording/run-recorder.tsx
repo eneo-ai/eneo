@@ -593,42 +593,26 @@ export function RunRecorder({
   const [handled, setHandled] = useState<ReadonlySet<string>>(new Set());
   const [promptDismissed, setPromptDismissed] = useState(false);
   const [resumeBusy, setResumeBusy] = useState<"continue" | "discard" | null>(null);
-  /** Why each refused kept recording did not continue or go, in the order they were refused. */
-  const [resumeProblems, setResumeProblems] = useState<ReadonlyMap<string, string>>(new Map());
+  const [resumeProblem, setResumeProblem] = useState<string | null>(null);
   const onForm = new Set(entries.flatMap((entry) => entry.recording?.sessionId ?? []));
-  const offers = (scan.data?.saved ?? []).filter(
+  const offered = (scan.data?.saved ?? []).find(
     (saved) => !onForm.has(saved.sessionId) && !handled.has(saved.sessionId)
   );
-  // A refused recording goes last, so the others can be reached; its refusal shows only beside it.
-  const offered =
-    offers.find((saved) => !resumeProblems.has(saved.sessionId)) ??
-    [...resumeProblems.keys()].flatMap((id) => offers.filter((saved) => saved.sessionId === id))[0];
-  const resumeProblem = offered ? (resumeProblems.get(offered.sessionId) ?? null) : null;
-
-  /** Sets, or with null clears, why a kept recording did not continue or go. */
-  function setResumeProblem(saved: SavedRecording, problem: string | null) {
-    setResumeProblems((current) => {
-      const next = new Map(current);
-      next.delete(saved.sessionId);
-      if (problem) next.set(saved.sessionId, problem);
-      return next;
-    });
-  }
 
   function settle(saved: SavedRecording) {
     setHandled((current) => new Set(current).add(saved.sessionId));
-    setResumeProblem(saved, null);
+    setResumeProblem(null);
   }
 
   /** Shows why a kept recording did not continue or go, and says it. */
-  function refuse(saved: SavedRecording, problem: string) {
-    setResumeProblem(saved, problem);
+  function refuse(problem: string) {
+    setResumeProblem(problem);
     announce(problem);
   }
 
   async function continueSaved(saved: SavedRecording) {
     setResumeBusy("continue");
-    setResumeProblem(saved, null);
+    setResumeProblem(null);
     // The keeper takes the recording over only when no other tab holds it and the step takes it.
     const outcome = await keeper.resume(stepId, saved.sessionId, snapshotOfContract());
     // A second press while the first goes on: the first answers.
@@ -640,7 +624,7 @@ export function RunRecorder({
       return;
     }
     if (outcome.kind === "refused") {
-      refuse(saved, resumeRefusalText(outcome.refusal, t));
+      refuse(resumeRefusalText(outcome.refusal, t));
       return;
     }
     setSession(saved.sessionId);
@@ -663,13 +647,13 @@ export function RunRecorder({
 
   async function discardSaved(saved: SavedRecording) {
     setResumeBusy("discard");
-    setResumeProblem(saved, null);
+    setResumeProblem(null);
     // Not while another tab has the recording open.
     const outcome = await keeper.discard(stepId, saved.sessionId);
     setResumeBusy(null);
     if (outcome === "closed") return;
     if (outcome !== "discarded") {
-      refuse(saved, discardRefusalText(outcome, t));
+      refuse(discardRefusalText(outcome, t));
       return;
     }
     settle(saved);
@@ -900,7 +884,7 @@ export function RunRecorder({
             onDiscard={() => void discardSaved(offered)}
             onDismiss={() => {
               setPromptDismissed(true);
-              setResumeProblems(new Map());
+              setResumeProblem(null);
             }}
           />
           {resumeProblem ? (
