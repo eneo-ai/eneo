@@ -5,6 +5,7 @@ import { Heading } from "@astryxdesign/core/Heading";
 import { Link } from "@astryxdesign/core/Link";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
+import { Selector } from "@astryxdesign/core/Selector";
 import { Text } from "@astryxdesign/core/Text";
 import { TextArea } from "@astryxdesign/core/TextArea";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -24,7 +25,9 @@ import { browserApi } from "@/lib/api/browser";
 import { EneoApiError } from "@/lib/api/errors";
 import { docsUrl } from "@/lib/docs";
 import { useSecretMutation } from "@/lib/api/use-secret-mutation";
+import { mfaSignInHref } from "@/features/auth/sso-entry";
 import { useFocusRescue } from "@/lib/focus-rescue";
+import { navigateTo } from "@/lib/navigate-to";
 import { ClientSecretField } from "./client-secret-field";
 import {
   FEDERATION_KEY,
@@ -36,9 +39,11 @@ import {
 } from "./federation";
 import {
   changedFields,
+  changesMfaTrust,
   consequences,
   domainChange,
   draftFromView,
+  draftRule,
   FEDERATION_FIELDS,
   parseDomains,
   RISKY,
@@ -46,7 +51,10 @@ import {
   validate,
   type Consequence,
   type FederationDraft,
-  type FederationField
+  type FederationField,
+  type MfaClaim,
+  type MfaRequest,
+  type MfaRule
 } from "./federation-draft";
 import { RedirectUris } from "./redirect-uris";
 
@@ -55,8 +63,9 @@ const CARD = "bg-ax-card border-ax-border rounded-ax-container border";
 /**
  * The organisation's sign-in (SSO) settings for its admins. The operator
  * registers the identity provider; here an admin reads it, copies the
- * redirect URIs and changes the label, client ID, secret and allowed domains
- * in one confirmed save (no autosave: an IdP change is applied atomically).
+ * redirect URIs and changes the label, client ID, secret, allowed domains and
+ * the rule for what counts as multi-factor authentication, in one confirmed
+ * save (no autosave: an IdP change is applied atomically).
  */
 export function FederationPage() {
   const t = useTranslations();
@@ -231,7 +240,9 @@ function FederationForm({
     lines: string[];
     effects: string[];
     risky: boolean;
-  }>({ lines: [], effects: [], risky: false });
+    /** What the dialog asks: a change to sign-in, to the MFA rule, or to the name. */
+    kind: "sign_in" | "mfa" | "label";
+  }>({ lines: [], effects: [], risky: false, kind: "label" });
   // A Save with nothing changed says so instead of doing nothing silently.
   const [nothingToSave, setNothingToSave] = useState(false);
   // After a save that changed who can sign in: suggest trying it.
@@ -239,6 +250,8 @@ function FederationForm({
   const [conflict, setConflict] = useState(false);
   const [reloading, setReloading] = useState(false);
   const [saveError, setSaveError] = useState<unknown>(null);
+  // The save was refused because this session has no MFA under the rule.
+  const [mfaRefused, setMfaRefused] = useState(false);
   const [serverProblems, setServerProblems] = useState<Partial<Record<FederationField, string>>>(
     {}
   );
@@ -246,6 +259,7 @@ function FederationForm({
   const clientIdRef = useRef<HTMLInputElement>(null);
   const secretRef = useRef<HTMLInputElement>(null);
   const domainsRef = useRef<HTMLTextAreaElement>(null);
+  const mfaValuesRef = useRef<HTMLTextAreaElement>(null);
   const replaceSecretRef = useRef<HTMLButtonElement>(null);
   const saveRef = useRef<HTMLButtonElement>(null);
   const rescueFocus = useFocusRescue();
@@ -288,6 +302,7 @@ function FederationForm({
     setSubmitted(false);
     setServerProblems({});
     setSaveError(null);
+    setMfaRefused(false);
   }
 
   // The body holds the secret.
@@ -319,6 +334,12 @@ function FederationForm({
         void queryClient.invalidateQueries({ queryKey: FEDERATION_KEY });
         return;
       }
+      if (reason === "federation_mfa_required") {
+        // The draft stays: after a sign-in with MFA the same change can be made.
+        setMfaRefused(true);
+        announce(t("federation_admin_mfa_needed_title"));
+        return;
+      }
       const fieldProblems = serverFieldProblems(error, t);
       if (fieldProblems) {
         setServerProblems(fieldProblems);
@@ -344,16 +365,20 @@ function FederationForm({
         provider: providerRef,
         client_id: clientIdRef,
         client_secret: secretRef,
-        allowed_domains: domainsRef
+        allowed_domains: domainsRef,
+        mfa: mfaValuesRef
       }[first];
       revealProblems(() => setSubmitted(true), fieldRef.current);
       return;
     }
     setSaveError(null);
+    setMfaRefused(false);
+    const risky = changed.some((field) => RISKY.has(field));
     setConfirmation({
       lines: changed.map((field) => changeLine(field, base, draft, t)),
       effects: consequences(base, draft).map((effect) => effectText(effect, t)),
-      risky: changed.some((field) => RISKY.has(field))
+      risky,
+      kind: risky ? "sign_in" : changed.includes("mfa") ? "mfa" : "label"
     });
     setConfirming(true);
   }
@@ -452,6 +477,29 @@ function FederationForm({
             id={provisioningId}
             hasDomains={parseDomains(draft.domains).length > 0}
           />
+          <MfaRuleFields
+            draft={draft}
+            edit={(changes) => edit("mfa", changes)}
+            valuesRef={mfaValuesRef}
+            status={status("mfa")}
+          />
+          {mfaRefused || (base.mfa && !base.session_has_mfa) ? (
+            <Banner
+              role={mfaRefused ? "alert" : undefined}
+              status={mfaRefused || changesMfaTrust(base, draft) ? "warning" : "info"}
+              title={t("federation_admin_mfa_needed_title")}
+              description={t("federation_admin_mfa_needed_description")}
+              endContent={
+                <Button
+                  size="sm"
+                  label={t("federation_admin_mfa_sign_in")}
+                  onClick={() =>
+                    navigateTo(mfaSignInHref(window.location.pathname + window.location.search))
+                  }
+                />
+              }
+            />
+          ) : null}
           {saveError != null ? <SaveError error={saveError} /> : null}
           {suggestTest ? (
             <Banner status="success" title={t("federation_admin_saved_next_step")} />
@@ -475,16 +523,8 @@ function FederationForm({
       <ConfirmDialogControlled
         open={confirming}
         onOpenChange={setConfirming}
-        title={t(
-          confirmation.risky
-            ? "federation_admin_confirm_title"
-            : "federation_admin_confirm_label_title"
-        )}
-        description={t(
-          confirmation.risky
-            ? "federation_admin_confirm_description"
-            : "federation_admin_confirm_label_description"
-        )}
+        title={t(CONFIRM_KEYS[confirmation.kind].title)}
+        description={t(CONFIRM_KEYS[confirmation.kind].description)}
         confirmLabel={t("federation_admin_confirm_action")}
         variant={confirmation.risky ? "destructive" : "default"}
         pending={save.isPending}
@@ -525,6 +565,82 @@ function FederationForm({
   );
 }
 
+/** The claim that says MFA, its values and, for acr, how Eneo asks for it. */
+function MfaRuleFields({
+  draft,
+  edit,
+  valuesRef,
+  status
+}: {
+  draft: FederationDraft;
+  edit: (changes: Partial<FederationDraft>) => void;
+  valuesRef: React.RefObject<HTMLTextAreaElement | null>;
+  status: { type: "error"; message: string } | undefined;
+}) {
+  const t = useTranslations();
+  const headingId = useId();
+  const helpId = useId();
+  return (
+    <fieldset
+      aria-labelledby={headingId}
+      aria-describedby={helpId}
+      className="border-ax-border flex flex-col gap-5 border-t pt-5"
+    >
+      <div className="flex flex-col gap-1">
+        <Heading level={3} id={headingId} className="text-sm">
+          {t("federation_admin_mfa_title")}
+        </Heading>
+        <Text type="supporting" id={helpId}>
+          {t("federation_admin_mfa_help")}
+        </Text>
+      </div>
+      <Selector
+        label={t("federation_admin_mfa_claim_label")}
+        options={[
+          { value: "none", label: t("federation_admin_mfa_claim_none") },
+          { value: "acr", label: t("federation_admin_mfa_claim_acr") },
+          { value: "amr", label: t("federation_admin_mfa_claim_amr") }
+        ]}
+        value={draft.mfaClaim === "" ? "none" : draft.mfaClaim}
+        onChange={(value) => edit({ mfaClaim: value === "none" ? "" : (value as MfaClaim) })}
+        width="100%"
+      />
+      {draft.mfaClaim !== "" ? (
+        <TextArea
+          ref={valuesRef}
+          label={t("federation_admin_mfa_values_label")}
+          description={t(
+            draft.mfaClaim === "acr"
+              ? "federation_admin_mfa_values_help_acr"
+              : "federation_admin_mfa_values_help_amr"
+          )}
+          value={draft.mfaValues}
+          onChange={(mfaValues) => edit({ mfaValues })}
+          rows={3}
+          hasSpellCheck={false}
+          {...KEYBOARD.identifier}
+          isRequired
+          status={status}
+        />
+      ) : null}
+      {draft.mfaClaim === "acr" ? (
+        <Selector
+          label={t("federation_admin_mfa_request_label")}
+          description={t("federation_admin_mfa_request_help")}
+          options={[
+            { value: "none", label: t("federation_admin_mfa_request_none") },
+            { value: "acr_values", label: t("federation_admin_mfa_request_acr_values") },
+            { value: "claims", label: t("federation_admin_mfa_request_claims") }
+          ]}
+          value={draft.mfaRequest === "" ? "none" : draft.mfaRequest}
+          onChange={(value) => edit({ mfaRequest: value === "none" ? "" : (value as MfaRequest) })}
+          width="100%"
+        />
+      ) : null}
+    </fieldset>
+  );
+}
+
 /** A failed save: the page's own words for a refusal it knows, else the catalog's. */
 function SaveError({ error }: { error: unknown }) {
   const t = useTranslations();
@@ -542,8 +658,34 @@ const FIELD_LABEL_KEYS: Record<FederationField, string> = {
   provider: "federation_admin_provider_label",
   client_id: "client_id",
   client_secret: "client_secret",
-  allowed_domains: "federation_admin_domains"
+  allowed_domains: "federation_admin_domains",
+  mfa: "federation_admin_mfa_field"
 };
+
+/** What the confirmation asks, by what the save changes. */
+const CONFIRM_KEYS = {
+  sign_in: {
+    title: "federation_admin_confirm_title",
+    description: "federation_admin_confirm_description"
+  },
+  mfa: {
+    title: "federation_admin_confirm_mfa_title",
+    description: "federation_admin_confirm_mfa_description"
+  },
+  label: {
+    title: "federation_admin_confirm_label_title",
+    description: "federation_admin_confirm_label_description"
+  }
+} as const;
+
+/** A rule in a line: the claim, its values and how Eneo asks. */
+function ruleText(rule: MfaRule | null | undefined, t: Translate): string {
+  if (!rule) return t("federation_admin_mfa_claim_none");
+  const values = rule.values.join(", ");
+  return rule.request
+    ? t("federation_admin_mfa_summary_asks", { claim: rule.claim, values, request: rule.request })
+    : t("federation_admin_mfa_summary", { claim: rule.claim, values });
+}
 
 /** One line of the confirmation: the setting from what to what; never the secret. */
 function changeLine(
@@ -553,6 +695,13 @@ function changeLine(
   t: Translate
 ): string {
   if (field === "client_secret") return t("federation_admin_secret_replaced_change");
+  if (field === "mfa") {
+    return t("federation_admin_change", {
+      field: t(FIELD_LABEL_KEYS[field]),
+      from: ruleText(base.mfa, t),
+      to: ruleText(draftRule(draft), t)
+    });
+  }
   const list = (values: string[]) => values.join(", ") || t("federation_admin_none");
   if (field === "allowed_domains") {
     // The domains added and removed, not two whole lists to compare.
@@ -598,6 +747,10 @@ function effectText(effect: Consequence, t: Translate): string {
       return t("federation_admin_confirm_domains_removed", { domains: list(effect.domains) });
     case "domains_added":
       return t("federation_admin_confirm_domains_added", { domains: list(effect.domains) });
+    case "mfa_first":
+      return t("federation_admin_confirm_mfa_first");
+    case "mfa_sessions":
+      return t("federation_admin_confirm_mfa_sessions");
   }
 }
 

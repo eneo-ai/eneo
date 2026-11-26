@@ -14,6 +14,7 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
+  import * as Select from "$lib/components/ui/select/index.js";
   import { Textarea } from "$lib/components/ui/textarea/index.js";
   import { getEneo } from "$lib/core/Eneo";
   import { assignLocation } from "$lib/core/navigation";
@@ -21,9 +22,11 @@
   import { createCopyState } from "$lib/core/helpers/clipboard.svelte";
   import {
     changedFields,
+    changesMfaTrust,
     consequences,
     domainChange,
     draftFromView,
+    draftRule,
     FEDERATION_FIELDS,
     parseDomains,
     RISKY,
@@ -32,7 +35,10 @@
     type Consequence,
     type FederationField,
     type FederationView,
-    type FieldProblem
+    type FieldProblem,
+    type MfaClaim,
+    type MfaRequest,
+    type MfaRule
   } from "$lib/features/federation/federationDraft";
   import { m } from "$lib/paraglide/messages";
   import type { SaveFailure } from "./+page.server";
@@ -48,13 +54,41 @@
     provider: "federation-provider",
     client_id: "federation-client-id",
     client_secret: "federation-client-secret",
-    allowed_domains: "federation-domains"
+    allowed_domains: "federation-domains",
+    mfa: "federation-mfa-values"
   };
   const LABELS: Record<FederationField, () => string> = {
     provider: () => m.federation_admin_provider_label(),
     client_id: () => m.client_id(),
     client_secret: () => m.client_secret(),
-    allowed_domains: () => m.federation_admin_domains()
+    allowed_domains: () => m.federation_admin_domains(),
+    mfa: () => m.federation_admin_mfa_field()
+  };
+  const CLAIM_LABELS: Record<MfaClaim | "none", () => string> = {
+    none: () => m.federation_admin_mfa_claim_none(),
+    acr: () => m.federation_admin_mfa_claim_acr(),
+    amr: () => m.federation_admin_mfa_claim_amr()
+  };
+  const REQUEST_LABELS: Record<MfaRequest | "none", () => string> = {
+    none: () => m.federation_admin_mfa_request_none(),
+    acr_values: () => m.federation_admin_mfa_request_acr_values(),
+    claims: () => m.federation_admin_mfa_request_claims()
+  };
+  /** What the confirmation asks: a change to sign-in, to the MFA rule, or to the name. */
+  type ConfirmKind = "sign_in" | "mfa" | "label";
+  const CONFIRM: Record<ConfirmKind, { title: () => string; description: () => string }> = {
+    sign_in: {
+      title: () => m.federation_admin_confirm_title(),
+      description: () => m.federation_admin_confirm_description()
+    },
+    mfa: {
+      title: () => m.federation_admin_confirm_mfa_title(),
+      description: () => m.federation_admin_confirm_mfa_description()
+    },
+    label: {
+      title: () => m.federation_admin_confirm_label_title(),
+      description: () => m.federation_admin_confirm_label_description()
+    }
   };
 
   // The settings the draft was made from. A save answers with the new ones;
@@ -65,9 +99,15 @@
   let serverProblems = $state<Partial<Record<FederationField, FieldProblem>>>({});
   let confirming = $state(false);
   // What the open dialog lists, fixed when it opens: the save resets the draft.
-  let confirmation = $state<{ lines: string[]; risky: boolean; effects: string[] }>({
+  let confirmation = $state<{
+    lines: string[];
+    risky: boolean;
+    kind: ConfirmKind;
+    effects: string[];
+  }>({
     lines: [],
     risky: false,
+    kind: "label",
     effects: []
   });
   // A Save with nothing changed says so instead of doing nothing silently.
@@ -78,6 +118,8 @@
   let reloading = $state(false);
   let reloadFailed = $state(false);
   let formError = $state<string | null>(null);
+  // The save was refused because this session has no MFA under the rule.
+  let mfaRefused = $state(false);
   let copiedUri = $state<string | null>(null);
   let leaving = false;
   // Where focus goes when the dialog closes after a save.
@@ -87,6 +129,7 @@
   let replaceSecretButton = $state<HTMLButtonElement | null>(null);
   let conflictAlert = $state<HTMLElement | null>(null);
   let formErrorAlert = $state<HTMLElement | null>(null);
+  let mfaNeededAlert = $state<HTMLElement | null>(null);
 
   const changed = $derived(changedFields(base, draft));
   const problems = $derived(validate(draft));
@@ -97,6 +140,11 @@
       : parseDomains(draft.domains).length > 0
         ? m.federation_admin_jit_on()
         : m.federation_admin_jit_no_domains()
+  );
+
+  // Where a signed-in person signs in again for MFA and comes back here.
+  const mfaSignInHref = $derived(
+    `${resolve("/login/mfa")}?${new URLSearchParams({ next: resolve("/admin/federation") })}`
   );
 
   function problemFor(field: FederationField): FieldProblem | undefined {
@@ -115,6 +163,10 @@
         return m.federation_admin_domain_invalid({ domain: problem.domain });
       case "secret_masked":
         return m.federation_admin_secret_masked();
+      case "mfa_values_required":
+        return m.federation_admin_mfa_values_required();
+      case "mfa_values_too_many":
+        return m.federation_admin_mfa_values_too_many({ max: problem.max });
       case "refused":
         return m.federation_admin_field_refused();
     }
@@ -144,6 +196,7 @@
     submitted = false;
     serverProblems = {};
     formError = null;
+    mfaRefused = false;
   }
 
   async function requestSave(event: SubmitEvent) {
@@ -162,9 +215,12 @@
       return;
     }
     formError = null;
+    mfaRefused = false;
+    const risky = changed.some((field) => RISKY.has(field));
     confirmation = {
       lines: changed.map(changeLine),
-      risky: changed.some((field) => RISKY.has(field)),
+      risky,
+      kind: risky ? "sign_in" : changed.includes("mfa") ? "mfa" : "label",
       effects: consequences(base, draft).map(effectText)
     };
     confirming = true;
@@ -243,6 +299,11 @@
         if (first) focusAfterSave = () => document.getElementById(IDS[first]);
         return;
       }
+      case "mfa_required":
+        // The draft stays: after a sign-in with MFA the same change can be made.
+        mfaRefused = true;
+        focusAfterSave = () => mfaNeededAlert;
+        return;
       case "encryption_unavailable":
         formError = m.federation_admin_encryption_unavailable();
         break;
@@ -284,9 +345,25 @@
     }
   }
 
+  /** A rule in a line: the claim, its values and how Eneo asks. */
+  function ruleText(rule: MfaRule | null | undefined): string {
+    if (!rule) return m.federation_admin_mfa_claim_none();
+    const values = rule.values.join(", ");
+    return rule.request
+      ? m.federation_admin_mfa_summary_asks({ claim: rule.claim, values, request: rule.request })
+      : m.federation_admin_mfa_summary({ claim: rule.claim, values });
+  }
+
   /** One line of the confirmation: the setting from what to what; never the secret. */
   function changeLine(field: FederationField): string {
     if (field === "client_secret") return m.federation_admin_secret_replaced_change();
+    if (field === "mfa") {
+      return m.federation_admin_change({
+        field: LABELS[field](),
+        from: ruleText(base.mfa),
+        to: ruleText(draftRule(draft))
+      });
+    }
     const list = (values: string[]) => values.join(", ");
     if (field === "allowed_domains") {
       // The domains added and removed, not two whole lists to compare.
@@ -331,6 +408,10 @@
         return m.federation_admin_confirm_domains_removed({ domains: list(effect.domains) });
       case "domains_added":
         return m.federation_admin_confirm_domains_added({ domains: list(effect.domains) });
+      case "mfa_first":
+        return m.federation_admin_confirm_mfa_first();
+      case "mfa_sessions":
+        return m.federation_admin_confirm_mfa_sessions();
     }
   }
 
@@ -550,6 +631,114 @@
       {@render fieldError("allowed_domains")}
     </Field.Field>
 
+    <Field.Set class="border-default gap-5 border-t pt-5">
+      <Field.Legend>{m.federation_admin_mfa_title()}</Field.Legend>
+      <Field.Description>{m.federation_admin_mfa_help()}</Field.Description>
+
+      <Field.Field>
+        <Field.Label for="federation-mfa-claim">{m.federation_admin_mfa_claim_label()}</Field.Label>
+        <Select.Root
+          type="single"
+          value={draft.mfaClaim === "" ? "none" : draft.mfaClaim}
+          onValueChange={(value) => {
+            draft.mfaClaim = value === "none" ? "" : (value as MfaClaim);
+            edited("mfa");
+          }}
+        >
+          <Select.Trigger id="federation-mfa-claim" class="w-full sm:max-w-md">
+            <span data-slot="select-value"
+              >{CLAIM_LABELS[draft.mfaClaim === "" ? "none" : draft.mfaClaim]()}</span
+            >
+          </Select.Trigger>
+          <Select.Content>
+            {#each ["none", "acr", "amr"] as const as option (option)}
+              <Select.Item value={option} label={CLAIM_LABELS[option]()}
+                >{CLAIM_LABELS[option]()}</Select.Item
+              >
+            {/each}
+          </Select.Content>
+        </Select.Root>
+      </Field.Field>
+
+      {#if draft.mfaClaim !== ""}
+        <Field.Field>
+          <Field.Label for={IDS.mfa}>{m.federation_admin_mfa_values_label()}</Field.Label>
+          <Textarea
+            id={IDS.mfa}
+            bind:value={draft.mfaValues}
+            oninput={() => edited("mfa")}
+            rows={3}
+            spellcheck={false}
+            aria-required="true"
+            aria-invalid={problemFor("mfa") ? true : undefined}
+            aria-describedby={describedBy("mfa", "federation-mfa-values-help")}
+          />
+          <Field.Description id="federation-mfa-values-help">
+            {draft.mfaClaim === "acr"
+              ? m.federation_admin_mfa_values_help_acr()
+              : m.federation_admin_mfa_values_help_amr()}
+          </Field.Description>
+          {@render fieldError("mfa")}
+        </Field.Field>
+      {/if}
+
+      {#if draft.mfaClaim === "acr"}
+        <Field.Field>
+          <Field.Label for="federation-mfa-request"
+            >{m.federation_admin_mfa_request_label()}</Field.Label
+          >
+          <Select.Root
+            type="single"
+            value={draft.mfaRequest === "" ? "none" : draft.mfaRequest}
+            onValueChange={(value) => {
+              draft.mfaRequest = value === "none" ? "" : (value as MfaRequest);
+              edited("mfa");
+            }}
+          >
+            <Select.Trigger
+              id="federation-mfa-request"
+              class="w-full sm:max-w-md"
+              aria-describedby="federation-mfa-request-help"
+            >
+              <span data-slot="select-value"
+                >{REQUEST_LABELS[draft.mfaRequest === "" ? "none" : draft.mfaRequest]()}</span
+              >
+            </Select.Trigger>
+            <Select.Content>
+              {#each ["none", "acr_values", "claims"] as const as option (option)}
+                <Select.Item value={option} label={REQUEST_LABELS[option]()}
+                  >{REQUEST_LABELS[option]()}</Select.Item
+                >
+              {/each}
+            </Select.Content>
+          </Select.Root>
+          <Field.Description id="federation-mfa-request-help">
+            {m.federation_admin_mfa_request_help()}
+          </Field.Description>
+        </Field.Field>
+      {/if}
+    </Field.Set>
+
+    {#if mfaRefused || (base.mfa && !base.session_has_mfa)}
+      <Alert.Root
+        bind:ref={mfaNeededAlert}
+        tabindex={-1}
+        role={mfaRefused ? "alert" : undefined}
+        variant={mfaRefused || changesMfaTrust(base, draft) ? "destructive" : "default"}
+      >
+        <CircleAlert />
+        <Alert.Title>{m.federation_admin_mfa_needed_title()}</Alert.Title>
+        <Alert.Description>
+          <p>{m.federation_admin_mfa_needed_description()}</p>
+          <!-- A link to the page that starts the sign-in on a press; this form's own
+               button would save instead. The draft is lost on the way, as on any leave. -->
+          <Button size="sm" variant="outline" class="mt-2" href={mfaSignInHref}>
+            {m.federation_admin_mfa_sign_in()}
+          </Button>
+        </Alert.Description>
+      </Alert.Root>
+    {/if}
+
     {#if formError}
       <Alert.Root variant="destructive" bind:ref={formErrorAlert} tabindex={-1}>
         <CircleAlert />
@@ -584,12 +773,8 @@
 
 <ConfirmDialog
   bind:open={confirming}
-  title={confirmation.risky
-    ? m.federation_admin_confirm_title()
-    : m.federation_admin_confirm_label_title()}
-  description={confirmation.risky
-    ? m.federation_admin_confirm_description()
-    : m.federation_admin_confirm_label_description()}
+  title={CONFIRM[confirmation.kind].title()}
+  description={CONFIRM[confirmation.kind].description()}
   confirmLabel={m.federation_admin_confirm_action()}
   pendingLabel={m.saving()}
   variant={confirmation.risky ? "destructive" : "default"}

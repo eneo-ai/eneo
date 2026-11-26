@@ -19,7 +19,10 @@ export async function loginWithOidc(
   bindingVerifier: string,
   fetchFn: typeof fetch = fetch,
   // The provider's RFC 9207 issuer from the redirect; the backend checks it.
-  iss: string | null = null
+  iss: string | null = null,
+  // The session this browser already holds. A sign-in that succeeds ends it,
+  // so a person who signs in again (for MFA) is left with one session.
+  replaces: string | null = null
 ): Promise<OidcLoginResult | null> {
   const resolvedBackendUrl = getBackendUrl();
   if (!resolvedBackendUrl) {
@@ -45,6 +48,7 @@ export async function loginWithOidc(
         code,
         state,
         ...(iss !== null && { iss }),
+        ...(replaces !== null && { replaces }),
         binding_verifier: bindingVerifier
       })
     });
@@ -89,6 +93,13 @@ export async function loginWithOidc(
       }
       if (refusal === "identity_conflict") {
         throw new LoginError("oidc", "IDENTITY_CONFLICT", "", {
+          traceId,
+          statusCode: response.status,
+          rawDetail
+        });
+      }
+      if (refusal === "mfa_not_met") {
+        throw new LoginError("oidc", "MFA_NOT_MET", "", {
           traceId,
           statusCode: response.status,
           rawDetail

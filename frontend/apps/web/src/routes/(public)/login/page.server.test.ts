@@ -400,6 +400,7 @@ describe("login resume", () => {
       result.state,
       bindingVerifier,
       event.fetch,
+      null,
       null
     );
   });

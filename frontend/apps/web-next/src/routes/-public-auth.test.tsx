@@ -221,6 +221,35 @@ it.each(["has_global_oidc_config", "has_single_tenant_federation"])(
   }
 );
 
+it("ends a sign-in without MFA on a page that starts nothing by itself", async () => {
+  // Still signed in with the session they came with: the page must neither
+  // continue to where they were going nor start another sign-in.
+  generation = "session-a";
+  replies.set("/api/v1/auth/federation-status", { has_single_tenant_federation: true });
+  await route(
+    "/login?message=oidc_callback_failed&detailCode=mfa_not_met&next=%2Fadmin%2Ffederation"
+  );
+  expect(await screen.findByText(messages.mfa_sign_in_not_met_title)).toBeTruthy();
+  expect(screen.getByRole("link", { name: messages.mfa_sign_in_retry }).getAttribute("href")).toBe(
+    "/api/v1/auth/browser/initiate?next=%2Fadmin%2Ffederation&mfa=true"
+  );
+  expect(screen.getByRole("link", { name: messages.mfa_sign_in_back }).getAttribute("href")).toBe(
+    "/admin/federation"
+  );
+  expect(navigate).not.toHaveBeenCalled();
+  expect(screen.queryByText(messages.authentication_failed)).toBeNull();
+  await expectNoAxeViolations();
+});
+
+it("tells a person signing in for MFA when the organisation has set no rule", async () => {
+  generation = "session-a";
+  replies.set("/api/v1/auth/federation-status", { has_single_tenant_federation: true });
+  await route("/login?message=oidc_callback_failed&detailCode=mfa_not_configured&next=%2Fadmin");
+  expect(await screen.findByText(messages.mfa_sign_in_not_configured_title)).toBeTruthy();
+  expect(screen.queryByRole("link", { name: messages.mfa_sign_in_retry })).toBeNull();
+  expect(navigate).not.toHaveBeenCalled();
+});
+
 it("keeps explicit password login available on an SSO installation", async () => {
   replies.set("/api/v1/auth/federation-status", { has_single_tenant_federation: true });
   await route("/login?showUsernameAndPassword=true&next=%2Fadmin");

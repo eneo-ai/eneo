@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import type { Schema } from "@/lib/api/models";
-import { ssoEntry } from "./sso-entry";
+import { federationHref, mfaSignInHref, ssoEntry } from "./sso-entry";
 
 const status = (
   changes: Partial<Schema<"FederationStatusResponse">> = {}
@@ -34,4 +34,14 @@ it.each([
   status({ has_multi_tenant_federation: true, has_global_oidc_config: true })
 ])("leaves password or tenant selection to its owner for %j", (value) => {
   expect(ssoEntry(value)).toBeNull();
+});
+
+it("a sign-in for MFA says so to the backend and names no organisation", () => {
+  expect(mfaSignInHref("/admin/federation")).toBe(
+    "/api/v1/auth/browser/initiate?next=%2Fadmin%2Ffederation&mfa=true"
+  );
+  expect(mfaSignInHref("//evil.example")).toBe(
+    "/api/v1/auth/browser/initiate?next=%2Fspaces%2Fpersonal%2Fchat&mfa=true"
+  );
+  expect(federationHref("/spaces/x", "sundsvall")).not.toContain("mfa");
 });

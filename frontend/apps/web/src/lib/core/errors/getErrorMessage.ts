@@ -82,6 +82,8 @@ const ERROR_CODE_MESSAGES: Partial<Record<EneoErrorCode, () => string>> = {
   9078: () => m.eneo_error_9078(), // OIDC_TRANSACTION_INVALID
   9079: () => m.eneo_error_9079(), // OIDC_RESPONSE_NOT_VERIFIED
   9082: () => m.eneo_error_9082(), // IDENTITY_CONFLICT
+  9083: () => m.eneo_error_9083(), // OIDC_MFA_NOT_MET
+  9084: () => m.eneo_error_9084(), // OIDC_MFA_NOT_CONFIGURED
 
   // --- Governance ---
   9069: () => m.eneo_error_9069(), // PROMPT_IN_USE_BY_GOVERNANCE

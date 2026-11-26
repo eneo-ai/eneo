@@ -14,6 +14,7 @@ import { safeNextPath } from "@/lib/auth/safe-next";
 import { navigateTo } from "@/lib/navigate-to";
 import { LoginDiagnosticsAlert } from "./login-diagnostics-alert";
 import { LoginForm } from "./login-form";
+import { MfaSignInEnded, mfaSignInEnd } from "./mfa-sign-in-ended";
 import { PublicPage } from "./public-page";
 import { ssoEntry } from "./sso-entry";
 import { TenantFederationLogin } from "./tenant-federation-login";
@@ -49,13 +50,16 @@ export function LoginPage({ search, accessibilityStatementUrl }: Props) {
   const queries = sessionQueries(browserApi);
   const me = useQuery({ ...queries.me, enabled: bound });
   const federation = useQuery(queries.federationStatus);
+  // A sign-in for MFA that gave none ends here, with the person still signed
+  // in. Sending them on to where they were going would start it all over.
+  const mfaEnd = mfaSignInEnd(search.detailCode);
   const continued = useRef(false);
   useEffect(() => {
-    if (bound && me.data && !continued.current) {
+    if (bound && me.data && !mfaEnd && !continued.current) {
       continued.current = true;
       navigateTo(safeNextPath(search.next), { replace: true });
     }
-  }, [bound, me.data, search.next]);
+  }, [bound, me.data, mfaEnd, search.next]);
   const diagnostics = loginDiagnosticsFromRecord(search);
   const ssoHref = ssoEntry(federation.data, search.next);
   const notice = search.message ? loginNotices.get(search.message) : undefined;
@@ -92,7 +96,9 @@ export function LoginPage({ search, accessibilityStatementUrl }: Props) {
       description={t("login_description")}
       accessibilityStatementUrl={accessibilityStatementUrl}
     >
-      {bound && (me.isPending || me.data) ? (
+      {mfaEnd ? (
+        <MfaSignInEnded reason={mfaEnd} next={search.next} correlation={search.correlation} />
+      ) : bound && (me.isPending || me.data) ? (
         <LoadingState rows={1} label={t("redirecting")} />
       ) : autoSso ? (
         <FederationPending href={autoSso} />
