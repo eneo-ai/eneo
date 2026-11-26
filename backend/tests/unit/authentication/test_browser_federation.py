@@ -110,7 +110,7 @@ def federation(monkeypatch: pytest.MonkeyPatch) -> Iterator[Federation]:
     exp = int(time.time()) + 900
     secret = get_settings().jwt_secret
     session_token = jwt.encode({"exp": exp, "sid": "s" * 43}, secret, algorithm="HS256")
-    callback = AsyncMock(return_value=FederatedSignIn(TEST_USER, "ignored"))
+    callback = AsyncMock(return_value=FederatedSignIn(TEST_USER, "ignored", mfa=True))
     start = AsyncMock(return_value=session_token)
     monkeypatch.setattr(routes, "initiate_federated_sign_in", initiate, raising=False)
     monkeypatch.setattr(routes, "federated_sign_in", callback, raising=False)
@@ -251,9 +251,9 @@ def test_callback_sets_session_and_clears_transaction(
         parsed.load(cookie)
     assert 0 < int(parsed["__Host-eneo_web"]["max-age"]) <= 900
     # The cookie carries the session the store started for the admitted
-    # user, which is no password session.
+    # user, which is no password session, with the sign-in's answer on MFA.
     federation.start.assert_awaited_once_with(
-        federation.user, auth_method=None, replacing=None
+        federation.user, auth_method=None, mfa=True, replacing=None
     )
     assert parsed["__Host-eneo_web"].value == federation.session_token
     assert any(

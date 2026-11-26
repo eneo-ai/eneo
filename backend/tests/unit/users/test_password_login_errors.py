@@ -470,7 +470,7 @@ def test_success_preserves_the_token_and_recovers_from_limiter_outages(
     # The issued token, carrying the session the login started for it.
     assert response.json() == SESSION_TOKEN.model_dump()
     login_endpoint.sessions.start.assert_awaited_once_with(
-        TEST_USER, auth_method="password"
+        TEST_USER, auth_method="password", mfa=False
     )
     assert PASSWORD not in structured_logs(caplog)
     if limiter_failure == "count":

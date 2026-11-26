@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import TIMESTAMP, ForeignKey
+from sqlalchemy import TIMESTAMP, ForeignKey, false
 from sqlalchemy.orm import Mapped, mapped_column
 
 from eneo.database.tables.base_class import BaseWithTableName, CreatedAtMixin, IdMixin
@@ -17,8 +17,8 @@ class BrowserSessions(IdMixin, CreatedAtMixin, BaseWithTableName):
     sid claim is admitted only while its row exists, matches the token's
     user, tenant and session_ref (when it carries one), and is unexpired.
     Sign-out deletes the row; ``BrowserSessionService.delete_expired``
-    deletes expired ones. Only a renewal changes a row, moving expires_at
-    later.
+    deletes expired ones. A renewal moves expires_at later, and a change of
+    the organisation's MFA rule sets mfa to no; nothing else changes a row.
     """
 
     sid: Mapped[str] = mapped_column(unique=True, nullable=False)
@@ -32,4 +32,10 @@ class BrowserSessions(IdMixin, CreatedAtMixin, BaseWithTableName):
     )
     expires_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False
+    )
+    # Whether the sign-in that started the session met the organisation's
+    # MFA rule. Decided once, at sign-in, and never changed from no to yes: a
+    # person who needs MFA signs in again and gets a new session.
+    mfa: Mapped[bool] = mapped_column(
+        nullable=False, default=False, server_default=false()
     )

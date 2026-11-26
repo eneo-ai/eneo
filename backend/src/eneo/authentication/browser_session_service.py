@@ -7,7 +7,9 @@ admits such a token, as the cookie or as Bearer, only while the row exists,
 matches the token's user, tenant and ``session_ref`` and is unexpired.
 Sign-out deletes the row, so a copied token stops working at once. Every
 sign-in a person makes starts one (the cookie and token logins, password or
-OIDC). Tokens without ``sid`` (API, module and MCP tokens, and tokens
+OIDC). The row also keeps whether that sign-in met the organisation's MFA
+rule (``mfa``): decided once, when the session starts, and never changed from
+no to yes. Tokens without ``sid`` (API, module and MCP tokens, and tokens
 issued before sign-ins started sessions) are not browser sessions and keep
 their own lifetime.
 
@@ -34,6 +36,7 @@ import time
 from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Literal
+from uuid import UUID
 
 import sqlalchemy as sa
 from dependency_injector import providers
@@ -135,9 +138,14 @@ class BrowserSessionService:
         user: "UserInDB",
         *,
         auth_method: Literal["password"] | None,
+        mfa: bool,
         replacing: str | None = None,
     ) -> str:
         """Start a browser session for ``user``, whom a sign-in just admitted.
+
+        ``mfa`` is whether that sign-in met the organisation's MFA rule
+        (``FederatedSignIn.mfa``); a password sign-in never does. It is stored
+        on the row and in no token, so a token cannot claim it.
 
         Returns the session's token: ``user``'s claims, ``auth_method``
         (``"password"`` for a password sign-in, for the password lifecycle
@@ -167,6 +175,7 @@ class BrowserSessionService:
                 user_id=payload.user_id,
                 tenant_id=payload.tenant_id,
                 expires_at=datetime.fromtimestamp(payload.exp, timezone.utc),
+                mfa=mfa,
             )
             .returning(BrowserSessions.id)
         )
@@ -192,6 +201,27 @@ class BrowserSessionService:
         ):
             raise AuthenticationException("Could not validate token credentials.")
 
+    async def has_mfa(self, session_ref: UUID | None) -> bool:
+        """Whether the session a credential belongs to was started with MFA.
+
+        ``session_ref`` is the admitted credential's
+        (``CredentialFacts.session_ref``): the session's own token carries it,
+        and so does a module or tool token minted from that session. Signing
+        in with MFA starts a new session, so a token minted from the earlier
+        one keeps naming a session without it. A credential that names no
+        session, or one that has ended, has none.
+        """
+        if session_ref is None:
+            return False
+        return bool(
+            await self.session.scalar(
+                sa.select(BrowserSessions.mfa).where(
+                    BrowserSessions.id == session_ref,
+                    BrowserSessions.expires_at > datetime.now(timezone.utc),
+                )
+            )
+        )
+
     async def delete_expired(self) -> int:
         """Delete every expired session, in the caller's transaction, and
         return how many there were. An expired row admits nothing, so this
@@ -216,7 +246,8 @@ class BrowserSessionService:
         token's ``iat`` for tokens issued before it existed); and a password
         sign-in's ``auth_method``, for the password lifecycle gate. The rest
         is minted again for ``user`` as it is now. A claim a sign-in adds is
-        lost on the first renewal unless it is carried here.
+        lost on the first renewal unless it is carried here. Whether the
+        session has MFA is on its row, which a renewal leaves as it is.
 
         The session's row moves to the new token's expiry unless another
         renewal already moved it later (renewals can be recorded in another

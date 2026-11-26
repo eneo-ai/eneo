@@ -28,7 +28,7 @@ from sqlalchemy.orm import Session
 from starlette.status import WS_1008_POLICY_VIOLATION, WS_1013_TRY_AGAIN_LATER
 
 from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-from eneo.authentication import browser_session_service
+from eneo.authentication import browser_session_service, federation_router
 from eneo.authentication.auth_models import JWTPayload
 from eneo.authentication.auth_service import AuthService
 from eneo.authentication.browser_session import session_generation
@@ -158,6 +158,32 @@ async def _rows(user_id: str) -> dict[str, tuple[UUID, UUID, datetime]]:
             row.sid: (row.user_id, row.tenant_id, row.expires_at)
             for row in rows.scalars()
         }
+
+
+async def _mfa(token: str) -> bool:
+    """Whether the session a token names was started with MFA."""
+    async with sessionmanager.session() as session, session.begin():
+        return await session.scalar(
+            sa.select(BrowserSessions.mfa).where(
+                BrowserSessions.sid == _claims(token)["sid"]
+            )
+        )
+
+
+async def _set_mfa_rule(tenant_id: UUID, rule: dict[str, Any] | None) -> None:
+    """Write the organisation's MFA rule where sign-in reads it."""
+    async with sessionmanager.session() as session, session.begin():
+        stored = await session.scalar(
+            sa.select(Tenants.federation_config).where(Tenants.id == tenant_id)
+        )
+        config = {key: value for key, value in stored.items() if key != "mfa"}
+        if rule is not None:
+            config["mfa"] = rule
+        await session.execute(
+            sa.update(Tenants)
+            .where(Tenants.id == tenant_id)
+            .values(federation_config=config)
+        )
 
 
 async def _execute(statement) -> None:
@@ -786,6 +812,115 @@ async def test_a_federated_sign_in_survives_optional_claims_in_the_wrong_form(
         "/api/v1/users/me/", headers=SAME_ORIGIN | {"Cookie": f"{SESSION}={token}"}
     )
     assert me.status_code == 200, me.text
+
+
+ACR_RULE = {"claim": "acr", "values": ["level-2"]}
+
+
+def _federated_token(callback) -> str:
+    assert callback.status_code == 303, callback.text
+    [session] = _session_cookies(callback)
+    return session.removeprefix(f"{SESSION}=").split(";", 1)[0]
+
+
+async def test_only_a_sign_in_that_meets_the_rule_starts_a_session_with_mfa(
+    client,
+    super_admin_token,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    browser_session_on,
+    federated_callback,
+    test_tenant,
+):
+    # Before the organisation states a rule, no answer means MFA.
+    assert not await _mfa(_federated_token(await federated_callback(acr="level-2")))
+    await _set_mfa_rule(test_tenant.id, ACR_RULE)
+
+    with_mfa = _federated_token(await federated_callback(acr="level-2"))
+    assert await _mfa(with_mfa)
+    for answer in (
+        {},
+        {"acr": "level-1"},
+        # A claim in a form Eneo cannot trust counts as missing.
+        {"acr": ["level-2"]},
+        # Another claim saying so is not what the organisation's rule reads.
+        {"amr": ["level-2", "mfa"]},
+    ):
+        assert not await _mfa(_federated_token(await federated_callback(**answer)))
+    email = await _create_local_user(client, super_admin_token)
+    cookie = await _login(client, SESSION_LOGIN, email, PASSWORD)
+    bearer = await _login(client, TOKEN_LOGIN, email, PASSWORD)
+    for password in (_session_token(cookie), bearer.json()["access_token"]):
+        assert not await _mfa(password)
+
+
+async def test_a_renewal_keeps_the_sessions_answer_on_mfa(
+    client,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    browser_session_on,
+    federated_callback,
+    test_tenant,
+):
+    await _set_mfa_rule(test_tenant.id, ACR_RULE)
+    with_mfa = _federated_token(await federated_callback(acr="level-2"))
+    without = _federated_token(await federated_callback())
+
+    for token, answer in ((with_mfa, True), (without, False)):
+        extended = await client.post(EXTEND, headers=_cookie(token))
+        assert extended.status_code == 200, extended.text
+        assert await _mfa(_session_token(extended)) is answer
+
+
+async def test_a_token_minted_from_the_earlier_session_gains_no_mfa(
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    browser_session_on,
+    federated_callback,
+    db_container,
+    test_tenant,
+):
+    """Signing in with MFA starts a new session. What was minted from the one
+    before it, a module or tool token, still names that one."""
+    await _set_mfa_rule(test_tenant.id, ACR_RULE)
+    earlier = _claims(_federated_token(await federated_callback()))
+    with_mfa = _claims(_federated_token(await federated_callback(acr="level-2")))
+
+    async with db_container() as container:
+        sessions = container.browser_session_service()
+        assert await sessions.has_mfa(UUID(with_mfa["session_ref"]))
+        assert not await sessions.has_mfa(UUID(earlier["session_ref"]))
+        # A credential that names no session, or one that has ended.
+        assert not await sessions.has_mfa(None)
+        await _execute(
+            sa.update(BrowserSessions)
+            .where(BrowserSessions.sid == with_mfa["sid"])
+            .values(expires_at=datetime.now(timezone.utc) - timedelta(seconds=1))
+        )
+        assert not await sessions.has_mfa(UUID(with_mfa["session_ref"]))
+
+
+async def test_settings_changed_while_a_sign_in_finishes_give_it_no_mfa(
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    browser_session_on,
+    federated_callback,
+    test_tenant,
+    monkeypatch,
+):
+    """The answer was verified and judged under settings that are no longer
+    the organisation's, so the session is started without MFA."""
+    await _set_mfa_rule(test_tenant.id, ACR_RULE)
+    verify = federation_router.verify_response
+
+    async def then_the_rule_changes(*args: Any, **kwargs: Any):
+        verified = await verify(*args, **kwargs)
+        await _set_mfa_rule(test_tenant.id, {"claim": "acr", "values": ["level-3"]})
+        return verified
+
+    monkeypatch.setattr(federation_router, "verify_response", then_the_rule_changes)
+
+    assert not await _mfa(_federated_token(await federated_callback(acr="level-2")))
 
 
 @pytest.mark.integration

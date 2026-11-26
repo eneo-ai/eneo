@@ -149,6 +149,7 @@ async def create_browser_session(
     session_token = await container.browser_session_service().start(
         user,
         auth_method=PASSWORD_AUTH_METHOD,
+        mfa=False,
         replacing=session_cookie(request, get_settings()),
     )
     response = Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -576,7 +577,10 @@ async def complete_browser_federation(
         diagnostics.detail_code = exc.code
         raise
     session_token = await container.browser_session_service().start(
-        signed_in.user, auth_method=None, replacing=session_cookie(request, settings)
+        signed_in.user,
+        auth_method=None,
+        mfa=signed_in.mfa,
+        replacing=session_cookie(request, settings),
     )
     response = RedirectResponse(diagnostics.next_path, status_code=303)
     set_session_cookie(response, session_token, settings=settings)

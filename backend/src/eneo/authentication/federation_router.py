@@ -18,6 +18,7 @@ from eneo.authentication.endpoint_access import (
     Authorization,
     endpoint_access,
 )
+from eneo.authentication.mfa_rule import MfaRule
 from eneo.authentication.oidc.authorization import build_authorization_request
 from eneo.authentication.oidc.errors import OidcSignInError
 from eneo.authentication.oidc.profile import (
@@ -38,7 +39,11 @@ from eneo.authentication.oidc.transaction import (
     save_transaction,
     take_transaction,
 )
-from eneo.authentication.oidc.verification import CallbackResponse, verify_response
+from eneo.authentication.oidc.verification import (
+    CallbackResponse,
+    VerifiedAuthentication,
+    verify_response,
+)
 from eneo.main.config import (
     Settings,
     get_settings,
@@ -83,10 +88,12 @@ class AccessTokenResponse(TypedDict):
 
 
 class FederatedSignIn(NamedTuple):
-    """A verified callback's admitted user, and the state its page sent."""
+    """A verified callback's admitted user, the state its page sent, and
+    whether the provider's answer met the organisation's MFA rule."""
 
     user: UserInDB
     frontend_state: str
+    mfa: bool
 
 
 async def _log_oidc_debug(
@@ -914,9 +921,37 @@ async def auth_callback(
     # ends every copy of it.
     return AccessTokenResponse(
         access_token=await container.browser_session_service().start(
-            signed_in.user, auth_method=None
+            signed_in.user, auth_method=None, mfa=signed_in.mfa
         ),
         frontend_state=signed_in.frontend_state,
+    )
+
+
+async def _met_mfa_rule(
+    container: Container,
+    tenant: TenantInDB,
+    verified: VerifiedAuthentication,
+    settings: Settings,
+) -> bool:
+    """Whether this sign-in gets a session with MFA: the provider's verified
+    answer meets the rule in the organisation's sign-in settings.
+
+    A change of those settings takes the organisation's row for itself and
+    takes MFA from the organisation's sessions. A yes is therefore given only
+    with the row shared until this sign-in commits, and only when the settings
+    are still the ones the answer was verified and judged under: the session
+    is either written before the change, and loses MFA with the rest, or
+    after it, without MFA. The person can then sign in again.
+    """
+    # The OIDC_* environment settings state no rule, so they never get here.
+    judged_under = selected_config(settings, tenant)
+    rule = MfaRule.from_config(judged_under)
+    if rule is None or not rule.met_by(verified):
+        return False
+    stored = await container.tenant_repo().share_federation_config(tenant.id)
+    # A loaded tenant holds its settings in the validator's form.
+    return stored is not None and TenantInDB.validate_federation_config(stored) == dict(
+        judged_under
     )
 
 
@@ -1171,7 +1206,11 @@ async def federated_sign_in(
             user_id=str(user.id),
         )
 
-        return FederatedSignIn(user, state_payload["frontend_state"])
+        return FederatedSignIn(
+            user,
+            state_payload["frontend_state"],
+            await _met_mfa_rule(container, tenant_obj, verified, settings),
+        )
     except (HTTPException, OidcSignInError, IdentityConflictError):
         # Re-raise HTTP and typed sign-in refusals with correlation_id already set
         raise

@@ -224,9 +224,13 @@ async def test_the_callback_route_hands_out_a_session_and_the_frontend_state(
         CallbackRequest(code=answer.code, state=started.state), login.container
     )
 
-    # A provider sign-in starts a session that is no password session.
+    # A provider sign-in starts a session that is no password session, and
+    # without MFA while the organisation has stated no rule.
     [(user,), started_with] = sessions.start.await_args
-    assert (user.email, started_with) == ("user@example.com", {"auth_method": None})
+    assert (user.email, started_with) == (
+        "user@example.com",
+        {"auth_method": None, "mfa": False},
+    )
     assert result == {
         "access_token": "session-token",
         "frontend_state": '{"next":"/spaces"}',
@@ -273,6 +277,7 @@ async def test_browser_login_sets_the_session_cookie(monkeypatch):
     sessions.start.side_effect = (
         lambda user,
         auth_method,
+        mfa,
         replacing=None: AuthService().create_access_token_for_user(
             user, auth_method=auth_method
         )

@@ -244,7 +244,7 @@ def test_password_session_sets_cookie_without_token_in_body(
     # The cookie carries the token of the session the store started for the
     # admitted user, a password session.
     endpoints.sessions.start.assert_awaited_once_with(
-        endpoints.user, auth_method="password", replacing=None
+        endpoints.user, auth_method="password", mfa=False, replacing=None
     )
     assert set_cookies(response) == [
         expected_set_cookie(SESSION, session_token, 15 * 60, production=True)
@@ -277,7 +277,7 @@ def test_password_session_replaces_a_planted_session(endpoints: Endpoints):
     assert planted not in cookie
     # The store ends whatever session the planted cookie names.
     endpoints.sessions.start.assert_awaited_once_with(
-        endpoints.user, auth_method="password", replacing=planted
+        endpoints.user, auth_method="password", mfa=False, replacing=planted
     )
 
 
@@ -533,7 +533,7 @@ def test_token_login_hands_out_the_session_it_starts(endpoints: Endpoints):
         "token_type": "bearer",
     }
     endpoints.sessions.start.assert_awaited_once_with(
-        endpoints.user, auth_method="password"
+        endpoints.user, auth_method="password", mfa=False
     )
     assert set_cookies(response) == []
 

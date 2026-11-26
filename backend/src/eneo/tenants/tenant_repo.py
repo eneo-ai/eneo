@@ -668,6 +668,22 @@ class TenantRepository:
         config = await self.session.scalar(stmt)
         return None if config is None else dict(config)
 
+    async def share_federation_config(self, tenant_id: UUID) -> dict[str, Any] | None:
+        """The stored federation config, read while no federation write is
+        under way, and with the next one held off until this transaction ends.
+
+        Readers share the tenant row; a writer (``lock_federation_config``)
+        waits for them and they wait for it. None when the tenant does not
+        exist.
+        """
+        stmt = (
+            sa.select(Tenants.federation_config)
+            .where(Tenants.id == tenant_id)
+            .with_for_update(read=True)
+        )
+        config = await self.session.scalar(stmt)
+        return None if config is None else dict(config)
+
     async def get_federation_config_with_metadata(
         self, tenant_id: UUID
     ) -> Optional[dict[str, Any]]:
