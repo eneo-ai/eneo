@@ -1,5 +1,4 @@
 from collections.abc import Sequence
-from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Any, List, Literal, TypeVar
 from urllib.parse import quote
@@ -282,10 +281,7 @@ class InfoBlobRepository:
         unique_ids = list(dict.fromkeys(ids))
         if not unique_ids:
             return []
-        async with (
-            nullcontext() if self.session.in_transaction() else self.session.begin()
-        ):
-            return await self.delegate.get_by_ids(unique_ids)
+        return await self.delegate.get_by_ids(unique_ids)
 
     async def add(
         self,
@@ -620,12 +616,9 @@ class InfoBlobRepository:
         """
         if not blobs:
             return blobs
-        async with (
-            nullcontext() if self.session.in_transaction() else self.session.begin()
-        ):
-            available_ids = await self.get_original_availability(
-                [blob.id for blob in blobs]
-            )
+        available_ids = await self.get_original_availability(
+            [blob.id for blob in blobs]
+        )
         for blob in blobs:
             blob.original_available = blob.id in available_ids
         return blobs

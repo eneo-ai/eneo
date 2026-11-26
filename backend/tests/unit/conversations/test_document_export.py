@@ -150,8 +150,7 @@ async def _export(
 
 
 async def test_document_is_rendered_by_the_file_creation_provider():
-    document = _docx()
-    proxy = _Proxy(_file_result(document, DOCX_MIME_TYPE))
+    proxy = _Proxy(_file_result(_docx(), DOCX_MIME_TYPE))
 
     exported, assistants, files = await _export(proxy)
 
@@ -171,7 +170,7 @@ async def test_document_is_rendered_by_the_file_creation_provider():
     ]
     assert exported.filename == "Införandeplan.docx"
     assert exported.mime_type == DOCX_MIME_TYPE
-    assert exported.data == document
+    assert exported.data == _docx()
     assert exported.mcp_server_id == SERVER_ID
     assert files.read == [FILE_ID]
     assert proxy.closed

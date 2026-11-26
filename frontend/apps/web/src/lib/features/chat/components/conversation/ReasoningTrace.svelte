@@ -17,7 +17,6 @@
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import LoaderCircle from "@lucide/svelte/icons/loader-circle";
   import ReasoningToolStep from "./ReasoningToolStep.svelte";
-  import type { ToolStepStatus } from "../../toolStepStatus";
 
   type Step = {
     toolName: string;
@@ -27,7 +26,7 @@
     args?: Record<string, unknown>;
     toolCallId?: string;
     previousAttempt?: boolean;
-    status: ToolStepStatus;
+    status: "preparing" | "running" | "complete" | "failed" | "denied";
   };
 
   let {

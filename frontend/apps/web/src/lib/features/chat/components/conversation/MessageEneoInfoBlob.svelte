@@ -11,7 +11,6 @@
     documentNumber,
     mergeAdjacentCitations
   } from "../../mcpReferenceDocs";
-  import { specialistsByReference } from "../../consultationReferences";
   import { m } from "$lib/paraglide/messages";
   import { sanitizeWebHref } from "$lib/components/markdown/index.js";
   import SourceMetadataList from "$lib/features/knowledge/components/SourceMetadataList.svelte";
@@ -87,7 +86,6 @@
         pageRange,
         section,
         source_metadata: meta.source_metadata,
-        viaSpecialist: specialistsByReference(current().consultations).get(ref.id) ?? null,
         // Number by DOCUMENT, matching the deduped chip list in
         // MessageTools: passages from the same document share one number.
         number: documentNumber(mcpToolReferences, ref)
@@ -210,11 +208,6 @@
           </Tooltip.Trigger>
           <Tooltip.Content class="flex-col items-start">
             <span>{mcpReference?.title}</span>
-            {#if mcpReference?.viaSpecialist}
-              <span class="text-xs">
-                {m.reference_via_specialist({ name: mcpReference.viaSpecialist })}
-              </span>
-            {/if}
             {#if hasSourceMetadata(mcpReference)}
               <SourceMetadataList entries={mcpReference.source_metadata} variant="inline" />
             {/if}

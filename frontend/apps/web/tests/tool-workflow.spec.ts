@@ -77,11 +77,7 @@ test("workbook tools produce a report, preserve revisions, and recheck export su
   // run only folds (and keeps its expanded state) once nothing is running.
   // The composer offers to send again when the turn is over.
   await expect(page.locator('button[name="ask"][type="submit"]')).toBeVisible();
-  // Tool views can still resize and move the transcript after streaming.
-  // Keyboard activation keeps the interaction on the selected disclosure.
-  const steps = conversation.getByRole("button", { name: /Skills.*6/ });
-  await steps.press("Enter");
-  await expect(steps).toHaveAttribute("aria-expanded", "true");
+  await conversation.getByRole("button", { name: /Skills.*6/ }).click();
   await expect(conversation.getByRole("button", { name: /Workflow analysis/ })).toBeVisible();
 
   // The formula notice is rendered by the table itself, independently of model prose.
