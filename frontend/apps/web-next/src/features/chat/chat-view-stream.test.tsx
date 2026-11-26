@@ -25,7 +25,6 @@ const spies = vi.hoisted(() => ({
     | "hold"
     | "approval"
     | "approval-break"
-    | "specialist-approval"
     | "provider"
     | "late-context",
   contextStream: null as ReadableStreamDefaultController<Record<string, unknown>> | null,
@@ -72,52 +71,28 @@ vi.mock("@/lib/chat/transport", () => ({
           }
         });
       }
-      if (
-        spies.mode === "approval" ||
-        spies.mode === "approval-break" ||
-        spies.mode === "specialist-approval"
-      ) {
+      if (spies.mode === "approval" || spies.mode === "approval-break") {
         // A tool asks first; the stream waits for the decision, or breaks.
         return new ReadableStream({
           start(controller) {
             controller.enqueue({ type: "start", messageId: "answer-1" });
-            const tool = {
-              server_name: "diarium",
-              tool_name: "sok_arende",
-              title: "Sök ärende i diariet",
-              tool_call_id: "call-1",
-              arguments: { arendenummer: "BN 2026-0412" }
-            };
-            controller.enqueue(
-              spies.mode === "specialist-approval"
-                ? {
-                    type: "data-consultation",
-                    id: "child-1",
-                    data: {
-                      id: "child-1",
-                      ordinal: 1,
-                      assistant_id: "specialist",
-                      assistant_name: "IT",
-                      question: "Find the case",
-                      status: "awaiting_approval",
-                      approval_id: "ap-1",
-                      awaiting_tool_call_ids: ["call-1"],
-                      tool_calls: [
-                        { ...tool, step_id: "prior", approved: true, result_status: "succeeded" },
-                        { ...tool, step_id: "current", approved: null, result_status: "pending" }
-                      ]
-                    }
+            controller.enqueue({
+              type: "data-tool-approval",
+              id: "ap-1",
+              data: {
+                approval_id: "ap-1",
+                status: "pending",
+                tools: [
+                  {
+                    server_name: "diarium",
+                    tool_name: "sok_arende",
+                    title: "Sök ärende i diariet",
+                    tool_call_id: "call-1",
+                    arguments: { arendenummer: "BN 2026-0412" }
                   }
-                : {
-                    type: "data-tool-approval",
-                    id: "ap-1",
-                    data: {
-                      approval_id: "ap-1",
-                      status: "pending",
-                      tools: [tool]
-                    }
-                  }
-            );
+                ]
+              }
+            });
             if (spies.mode === "approval-break") {
               setTimeout(() => controller.error(new Error("Anslutningen bröts")), 0);
             }
@@ -623,6 +598,33 @@ describe("ChatView rating a streamed answer", () => {
 });
 
 describe("ChatView sending", () => {
+  it("sends an @-mention to the group chat member it names", async () => {
+    spies.mode = "answer";
+    renderInApp(
+      <Harness
+        chatPartner={{
+          type: "group-chat",
+          id: "group-1",
+          name: "Upphandlingsgruppen",
+          mentionableAssistants: [{ id: "assistant-9", handle: "juristen" }]
+        }}
+      />
+    );
+    fireEvent.click(screen.getByRole("combobox", { name: "Nämn" }));
+    fireEvent.click(await screen.findByRole("option", { name: "@juristen" }));
+    ask("Är avtalet förenligt med LOU?");
+    await waitFor(() => expect(spies.sent).toHaveLength(1));
+    expect(spies.sent[0]?.body).toMatchObject({
+      group_chat_id: "group-1",
+      assistant_id: null,
+      tools: { assistants: [{ id: "assistant-9", handle: "juristen" }] }
+    });
+    // The mention applies to that question only.
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Nämn" }).textContent).toContain("Omnämnanden")
+    );
+  });
+
   it("stops an answer from the stop button and says so", async () => {
     spies.mode = "hold";
     renderInApp(<Harness />);
@@ -654,37 +656,34 @@ describe("ChatView docked composer", () => {
 });
 
 describe("ChatView tool approval on a phone (decision 26)", () => {
-  it.each(["approval", "specialist-approval"] as const)(
-    "offers one decision and returns the composer for %s",
-    async (mode) => {
-      spies.mode = mode;
-      setViewport("phone");
-      renderInApp(<Harness />);
-      ask("Hur långt har ärende BN 2026-0412 kommit?");
+  it("puts the decision in the composer's place while the tool waits, then gives it back", async () => {
+    spies.mode = "approval";
+    setViewport("phone");
+    renderInApp(<Harness />);
+    ask("Hur långt har ärende BN 2026-0412 kommit?");
 
-      const bar = await screen.findByRole("region", {
-        name: /vill använda Sök ärende i diariet$/
-      });
-      expect(screen.queryByRole("textbox", { name: /^Fråga / })).toBeNull();
-      expect(within(bar).getByText("arendenummer: BN 2026-0412")).toBeTruthy();
-      // Asked once: the card in the conversation shows the call, the bar decides.
-      // The bar is docked as soon as the call is known; the card follows with
-      // the streamed message, so it is awaited rather than assumed.
-      const card = await screen.findByRole("region", { name: "Väntar på godkännande" });
-      expect(within(card).queryByRole("button", { name: /^Godkänn/ })).toBeNull();
+    const bar = await screen.findByRole("region", {
+      name: /vill använda Sök ärende i diariet$/
+    });
+    expect(screen.queryByRole("textbox", { name: /^Fråga / })).toBeNull();
+    expect(within(bar).getByText("arendenummer: BN 2026-0412")).toBeTruthy();
+    // Asked once: the card in the conversation shows the call, the bar decides.
+    // The bar is docked as soon as the call is known; the card follows with
+    // the streamed message, so it is awaited rather than assumed.
+    const card = await screen.findByRole("region", { name: "Väntar på godkännande" });
+    expect(within(card).queryByRole("button", { name: /^Godkänn/ })).toBeNull();
 
-      fireEvent.click(within(bar).getByRole("button", { name: "Granska Sök ärende i diariet" }));
-      const sheet = await screen.findByRole("dialog", { name: "Sök ärende i diariet" });
-      expect(within(sheet).getByText("diarium/sok_arende")).toBeTruthy();
-      expect(within(sheet).getByRole("button", { name: "Stäng" })).toBeTruthy();
+    fireEvent.click(within(bar).getByRole("button", { name: "Granska Sök ärende i diariet" }));
+    const sheet = await screen.findByRole("dialog", { name: "Sök ärende i diariet" });
+    expect(within(sheet).getByText("diarium/sok_arende")).toBeTruthy();
+    expect(within(sheet).getByRole("button", { name: "Stäng" })).toBeTruthy();
 
-      fireEvent.click(within(bar).getByRole("button", { name: "Godkänn Sök ärende i diariet" }));
-      await waitFor(() => expect(screen.getByRole("textbox", { name: /^Fråga / })).toBeTruthy());
-      expect(
-        within(screen.getByRole("region", { name: "Verktygsgodkännande" })).getByText("Godkänt")
-      ).toBeTruthy();
-    }
-  );
+    fireEvent.click(within(bar).getByRole("button", { name: "Godkänn Sök ärende i diariet" }));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: /^Fråga / })).toBeTruthy());
+    expect(
+      within(screen.getByRole("region", { name: "Verktygsgodkännande" })).getByText("Godkänt")
+    ).toBeTruthy();
+  });
 
   it("keeps the dock for the decision: an earlier answer's sources do not cover it", async () => {
     spies.mode = "approval";
@@ -756,7 +755,11 @@ describe("ChatView offline", () => {
 
 describe("ChatView with nobody to answer", () => {
   it.each([
-    ["an assistant without a usable model", { ...partner, completionModel: null }]
+    ["an assistant without a usable model", { ...partner, completionModel: null }],
+    [
+      "a group chat without assistants",
+      { type: "group-chat", id: "group-1", name: "Gruppen", assistantCount: 0 }
+    ]
   ] satisfies [string, ChatPartner][])(
     "says so at the field and sends nothing: %s",
     (_, chatPartner) => {
@@ -772,7 +775,12 @@ describe("ChatView with nobody to answer", () => {
   );
 
   it.each([
-    ["the assistant loses its model", partner, { ...partner, completionModel: null }]
+    ["the assistant loses its model", partner, { ...partner, completionModel: null }],
+    [
+      "the group chat loses its assistants",
+      { type: "group-chat", id: "group-1", name: "Gruppen", assistantCount: 2 },
+      { type: "group-chat", id: "group-1", name: "Gruppen", assistantCount: 0 }
+    ]
   ] satisfies [string, ChatPartner, ChatPartner][])(
     "keeps a failed question and its files when Retry finds nobody to answer: %s",
     async (_, before, after) => {

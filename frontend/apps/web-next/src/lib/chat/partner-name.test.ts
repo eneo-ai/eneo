@@ -42,5 +42,6 @@ describe("displayPartnerName", () => {
     expect(displayPartnerName({ type: "assistant", name: "Default", personalSpace: true }, t)).toBe(
       "Default"
     );
+    expect(displayPartnerName({ type: "group-chat", name: "Inköpsrådet" }, t)).toBe("Inköpsrådet");
   });
 });

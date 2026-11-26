@@ -85,6 +85,7 @@ class MockSpaceRole:
 
 class MockPermission:
     ASSISTANTS = "assistants"
+    GROUP_CHATS = "group_chats"
     COLLECTIONS = "collections"
     WEBSITES = "websites"
     SERVICES = "services"
@@ -261,33 +262,29 @@ def shared_space(organization_space, viewer_user, editor_user, admin_user):
 
 
 @pytest.mark.parametrize(
-    ("role", "insight_enabled", "assistant_access", "can_view_insights"),
+    ("role", "insight_enabled", "can_view_insights"),
     [
-        (MockSpaceRole.VIEWER, True, True, False),
-        (MockSpaceRole.EDITOR, True, True, True),
-        (MockSpaceRole.EDITOR, False, True, False),
-        (MockSpaceRole.EDITOR, True, False, False),
+        (MockSpaceRole.VIEWER, True, False),
+        (MockSpaceRole.EDITOR, True, True),
+        (MockSpaceRole.EDITOR, False, False),
     ],
 )
 def test_shared_assistant_insights_require_role_and_enabled_resource(
     shared_space: MockSpace,
     role: str,
     insight_enabled: bool,
-    assistant_access: bool,
     can_view_insights: bool,
 ):
-    permissions = {Permission.SHARED_SPACES}
-    if assistant_access:
-        permissions.add(Permission.ASSISTANTS)
-    user = MockUser(id=uuid4(), permissions=permissions)
+    user = MockUser(
+        id=uuid4(),
+        permissions={Permission.SHARED_SPACES, Permission.ASSISTANTS},
+    )
     shared_space.members[user.id] = MockGroupMember(id=user.id, role=role)
     assistant = MagicMock(id=uuid4(), published=True, insight_enabled=insight_enabled)
     shared_space.assistants = [assistant]
     actor = _actor(user, shared_space)
 
-    # Migrated groups are ordinary assistants, including for historical insights.
-    assistant.metadata_json = {"migrated_from_group_chat": True}
-    assert actor.can_read_assistants() is assistant_access
+    assert actor.can_read_assistants()
     assert actor.can_access_insight_assistant(assistant=assistant) is can_view_insights
 
 

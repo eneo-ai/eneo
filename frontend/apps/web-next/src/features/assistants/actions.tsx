@@ -83,20 +83,26 @@ const { ResourceActionScope, useOpenResourceAction } = createResourceActions<
 >();
 
 function publishRequest(item: ChatAppItem): Promise<unknown> {
-  return unwrap(
-    browserApi.POST("/api/v1/assistants/{id}/publish/", {
-      params: { path: { id: item.id }, query: { published: !item.published } }
-    })
-  );
+  return item.type === "group-chat"
+    ? unwrap(
+        browserApi.POST("/api/v1/group-chats/{id}/publish/", {
+          params: { path: { id: item.id }, query: { published: !item.published } }
+        })
+      )
+    : unwrap(
+        browserApi.POST("/api/v1/assistants/{id}/publish/", {
+          params: { path: { id: item.id }, query: { published: !item.published } }
+        })
+      );
 }
 
 function deleteRequest(item: ChatAppItem): Promise<unknown> {
-  return unwrap(
-    browserApi.DELETE("/api/v1/assistants/{id}/", { params: { path: { id: item.id } } })
-  );
+  return item.type === "group-chat"
+    ? unwrap(browserApi.DELETE("/api/v1/group-chats/{id}/", { params: { path: { id: item.id } } }))
+    : unwrap(browserApi.DELETE("/api/v1/assistants/{id}/", { params: { path: { id: item.id } } }));
 }
 
-/** The publish, move and delete dialogs of an assistant's menu, held above the rows and cards that open them. */
+/** The publish, move and delete dialogs of an assistant's or group chat's menu, held above the rows and cards that open them. */
 function ChatAppActionDialog({
   kind,
   resource: item,
@@ -109,12 +115,13 @@ function ChatAppActionDialog({
   const t = useTranslations();
   const invalidate = useSpaceInvalidation();
   const queryClient = useQueryClient();
+  const isGroupChat = item.type === "group-chat";
 
   const publish = useMutation({
     mutationFn: () => publishRequest(item),
     onSuccess: () => {
       void invalidate();
-      void invalidateExpiringApiKeys(queryClient);
+      if (!isGroupChat) void invalidateExpiringApiKeys(queryClient);
       onClose();
     },
     onError: (error) => toastApiError(error, t)
@@ -150,7 +157,7 @@ function ChatAppActionDialog({
         name={item.name}
         published={item.published ?? false}
         pending={publish.isPending}
-        publishHint={t("api_keys_notifications_publish_assistant_hint")}
+        publishHint={isGroupChat ? undefined : t("api_keys_notifications_publish_assistant_hint")}
         onConfirm={() => publish.mutate()}
       />
     );
@@ -172,8 +179,12 @@ function ChatAppActionDialog({
     <ConfirmDialogControlled
       open
       onOpenChange={onOpenChange}
-      title={t("delete_assistant")}
-      description={t("confirm_delete_assistant", { name: item.name })}
+      title={isGroupChat ? t("delete_group_chat") : t("delete_assistant")}
+      description={
+        isGroupChat
+          ? t("confirm_delete_group_chat", { groupChatName: item.name })
+          : t("confirm_delete_assistant", { name: item.name })
+      }
       confirmLabel={remove.isPending ? t("deleting") : t("delete")}
       pending={remove.isPending}
       onConfirm={() => remove.mutate()}
@@ -182,7 +193,7 @@ function ChatAppActionDialog({
 }
 
 /**
- * Above a collection of assistants: what their menus open. A
+ * Above a collection of assistants and group chats: what their menus open. A
  * turn across 768 px replaces the rows with cards and the open dialog stays.
  * `focusTarget` is where focus goes when the control that opened one is gone.
  */
@@ -200,7 +211,7 @@ export function ChatAppActionScope({
   );
 }
 
-/** The menu of an assistant: edit, publish, move and delete, as far as the user may. */
+/** The menu of an assistant or group chat: edit, publish, move (assistants) and delete, as far as the user may. */
 export function ChatAppActions({ item }: { item: ChatAppItem }) {
   const t = useTranslations();
   const { routeId } = useSpace();
@@ -211,15 +222,16 @@ export function ChatAppActions({ item }: { item: ChatAppItem }) {
     return null;
   }
 
+  const isGroupChat = item.type === "group-chat";
   return (
     <MoreMenu
       label={t("space_more_actions_for", { name: item.name })}
       alignment="end"
       items={chatAppMenuItems(t, permissions, {
         published: item.published ?? false,
-        editHref: `/spaces/${routeId}/assistants/${item.id}/edit`,
+        editHref: `/spaces/${routeId}/${isGroupChat ? "group-chats" : "assistants"}/${item.id}/edit`,
         onPublish: () => open("publish", item),
-        onMove: () => open("move", item),
+        onMove: isGroupChat ? undefined : () => open("move", item),
         onDelete: () => open("delete", item)
       })}
     />

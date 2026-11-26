@@ -39,7 +39,9 @@
   // Keep the conversation's preview state when moving between chat and history.
   initFilePreview(getAttachmentUrlService());
 
-  const debugAvailable = $derived(user.hasPermission("assistant_debug"));
+  const debugAvailable = $derived(
+    user.hasPermission("assistant_debug") && chat.partner.type !== "group-chat"
+  );
 
   let currentTab = writable("chat");
 

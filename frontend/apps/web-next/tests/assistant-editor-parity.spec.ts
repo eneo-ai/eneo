@@ -4,24 +4,6 @@ import type { components } from "../src/lib/api/schema";
 type Assistant = components["schemas"]["AssistantPublic"];
 
 test.use({ viewport: { width: 320, height: 800 }, isMobile: true, hasTouch: true });
-test("opens a former group editor bookmark in the same assistant's settings", async ({ page }) => {
-  const space = await createSpace(page, uniqueName("Former group bookmarks"));
-  const name = uniqueName("Former group");
-  const assistant = await apiPostJson<Assistant>(page, `${space}/applications/assistants/`, {
-    name
-  });
-  await page.goto(`${space}/group-chats/${assistant.id}/edit`);
-  await expect(page).toHaveURL(
-    (url) => url.pathname === `${space}/assistants/${assistant.id}/edit`
-  );
-  await expect(page).toHaveTitle(new RegExp(name));
-  await page
-    .locator("[data-editor-index]")
-    .getByRole("link", { name: /^Verktyg/ })
-    .click();
-  await expect(page.getByRole("heading", { name: "Specialister", exact: true })).toBeVisible();
-});
-
 test("edits, restores and deletes real prompt history and validates, previews and downloads a native avatar", async ({
   page
 }, info) => {

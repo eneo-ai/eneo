@@ -139,16 +139,19 @@ describe("assistantActivityRows", () => {
         {
           id: "session-1",
           assistant_id: "assistant-a",
+          group_chat_id: null,
           created_at: "2026-06-01T08:00:00Z"
         },
         {
           id: "session-2",
           assistant_id: "assistant-b",
+          group_chat_id: null,
           created_at: "2026-06-01T09:00:00Z"
         },
         {
           id: "session-3",
           assistant_id: null,
+          group_chat_id: "group-1",
           created_at: "2026-06-01T10:00:00Z"
         }
       ],
@@ -204,11 +207,13 @@ describe("assistantActivityRows", () => {
           {
             id: "session-1",
             assistant_id: "assistant-a",
+            group_chat_id: null,
             created_at: "2026-06-01T08:00:00Z"
           },
           {
             id: "session-2",
             assistant_id: "assistant-b",
+            group_chat_id: null,
             created_at: "2026-06-01T09:00:00Z"
           }
         ],

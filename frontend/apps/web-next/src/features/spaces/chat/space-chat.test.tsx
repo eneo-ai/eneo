@@ -2,7 +2,6 @@
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeQueryClient } from "@/lib/api/query";
-import { router } from "@/test/navigation";
 import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
 import { awaitPartnerUpdates, hasPendingPartnerUpdates } from "@/features/chat/partner-updates";
 import { SpaceChat } from "@/features/spaces/chat/space-chat.client";
@@ -110,8 +109,9 @@ describe("SpaceChat", () => {
 
   it.each([
     ["assistant", 403, 1],
-    ["assistant", 404, 1],
-    ["assistant", 503, 2]
+    ["group-chat", 404, 1],
+    ["assistant", 503, 2],
+    ["group-chat", 503, 2]
   ] as const)(
     "sends the %s request after a %s %s time(s) in its first second, under the app's retry policy",
     async (type, status, requests) => {
@@ -136,19 +136,6 @@ describe("SpaceChat", () => {
     }
   );
 
-  it("opens a saved group-chat link as the assistant with that id", async () => {
-    // A retired group chat became an assistant with the same id.
-    renderRoute("/spaces/space-1/chat?type=group-chat&id=assistant-9&session_id=s-1");
-    await waitFor(() =>
-      expect(api.GET).toHaveBeenCalledWith("/api/v1/assistants/{id}/", {
-        params: { path: { id: "assistant-9" } }
-      })
-    );
-    expect(router.replace).toHaveBeenCalledWith(
-      "/spaces/space-1/chat?type=assistant&id=assistant-9&session_id=s-1"
-    );
-  });
-
   it("says so without a retry when the space has no assistant to chat with", () => {
     renderRoute();
     expect(screen.getByText("Det gick inte att öppna chatten")).toBeTruthy();
@@ -156,9 +143,9 @@ describe("SpaceChat", () => {
     expect(api.GET).not.toHaveBeenCalled();
   });
 
-  it("projects insight_view from the loaded assistant", async () => {
+  it.each(["assistant", "group-chat"])("projects insight_view from the loaded %s", async (type) => {
     const queryClient = testQueryClient();
-    queryClient.setQueryData(["assistants", "partner-9"], {
+    queryClient.setQueryData([type === "assistant" ? "assistants" : "group-chats", "partner-9"], {
       ...personalSpace.default_assistant,
       id: "partner-9",
       name: "Avtalsgranskning",
@@ -166,10 +153,12 @@ describe("SpaceChat", () => {
       permissions: ["read", "insight_view"],
       groups: [],
       websites: [],
-      integration_knowledge_list: []
+      integration_knowledge_list: [],
+      // A group chat always lists its member assistants (GroupChatPublic.tools).
+      ...(type === "group-chat" && { tools: { assistants: [{ id: "member-1", handle: "avtal" }] } })
     });
     renderInApp(<SpaceChat />, {
-      route: "/spaces/space-1/chat?type=assistant&id=partner-9",
+      route: `/spaces/space-1/chat?type=${type}&id=partner-9`,
       queryClient
     });
     expect(await screen.findByRole("tab", { name: "Insikter" })).toBeTruthy();

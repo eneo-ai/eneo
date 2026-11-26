@@ -31,7 +31,8 @@ async def analyze_conversation_insights_task(
         service = container.analysis_service()
         answer = await service.generate_unified_analysis_answer(
             question=job.question,
-            assistant_id=job.assistant_id,
+            assistant_id=params.assistant_id,
+            group_chat_id=params.group_chat_id,
             from_date=datetime.fromisoformat(params.from_date),
             to_date=datetime.fromisoformat(params.to_date),
             include_followup=params.include_followups,

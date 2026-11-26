@@ -17,20 +17,6 @@ import {
   visibleEntries
 } from "./index.js";
 
-test("former group owners can find the migration notice even if their role lacks assistant access", () => {
-  const release = releases.find(({ entries }) =>
-    entries.some(({ id }) => id === "group-chats-became-assistants")
-  );
-  const visible = (assistantAccess) =>
-    visibleEntries(
-      release,
-      (requirement) => assistantAccess && requirement.allOf?.includes("assistants")
-    ).map(({ id }) => id);
-  expect(visible(false)).toContain("group-chats-became-assistants");
-  expect(visible(false)).not.toContain("assistant-specialists");
-  expect(visible(true)).toContain("assistant-specialists");
-});
-
 test("visibility uses explicit requirements without mutating the release or granting admin a bypass", () => {
   const release = {
     version: "2.3.0",

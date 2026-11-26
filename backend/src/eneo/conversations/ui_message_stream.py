@@ -310,7 +310,8 @@ async def _ui_message_chunks(
                 }
                 for ref in response.mcp_tool_references
             ],
-            # The assistant that answered, when the response names one.
+            # Group chat stamps the answering member assistant onto the response;
+            # the single-assistant / clarification paths leave it empty.
             "answering_assistant": (
                 {
                     "id": str(response.tools.assistants[0].id),

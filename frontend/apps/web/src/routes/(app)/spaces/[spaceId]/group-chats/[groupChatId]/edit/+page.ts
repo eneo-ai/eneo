@@ -1,13 +1,5 @@
-import { redirect } from "@sveltejs/kit";
-import { resolve } from "$app/paths";
-import type { PageLoad } from "./$types";
-
-export const load: PageLoad = ({ params }) => {
-  redirect(
-    308,
-    resolve("/(app)/spaces/[spaceId]/assistants/[assistantId]/edit", {
-      spaceId: params.spaceId,
-      assistantId: params.groupChatId
-    })
-  );
+export const load = async (event) => {
+  const { eneo } = await event.parent();
+  const groupChat = await eneo.groupChats.get({ id: event.params.groupChatId });
+  return { groupChat };
 };

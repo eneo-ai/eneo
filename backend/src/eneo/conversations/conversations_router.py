@@ -154,26 +154,11 @@ def _raise_conversation_scope_denied(http_request: Request, message: str) -> NoR
     raise HTTPException(status_code=403, detail=detail)
 
 
-_GROUP_CHATS_RETIRED_DETAIL = {
-    "code": "group_chats_retired",
-    "message": (
-        "Group chats were replaced by assistants with specialists. The group "
-        "became an assistant with the same id; use assistant_id."
-    ),
-}
-
-
-def _reject_retired_group_chat(group_chat_id: UUID | None) -> None:
-    """``group_chat_id`` stays in the request shapes for old clients; it is
-    answered with 410 instead of being routed anywhere."""
-    if group_chat_id is not None:
-        raise HTTPException(status_code=410, detail=_GROUP_CHATS_RETIRED_DETAIL)
-
-
 async def _validate_conversation_scope(
     http_request: Request,
     container: Container,
     assistant_id: UUID | None,
+    group_chat_id: UUID | None,
     session_id: UUID | None,
 ) -> None:
     """Validate body-driven fields against API key scope.
@@ -234,7 +219,7 @@ async def _validate_conversation_scope(
                     ),
                 )
         elif scope_type == "space":
-            # Resolve session to space via its assistant
+            # Resolve session to space via assistant or group_chat
             try:
                 space = await space_repo.get_space_by_session(session_id)
                 assert space is not None
@@ -286,6 +271,38 @@ async def _validate_conversation_scope(
                         f"The requested resource belongs to a different scope."
                     ),
                 )
+        return
+
+    # New conversation with group_chat_id
+    if group_chat_id is not None:
+        if scope_type == "assistant":
+            # Assistant-scoped keys cannot access group chats
+            _raise_conversation_scope_denied(
+                http_request,
+                (
+                    f"API key is scoped to assistant '{scope_id}'. "
+                    f"It can only access that assistant and its conversations."
+                ),
+            )
+        elif scope_type == "space":
+            try:
+                space = await space_repo.get_space_by_group_chat(group_chat_id)
+                if space.id != scope_id:
+                    _raise_conversation_scope_denied(
+                        http_request,
+                        (
+                            f"API key is scoped to space '{scope_id}'. "
+                            f"The requested resource belongs to a different scope."
+                        ),
+                    )
+            except NotFoundException:
+                _raise_conversation_scope_denied(
+                    http_request,
+                    (
+                        f"API key is scoped to space '{scope_id}'. "
+                        f"The requested resource belongs to a different scope."
+                    ),
+                )
 
 
 async def _authorize_session_access(container: Container, session: SessionInDB) -> None:
@@ -294,24 +311,29 @@ async def _authorize_session_access(container: Container, session: SessionInDB) 
     Session ownership alone is not sufficient: a permission can be revoked after
     a session is created (e.g. personal_chat), and the historical session must
     then become unreachable. Re-check the current permission by resolving the
-    session's assistant — get_assistant raises UnauthorizedException when access
-    is no longer allowed, and is default-assistant-aware so the personal chat is
-    gated by personal_chat.
+    session's assistant or group chat — get_assistant/get_group_chat raise
+    UnauthorizedException when access is no longer allowed, and get_assistant is
+    default-assistant-aware so the personal chat is gated by personal_chat.
     """
     await _authorize_partner_access(
         container,
         assistant_id=session.assistant.id if session.assistant else None,
+        group_chat_id=session.group_chat_id,
     )
 
 
 async def _authorize_partner_access(
-    container: Container, *, assistant_id: UUID | None
+    container: Container, *, assistant_id: UUID | None, group_chat_id: UUID | None
 ) -> None:
     """The partner half of ``_authorize_session_access``, for callers that hold
-    only the partner id of an owned conversation."""
-    assert assistant_id is not None
-    assistant_service = container.assistant_service()
-    await assistant_service.get_assistant(assistant_id)
+    only the partner ids of an owned conversation."""
+    if group_chat_id:
+        group_chat_service = container.group_chat_service()
+        await group_chat_service.get_group_chat(group_chat_id=group_chat_id)
+    else:
+        assert assistant_id is not None
+        assistant_service = container.assistant_service()
+        await assistant_service.get_assistant(assistant_id)
 
 
 async def _authorized_session(container: Container, session_id: UUID) -> SessionInDB:
@@ -330,6 +352,7 @@ async def _authorized_session(container: Container, session_id: UUID) -> Session
         await _authorize_partner_access(
             container,
             assistant_id=owner.assistant_id,
+            group_chat_id=owner.group_chat_id,
         )
         await session_service.refuse_removed_copy(session_id)
         raise
@@ -339,9 +362,9 @@ async def _authorized_session(container: Container, session_id: UUID) -> Session
 
 @router.post(
     "/",
-    description="Chat with an assistant; starts or continues a conversation and streams the response as Server-Sent Events when stream is true.",
+    description="Chat with an assistant or group chat; starts or continues a conversation and streams the response as Server-Sent Events when stream is true.",
     responses=responses.streaming_response(
-        response_codes=[400, 403, 404, 410],
+        response_codes=[400, 403, 404],
         models=[
             SSEText,
             SSEReasoning,
@@ -370,14 +393,22 @@ async def chat(
         get_container(with_user=True, with_transaction=False)  # pyright: ignore[reportCallInDefaultInitializer]  # FastAPI DI; evaluated at request time
     ),
 ):
-    """Unified endpoint for communicating with an assistant.
+    """Unified endpoint for communicating with an assistant or a group chat.
 
     If request.session_id is provided: continues an existing conversation.
-    Otherwise: starts a new conversation with the specified assistant.
+    Otherwise: starts a new conversation with the specified assistant or group chat.
 
-    Either request.session_id or request.assistant_id must be provided. The
-    retired request.group_chat_id is answered with 410 group_chats_retired.
+    Either request.session_id, request.assistant_id, or request.group_chat_id must be provided.
 
+    For group chats:
+    - Specify the group_chat_id to chat with a group chat
+    - If tools.assistants contains an assistant, that specific assistant will be targeted
+      (requires the group chat to have allow_mentions=True).
+    - If no assistant is targeted, the most appropriate assistant will be selected.
+    - When multiple assistants could answer a question, the system will choose the most relevant one
+      or select the first matching assistant if relevance scores are similar.
+
+    For regular assistants:
     - The tools.assistants field can be used for directing the request to a tool assistant.
 
     Streams the response as Server-Sent Events if stream == true.
@@ -387,7 +418,6 @@ async def chat(
     - SSEFirstChunk: Initial response with metadata
     - SSEError: Error events (API errors, authentication failures, rate limits, etc.)
     """
-    _reject_retired_group_chat(request.retired_group_chat_id)
     if request.require_tool_approval and not request.stream:
         raise HTTPException(
             status_code=400,
@@ -404,6 +434,7 @@ async def chat(
             http_request=http_request,
             container=container,
             assistant_id=request.assistant_id,
+            group_chat_id=request.group_chat_id,
             session_id=request.session_id,
         )
 
@@ -420,6 +451,7 @@ async def chat(
             question=request.question,
             session_id=request.session_id,
             assistant_id=request.assistant_id,
+            group_chat_id=request.group_chat_id,
             file_ids=file_ids,
             stream=request.stream,
             tool_assistant_id=tool_assistant_id,
@@ -464,7 +496,9 @@ async def get_chat_turn_diagnostics(
         tenant_id=user.tenant_id,
         user_id=user.id,
     )
-    if partner is None or partner.assistant_id is None:
+    if partner is None or partner.group_chat_id is not None:
+        raise NotFoundException("Conversation not found.")
+    if partner.assistant_id is None:
         raise NotFoundException("Conversation not found.")
 
     try:
@@ -491,7 +525,7 @@ async def get_chat_turn_diagnostics(
     "/preflight",
     response_model=PreflightResponse,
     description="Returns an estimated token cost for the next chat request (excludes knowledge/RAG and web-search content).",
-    responses=responses.get_responses([400, 403, 404, 410, 429]),
+    responses=responses.get_responses([400, 403, 404, 429]),
 )
 @endpoint_access(
     authentication=Authentication.USER,
@@ -537,13 +571,13 @@ async def preflight_tokens(
         # Fail-open: preflight is best-effort UX, not a security-critical path.
         logger.warning("Preflight rate limiter unavailable", exc_info=True)
 
-    _reject_retired_group_chat(request.retired_group_chat_id)
     session = cast(AsyncSession, container.session())
     async with session.begin():
         await _validate_conversation_scope(
             http_request=http_request,
             container=container,
             assistant_id=request.assistant_id,
+            group_chat_id=request.group_chat_id,
             session_id=request.session_id,
         )
 
@@ -557,6 +591,7 @@ async def preflight_tokens(
             file_ids=request.file_ids,
             session_id=request.session_id,
             assistant_id=request.assistant_id,
+            group_chat_id=request.group_chat_id,
             tool_assistant_id=tool_assistant_id,
             assistant_prompt=request.assistant_prompt,
             attachments=(
@@ -570,7 +605,7 @@ async def preflight_tokens(
 @router.get(
     "/",
     response_model=CursorPaginatedResponse[SessionMetadataPublic],
-    responses=responses.get_responses([400, 403, 404, 410]),
+    responses=responses.get_responses([400, 403, 404]),
     dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
 @endpoint_access(
@@ -584,55 +619,70 @@ async def list_conversations(
         Optional[UUID], Query(description="The UUID of the assistant")
     ] = None,
     group_chat_id: Annotated[
-        Optional[UUID],
-        Query(
-            deprecated=True,
-            description=(
-                "Deprecated: group chats became assistants with the same id; "
-                "use assistant_id. Answered with 410 when provided."
-            ),
-        ),
+        Optional[UUID], Query(description="The UUID of the group chat")
     ] = None,
     limit: Annotated[Optional[int], Query(gt=0)] = None,
     cursor: Optional[datetime] = None,
     previous: bool = False,
     container: Container = Depends(get_container(with_user=True)),  # pyright: ignore[reportCallInDefaultInitializer]  # FastAPI DI; evaluated at request time
 ):
-    """Gets conversations (sessions) for an assistant.
+    """Gets conversations (sessions) for an assistant or group chat.
 
-    Provide assistant_id to filter sessions. If it is missing, an error will be
-    returned.
+    Provide either assistant_id or group_chat_id (but not both) to filter sessions.
+    If neither is provided, an error will be returned.
     """
-    _reject_retired_group_chat(group_chat_id)
     # Query-param scope validation (same rules as body-driven POST)
     await _validate_conversation_scope(
         http_request=http_request,
         container=container,
         assistant_id=assistant_id,
+        group_chat_id=group_chat_id,
         session_id=None,
     )
 
-    if assistant_id is None:
+    if assistant_id is None and group_chat_id is None:
         raise HTTPException(
             status_code=400,
             detail={
                 "code": "invalid_request",
-                "message": "assistant_id must be provided.",
+                "message": "Either assistant_id or group_chat_id must be provided.",
+            },
+        )
+    if assistant_id is not None and group_chat_id is not None:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "invalid_request",
+                "message": "Provide either assistant_id or group_chat_id, not both.",
             },
         )
 
     session_service = container.session_service()
 
-    # Get assistant service to validate the assistant exists and user has access
-    assistant_service = container.assistant_service()
-    await assistant_service.get_assistant(assistant_id)
+    if assistant_id is not None:
+        # Get assistant service to validate the assistant exists and user has access
+        assistant_service = container.assistant_service()
+        await assistant_service.get_assistant(assistant_id)
 
-    sessions, total_count = await session_service.get_sessions_by_assistant(
-        assistant_id=assistant_id,
-        limit=limit,
-        cursor=cursor,
-        previous=previous,
-    )
+        sessions, total_count = await session_service.get_sessions_by_assistant(
+            assistant_id=assistant_id,
+            limit=limit,
+            cursor=cursor,
+            previous=previous,
+        )
+    else:
+        # Get group chat service to validate the group chat exists and user has access
+        # group_chat_id is non-None here: validated above (at least one of assistant_id/group_chat_id must be set)
+        assert group_chat_id is not None
+        group_chat_service = container.group_chat_service()
+        await group_chat_service.get_group_chat(group_chat_id=group_chat_id)
+
+        sessions, total_count = await session_service.get_sessions_by_group_chat(
+            group_chat_id=group_chat_id,
+            limit=limit,
+            cursor=cursor,
+            previous=previous,
+        )
 
     return to_session_metadata_paginated_response(
         sessions=sessions,
@@ -650,7 +700,7 @@ async def list_conversations(
     response_model=PaginatedResponse[RecentConversation],
     description=(
         "List the caller's own latest conversations across the personal "
-        "assistant and space assistants they can still open, "
+        "assistant, space assistants and group chats they can still open, "
         "latest activity first."
     ),
     responses=responses.get_responses([403]),
@@ -803,6 +853,7 @@ async def call_tool_from_app_view(
         http_request=http_request,
         container=container,
         assistant_id=None,
+        group_chat_id=None,
         session_id=session_id,
     )
     session = await _authorized_session(container, session_id)
@@ -937,6 +988,7 @@ async def get_document_export_availability(
         http_request=http_request,
         container=container,
         assistant_id=None,
+        group_chat_id=None,
         session_id=session_id,
     )
     session = await _authorized_session(container, session_id)
@@ -995,6 +1047,7 @@ async def export_conversation_document(
         http_request=http_request,
         container=container,
         assistant_id=None,
+        group_chat_id=None,
         session_id=session_id,
     )
     session = await _authorized_session(container, session_id)
@@ -1121,6 +1174,7 @@ async def save_conversation_document_version(
         http_request=http_request,
         container=container,
         assistant_id=None,
+        group_chat_id=None,
         session_id=session_id,
     )
     session = await _authorized_session(container, session_id)
@@ -1193,12 +1247,18 @@ async def delete_conversation(
 ):
     """Deletes a specific conversation"""
     session_service = container.session_service()
+    # Note: We'll need to determine if this is an assistant or group chat session
     owner = await session_service.get_session_ownership(session_id)
 
-    await _authorize_partner_access(container, assistant_id=owner.assistant_id)
+    await _authorize_partner_access(
+        container, assistant_id=owner.assistant_id, group_chat_id=owner.group_chat_id
+    )
 
-    assert owner.assistant_id is not None
-    await session_service.delete(session_id, assistant_id=owner.assistant_id)
+    if owner.group_chat_id:
+        await session_service.delete(session_id, group_chat_id=owner.group_chat_id)
+    else:
+        assert owner.assistant_id is not None
+        await session_service.delete(session_id, assistant_id=owner.assistant_id)
 
     # Return None to produce 204 No Content response
     return None
@@ -1226,15 +1286,27 @@ async def leave_feedback(
     """Leave feedback for a conversation"""
     session_service = container.session_service()
 
+    # Determine if this is a group chat or assistant session
     owner = await session_service.get_session_ownership(session_id)
 
-    await _authorize_partner_access(container, assistant_id=owner.assistant_id)
+    await _authorize_partner_access(
+        container, assistant_id=owner.assistant_id, group_chat_id=owner.group_chat_id
+    )
 
-    assert owner.assistant_id is not None
     try:
-        updated_session = await session_service.leave_feedback(
-            session_id=session_id, assistant_id=owner.assistant_id, feedback=feedback
-        )
+        if owner.group_chat_id:
+            updated_session = await session_service.leave_feedback(
+                session_id=session_id,
+                group_chat_id=owner.group_chat_id,
+                feedback=feedback,
+            )
+        else:
+            assert owner.assistant_id is not None
+            updated_session = await session_service.leave_feedback(
+                session_id=session_id,
+                assistant_id=owner.assistant_id,
+                feedback=feedback,
+            )
     except NotFoundException:
         await session_service.refuse_removed_copy(session_id)
         raise
@@ -1277,7 +1349,11 @@ async def set_message_feedback(
     partner = await session_service.get_message_partner(
         session_id=session_id, message_id=message_id
     )
-    await _authorize_partner_access(container, assistant_id=partner.assistant_id)
+    await _authorize_partner_access(
+        container,
+        assistant_id=partner.assistant_id,
+        group_chat_id=partner.group_chat_id,
+    )
     return await session_service.set_message_feedback(
         session_id=session_id, message_id=message_id, feedback=feedback
     )
@@ -1313,7 +1389,11 @@ async def delete_message_feedback(
     partner = await session_service.get_message_partner(
         session_id=session_id, message_id=message_id
     )
-    await _authorize_partner_access(container, assistant_id=partner.assistant_id)
+    await _authorize_partner_access(
+        container,
+        assistant_id=partner.assistant_id,
+        group_chat_id=partner.group_chat_id,
+    )
     await session_service.clear_message_feedback(
         session_id=session_id, message_id=message_id
     )
@@ -1437,6 +1517,7 @@ async def approve_tools(
         http_request=http_request,
         container=container,
         assistant_id=context_result.context.assistant_id,
+        group_chat_id=None,
         session_id=context_result.context.session_id,
     )
 
@@ -1548,7 +1629,9 @@ async def rename_conversation(
     """Rename a conversation (session)"""
     session_service = container.session_service()
     owner = await session_service.get_session_ownership(session_id)
-    await _authorize_partner_access(container, assistant_id=owner.assistant_id)
+    await _authorize_partner_access(
+        container, assistant_id=owner.assistant_id, group_chat_id=owner.group_chat_id
+    )
 
     try:
         updated_session = await session_service.update_session(

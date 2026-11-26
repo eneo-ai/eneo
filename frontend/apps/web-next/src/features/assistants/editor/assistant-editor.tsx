@@ -8,11 +8,11 @@ import {
   MessageSquareCode,
   Paperclip,
   Play,
+  Plug,
   Send,
   ShieldCheck,
   SlidersHorizontal,
-  Sparkles,
-  Wrench
+  Sparkles
 } from "lucide-react";
 import Link from "@/lib/link";
 import { useTranslations } from "use-intl";
@@ -46,7 +46,6 @@ import { InstructionsSection } from "./instructions-section";
 import { KnowledgeSection } from "./knowledge-section";
 import { McpSection } from "./mcp-section";
 import { PublishingSection } from "./publishing-section";
-import { SpecialistsSection } from "./specialists-section";
 import { SecuritySection } from "./security-section";
 import { assistantQueryOptions, type Assistant, useUpdateAssistant } from "./use-assistant";
 
@@ -145,22 +144,11 @@ function AssistantEditorContent({ assistantId }: { assistantId: string }) {
       : []),
     {
       id: "mcp",
-      label: t("tools"),
-      icon: Wrench,
+      label: t("mcp_servers"),
+      icon: Plug,
       group: content,
-      summary: summary.chosen(
-        (assistant.mcp_servers?.length ?? 0) + (assistant.specialists?.length ?? 0)
-      ),
-      node: (
-        <div className="flex flex-col gap-8">
-          <McpSection assistant={assistant} />
-          <SpecialistsSection
-            key={assistant.id}
-            assistant={assistant}
-            supportsTools={ai.toolModel?.supports_tool_calling === true}
-          />
-        </div>
-      )
+      summary: summary.chosen(assistant.mcp_servers?.length ?? 0),
+      node: <McpSection assistant={assistant} />
     },
     {
       id: "attachments",

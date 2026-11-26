@@ -14,9 +14,11 @@ from eneo.database.database import AsyncSession, sessionmanager
 from eneo.files.file_content_loader import FileContentLoader
 from eneo.files.file_models import File
 from eneo.files.file_service import FileService
+from eneo.group_chat.application.group_chat_service import GroupChatService
 from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from eneo.logging.logging import LoggingDetails
 from eneo.main.exceptions import (
+    BadRequestException,
     NotFoundException,
     UnauthorizedException,
 )
@@ -201,6 +203,7 @@ class SessionService:
         user: UserInDB,
         file_service: FileService | None = None,
         assistant_service: AssistantService | None = None,
+        group_chat_service: GroupChatService | None = None,
         file_content_loader_factory: (
             Callable[[AsyncSession], FileContentLoader] | None
         ) = None,
@@ -216,6 +219,7 @@ class SessionService:
         self.user = user
         self.file_service = file_service
         self.assistant_service = assistant_service
+        self.group_chat_service = group_chat_service
         self._file_content_loader_factory = file_content_loader_factory
 
     def _file_content_loader(self, session: AsyncSession) -> FileContentLoader | None:
@@ -313,6 +317,7 @@ class SessionService:
         self,
         owner: SessionOwnership | None,
         assistant_id: UUID | None = None,
+        group_chat_id: UUID | None = None,
     ) -> SessionOwnership:
         if owner is None:
             raise NotFoundException("Session not found")
@@ -320,13 +325,22 @@ class SessionService:
         if not self._is_owner(owner):
             raise UnauthorizedException("Session belongs to other principal")
 
-        # Verify the session belongs to the specified assistant
+        # Handle cross-endpoint access attempt
+        if assistant_id is not None and owner.group_chat_id is not None:
+            raise BadRequestException(
+                "Cannot access a group chat session through the assistant endpoint. "
+                "Use the conversation endpoints instead."
+            )
+
+        # Verify the session belongs to the specified assistant/group chat
         if (
             assistant_id is not None
             and owner.assistant_id is not None
             and owner.assistant_id != assistant_id
         ):
             raise NotFoundException("Session belongs to another assistant")
+        if group_chat_id is not None and owner.group_chat_id != group_chat_id:
+            raise NotFoundException("Session belongs to another group chat")
 
         return owner
 
@@ -334,6 +348,7 @@ class SessionService:
         self,
         session: SessionInDB | None,
         assistant_id: UUID | None = None,
+        group_chat_id: UUID | None = None,
     ) -> SessionInDB:
         self._check_owned(
             None
@@ -344,8 +359,10 @@ class SessionService:
                 widget_id=session.widget_id,
                 visitor_id=session.visitor_id,
                 assistant_id=session.assistant.id if session.assistant else None,
+                group_chat_id=session.group_chat_id,
             ),
             assistant_id=assistant_id,
+            group_chat_id=group_chat_id,
         )
         assert session is not None
         return session
@@ -354,11 +371,12 @@ class SessionService:
         self,
         id: UUID,
         assistant_id: UUID | None = None,
+        group_chat_id: UUID | None = None,
     ) -> SessionInDB:
         session = await self.session_repo.get(id=id)
 
         return self._check_exists_and_belongs_to_user(
-            session, assistant_id=assistant_id
+            session, assistant_id=assistant_id, group_chat_id=group_chat_id
         )
 
     async def refuse_removed_copy(self, id: UUID) -> None:
@@ -375,11 +393,14 @@ class SessionService:
         self,
         id: UUID,
         assistant_id: UUID | None = None,
+        group_chat_id: UUID | None = None,
     ) -> SessionOwnership:
         """``get_session_by_uuid`` for callers that need only the owner and chat
         partner: the same refusals, without reading the turns."""
         return self._check_owned(
-            await self.session_repo.get_ownership(id), assistant_id=assistant_id
+            await self.session_repo.get_ownership(id),
+            assistant_id=assistant_id,
+            group_chat_id=group_chat_id,
         )
 
     async def get_tool_call_result(
@@ -446,14 +467,18 @@ class SessionService:
         self,
         id: UUID,
         assistant_id: UUID | None = None,
+        group_chat_id: UUID | None = None,
     ) -> SessionInDB | None:
-        await self.get_session_ownership(id, assistant_id=assistant_id)
+        await self.get_session_ownership(
+            id, assistant_id=assistant_id, group_chat_id=group_chat_id
+        )
         return await self.session_repo.delete(id)
 
     async def create_session(
         self,
         name: str,
         assistant_id: UUID | None = None,
+        group_chat_id: UUID | None = None,
     ) -> SessionInDB:
         """Create the conversation identity in a short committed transaction.
 
@@ -462,7 +487,11 @@ class SessionService:
         parent row here makes those child writes independently durable and
         prevents a later request rollback from orphaning them.
         """
-        session_add = self._build_session_add(name=name, assistant_id=assistant_id)
+        session_add = self._build_session_add(
+            name=name,
+            assistant_id=assistant_id,
+            group_chat_id=group_chat_id,
+        )
         async with self._placeholder_transaction() as session:
             return await self._session_repository(session).add(session_add)
 
@@ -471,6 +500,7 @@ class SessionService:
         *,
         name: str,
         assistant_id: UUID | None,
+        group_chat_id: UUID | None,
     ) -> SessionAdd:
         user_id, api_key_id, widget_id, visitor_id = self._principal_columns()
         return SessionAdd(
@@ -480,6 +510,7 @@ class SessionService:
             widget_id=widget_id,
             visitor_id=visitor_id,
             assistant_id=assistant_id,
+            group_chat_id=group_chat_id,
         )
 
     def _build_question_placeholder(
@@ -534,13 +565,16 @@ class SessionService:
         files: Sequence[File] | None = None,
         session_assistant_id: UUID | None = None,
         question_assistant_id: UUID | None = None,
+        group_chat_id: UUID | None = None,
         completion_model: CompletionModel | None = None,
         skill_provenance: Sequence[SkillExecutionReference] | None = None,
         skill_activation: SkillActivationEvidence | None = None,
     ) -> tuple[SessionInDB, UUID, datetime | None]:
         """Commit a new conversation and its first user message atomically."""
         session_add = self._build_session_add(
-            name=name, assistant_id=session_assistant_id
+            name=name,
+            assistant_id=session_assistant_id,
+            group_chat_id=group_chat_id,
         )
         async with self._placeholder_transaction() as db_session:
             session_record = await self._session_repository(db_session).add(session_add)
@@ -665,9 +699,12 @@ class SessionService:
         session_id: UUID,
         feedback: SessionFeedback,
         assistant_id: UUID | None = None,
+        group_chat_id: UUID | None = None,
         keep_existing_text: bool = False,
     ) -> SessionInDB:
-        await self.get_session_ownership(session_id, assistant_id=assistant_id)
+        await self.get_session_ownership(
+            session_id, assistant_id=assistant_id, group_chat_id=group_chat_id
+        )
         session = await self.session_repo.add_feedback(
             feedback=feedback,
             id=session_id,
@@ -680,7 +717,7 @@ class SessionService:
     async def get_message_partner(
         self, *, session_id: UUID, message_id: UUID
     ) -> OwnedChatPartner:
-        """The assistant behind a message in the principal's conversation.
+        """The assistant or group chat behind a message in the principal's conversation.
 
         Raises NotFoundException alike for a message outside the session, a
         conversation of another principal and one without a chat partner, so
@@ -735,4 +772,25 @@ class SessionService:
             tenant_id=self.user.tenant_id,
             user_id=user_id,
             api_key_id=api_key_id,
+        )
+
+    async def get_sessions_by_group_chat(
+        self,
+        group_chat_id: UUID,
+        limit: int | None = None,
+        cursor: datetime | None = None,
+        previous: bool = False,
+        name_filter: str | None = None,
+    ) -> tuple[list[SessionMetadataPublic], int]:
+        user_id, api_key_id, widget_id, visitor_id = self._principal_columns()
+        return await self.session_repo.get_metadata_by_group_chat(
+            group_chat_id=group_chat_id,
+            user_id=user_id,
+            api_key_id=api_key_id,
+            widget_id=widget_id,
+            visitor_id=visitor_id,
+            limit=limit,
+            cursor=cursor,
+            previous=previous,
+            name_filter=name_filter,
         )

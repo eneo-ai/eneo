@@ -50,23 +50,21 @@ the message array. `transport.ts` builds the body from the last user
 message's text parts (joined with `\n`) and the per-send options
 `sendMessage(…, { body })` provides.
 
-| Field                     | Type                  | Notes                                                              |
-| ------------------------- | --------------------- | ------------------------------------------------------------------ |
-| `question`                | `string`              | The user's text.                                                   |
-| `stream`                  | `true`                | Always `true` on this path.                                        |
-| `files`                   | `{ id: string }[]`    | Uploaded attachment ids (defaults to `[]`).                        |
-| `session_id`              | `string \| null`      | Continue a conversation.                                           |
-| `assistant_id`            | `string \| null`      | Start one with an assistant (also the personal/default assistant). |
-| `disabled_capabilities`   | `CapabilityPurpose[]` | Capabilities the user turned off for this message.                 |
-| `disabled_mcp_server_ids` | `string[]`            | MCP servers the user turned off; can never enable one.             |
-| `require_tool_approval`   | `boolean`             | Ask before running MCP tools. Requires `stream: true`.             |
+| Field                     | Type                                       | Notes                                                                                       |
+| ------------------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------- |
+| `question`                | `string`                                   | The user's text.                                                                            |
+| `stream`                  | `true`                                     | Always `true` on this path.                                                                 |
+| `files`                   | `{ id: string }[]`                         | Uploaded attachment ids (defaults to `[]`).                                                 |
+| `session_id`              | `string \| null`                           | Continue a conversation.                                                                    |
+| `assistant_id`            | `string \| null`                           | Start one with an assistant (also the personal/default assistant).                          |
+| `group_chat_id`           | `string \| null`                           | Start one with a group chat.                                                                |
+| `tools`                   | `{ assistants: { id, handle }[] } \| null` | @mention of a group-chat member.                                                            |
+| `disabled_capabilities`   | `CapabilityPurpose[]`                      | Capabilities the user turned off for this message.                                          |
+| `disabled_mcp_server_ids` | `string[]`                                 | MCP servers the user turned off; can never enable one.                                      |
+| `require_tool_approval`   | `boolean`                                  | Ask before running MCP tools. Requires `stream: true`; rejected with `400` for group chats. |
 
-Exactly one of `session_id`, `assistant_id` identifies the target (backend
-`ConversationRequest`). The partner is always an assistant: the space's
-default assistant (`type=default-assistant`, the personal assistant in the
-personal space) or a named one (`type=assistant`). Group chats are retired;
-a chat link with `type=group-chat` is opened as the assistant with that id
-(`space-chat.client.tsx` rewrites the URL).
+Exactly one of `session_id`, `assistant_id`, `group_chat_id` identifies the
+target (backend `ConversationRequest`).
 
 ## Stream parts
 
@@ -98,7 +96,7 @@ transient, so it lands in `message.parts` (first part of every live answer).
     "files": [/* FilePublic[] — the question's uploaded attachments */],
     "web_search_references": [],
     "mcp_tool_references": [/* McpToolReferencePublic[] known at start (usually []) */],
-    "answering_assistant": { "id": "<uuid>", "handle": "…" } /* or null */
+    "answering_assistant": { "id": "<uuid>", "handle": "…" } /* group chats; else null */
   }
 }
 ```
@@ -279,16 +277,6 @@ MCP resource citations produced by a tool call; emitted with the snapshot
 that carries them, before that snapshot's tool parts. Not transient (one
 part per batch, no id).
 
-### `data-consultation` (eneo)
-
-The part carries a public `ConsultationInfo` snapshot. Its ID is the consultation
-ID. Updates replace the same part as the specialist works. A specialist's
-pending approval carries the approval ID and the tool call IDs awaiting a decision.
-The parent's final answer continues on the ordinary text stream. View steps renders
-the specialist's question, answer, sources and tool calls from this part. History
-maps persisted consultations back to the same parts. An interrupted consultation
-reopens as incomplete, with no actionable approval.
-
 ### `data-tool-approval` (eneo) — see [Tool approval](#tool-approval)
 
 ```json
@@ -412,7 +400,8 @@ Approval is an Eneo flow over the open stream; the SDK's tool-approval
 machinery is not involved. `useChat` sees only `data-tool-approval` parts
 and ordinary tool parts.
 
-1. The request carries `require_tool_approval: true` (and `stream: true`).
+1. The request carries `require_tool_approval: true` (and `stream: true`;
+   group chats are rejected with `400`).
 2. When the model calls MCP tools that need approval the backend registers
    an `approval_id` (uuid, Redis, TTL `mcp_tool_approval_ttl_seconds`, 305 s
    by default) and emits `data-tool-approval` with `status: "pending"`,

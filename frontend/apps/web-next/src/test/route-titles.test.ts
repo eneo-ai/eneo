@@ -11,8 +11,6 @@ const TITLE_EXCEPTIONS: Record<string, string> = {
   "/": "Redirects to the viewer's personal space.",
   "/spaces/": "Redirects to the space list.",
   "/spaces/$spaceId/": "Redirects to the space's chat or overview.",
-  "/spaces/$spaceId/group-chats/$groupChatId/edit":
-    "A former group editor bookmark redirects to the assistant editor, which owns the title.",
   "/spaces/$spaceId/knowledge/integrations/": "Redirects to the space's knowledge page.",
   "/admin/mcp-servers/": "Redirects to the MCP servers tab on the tools page.",
   "/admin/": "Inherits Administration from the admin layout.",

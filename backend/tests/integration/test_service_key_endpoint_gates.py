@@ -320,6 +320,11 @@ _CREATION_ENDPOINTS: list[tuple[str, str, dict | None]] = [
     ),
     (
         "POST",
+        "/api/v1/spaces/{space_id}/applications/group-chats/",
+        {"name": "x"},
+    ),
+    (
+        "POST",
         "/api/v1/spaces/{space_id}/applications/apps/",
         {"name": "x"},
     ),

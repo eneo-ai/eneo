@@ -306,9 +306,8 @@ class AssistantUpdatePublic(AssistantCreatePublic):
     description: Optional[str] = Field(  # type: ignore[assignment]  # NOT_PROVIDED sentinel default
         default=NOT_PROVIDED,
         description=(
-            "A short description of the assistant. It is also the default "
-            "description shown to an orchestrating assistant that consults this "
-            "one as a specialist."
+            "A description of the assitant that will be used as "
+            "default description in GroupChatAssistantPublic"
         ),
         json_schema_extra={"example": "This is a helpful AI assistant"},
     )
@@ -498,9 +497,8 @@ class AssistantPublic(InDB, ResourcePermissionsMixin):
     description: Optional[str] = Field(
         default=None,
         description=(
-            "A short description of the assistant. It is also the default "
-            "description shown to an orchestrating assistant that consults this "
-            "one as a specialist."
+            "A description of the assitant that will be used "
+            "as default description in GroupChatAssistantPublic"
         ),
         json_schema_extra={"example": "This is a helpful AI assistant"},
     )

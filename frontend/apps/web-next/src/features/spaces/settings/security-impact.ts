@@ -4,6 +4,7 @@ export type SpaceSecurityImpact = Schema<"UpdateSpaceDryRunResponse">;
 
 export type SpaceSecurityImpactKey =
   | "assistants"
+  | "group_chats"
   | "apps"
   | "services"
   | "completion_models"
@@ -14,6 +15,7 @@ export type SpaceSecurityImpactKey =
 
 const IMPACT_KEYS: SpaceSecurityImpactKey[] = [
   "assistants",
+  "group_chats",
   "apps",
   "services",
   "completion_models",

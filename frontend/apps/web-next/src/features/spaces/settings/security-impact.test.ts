@@ -5,6 +5,7 @@ import { securityImpactRows, securityImpactTotal } from "./security-impact";
 function impact(partial: Partial<SpaceSecurityImpact>): SpaceSecurityImpact {
   return {
     assistants: [],
+    group_chats: [],
     apps: [],
     services: [],
     completion_models: [],

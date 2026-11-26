@@ -1,6 +1,6 @@
 ---
 title: Gallring
-translationSource: guides/data-retention.mdx@17bec1801d03
+translationSource: guides/data-retention.mdx@36510ed6d3d3
 ---
 
 # Gallring
@@ -59,7 +59,7 @@ När ingen nivå har en tid tas inget bort.
 Den närmaste nivån avgör **även när dess tid är längre** än tiden på en nivå
 utanför: ytans tid är ett standardvärde, inte ett tak.
 
-- **Tidigare gruppchattar:** varje historisk tur följer assistenten som svarade, så en tidigare
+- **Gruppchattar:** varje tur följer assistenten som svarade, så en tidigare
   tur kan finnas kvar medan en senare tas bort. En tur vars assistent har
   raderats följer ingen tid och tas inte bort.
 - **När en assistent raderas** raderas dess chattar. En fråga som inte
@@ -157,7 +157,7 @@ väntar. Se
 
 | Kopia | Hur den följer |
 | --- | --- |
-| En konversations namn (första frågan, en genererad rubrik eller ett namn någon valt) och dess feedbacktext | När tiden då den skrevs är äldre än konversationens period töms namnet (båda apparna visar Namnlös) och feedbacktexten tas bort, även medan frågor finns kvar. Tummen upp eller ned finns kvar. Konversationer med specialister följer den samordnande assistentens period. Tidigare gruppchattar behåller den kortaste effektiva perioden bland sina tidigare medlemmar (nu specialister); en uttryckligen kortare period på den migrerade assistenten gäller också |
+| En konversations namn (första frågan, en genererad rubrik eller ett namn någon valt) och dess feedbacktext | När tiden då den skrevs är äldre än konversationens period töms namnet (båda apparna visar Namnlös) och feedbacktexten tas bort, även medan frågor finns kvar. Tummen upp eller ned finns kvar. En gruppchatt följer den kortaste perioden bland sina assistenter |
 | En konversation som kopierats från en annan | Går inte att läsa så snart en fråga den kopierades från tas bort, och tas sedan bort själv. Se [Copies of removed conversations](/docs/audit-logging#copies-of-removed-conversations) (på engelska) |
 | Temporära filer för en uppladdning, en transkribering, en webbläsning eller en SharePoint-import | Tas bort när processen stannar; efter en krasch av nästa process på samma volym. `UPLOAD_TMP_DIR` måste därför ligga på ett lokalt filsystem |
 | Registret för ett misslyckat jobb | Behåller en felkod, aldrig feltexten. Jobb som registrerades före uppgraderingen behåller sin text |
@@ -181,7 +181,7 @@ skapades. Nästa schemalagda körning tar bort det.
 
 | Vad | Tiden ställs in på | Utan val | Körs |
 | --- | --- | --- | --- |
-| Chattar och chattar med hjälpassistenter | Assistenten, annars dess yta | Sparas | Varje natt, 03:30 som standard (`RETENTION_CRON_HOUR`, `RETENTION_CRON_MINUTE`) |
+| Chattar, gruppchattar och chattar med hjälpassistenter | Assistenten, annars dess yta | Sparas | Varje natt, 03:30 som standard (`RETENTION_CRON_HOUR`, `RETENTION_CRON_MINUTE`) |
 | Appkörningar | Appen, annars dess yta | Sparas | Varje natt, med chattarna |
 | Filer i en tur eller appkörning | De följer den; en fil som används någon annanstans finns kvar | Sparas | Med turen eller körningen |
 | Namn och feedbacktext | Konversationens period | Sparas | Varje natt, med chattarna |

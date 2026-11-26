@@ -18,6 +18,7 @@ class SessionMetadata(AssistantMetadata):
         default=None,
         validation_alias=AliasPath("assistant", "id"),
     )
+    group_chat_id: Optional[UUID] = None
 
 
 class QuestionMetadata(AssistantMetadata):
@@ -64,9 +65,10 @@ class AnalysisProcessingMode(str, Enum):
 
 
 class ConversationInsightRequest(BaseModel):
-    assistant_id: UUID
     start_time: Optional[datetime] = None
     end_time: Optional[datetime] = None
+    assistant_id: Optional[UUID] = None
+    group_chat_id: Optional[UUID] = None
 
 
 class MessageFeedbackCounts(BaseModel):

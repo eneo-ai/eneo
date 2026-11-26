@@ -76,6 +76,9 @@
  "ipad-dark|/spaces/$/chat": {
   "bgOverlap": 2
  },
+ "ipad-dark|/spaces/$/group-chats/$/edit": {
+  "bgOverlap": 4
+ },
  "ipad-dark|/spaces/$/knowledge": {
   "bgOverlap": 10,
   "pseudoContent": 2,
@@ -438,6 +441,9 @@
  },
  "ipad-light|/spaces/$/chat": {
   "bgOverlap": 2
+ },
+ "ipad-light|/spaces/$/group-chats/$/edit": {
+  "bgOverlap": 4
  },
  "ipad-light|/spaces/$/knowledge": {
   "bgOverlap": 10,

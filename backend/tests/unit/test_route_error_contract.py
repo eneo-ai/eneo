@@ -34,7 +34,7 @@ import typing
 from dataclasses import dataclass
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from fastapi.routing import APIRoute
 from pydantic import BaseModel
 
@@ -98,11 +98,7 @@ def _response_codes(route: APIRoute) -> set[int]:
 
 
 def _declared_codes(route: APIRoute) -> set[int]:
-    declared = _response_codes(route)
-    if route.status_code is not None:
-        # FastAPI also documents the primary status, including errors on retired endpoints.
-        declared.add(route.status_code)
-    return declared - _SUCCESS_AND_VALIDATION
+    return _response_codes(route) - _SUCCESS_AND_VALIDATION
 
 
 def _dep_callables(route: APIRoute) -> list[Any]:
@@ -255,6 +251,8 @@ def _compute_all() -> dict[str, list[str]]:
 
 
 def _raises_positional_http_exception() -> None:
+    from fastapi import HTTPException
+
     raise HTTPException(409, "Conflict")
 
 
@@ -268,19 +266,6 @@ def test_detects_positional_http_exception_status() -> None:
     assert _ast_required_codes_from_func(
         _raises_positional_http_exception, seen=set()
     ) == {409}
-
-
-def test_counts_the_primary_error_and_still_detects_an_undeclared_alternative() -> None:
-    router = APIRouter()
-
-    @router.get("/retired", status_code=410)
-    async def endpoint(missing: bool = False) -> None:
-        if missing:
-            raise HTTPException(status_code=404)
-        raise HTTPException(status_code=410)
-
-    route = next(route for route in router.routes if isinstance(route, APIRoute))
-    assert _route_violations(route, "GET") == ["missing_declared_code:404"]
 
 
 def test_rejects_string_422_response_key() -> None:

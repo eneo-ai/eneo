@@ -1508,7 +1508,7 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v1/group-chats/": {
+  "/api/v1/group-chats/{id}/": {
     parameters: {
       query?: never;
       header?: never;
@@ -1516,63 +1516,44 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * Retired Group Chats Collection
-     * @deprecated
-     * @description Retired: group chats became assistants with specialists. Always 410.
+     * Get Group Chat
+     * @description Get an existing group chat by its ID.
      */
-    get: operations["retired_group_chats_collection_get"];
+    get: operations["get_group_chat_api_v1_group_chats__id___get"];
+    put?: never;
+    post?: never;
+    /**
+     * Delete Group Chat
+     * @description Delete an existing group chat by its ID.
+     */
+    delete: operations["delete_group_chat_api_v1_group_chats__id___delete"];
+    options?: never;
+    head?: never;
+    /**
+     * Update Group Chat
+     * @description Updates an existing group chat. Omitted fields are not updated
+     */
+    patch: operations["update_group_chat_api_v1_group_chats__id___patch"];
+    trace?: never;
+  };
+  "/api/v1/group-chats/{id}/publish/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
     put?: never;
     /**
-     * Retired Group Chats Collection
-     * @deprecated
-     * @description Retired: group chats became assistants with specialists. Always 410.
+     * Publish Group Chat
+     * @description Publishes or unpublishes an existing group chat by its ID.
      */
-    post: operations["retired_group_chats_collection_post"];
+    post: operations["publish_group_chat_api_v1_group_chats__id__publish__post"];
     delete?: never;
     options?: never;
     head?: never;
     patch?: never;
-    trace?: never;
-  };
-  "/api/v1/group-chats/{path}": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /**
-     * Retired Group Chats Item
-     * @deprecated
-     * @description Retired: group chats became assistants with specialists. Always 410.
-     */
-    get: operations["retired_group_chats_item_get"];
-    /**
-     * Retired Group Chats Item
-     * @deprecated
-     * @description Retired: group chats became assistants with specialists. Always 410.
-     */
-    put: operations["retired_group_chats_item_put"];
-    /**
-     * Retired Group Chats Item
-     * @deprecated
-     * @description Retired: group chats became assistants with specialists. Always 410.
-     */
-    post: operations["retired_group_chats_item_post"];
-    /**
-     * Retired Group Chats Item
-     * @deprecated
-     * @description Retired: group chats became assistants with specialists. Always 410.
-     */
-    delete: operations["retired_group_chats_item_delete"];
-    options?: never;
-    head?: never;
-    /**
-     * Retired Group Chats Item
-     * @deprecated
-     * @description Retired: group chats became assistants with specialists. Always 410.
-     */
-    patch: operations["retired_group_chats_item_patch"];
     trace?: never;
   };
   "/api/v1/conversations/": {
@@ -1584,16 +1565,16 @@ export interface paths {
     };
     /**
      * List Conversations
-     * @description Gets conversations (sessions) for an assistant.
+     * @description Gets conversations (sessions) for an assistant or group chat.
      *
-     *     Provide assistant_id to filter sessions. If it is missing, an error will be
-     *     returned.
+     *     Provide either assistant_id or group_chat_id (but not both) to filter sessions.
+     *     If neither is provided, an error will be returned.
      */
     get: operations["list_conversations_api_v1_conversations__get"];
     put?: never;
     /**
      * Chat
-     * @description Chat with an assistant; starts or continues a conversation and streams the response as Server-Sent Events when stream is true.
+     * @description Chat with an assistant or group chat; starts or continues a conversation and streams the response as Server-Sent Events when stream is true.
      */
     post: operations["chat_api_v1_conversations__post"];
     delete?: never;
@@ -1651,7 +1632,7 @@ export interface paths {
     };
     /**
      * List Recent Conversations
-     * @description List the caller's own latest conversations across the personal assistant and space assistants they can still open, latest activity first.
+     * @description List the caller's own latest conversations across the personal assistant, space assistants and group chats they can still open, latest activity first.
      */
     get: operations["list_recent_conversations_api_v1_conversations_recent__get"];
     put?: never;
@@ -2137,8 +2118,9 @@ export interface paths {
     };
     /**
      * Get Conversation Insights
-     * @description Get statistics about an assistant's conversations.
+     * @description Get statistics about conversations for either an assistant or a group chat.
      *
+     *     Either assistant_id or group_chat_id must be provided, but not both.
      *     Start time and end time are optional filters. If no time is provided in the datetime parameters,
      *     time components default to 00:00:00.
      */
@@ -2146,7 +2128,7 @@ export interface paths {
     put?: never;
     /**
      * Ask Unified Questions About Questions
-     * @description Ask a question about an assistant's conversations.
+     * @description Ask a question about an assistant's or group chat's conversations.
      */
     post: operations["ask_unified_questions_about_questions_api_v1_analysis_conversation_insights__post"];
     delete?: never;
@@ -2184,14 +2166,15 @@ export interface paths {
     };
     /**
      * Get Conversation Insight Sessions
-     * @description Get all sessions for an assistant across all
+     * @description Get all sessions for an assistant or group chat across all
      *     users in the tenant (with insight access).
      *
      *     This endpoint requires the user to be OWNER or EDITOR,
-     *     and the assistant must have insight_enabled set to true.
+     *     and the assistant/group chat must have insight_enabled set to true.
      *
      *     Args:
-     *         assistant_id: UUID of the assistant
+     *         assistant_id: UUID of the assistant (optional)
+     *         group_chat_id: UUID of the group chat (optional)
      *         limit: Maximum number of sessions to return
      *         cursor: Datetime to start fetching from. If no time is provided, time defaults to 00:00:00.
      *         previous: Whether to fetch sessions before or after the cursor
@@ -2224,11 +2207,13 @@ export interface paths {
      * Get Conversation Insight Session
      * @description Get a specific session with insight access.
      *
-     *     This endpoint requires the user to be OWNER or EDITOR, and the assistant
+     *     This endpoint requires the user to be OWNER or EDITOR, and the assistant/group chat
      *     must have insight_enabled set to true.
      *
      *     Args:
      *         session_id: UUID of the session
+     *         assistant_id: UUID of the assistant (optional)
+     *         group_chat_id: UUID of the group chat (optional)
      *
      *     Returns:
      *         Session data
@@ -5267,7 +5252,7 @@ export interface paths {
     post?: never;
     /**
      * Delete icon
-     * @description Delete an icon of the caller's tenant that no assistant, app or space shows. Remove the icon from its resource with that resource's update first; an icon still in use is refused with 409 (`eneo_error_code` 9075).
+     * @description Delete an icon of the caller's tenant that no assistant, app, space or group chat shows. Remove the icon from its resource with that resource's update first; an icon still in use is refused with 409 (`eneo_error_code` 9075).
      */
     delete: operations["delete_icon_api_v1_icons__id___delete"];
     options?: never;
@@ -5432,8 +5417,7 @@ export interface paths {
     put?: never;
     /**
      * Create Group Chat
-     * @deprecated
-     * @description Retired: group chats became assistants with specialists. Always 410. Create an assistant and add its specialists instead.
+     * @description Creates a group chat.
      */
     post: operations["create_group_chat_api_v1_spaces__id__applications_group_chats__post"];
     delete?: never;
@@ -11731,6 +11715,7 @@ export interface components {
     /** Applications */
     Applications: {
       assistants: components["schemas"]["PaginatedPermissions_AssistantSparse_"];
+      group_chats: components["schemas"]["PaginatedPermissions_GroupChatSparse_"];
       services: components["schemas"]["PaginatedPermissions_ServiceSparse_"];
       apps: components["schemas"]["PaginatedPermissions_AppSparse_"];
     };
@@ -12155,7 +12140,7 @@ export interface components {
       model_info?: components["schemas"]["ModelInfo"] | null;
       /**
        * Description
-       * @description A short description of the assistant. It is also the default description shown to an orchestrating assistant that consults this one as a specialist.
+       * @description A description of the assitant that will be used as default description in GroupChatAssistantPublic
        * @example This is a helpful AI assistant
        */
       description?: string | null;
@@ -13837,21 +13822,22 @@ export interface components {
     };
     /**
      * ConversationRequest
-     * @description A unified model for asking questions to assistants.
+     * @description A unified model for asking questions to either assistants or group chats.
      *
-     *     Either session_id or assistant_id must be provided.
+     *     Either session_id, assistant_id, or group_chat_id must be provided.
      *     If session_id is provided, the conversation will continue with the existing session.
+     *
+     *     For group chats:
+     *     - If tools.assistants contains an assistant, that specific assistant will be targeted
+     *       (requires the group chat to have allow_mentions=True).
+     *     - If no assistant is targeted, the most appropriate assistant will be selected.
      */
     ConversationRequest: {
       /** Session Id */
       session_id?: string | null;
       /** Assistant Id */
       assistant_id?: string | null;
-      /**
-       * Group Chat Id
-       * @deprecated
-       * @description Deprecated: group chats were replaced by assistants with specialists. The group became an assistant with the same id; use assistant_id. Requests that set this field are answered with 410.
-       */
+      /** Group Chat Id */
       group_chat_id?: string | null;
       /** Question */
       question: string;
@@ -14674,7 +14660,7 @@ export interface components {
       model_info?: components["schemas"]["ModelInfo"] | null;
       /**
        * Description
-       * @description A short description of the assistant. It is also the default description shown to an orchestrating assistant that consults this one as a specialist.
+       * @description A description of the assitant that will be used as default description in GroupChatAssistantPublic
        * @example This is a helpful AI assistant
        */
       description?: string | null;
@@ -15966,6 +15952,205 @@ export interface components {
       reasoning_policy?: components["schemas"]["ReasoningPolicyInput"] | null;
       file_policy?: components["schemas"]["FilePolicyInput"] | null;
       skills?: components["schemas"]["SkillsPolicyInput"] | null;
+    };
+    /** GroupChatAssistantPublic */
+    GroupChatAssistantPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Handle */
+      handle: string;
+      /** Default Description */
+      default_description: string | null;
+      /** User Description */
+      user_description: string | null;
+    };
+    /** GroupChatAssistantUpdateSchema */
+    GroupChatAssistantUpdateSchema: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * User Description
+       * @description Custom description provided by the user. Cannot be null if 'description' of assistant is null.
+       * @example My custom AI assistant description
+       */
+      user_description: string | null;
+    };
+    /**
+     * GroupChatCreate
+     * @description Attributes:
+     *         name: str
+     */
+    GroupChatCreate: {
+      /** Name */
+      name: string;
+    };
+    /**
+     * GroupChatPublic
+     * @description Represents a group chat of assistants.
+     *
+     *     Attributes:
+     *         created_at: datetime
+     *         updated_at: datetime
+     *         name: str
+     *         id: UUID
+     *         space_id: UUID
+     *         allow_mentions: bool
+     *         show_response_label: bool
+     *         tools: GroupChatTools
+     *         insight_enabled: bool
+     *         attachments: list[FilePublic]
+     *         allowed_attachments: FileRestrictions
+     *         type: str
+     */
+    GroupChatPublic: {
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+      /** Name */
+      name: string;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Space Id
+       * Format: uuid
+       */
+      space_id: string;
+      /** Allow Mentions */
+      allow_mentions: boolean;
+      /** Show Response Label */
+      show_response_label: boolean;
+      /** Published */
+      published: boolean;
+      /**
+       * Insight Enabled
+       * @description Whether insights are enabled for this group chat. If enabled, users with appropriate permissions can see all sessions for this group chat.
+       */
+      insight_enabled: boolean;
+      tools: components["schemas"]["GroupChatTools"];
+      /** Attachments */
+      attachments: components["schemas"]["FilePublic"][];
+      allowed_attachments: components["schemas"]["FileRestrictions"];
+      /**
+       * Type
+       * @constant
+       */
+      type: "group-chat";
+      /** Permissions */
+      permissions: components["schemas"]["ResourcePermission"][];
+      /** Metadata Json */
+      metadata_json: {
+        [key: string]: unknown;
+      } | null;
+      /** Icon Id */
+      icon_id?: string | null;
+    };
+    /** GroupChatSparse */
+    GroupChatSparse: {
+      /**
+       * Permissions
+       * @default []
+       */
+      permissions?: components["schemas"]["ResourcePermission"][];
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+      /** Name */
+      name: string;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * User Id
+       * Format: uuid
+       */
+      user_id: string;
+      /** Published */
+      published: boolean;
+      /**
+       * Type
+       * @constant
+       */
+      type: "group-chat";
+      /** Metadata Json */
+      metadata_json: {
+        [key: string]: unknown;
+      } | null;
+      /** Icon Id */
+      icon_id?: string | null;
+    };
+    /** GroupChatTools */
+    GroupChatTools: {
+      /** Assistants */
+      assistants: components["schemas"]["GroupChatAssistantPublic"][];
+    };
+    /** GroupChatUpdateSchema */
+    GroupChatUpdateSchema: {
+      /**
+       * Name
+       * @description The name of the group chat.
+       */
+      name?: string | null;
+      /** Space Id */
+      space_id?: string | null;
+      /** @description Tools available in the group chat. */
+      tools?: components["schemas"]["GroupChatUpdateTools"] | null;
+      /**
+       * Allow Mentions
+       * @description Indicates if mentions are allowed.
+       */
+      allow_mentions?: boolean | null;
+      /**
+       * Show Response Label
+       * @description Indicates if the response label should be shown.
+       */
+      show_response_label?: boolean | null;
+      /**
+       * Insight Enabled
+       * @description Whether insights are enabled for this group chat. If enabled, users with appropriate permissions can see all sessions for this group chat.
+       */
+      insight_enabled?: boolean | null;
+      /**
+       * Metadata Json
+       * @description Metadata for the group chat.
+       */
+      metadata_json?: {
+        [key: string]: unknown;
+      } | null;
+      /**
+       * Icon Id
+       * @description Icon ID referencing an uploaded icon. Set to null to remove.
+       */
+      icon_id?: string | null;
+    };
+    /** GroupChatUpdateTools */
+    GroupChatUpdateTools: {
+      /** Assistants */
+      assistants: components["schemas"]["GroupChatAssistantUpdateSchema"][];
     };
     /** GroupMetadata */
     GroupMetadata: {
@@ -19215,6 +19400,24 @@ export interface components {
        */
       readonly count: number;
     };
+    /** PaginatedPermissions[GroupChatSparse] */
+    PaginatedPermissions_GroupChatSparse_: {
+      /**
+       * Permissions
+       * @default []
+       */
+      permissions?: components["schemas"]["ResourcePermission"][];
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["GroupChatSparse"][];
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      readonly count: number;
+    };
     /** PaginatedPermissions[IntegrationKnowledgePublic] */
     PaginatedPermissions_IntegrationKnowledgePublic_: {
       /**
@@ -19979,7 +20182,7 @@ export interface components {
       specialists?: components["schemas"]["AssistantSpecialistInput"][] | null;
       /**
        * Description
-       * @description A short description of the assistant. It is also the default description shown to an orchestrating assistant that consults this one as a specialist.
+       * @description A description of the assitant that will be used as default description in GroupChatAssistantPublic
        * @example This is a helpful AI assistant
        */
       description?: string | null;
@@ -20345,6 +20548,7 @@ export interface components {
       | "skills_management"
       | "personal_skills"
       | "personal_chat"
+      | "group_chats"
       | "apps"
       | "services"
       | "collections"
@@ -20562,11 +20766,7 @@ export interface components {
       session_id?: string | null;
       /** Assistant Id */
       assistant_id?: string | null;
-      /**
-       * Group Chat Id
-       * @deprecated
-       * @description Deprecated: group chats were replaced by assistants with specialists. The group became an assistant with the same id; use assistant_id. Requests that set this field are answered with 410.
-       */
+      /** Group Chat Id */
       group_chat_id?: string | null;
       /**
        * Question
@@ -21048,7 +21248,7 @@ export interface components {
     };
     /**
      * RecentConversationPartner
-     * @description The assistant a recent conversation is held with.
+     * @description The assistant or group chat a recent conversation is held with.
      */
     RecentConversationPartner: {
       /**
@@ -21056,7 +21256,7 @@ export interface components {
        * @description `default-assistant` is the space's own assistant; in the personal space that is the personal chat.
        * @enum {string}
        */
-      type: "assistant" | "default-assistant";
+      type: "assistant" | "default-assistant" | "group-chat";
       /**
        * Id
        * Format: uuid
@@ -21869,6 +22069,8 @@ export interface components {
       created_at: string;
       /** Assistant Id */
       assistant_id?: string | null;
+      /** Group Chat Id */
+      group_chat_id?: string | null;
     };
     /** SessionMetadataPublic */
     SessionMetadataPublic: {
@@ -25315,6 +25517,8 @@ export interface components {
       )[];
       /** Assistants */
       assistants: components["schemas"]["AssistantSparse"][];
+      /** Group Chats */
+      group_chats: components["schemas"]["GroupChatSparse"][];
       /** Services */
       services: components["schemas"]["ServiceSparse"][];
       /** Apps */
@@ -33695,59 +33899,37 @@ export interface operations {
       };
     };
   };
-  retired_group_chats_collection_get: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Group chats are retired. */
-      410: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-    };
-  };
-  retired_group_chats_collection_post: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Group chats are retired. */
-      410: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-    };
-  };
-  retired_group_chats_item_get: {
+  get_group_chat_api_v1_group_chats__id___get: {
     parameters: {
       query?: never;
       header?: never;
       path: {
-        path: string;
+        id: string;
       };
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description Group chats are retired. */
-      410: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GroupChatPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
         headers: {
           [name: string]: unknown;
         };
@@ -33766,19 +33948,35 @@ export interface operations {
       };
     };
   };
-  retired_group_chats_item_put: {
+  delete_group_chat_api_v1_group_chats__id___delete: {
     parameters: {
       query?: never;
       header?: never;
       path: {
-        path: string;
+        id: string;
       };
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description Group chats are retired. */
-      410: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
         headers: {
           [name: string]: unknown;
         };
@@ -33797,19 +33995,50 @@ export interface operations {
       };
     };
   };
-  retired_group_chats_item_post: {
+  update_group_chat_api_v1_group_chats__id___patch: {
     parameters: {
       query?: never;
       header?: never;
       path: {
-        path: string;
+        id: string;
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["GroupChatUpdateSchema"];
+      };
+    };
     responses: {
-      /** @description Group chats are retired. */
-      410: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GroupChatPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
         headers: {
           [name: string]: unknown;
         };
@@ -33828,19 +34057,30 @@ export interface operations {
       };
     };
   };
-  retired_group_chats_item_delete: {
+  publish_group_chat_api_v1_group_chats__id__publish__post: {
     parameters: {
-      query?: never;
+      query: {
+        published: boolean;
+      };
       header?: never;
       path: {
-        path: string;
+        id: string;
       };
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description Group chats are retired. */
-      410: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GroupChatPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -33848,30 +34088,8 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  retired_group_chats_item_patch: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        path: string;
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Group chats are retired. */
-      410: {
+      /** @description Not Found */
+      404: {
         headers: {
           [name: string]: unknown;
         };
@@ -33895,10 +34113,7 @@ export interface operations {
       query?: {
         /** @description The UUID of the assistant */
         assistant_id?: string | null;
-        /**
-         * @deprecated
-         * @description Deprecated: group chats became assistants with the same id; use assistant_id. Answered with 410 when provided.
-         */
+        /** @description The UUID of the group chat */
         group_chat_id?: string | null;
         limit?: number | null;
         cursor?: string | null;
@@ -33939,15 +34154,6 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Gone */
-      410: {
         headers: {
           [name: string]: unknown;
         };
@@ -35123,15 +35329,6 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Gone */
-      410: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -35235,15 +35432,6 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Gone */
-      410: {
         headers: {
           [name: string]: unknown;
         };
@@ -37179,10 +37367,11 @@ export interface operations {
   };
   get_conversation_insights_api_v1_analysis_conversation_insights__get: {
     parameters: {
-      query: {
-        assistant_id: string;
+      query?: {
         start_time?: string | null;
         end_time?: string | null;
+        assistant_id?: string | null;
+        group_chat_id?: string | null;
       };
       header?: never;
       path?: never;
@@ -37239,12 +37428,13 @@ export interface operations {
   };
   ask_unified_questions_about_questions_api_v1_analysis_conversation_insights__post: {
     parameters: {
-      query: {
-        assistant_id: string;
+      query?: {
         days_since?: number;
         from_date?: string | null;
         to_date?: string | null;
         include_followups?: boolean;
+        assistant_id?: string | null;
+        group_chat_id?: string | null;
         processing_mode?: components["schemas"]["AnalysisProcessingMode"];
       };
       header?: never;
@@ -37355,8 +37545,9 @@ export interface operations {
   };
   get_conversation_insight_sessions_api_v1_analysis_conversation_insights_sessions__get: {
     parameters: {
-      query: {
-        assistant_id: string;
+      query?: {
+        assistant_id?: string | null;
+        group_chat_id?: string | null;
         limit?: number | null;
         cursor?: string | null;
         previous?: boolean;
@@ -48221,10 +48412,23 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["GroupChatCreate"];
+      };
+    };
     responses: {
-      /** @description Unauthorized */
-      401: {
+      /** @description Successful Response. */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GroupChatPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
         headers: {
           [name: string]: unknown;
         };
@@ -48243,15 +48447,6 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Group chats are retired. */
-      410: {
         headers: {
           [name: string]: unknown;
         };

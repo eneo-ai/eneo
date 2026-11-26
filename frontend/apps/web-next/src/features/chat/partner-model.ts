@@ -4,11 +4,13 @@ import type { ChatPartner } from "@/lib/chat/types";
 
 /**
  * Nobody can answer in this chat: an assistant without a usable completion
- * model. A partner whose model is not known (left unset) counts as able to
- * answer.
+ * model, or a group chat without assistants. A partner whose model or members
+ * are not known (left unset) counts as able to answer.
  */
 export function partnerCannotAnswer(partner: ChatPartner): boolean {
-  return partner.completionModel === null;
+  return partner.type === "group-chat"
+    ? partner.assistantCount === 0
+    : partner.completionModel === null;
 }
 
 type SparseModel = Schema<"CompletionModelSparse">;

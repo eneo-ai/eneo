@@ -77,29 +77,6 @@ function expectPartialText(result: Awaited<ReturnType<typeof run>>, text: string
 }
 
 describe("a well-formed stream", () => {
-  it("updates one specialist consultation in place and delivers the final answer", async () => {
-    const data = {
-      id: "c-1",
-      ordinal: 1,
-      assistant_id: "a-2",
-      assistant_name: "IT",
-      question: "Check the policy",
-      status: "running",
-      answer: "",
-      tool_calls: [],
-      references: []
-    };
-    const part = { type: "data-consultation", id: data.id, data };
-    const final = { ...part, data: { ...data, status: "complete", answer: "Policy confirmed." } };
-    const result = await run(
-      toSseBody([start, session, part, final, textStart, textDelta, textEnd, finish])
-    );
-    expect(result.chat.status).toBe("ready");
-    const parts = result.chat.lastMessage?.parts ?? [];
-    expect(parts.filter((item) => item.type === "data-consultation")).toEqual([final]);
-    expect(parts).toContainEqual({ type: "text", text: "Hello", state: "done" });
-  });
-
   it("settles as ready", async () => {
     const result = await run(toSseBody([start, session, textStart, textDelta, textEnd, finish]));
     expect(result.chat.status).toBe("ready");

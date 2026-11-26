@@ -444,24 +444,32 @@
     )
   ]);
 
-  const answeringAssistants = $derived(
-    (message.tools?.assistants ?? []).filter((assistant) => assistant.id !== chat.partner.id)
-  );
+  const showAnswerLabel = $derived.by(() => {
+    let hasInfo = message.tools && message.tools.assistants.length > 0;
+    let isSameAssistant = message.tools.assistants.some(({ id }) => id === chat.partner.id);
+    let isEnabled =
+      chat.partner.type === "default-assistant" ||
+      ("show_response_label" in chat.partner && chat.partner.show_response_label);
+    return hasInfo && !isSameAssistant && isEnabled;
+  });
 </script>
 
 <div class="relative pt-4 text-lg">
   <span class="sr-only">{m.answer()}</span>
-  {#each answeringAssistants as mention (mention.id)}
-    <div
-      {...dynamicColour({ basedOn: mention.id })}
-      class="bg-dynamic-dimmer text-dynamic-stronger mb-4 -ml-2 flex w-fit items-center gap-2 rounded-full px-4 py-2 text-base font-medium"
-    >
-      <IconSpeechBubble class="stroke-2"></IconSpeechBubble>
-      <span>
-        {formatEmojiTitle(mention.handle ?? m.unknown_assistant())}
-      </span>
-    </div>
-  {/each}
+  {#if showAnswerLabel}
+    {#each message.tools?.assistants ?? [] as mention (mention.id)}
+      <div
+        {...dynamicColour({ basedOn: mention.id })}
+        class="bg-dynamic-dimmer text-dynamic-stronger mb-4 -ml-2 flex w-fit items-center gap-2 rounded-full px-4 py-2 text-base font-medium"
+      >
+        <IconSpeechBubble class="stroke-2"></IconSpeechBubble>
+        <span>
+          {formatEmojiTitle(mention.handle ?? m.unknown_assistant())}
+        </span>
+      </div>
+    {/each}
+  {/if}
+
   <!-- Reasoning text belongs at the top of the trace: it rides in the first
        run's box when that run is external, otherwise it gets its own box so
        it never renders below tool activity it preceded. -->

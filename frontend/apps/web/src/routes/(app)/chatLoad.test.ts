@@ -1,9 +1,8 @@
 import { EneoError, type EneoErrorCode } from "@eneo/eneo-js";
-import { isHttpError, isRedirect } from "@sveltejs/kit";
+import { isHttpError } from "@sveltejs/kit";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { toAppError } from "$lib/core/errors/toAppError";
 import { load as loadSpace } from "./spaces/[spaceId]/chat/+page";
-import { load as loadFormerGroupEditor } from "./spaces/[spaceId]/group-chats/[groupChatId]/edit/+page";
 import { load as loadDashboard } from "./dashboard/[assistantId]/[[sessionId]]/+page";
 
 function deferred<T>() {
@@ -28,12 +27,14 @@ function fixture(hasSession = true) {
   const getPartner = vi.fn(async () => partner);
   const getSession = vi.fn(async () => conversation);
   const listSessions = vi.fn(async () => history);
+  const getGroup = vi.fn(async () => ({ ...partner, type: "group-chat" }));
   const currentSpace = { default_assistant: { ...partner, permissions: ["read"] } };
   const input = {
     parent: async () => ({
       eneo: {
         assistants: { get: getPartner, getSession },
-        conversations: { get: getSession, list: listSessions }
+        conversations: { get: getSession, list: listSessions },
+        groupChats: { get: getGroup }
       },
       currentSpace
     }),
@@ -54,7 +55,8 @@ function fixture(hasSession = true) {
     currentSpace,
     getPartner,
     getSession,
-    listSessions
+    listSessions,
+    getGroup
   };
 }
 
@@ -236,26 +238,16 @@ describe("Space chat access", () => {
     expect(data.listSessions).not.toHaveBeenCalled();
   });
 
-  test("opens a former group editor bookmark in the same assistant's settings", () => {
-    expect(() =>
-      loadFormerGroupEditor({
-        params: { spaceId: "space-1", groupChatId: "group-1" }
-      } as Parameters<typeof loadFormerGroupEditor>[0])
-    ).toThrow(
-      expect.objectContaining({ status: 308, location: "/spaces/space-1/assistants/group-1/edit" })
-    );
-  });
-
-  test("opens a saved group-chat link as the assistant with that id", async () => {
+  test("still loads group-chat conversations", async () => {
     const data = fixture();
     data.input.url.searchParams.set("type", "group-chat");
 
-    const outcome = await Promise.resolve(loadSpace(data.input as never)).catch(
-      (error: unknown) => error
-    );
-    expect(isRedirect(outcome) && outcome.location).toBe(
-      "/spaces/space-1/chat?type=assistant&id=assistant-1&session_id=session-1"
-    );
+    expect(await loadSpace(data.input as never)).toMatchObject({
+      chatPartner: { type: "group-chat" },
+      initialConversation: data.conversation,
+      initialHistory: data.history
+    });
+    expect(data.getGroup).toHaveBeenCalledOnce();
     expect(data.getPartner).not.toHaveBeenCalled();
   });
 

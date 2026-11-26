@@ -550,6 +550,27 @@ def specialist_plan(turn: TurnFixture, monkeypatch: pytest.MonkeyPatch, speciali
     )
 
 
+async def test_group_member_answers_in_the_group_session_without_delegating(
+    turn: TurnFixture,
+):
+    specialist = copy.deepcopy(turn.assistant)
+    specialist.id = uuid4()
+    give_specialists(turn, specialist)
+    group_id = uuid4()
+    async with turn.service.repo.session.begin():
+        reply = await turn.service.ask(
+            question="Review", assistant_id=turn.assistant.id, group_chat_id=group_id
+        )
+    assert reply.answer == "Check the policy."
+    assert not turn.requests[0].get("tools")
+    assert (
+        turn.history.create_session_with_question_placeholder.call_args.kwargs[
+            "group_chat_id"
+        ]
+        == group_id
+    )
+
+
 async def test_specialist_configuration_is_projected_for_each_reader(turn: TurnFixture):
     from eneo.spaces.api.space_models import SpaceRoleValue
 
