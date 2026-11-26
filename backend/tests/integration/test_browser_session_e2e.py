@@ -751,12 +751,19 @@ async def federated_callback(
     async with db_container() as container:
         slug = await container.tenant_repo().generate_slug_for_tenant(test_tenant.id)
 
-    async def initiate(*, mfa: bool = False):
-        params = {"tenant": slug, "next": "/dashboard"}
+    async def initiate(
+        *, mfa: bool = False, holding: str | None = None, tenant: str | None = slug
+    ):
+        params = {"next": "/dashboard"}
+        if tenant is not None:
+            params["tenant"] = tenant
         if mfa:
             params["mfa"] = "true"
+        headers = SAME_ORIGIN
+        if holding is not None:
+            headers = headers | {"Cookie": f"{SESSION}={holding}"}
         return await client.get(
-            "/api/v1/auth/browser/initiate", params=params, headers=SAME_ORIGIN
+            "/api/v1/auth/browser/initiate", params=params, headers=headers
         )
 
     async def callback(*, mfa: bool = False, holding: str | None = None, **claims: Any):
@@ -1196,6 +1203,49 @@ async def test_a_sign_in_for_mfa_replaces_the_session_or_starts_none(
     assert (await _rows(user_id)).keys() == {_claims(with_mfa)["sid"]}
     gone = await client.get("/api/v1/users/me/", headers=_cookie(held))
     assert gone.status_code == 401, gone.text
+
+
+async def test_a_sign_in_for_mfa_asks_at_the_organisation_of_the_session_held(
+    client,
+    super_admin_token,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    browser_session_on,
+    federated_callback,
+    test_tenant,
+):
+    """With several organisations, an ordinary sign-in has to say which one.
+    A person signing in for MFA is signed in already, in one of them."""
+    await _set_mfa_rule(client, super_admin_token, test_tenant.id, ACR_RULE)
+    held = _federated_token(await federated_callback())
+    created = await client.post(
+        "/api/v1/sysadmin/tenants/",
+        json={"name": "other-org", "display_name": "other-org", "state": "active"},
+        headers={"X-API-Key": super_admin_token},
+    )
+    assert created.status_code == 200, created.text
+
+    unnamed = await federated_callback.initiate(tenant=None)
+    assert _failure(unnamed)["detailCode"] == ["http_400"]
+    # Not for an ordinary sign-in, which may be by another person.
+    plain = await federated_callback.initiate(tenant=None, holding=held)
+    assert _failure(plain)["detailCode"] == ["http_400"]
+
+    started = await federated_callback.initiate(mfa=True, tenant=None, holding=held)
+
+    assert started.status_code == 303, started.text
+    provider = urlsplit(started.headers["location"])
+    assert provider.netloc == "idp.browser.local"
+    assert provider.path == "/authorize"
+
+    # The client that keeps the token names its session the same way.
+    bearer = await client.get(
+        "/api/v1/auth/initiate", params={"mfa": "true"}, headers=_bearer(held)
+    )
+    assert bearer.status_code == 200, bearer.text
+    assert urlsplit(bearer.json()["authorization_url"]).netloc == "idp.browser.local"
+    without = await client.get("/api/v1/auth/initiate", params={"mfa": "true"})
+    assert without.status_code == 400, without.text
 
 
 async def test_a_token_sign_in_for_mfa_gets_a_token_only_with_mfa(

@@ -8,7 +8,15 @@ from typing import Annotated, Any, NamedTuple, Optional, cast
 from uuid import UUID
 
 import jwt as pyjwt
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    Header,
+    HTTPException,
+    Query,
+    Response,
+    status,
+)
 from pydantic import BaseModel, Field
 from redis.asyncio import Redis
 from typing_extensions import TypedDict
@@ -623,12 +631,18 @@ async def initiate_auth(
                 "organisation's request for MFA is added, and the callback "
                 "starts a session only when the provider's answer meets the "
                 "organisation's MFA rule (403 `mfa_not_met` otherwise). 409 "
-                "`mfa_not_configured` when the organisation has set no rule."
+                "`mfa_not_configured` when the organisation has set no rule. "
+                "Without `tenant`, the organisation is the one of the session "
+                "sent as `Authorization: Bearer`."
             ),
         ),
     ] = False,
+    # Read only to choose the organisation of a sign-in for MFA; the route
+    # stays public and admits nobody by it.
+    authorization: Annotated[str | None, Header(include_in_schema=False)] = None,
 ) -> InitiateAuthResponse:
     """Get the authorization URL for the tenant's identity provider."""
+    scheme, _, held = (authorization or "").partition(" ")
     return await initiate_federated_sign_in(
         response,
         container,
@@ -638,6 +652,7 @@ async def initiate_auth(
         channel="api",
         binding_challenge=binding_challenge,
         require_mfa=mfa,
+        held_session=held if scheme.lower() == "bearer" and held else None,
     )
 
 
@@ -651,6 +666,7 @@ async def initiate_federated_sign_in(
     channel: OidcChannel,
     binding_challenge: str | None,
     require_mfa: bool = False,
+    held_session: str | None = None,
 ) -> InitiateAuthResponse:
     """
     Start a sign-in at the tenant's identity provider: the shared initiation core.
@@ -681,6 +697,19 @@ async def initiate_federated_sign_in(
     """
     tenant_repo = container.tenant_repo()
     settings = get_settings()
+
+    # A sign-in for MFA is made by someone who is signed in. The session they
+    # hold says which organisation to ask, so they are not asked to choose it.
+    if (
+        tenant is None
+        and require_mfa
+        and held_session
+        and settings.federation_enabled
+        and (held_tenant := container.browser_session_service().tenant_of(held_session))
+        is not None
+    ):
+        held = await tenant_repo.get(held_tenant)
+        tenant = held.slug if held is not None else None
 
     # Handle single-tenant mode (no tenant slug needed)
     if tenant is None:

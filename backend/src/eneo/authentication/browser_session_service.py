@@ -222,6 +222,14 @@ class BrowserSessionService:
             )
         )
 
+    def tenant_of(self, token: str) -> UUID | None:
+        """The organisation of the session a token names; None when it names
+        none. For choosing where a signed-in person signs in again: whether
+        the session is still open is not asked, since the new sign-in decides
+        who they are."""
+        payload = self._named_session(token)
+        return None if payload is None else payload.tenant_id
+
     async def end_mfa(self, tenant_id: UUID) -> int:
         """Take MFA from every session of an organisation, in the caller's
         transaction, and return how many had it.

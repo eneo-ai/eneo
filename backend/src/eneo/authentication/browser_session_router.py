@@ -377,6 +377,7 @@ async def initiate_browser_federation(
                 # Only the browser holding the cookie can redeem the sign-in.
                 binding_challenge=code_challenge(transaction),
                 require_mfa=mfa,
+                held_session=session_cookie(request, settings),
             )
         except HTTPException as exc:
             if exc.status_code == 400 and exc.detail.startswith(
