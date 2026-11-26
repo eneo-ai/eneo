@@ -511,6 +511,8 @@ uv run python -m eneo.cli.generate_encryption_key
 
 The verification claims and their order come from the provider's `email_verified_claims` (default `["email_verified", "xms_edov"]`); the first one present decides. A claim left out of that list decides nothing, `email_verified` included.
 
+When the organisation has an [MFA rule](/guides/oidc-federation#multi-factor-authentication-mfa), `authentication/mfa_rule.py` compares `acr` or `amr` with it and the session row stores the answer (`browser_sessions.mfa`); the claims themselves are not kept.
+
 A claim counted as missing is logged as `oidc_optional_claim_ignored` with the claim's name and a reason, never with its value, so a provider that changed its format is noticed without locking anyone out. Claims Eneo does not use are neither stored nor logged.
 
 **Clock skew tolerance:** 120 seconds (2 minutes) - configurable via `oidc_clock_leeway_seconds`
