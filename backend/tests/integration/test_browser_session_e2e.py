@@ -49,9 +49,12 @@ from eneo.tenants.tenant import TenantState, TenantUpdate
 from eneo.users.user import UserState
 from tests.integration.test_federation_tenant_admin import (
     SECRET,
+    _audit_rows,
     _idp,
     _register,
+    _stored,
 )
+from tests.integration.test_federation_tenant_admin import URL as SIGN_IN_SETTINGS
 from tests.unit.browser_session_test_utils import expected_set_cookie
 
 PASSWORD = "OriginalPassword1!"
@@ -170,8 +173,25 @@ async def _mfa(token: str) -> bool:
         )
 
 
-async def _set_mfa_rule(tenant_id: UUID, rule: dict[str, Any] | None) -> None:
-    """Write the organisation's MFA rule where sign-in reads it."""
+async def _operator_sets(client, key: str, tenant_id: UUID, **settings: Any):
+    """Change the organisation's sign-in settings through the operator's door."""
+    return await client.patch(
+        f"/api/v1/sysadmin/tenants/{tenant_id}/federation",
+        json=settings,
+        headers={"X-API-Key": key},
+    )
+
+
+async def _set_mfa_rule(
+    client, key: str, tenant_id: UUID, rule: dict[str, Any] | None
+) -> None:
+    changed = await _operator_sets(client, key, tenant_id, mfa=rule)
+    assert changed.status_code == 200, changed.text
+
+
+async def _store_mfa_rule(tenant_id: UUID, rule: dict[str, Any] | None) -> None:
+    """Write the rule straight to the row, as a change that lands at a chosen
+    moment of a sign-in in flight."""
     async with sessionmanager.session() as session, session.begin():
         stored = await session.scalar(
             sa.select(Tenants.federation_config).where(Tenants.id == tenant_id)
@@ -731,23 +751,33 @@ async def federated_callback(
     async with db_container() as container:
         slug = await container.tenant_repo().generate_slug_for_tenant(test_tenant.id)
 
-    async def callback(**claims: Any):
-        initiated = await client.get(
-            "/api/v1/auth/browser/initiate",
-            params={"tenant": slug, "next": "/dashboard"},
-            headers=SAME_ORIGIN,
+    async def initiate(*, mfa: bool = False):
+        params = {"tenant": slug, "next": "/dashboard"}
+        if mfa:
+            params["mfa"] = "true"
+        return await client.get(
+            "/api/v1/auth/browser/initiate", params=params, headers=SAME_ORIGIN
         )
+
+    async def callback(*, mfa: bool = False, holding: str | None = None, **claims: Any):
+        """One sign-in; ``mfa`` signs in for MFA, ``holding`` is the token of
+        the session the browser already has."""
+        initiated = await initiate(mfa=mfa)
         assert initiated.status_code == 303, initiated.text
         location = initiated.headers["location"]
         [state] = parse_qs(urlsplit(location).query)["state"]
         answer = provider.authorize(location, **claims)
         [txn] = initiated.headers.get_list("set-cookie")
+        cookies = [txn.split(";", 1)[0]]
+        if holding is not None:
+            cookies.append(f"{SESSION}={holding}")
         return await client.get(
             "/login/callback",
             params={"code": answer.code, "state": state},
-            headers={"Cookie": txn.split(";", 1)[0], "Sec-Fetch-Site": "cross-site"},
+            headers={"Cookie": "; ".join(cookies), "Sec-Fetch-Site": "cross-site"},
         )
 
+    callback.initiate = initiate
     return callback
 
 
@@ -834,7 +864,7 @@ async def test_only_a_sign_in_that_meets_the_rule_starts_a_session_with_mfa(
 ):
     # Before the organisation states a rule, no answer means MFA.
     assert not await _mfa(_federated_token(await federated_callback(acr="level-2")))
-    await _set_mfa_rule(test_tenant.id, ACR_RULE)
+    await _set_mfa_rule(client, super_admin_token, test_tenant.id, ACR_RULE)
 
     with_mfa = _federated_token(await federated_callback(acr="level-2"))
     assert await _mfa(with_mfa)
@@ -856,13 +886,14 @@ async def test_only_a_sign_in_that_meets_the_rule_starts_a_session_with_mfa(
 
 async def test_a_renewal_keeps_the_sessions_answer_on_mfa(
     client,
+    super_admin_token,
     patch_auth_service_jwt,
     mock_transcription_models,
     browser_session_on,
     federated_callback,
     test_tenant,
 ):
-    await _set_mfa_rule(test_tenant.id, ACR_RULE)
+    await _set_mfa_rule(client, super_admin_token, test_tenant.id, ACR_RULE)
     with_mfa = _federated_token(await federated_callback(acr="level-2"))
     without = _federated_token(await federated_callback())
 
@@ -873,6 +904,8 @@ async def test_a_renewal_keeps_the_sessions_answer_on_mfa(
 
 
 async def test_a_token_minted_from_the_earlier_session_gains_no_mfa(
+    client,
+    super_admin_token,
     patch_auth_service_jwt,
     mock_transcription_models,
     browser_session_on,
@@ -882,7 +915,7 @@ async def test_a_token_minted_from_the_earlier_session_gains_no_mfa(
 ):
     """Signing in with MFA starts a new session. What was minted from the one
     before it, a module or tool token, still names that one."""
-    await _set_mfa_rule(test_tenant.id, ACR_RULE)
+    await _set_mfa_rule(client, super_admin_token, test_tenant.id, ACR_RULE)
     earlier = _claims(_federated_token(await federated_callback()))
     with_mfa = _claims(_federated_token(await federated_callback(acr="level-2")))
 
@@ -901,6 +934,8 @@ async def test_a_token_minted_from_the_earlier_session_gains_no_mfa(
 
 
 async def test_settings_changed_while_a_sign_in_finishes_give_it_no_mfa(
+    client,
+    super_admin_token,
     patch_auth_service_jwt,
     mock_transcription_models,
     browser_session_on,
@@ -910,17 +945,295 @@ async def test_settings_changed_while_a_sign_in_finishes_give_it_no_mfa(
 ):
     """The answer was verified and judged under settings that are no longer
     the organisation's, so the session is started without MFA."""
-    await _set_mfa_rule(test_tenant.id, ACR_RULE)
+    await _set_mfa_rule(client, super_admin_token, test_tenant.id, ACR_RULE)
     verify = federation_router.verify_response
 
     async def then_the_rule_changes(*args: Any, **kwargs: Any):
         verified = await verify(*args, **kwargs)
-        await _set_mfa_rule(test_tenant.id, {"claim": "acr", "values": ["level-3"]})
+        await _store_mfa_rule(test_tenant.id, {"claim": "acr", "values": ["level-3"]})
         return verified
 
     monkeypatch.setattr(federation_router, "verify_response", then_the_rule_changes)
 
     assert not await _mfa(_federated_token(await federated_callback(acr="level-2")))
+
+
+async def _admin_edit(client, token: str, **changes: Any):
+    """An edit of the sign-in settings by the administrator holding ``token``."""
+    view = await client.get(SIGN_IN_SETTINGS, headers=_cookie(token))
+    assert view.status_code == 200, view.text
+    return await client.patch(
+        SIGN_IN_SETTINGS,
+        json={"revision": view.json()["revision"], **changes},
+        headers=_cookie(token),
+    )
+
+
+async def test_the_first_rule_needs_the_permission_and_a_later_change_needs_mfa(
+    client,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    browser_session_on,
+    federated_callback,
+    test_tenant,
+):
+    admin = _federated_token(await federated_callback())
+    asking = ACR_RULE | {"request": "acr_values"}
+
+    # No rule yet: nobody can have MFA, so the permission is enough.
+    first = await _admin_edit(client, admin, mfa=asking)
+    assert first.status_code == 200, first.text
+    assert first.json()["mfa"] == asking
+    assert first.json()["session_has_mfa"] is False
+
+    # With a rule, the permission alone neither relaxes it nor points it at
+    # another client or subject.
+    for change in (
+        {"mfa": {"claim": "acr", "values": ["level-1"]}},
+        {"mfa": {"claim": "amr", "values": ["pwd"]}},
+        {"mfa": None},
+        {"client_id": "another-client"},
+        {"subject_claim": "oid"},
+    ):
+        refused = await _admin_edit(client, admin, **change)
+        assert refused.status_code == 403, (change, refused.text)
+        assert refused.json()["code"] == "federation_mfa_required"
+    stored = await _stored(test_tenant.id)
+    assert (stored["mfa"], stored["client_id"]) == (asking, "operator-client")
+
+    # What the rule does not rest on is still the permission's to change: a
+    # label, the allowed domains, how Eneo asks, the order of the values.
+    for change in (
+        {"provider": "Our sign-in"},
+        {"allowed_domains": ["example.com", "example.org"]},
+        {"mfa": ACR_RULE | {"request": "claims"}},
+    ):
+        kept = await _admin_edit(client, admin, **change)
+        assert kept.status_code == 200, (change, kept.text)
+
+
+@pytest.mark.parametrize(
+    "rule",
+    [
+        pytest.param({"claim": "acr", "values": []}, id="no-values"),
+        pytest.param({"claim": "acr", "values": [""]}, id="an-empty-value"),
+        pytest.param({"claim": "acr", "values": ["a", "a"]}, id="a-value-twice"),
+        pytest.param({"claim": "acr", "values": ["level 2"]}, id="a-space"),
+        pytest.param({"claim": "auth_time", "values": ["1"]}, id="another-claim"),
+        pytest.param(
+            {"claim": "amr", "values": ["mfa"], "request": "acr_values"},
+            id="asking-by-an-amr-rule",
+        ),
+        pytest.param(
+            {"claim": "acr", "values": ["level-2"], "methods": ["otp"]},
+            id="an-unknown-field",
+        ),
+    ],
+)
+async def test_what_is_not_a_rule_is_refused_and_nothing_stored(
+    client,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    browser_session_on,
+    federated_callback,
+    test_tenant,
+    rule,
+):
+    admin = _federated_token(await federated_callback())
+
+    refused = await _admin_edit(client, admin, mfa=rule)
+
+    assert refused.status_code == 422, refused.text
+    assert "mfa" not in await _stored(test_tenant.id)
+
+
+async def test_a_rule_change_takes_mfa_from_every_session_of_the_organisation(
+    client,
+    super_admin_token,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    browser_session_on,
+    federated_callback,
+    test_tenant,
+):
+    await _set_mfa_rule(client, super_admin_token, test_tenant.id, ACR_RULE)
+    admin = _federated_token(await federated_callback(acr="level-2"))
+    colleague = _federated_token(await federated_callback(acr="level-2"))
+    without = _federated_token(await federated_callback())
+    view = await client.get(SIGN_IN_SETTINGS, headers=_cookie(admin))
+    assert view.json()["session_has_mfa"] is True
+    # A session without MFA cannot make the change the one with MFA can.
+    assert (
+        await _admin_edit(client, without, mfa={"claim": "acr", "values": ["level-3"]})
+    ).status_code == 403
+
+    changed = await _admin_edit(
+        client, admin, mfa={"claim": "acr", "values": ["level-3"]}
+    )
+
+    assert changed.status_code == 200, changed.text
+    # The administrator's own session was judged under the old rule too.
+    assert changed.json()["session_has_mfa"] is False
+    for token in (admin, colleague, without):
+        assert not await _mfa(token)
+        # Nobody is signed out.
+        me = await client.get("/api/v1/users/me/", headers=_cookie(token))
+        assert me.status_code == 200, me.text
+    audited = (await _audit_rows(test_tenant.id))[-1]["metadata"]
+    assert audited["sessions_lost_mfa"] == 2
+    assert audited["changes"]["mfa"] == {
+        "old": ACR_RULE,
+        "new": {"claim": "acr", "values": ["level-3"]},
+    }
+
+
+async def test_the_operator_repairs_a_rule_nobody_can_meet(
+    client,
+    super_admin_token,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    browser_session_on,
+    federated_callback,
+    test_tenant,
+):
+    """A wrong rule locks the administrators out of their own setting: no
+    session can get the MFA a change needs. The operator's door has no session
+    and asks for none."""
+    never_sent = {"claim": "acr", "values": ["never-sent"]}
+    await _set_mfa_rule(client, super_admin_token, test_tenant.id, never_sent)
+    admin = _federated_token(await federated_callback(acr="level-2"))
+    assert not await _mfa(admin)
+    assert (await _admin_edit(client, admin, mfa=ACR_RULE)).status_code == 403
+
+    await _set_mfa_rule(client, super_admin_token, test_tenant.id, ACR_RULE)
+
+    shown = await client.get(
+        f"/api/v1/sysadmin/tenants/{test_tenant.id}/federation",
+        headers={"X-API-Key": super_admin_token},
+    )
+    assert shown.json()["mfa"] == ACR_RULE | {"request": None}
+    with_mfa = _federated_token(await federated_callback(acr="level-2"))
+    assert await _mfa(with_mfa)
+
+    # What the rule trusts is the operator's to change as well, and the
+    # sessions judged under it lose MFA.
+    moved = await _operator_sets(
+        client, super_admin_token, test_tenant.id, client_id="another-client"
+    )
+    assert moved.status_code == 200, moved.text
+    assert not await _mfa(with_mfa)
+    assert (await _audit_rows(test_tenant.id))[-1]["metadata"]["sessions_lost_mfa"] == 1
+
+    # Removing the rule: null, where leaving the field out keeps it.
+    kept = await _operator_sets(
+        client, super_admin_token, test_tenant.id, provider="Our sign-in"
+    )
+    assert kept.status_code == 200, kept.text
+    assert (await _stored(test_tenant.id))["mfa"] == ACR_RULE
+    await _set_mfa_rule(client, super_admin_token, test_tenant.id, None)
+    assert "mfa" not in await _stored(test_tenant.id)
+
+
+def _failure(response) -> dict[str, list[str]]:
+    """Where a refused browser sign-in ends: the login page, with its reason."""
+    assert response.status_code == 303, response.text
+    target = urlsplit(response.headers["location"])
+    assert target.path == "/login"
+    return parse_qs(target.query)
+
+
+async def test_a_sign_in_for_mfa_replaces_the_session_or_starts_none(
+    client,
+    super_admin_token,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    browser_session_on,
+    federated_callback,
+    test_tenant,
+):
+    # An organisation without a rule cannot be asked: the person is told so
+    # before being sent to the provider.
+    unset = _failure(await federated_callback.initiate(mfa=True))
+    assert (unset["detailCode"], unset["next"]) == (
+        ["mfa_not_configured"],
+        ["/dashboard"],
+    )
+
+    await _set_mfa_rule(
+        client, super_admin_token, test_tenant.id, ACR_RULE | {"request": "acr_values"}
+    )
+    held = _federated_token(await federated_callback())
+    assert not await _mfa(held)
+    user_id = _claims(held)["user_id"]
+
+    # Only a sign-in for MFA asks the provider for it.
+    for mfa, asked in ((False, None), (True, ["level-2"])):
+        sent = parse_qs(
+            urlsplit(
+                (await federated_callback.initiate(mfa=mfa)).headers["location"]
+            ).query
+        )
+        assert sent.get("acr_values") == asked
+
+    # The provider answers without MFA: no new session, and the one the
+    # person has stays as it was. The page they end on names the reason and
+    # where they were going; it does not send them round again.
+    refused = await federated_callback(mfa=True, holding=held, acr="level-1")
+    ended = _failure(refused)
+    assert (ended["detailCode"], ended["next"]) == (["mfa_not_met"], ["/dashboard"])
+    assert _session_cookies(refused) == []
+    assert (await _rows(user_id)).keys() == {_claims(held)["sid"]}
+    assert not await _mfa(held)
+    me = await client.get("/api/v1/users/me/", headers=_cookie(held))
+    assert me.status_code == 200, me.text
+
+    # The provider answers with MFA: a new session with it, in place of the
+    # one the browser held.
+    signed_in = await federated_callback(mfa=True, holding=held, acr="level-2")
+    assert signed_in.headers["location"] == "/dashboard"
+    with_mfa = _federated_token(signed_in)
+    assert await _mfa(with_mfa)
+    assert (await _rows(user_id)).keys() == {_claims(with_mfa)["sid"]}
+    gone = await client.get("/api/v1/users/me/", headers=_cookie(held))
+    assert gone.status_code == 401, gone.text
+
+
+async def test_a_token_sign_in_for_mfa_gets_a_token_only_with_mfa(
+    client,
+    super_admin_token,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    token_callback,
+    test_tenant,
+):
+    unset = await token_callback(mfa=True)
+    assert unset.status_code == 409, unset.text
+    assert unset.json()["code"] == "mfa_not_configured"
+    assert unset.json()["eneo_error_code"] == 9084
+    await _set_mfa_rule(client, super_admin_token, test_tenant.id, ACR_RULE)
+
+    held = (await token_callback()).json()["access_token"]
+
+    # Refused: no token, and the session the client holds stays as it was.
+    refused = await token_callback(mfa=True, holding=held)
+
+    assert refused.status_code == 403, refused.text
+    assert refused.json()["code"] == "mfa_not_met"
+    assert refused.json()["eneo_error_code"] == 9083
+    assert "access_token" not in refused.json()
+    assert (
+        await client.get("/api/v1/users/me/", headers=_bearer(held))
+    ).status_code == 200
+
+    # Met: the new token takes the place of the one the client held.
+    issued = await token_callback(mfa=True, holding=held, acr="level-2")
+    assert issued.status_code == 200, issued.text
+    assert await _mfa(issued.json()["access_token"])
+    assert (
+        await client.get("/api/v1/users/me/", headers=_bearer(held))
+    ).status_code == 401
+    # What names no session ends none and stops no sign-in.
+    assert (await token_callback(holding="not-a-token")).status_code == 200
 
 
 @pytest.mark.integration
@@ -973,14 +1286,26 @@ async def token_callback(
     async with db_container() as container:
         slug = await container.tenant_repo().generate_slug_for_tenant(test_tenant.id)
 
-    async def callback(http: AsyncClient = client, **claims: Any):
-        initiated = await http.get("/api/v1/auth/initiate", params={"tenant": slug})
+    async def callback(
+        http: AsyncClient = client,
+        *,
+        mfa: bool = False,
+        holding: str | None = None,
+        **claims: Any,
+    ):
+        """One sign-in; ``mfa`` signs in for MFA, ``holding`` is the token of
+        the session the client already has."""
+        params = {"tenant": slug} | ({"mfa": "true"} if mfa else {})
+        initiated = await http.get("/api/v1/auth/initiate", params=params)
+        if mfa and initiated.status_code != 200:
+            # A sign-in for MFA can be refused before it starts.
+            return initiated
         assert initiated.status_code == 200, initiated.text
         answer = provider.authorize(initiated.json()["authorization_url"], **claims)
-        return await http.post(
-            "/api/v1/auth/callback",
-            json={"code": answer.code, "state": initiated.json()["state"]},
-        )
+        body = {"code": answer.code, "state": initiated.json()["state"]}
+        if holding is not None:
+            body["replaces"] = holding
+        return await http.post("/api/v1/auth/callback", json=body)
 
     return callback
 

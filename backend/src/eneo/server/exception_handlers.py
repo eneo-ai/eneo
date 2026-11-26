@@ -13,6 +13,8 @@ from starlette.responses import Response
 from eneo.authentication.browser_session import SessionGenerationMismatchError
 from eneo.authentication.oidc.errors import (
     OidcLoginUnavailableError,
+    OidcMfaNotConfiguredError,
+    OidcMfaNotMetError,
     OidcResponseNotVerifiedError,
     OidcTransactionInvalidError,
 )
@@ -292,6 +294,8 @@ DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] 
         ErrorCodes.OIDC_RESPONSE_NOT_VERIFIED,
     ),
     IdentityConflictError: (403, None, ErrorCodes.IDENTITY_CONFLICT),
+    OidcMfaNotMetError: (403, None, ErrorCodes.OIDC_MFA_NOT_MET),
+    OidcMfaNotConfiguredError: (409, None, ErrorCodes.OIDC_MFA_NOT_CONFIGURED),
     # --- Integrations: the string ``code`` tells the cases apart ---
     SharePointCredentialsInvalidError: (400, None, ErrorCodes.BAD_REQUEST),
     OAuthCodeRejectedError: (400, None, ErrorCodes.BAD_REQUEST),

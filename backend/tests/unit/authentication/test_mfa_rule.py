@@ -1,5 +1,7 @@
 """The organisation's MFA rule: which claim says MFA, and with which values."""
 
+import json
+
 import pytest
 
 from eneo.authentication.mfa_rule import MfaRule
@@ -61,6 +63,8 @@ def test_an_amr_rule_is_met_by_every_one_of_its_values(amr, met):
         pytest.param((), id="no-values"),
         pytest.param(("level-2", ""), id="an-empty-value"),
         pytest.param(("level-2", "level-2"), id="a-value-twice"),
+        pytest.param(("level 2",), id="a-space-inside"),
+        pytest.param((" level-2",), id="a-space-around"),
     ],
 )
 def test_a_rule_that_any_or_no_sign_in_would_meet_is_not_a_rule(values):
@@ -91,3 +95,49 @@ def test_sign_in_settings_without_a_rule_state_none():
 )
 def test_a_stored_rule_that_cannot_be_read_gives_nobody_mfa(stored):
     assert MfaRule.from_config({"mfa": stored}) is None
+
+
+def test_two_rules_that_accept_the_same_are_the_same_to_a_session():
+    rule = MfaRule(claim="acr", values=("level-2", "level-3"))
+
+    assert rule.accepts() == (
+        MfaRule(claim="acr", values=("level-3", "level-2"), request="claims").accepts()
+    )
+    assert rule.accepts() != MfaRule(claim="acr", values=("level-2",)).accepts()
+    assert rule.accepts() != (
+        MfaRule(claim="amr", values=("level-2", "level-3")).accepts()
+    )
+
+
+def test_a_rule_that_does_not_ask_adds_nothing_to_the_request():
+    assert MfaRule(claim="amr", values=("mfa",)).authorization_parameters() == {}
+
+
+def test_acr_values_asks_for_the_rules_values_most_wanted_first():
+    rule = MfaRule(claim="acr", values=("level-3", "level-2"), request="acr_values")
+
+    assert rule.authorization_parameters() == {"acr_values": "level-3 level-2"}
+
+
+def test_claims_asks_for_acr_as_an_essential_claim_of_the_id_token():
+    rule = MfaRule(claim="acr", values=("level-3", "level-2"), request="claims")
+
+    [(name, value)] = rule.authorization_parameters().items()
+    assert name == "claims"
+    assert json.loads(value) == {
+        "id_token": {"acr": {"essential": True, "values": ["level-3", "level-2"]}}
+    }
+
+
+def test_only_an_acr_rule_has_values_to_ask_for():
+    with pytest.raises(ValueError):
+        MfaRule(claim="amr", values=("mfa",), request="acr_values")
+
+
+def test_how_eneo_asks_is_read_back_with_the_rule():
+    rule = MfaRule(claim="acr", values=("level-2",), request="claims")
+
+    assert MfaRule.from_config({"mfa": rule.as_config()}) == rule
+    assert (
+        MfaRule.from_config({"mfa": rule.as_config() | {"request": "prompt"}}) is None
+    )

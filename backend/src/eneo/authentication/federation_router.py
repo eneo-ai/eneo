@@ -20,7 +20,11 @@ from eneo.authentication.endpoint_access import (
 )
 from eneo.authentication.mfa_rule import MfaRule
 from eneo.authentication.oidc.authorization import build_authorization_request
-from eneo.authentication.oidc.errors import OidcSignInError
+from eneo.authentication.oidc.errors import (
+    OidcMfaNotConfiguredError,
+    OidcMfaNotMetError,
+    OidcSignInError,
+)
 from eneo.authentication.oidc.profile import (
     OidcProfile,
     OidcProviderError,
@@ -378,6 +382,16 @@ class CallbackRequest(BaseModel):
             "one."
         ),
     )
+    replaces: Optional[str] = Field(
+        default=None,
+        max_length=8192,
+        description=(
+            "The token of the session the client already holds, when it has "
+            "one. A sign-in that succeeds ends that session: the new token "
+            "takes its place, as a sign-in for MFA needs. A refused sign-in "
+            "leaves it as it was. A value that names no session is ignored."
+        ),
+    )
 
     model_config = {
         "json_schema_extra": {
@@ -601,6 +615,18 @@ async def initiate_auth(
             ),
         ),
     ] = None,
+    mfa: Annotated[
+        bool,
+        Query(
+            description=(
+                "Sign in for multi-factor authentication (MFA): the "
+                "organisation's request for MFA is added, and the callback "
+                "starts a session only when the provider's answer meets the "
+                "organisation's MFA rule (403 `mfa_not_met` otherwise). 409 "
+                "`mfa_not_configured` when the organisation has set no rule."
+            ),
+        ),
+    ] = False,
 ) -> InitiateAuthResponse:
     """Get the authorization URL for the tenant's identity provider."""
     return await initiate_federated_sign_in(
@@ -611,6 +637,7 @@ async def initiate_auth(
         redirect_uri_param=redirect_uri_param,
         channel="api",
         binding_challenge=binding_challenge,
+        require_mfa=mfa,
     )
 
 
@@ -623,6 +650,7 @@ async def initiate_federated_sign_in(
     redirect_uri_param: str | None,
     channel: OidcChannel,
     binding_challenge: str | None,
+    require_mfa: bool = False,
 ) -> InitiateAuthResponse:
     """
     Start a sign-in at the tenant's identity provider: the shared initiation core.
@@ -647,6 +675,8 @@ async def initiate_federated_sign_in(
         HTTPException 400: Tenant parameter required in multi-tenant mode
         HTTPException 404: Tenant not found or no slug configured
         HTTPException 500: No IdP configured for tenant or no public origin
+        OidcMfaNotConfiguredError (409): ``require_mfa`` in an organisation
+            that has set no MFA rule
         OidcLoginUnavailableError (503): The transaction store is unavailable
     """
     tenant_repo = container.tenant_repo()
@@ -755,6 +785,12 @@ async def initiate_federated_sign_in(
     # sets this header when a span is active.
     response.headers["X-Correlation-ID"] = correlation_id
 
+    # A sign-in for MFA with no rule could never be met: refuse it before the
+    # person is sent to the provider.
+    mfa_rule = MfaRule.from_config(federation_config) if require_mfa else None
+    if require_mfa and mfa_rule is None:
+        raise OidcMfaNotConfiguredError()
+
     # Resolve redirect_uri server-side
     try:
         canonical_redirect_uri, valid_redirect_uris = redirect_uris(
@@ -822,6 +858,7 @@ async def initiate_federated_sign_in(
         config_version=tenant_config_version,
         issuer=profile.issuer,
         iss_parameter_supported=profile.iss_parameter_supported,
+        mfa_required=require_mfa,
     )
     state_payload: OIDCStatePayload = {
         "tenant_id": transaction.tenant_id,
@@ -840,7 +877,10 @@ async def initiate_federated_sign_in(
         redis_client, transaction, ttl_seconds=settings.oidc_state_ttl_seconds
     )
     authorization_url = build_authorization_request(
-        profile, transaction, state=signed_state
+        profile,
+        transaction,
+        state=signed_state,
+        asking_for=mfa_rule.authorization_parameters() if mfa_rule else None,
     )
 
     await _log_oidc_debug(
@@ -921,7 +961,10 @@ async def auth_callback(
     # ends every copy of it.
     return AccessTokenResponse(
         access_token=await container.browser_session_service().start(
-            signed_in.user, auth_method=None, mfa=signed_in.mfa
+            signed_in.user,
+            auth_method=None,
+            mfa=signed_in.mfa,
+            replacing=callback.replaces,
         ),
         frontend_state=signed_in.frontend_state,
     )
@@ -972,7 +1015,9 @@ async def federated_sign_in(
        (signature, issuer, audience, freshness, nonce)
     4. Validates email domain against tenant's allowed_domains
     5. Resolves an active tenant member or provisions under the shared JIT policy
-    6. Returns the admitted user and the page's frontend state
+    6. Judges the answer by the organisation's MFA rule; a sign-in for MFA
+       that does not meet it is refused
+    7. Returns the admitted user, the page's frontend state and that answer
 
     Raises:
         HTTPException 400: Invalid state or code
@@ -982,6 +1027,8 @@ async def federated_sign_in(
         HTTPException 403: Email domain not allowed for tenant or user not found
         IdentityConflictError (403): The identity cannot be bound to the account
             its email names
+        OidcMfaNotMetError (403): A sign-in for MFA whose answer does not meet
+            the organisation's rule
         OidcLoginUnavailableError (503): The transaction store is unavailable
     """
     settings = get_settings()
@@ -1206,11 +1253,20 @@ async def federated_sign_in(
             user_id=str(user.id),
         )
 
-        return FederatedSignIn(
-            user,
-            state_payload["frontend_state"],
-            await _met_mfa_rule(container, tenant_obj, verified, settings),
-        )
+        mfa = await _met_mfa_rule(container, tenant_obj, verified, settings)
+        if transaction.mfa_required and not mfa:
+            # The person asked for a session with MFA. Without it there is
+            # nothing to hand out, and the session they have stays as it was.
+            logger.warning(
+                "oidc_mfa_not_met",
+                extra={
+                    "tenant_id": str(tenant_id),
+                    "user_id": str(user.id),
+                    "correlation_id": correlation_id,
+                },
+            )
+            raise OidcMfaNotMetError()
+        return FederatedSignIn(user, state_payload["frontend_state"], mfa)
     except (HTTPException, OidcSignInError, IdentityConflictError):
         # Re-raise HTTP and typed sign-in refusals with correlation_id already set
         raise

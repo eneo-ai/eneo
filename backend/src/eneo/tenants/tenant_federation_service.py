@@ -11,6 +11,14 @@ Every write reads the stored config with the tenant row locked, is audited as
 FEDERATION_UPDATED in the same transaction (always, whatever the tenant's audit
 settings) and commits with it. The secret is write-only: it is encrypted before
 storage and never appears in a response, a log line or an audit value.
+
+The organisation's MFA rule is one of the settings (authentication.mfa_rule).
+A write that changes the rule, or what the rule trusts (the issuer, the client
+ID, the subject claim), takes MFA from the organisation's sessions in the same
+transaction: they were judged under what no longer holds. Through the admin's
+door, such a change of an existing rule needs a session with MFA under that
+rule, so the admin permission alone cannot relax it. The operator's door has no
+session and needs none: it is how a rule nobody can meet is repaired.
 """
 
 import hashlib
@@ -28,6 +36,7 @@ from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.actor_types import ActorType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication.mfa_rule import MFA_RULE_KEY, MfaClaim, MfaRequest, MfaRule
 from eneo.authentication.oidc import outbound, sign_in_source
 from eneo.authentication.oidc.profile import (
     DEFAULT_SCOPES,
@@ -55,6 +64,7 @@ from eneo.tenants.tenant_repo import TenantRepository
 
 if TYPE_CHECKING:
     from eneo.audit.application.audit_service import AuditService
+    from eneo.authentication.browser_session_service import BrowserSessionService
     from eneo.users.user import UserInDB
 
 logger = get_logger(__name__)
@@ -121,6 +131,72 @@ def _with_subject_claim(config: Mapping[str, Any], claim: str | None) -> dict[st
                 "The subject claim cannot be the email claim.",
             ) from exc
     return mapping
+
+
+_MFA_RULE = (
+    "What counts as multi-factor authentication (MFA) at the identity provider. "
+    "With `acr`, the ID token's `acr` must be one of `values`. With `amr`, its "
+    "`amr` must contain every one of `values`; more methods do not matter. "
+    "`request` is how Eneo asks the provider for MFA when a person signs in for "
+    "it, by the values of an `acr` rule, most wanted first; leave it out when "
+    "the provider always requires MFA for this client. Changing or removing the "
+    "rule takes MFA from every session of the organisation: people sign in with "
+    "MFA again to reach what requires it. "
+)
+# PUT writes a whole new config; PATCH merges into the stored one.
+_MFA_RULE_PUT_DESCRIPTION = _MFA_RULE + "Omitted, PUT stores no rule."
+_MFA_RULE_PATCH_DESCRIPTION = (
+    _MFA_RULE + "Omitted, the stored rule is kept; null removes it."
+)
+
+
+class MfaRuleSetting(BaseModel):
+    """The organisation's MFA rule as both doors send and show it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    claim: MfaClaim = Field(..., description="The ID token claim that says MFA")
+    values: list[Annotated[str, Field(min_length=1, max_length=255)]] = Field(
+        ...,
+        min_length=1,
+        max_length=20,
+        description="The claim values that mean MFA",
+        examples=[["urn:example:loa:substantial"], ["mfa"]],
+    )
+    request: MfaRequest | None = Field(
+        default=None,
+        description=(
+            "How Eneo asks for MFA: `acr_values`, or `claims` with `acr` as an "
+            "essential claim. Only with an `acr` rule."
+        ),
+    )
+
+    @field_validator("values", mode="before")
+    @classmethod
+    def strip_values(cls, value: object) -> object:
+        if not isinstance(value, list):
+            return value
+        return [
+            item.strip() if isinstance(item, str) else item
+            for item in cast(list[object], value)
+        ]
+
+    @model_validator(mode="after")
+    def is_a_rule(self) -> Self:
+        self.rule()
+        return self
+
+    def rule(self) -> MfaRule:
+        return MfaRule(
+            claim=self.claim, values=tuple(self.values), request=self.request
+        )
+
+    @classmethod
+    def of(cls, config: Mapping[str, Any]) -> "MfaRuleSetting | None":
+        rule = MfaRule.from_config(config)
+        if rule is None:
+            return None
+        return cls(claim=rule.claim, values=list(rule.values), request=rule.request)
 
 
 def _validate_domains(domains: list[str] | None) -> list[str] | None:
@@ -211,6 +287,7 @@ class FederationRequestBase(BaseModel):
         description=_SUBJECT_CLAIM_PATCH_DESCRIPTION,
         examples=["oid"],
     )
+    mfa: MfaRuleSetting | None = Field(None, description=_MFA_RULE_PATCH_DESCRIPTION)
 
     @field_validator("subject_claim")
     @classmethod
@@ -332,6 +409,7 @@ class SetFederationRequest(FederationRequestBase):
         description=_SUBJECT_CLAIM_PUT_DESCRIPTION,
         examples=["oid"],
     )
+    mfa: MfaRuleSetting | None = Field(None, description=_MFA_RULE_PUT_DESCRIPTION)
 
 
 class PatchFederationRequest(FederationRequestBase):
@@ -363,6 +441,10 @@ class TenantAdminFederationPatch(BaseModel):
     Every other field (the authorization server and its endpoints, redirect
     topology, scopes, the rest of the claim mapping, token auth method) is
     operator-owned and refused as an unknown field.
+
+    Once the organisation has an MFA rule, changing or removing it, or changing
+    the client ID or the subject claim, needs a session with MFA under that
+    rule (403 ``federation_mfa_required``).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -405,6 +487,10 @@ class TenantAdminFederationPatch(BaseModel):
     ) = Field(
         default=None, description=_SUBJECT_CLAIM_PATCH_DESCRIPTION, examples=["oid"]
     )
+    # The one field where null says something: no rule.
+    mfa: MfaRuleSetting | None = Field(
+        default=None, description=_MFA_RULE_PATCH_DESCRIPTION
+    )
 
     @field_validator("subject_claim")
     @classmethod
@@ -435,7 +521,7 @@ class TenantAdminFederationPatch(BaseModel):
         nulls = sorted(
             field
             for field in self.model_fields_set
-            if field != "revision" and getattr(self, field) is None
+            if field not in ("revision", "mfa") and getattr(self, field) is None
         )
         if nulls:
             raise ValueError(f"PATCH does not allow null for: {', '.join(nulls)}")
@@ -473,6 +559,18 @@ class TenantFederationAdminView(BaseModel):
         default="sub", description="The token claim an account is bound to"
     )
     token_endpoint_auth_method: Optional[str] = None
+    mfa: Optional[MfaRuleSetting] = Field(
+        default=None,
+        description="What counts as MFA at the identity provider; null when not set",
+    )
+    session_has_mfa: bool = Field(
+        default=False,
+        description=(
+            "Whether the caller's session was started with MFA under the rule. "
+            "Once a rule is set, changing it, the client ID or the subject "
+            "claim needs that."
+        ),
+    )
     revision: Optional[str] = Field(
         default=None,
         description="Send back with PATCH; changes whenever the settings do",
@@ -565,8 +663,27 @@ def stored_subject_claim(config: Mapping[str, Any]) -> str:
     return _text(claim) or "sub"
 
 
+def mfa_trust(config: Mapping[str, Any]) -> tuple[object, ...]:
+    """What a session's MFA rests on: the rule, and who the rule believes.
+
+    A session started with MFA was judged by this rule on a token from this
+    issuer for this client, about this subject. When any of it changes, the
+    organisation's sessions lose MFA.
+    """
+    rule = MfaRule.from_config(config)
+    return (
+        None if rule is None else rule.accepts(),
+        _text(config.get("issuer")),
+        # A config stored without discovery (the OIDC_* move) names its
+        # provider only here.
+        _text(config.get("discovery_endpoint")),
+        _text(config.get("client_id")),
+        stored_subject_claim(config) if config else None,
+    )
+
+
 def build_admin_view(
-    tenant: TenantInDB, settings: Settings
+    tenant: TenantInDB, settings: Settings, *, session_has_mfa: bool = False
 ) -> TenantFederationAdminView:
     config = tenant.federation_config
     if not _is_registered(config):
@@ -598,6 +715,8 @@ def build_admin_view(
         scopes=_texts(config.get("scopes", list(DEFAULT_SCOPES))),
         subject_claim=stored_subject_claim(config),
         token_endpoint_auth_method=_text(config.get("token_endpoint_auth_method")),
+        mfa=MfaRuleSetting.of(config),
+        session_has_mfa=session_has_mfa,
         revision=federation_revision(config),
         configured_at=secret_updated_at or tenant.updated_at,
     )
@@ -700,6 +819,9 @@ def _build_full_federation_config(
     if request.email_verified_claims is not None:
         federation_config["email_verified_claims"] = request.email_verified_claims
 
+    if request.mfa is not None:
+        federation_config[MFA_RULE_KEY] = request.mfa.rule().as_config()
+
     return federation_config
 
 
@@ -708,8 +830,13 @@ def _merge_federation_config(
     updates: dict[str, Any],
     *,
     encrypted_secret: str | None,
+    mfa: MfaRuleSetting | None = None,
 ) -> dict[str, Any]:
-    """Merge PATCH updates into an existing federation config."""
+    """Merge PATCH updates into an existing federation config.
+
+    ``updates`` says which fields were sent. ``mfa`` is the sent rule when
+    ``updates`` holds the key; None there removes the stored rule.
+    """
     merged = existing_config.copy()
 
     for field in ("provider", "client_id", "discovery_endpoint"):
@@ -737,6 +864,12 @@ def _merge_federation_config(
 
     if "subject_claim" in updates:
         merged["claims_mapping"] = _with_subject_claim(merged, updates["subject_claim"])
+
+    if "mfa" in updates:
+        if mfa is None:
+            merged.pop(MFA_RULE_KEY, None)
+        else:
+            merged[MFA_RULE_KEY] = mfa.rule().as_config()
 
     if encrypted_secret is not None:
         merged["client_secret"] = encrypted_secret
@@ -772,16 +905,28 @@ class TenantFederationService:
         tenant_repo: TenantRepository,
         encryption_service: EncryptionService,
         audit_service: "AuditService",
+        sessions: "BrowserSessionService",
     ):
         super().__init__()
         self.tenant_repo = tenant_repo
         self.encryption_service = encryption_service
         self.audit_service = audit_service
+        self.sessions = sessions
 
     # Tenant admin door
 
-    def admin_view(self, tenant: TenantInDB) -> TenantFederationAdminView:
-        return build_admin_view(tenant, get_settings())
+    async def admin_view(self, user: "UserInDB") -> TenantFederationAdminView:
+        return build_admin_view(
+            user.tenant,
+            get_settings(),
+            session_has_mfa=await self._has_mfa(user),
+        )
+
+    async def _has_mfa(self, user: "UserInDB") -> bool:
+        credential = user.credential
+        return await self.sessions.has_mfa(
+            None if credential is None else credential.session_ref
+        )
 
     async def edit_as_admin(
         self, user: "UserInDB", patch: TenantAdminFederationPatch
@@ -822,9 +967,27 @@ class TenantFederationService:
             )
 
         merged = _merge_federation_config(
-            current, updates, encrypted_secret=self._encrypt(patch.client_secret)
+            current,
+            updates,
+            encrypted_secret=self._encrypt(patch.client_secret),
+            mfa=patch.mfa,
         )
         _usable(merged)
+        # The first rule needs only the permission. After that the permission
+        # alone must not relax the rule, or point it at another client or
+        # subject, to reach what the admin cannot reach today. The row is
+        # locked, so the session's MFA is under the rule read here.
+        if (
+            MfaRule.from_config(current) is not None
+            and mfa_trust(current) != mfa_trust(merged)
+            and not await self._has_mfa(user)
+        ):
+            raise _error(
+                status.HTTP_403_FORBIDDEN,
+                "federation_mfa_required",
+                "Sign in with multi-factor authentication to change the MFA "
+                "rule, the client ID or the subject claim.",
+            )
         await self._save(
             tenant,
             current,
@@ -842,11 +1005,13 @@ class TenantFederationService:
             },
         )
         # The same canonical form a following GET loads, so the views agree.
+        # Read again: a change of the rule took MFA from this session too.
         return build_admin_view(
             tenant.model_copy(
                 update={"federation_config": canonical_federation_config(merged)}
             ),
             get_settings(),
+            session_has_mfa=await self._has_mfa(user),
         )
 
     # Operator door
@@ -960,7 +1125,7 @@ class TenantFederationService:
         if not current:
             raise _no_config()
         federation_config = _merge_federation_config(
-            current, updates, encrypted_secret=encrypted_secret
+            current, updates, encrypted_secret=encrypted_secret, mfa=request.mfa
         )
         if discovery is None:
             _usable(federation_config)
@@ -1002,6 +1167,9 @@ class TenantFederationService:
             user=None,
             secret_replaced=False,
             description=f"Sysadmin deleted federation config for tenant {tenant.name}",
+            sessions_lost_mfa=await self._end_mfa_when_trust_changed(
+                tenant, current, {}
+            ),
         )
         logger.info(f"Federation config deleted for tenant {tenant.name}")
 
@@ -1084,7 +1252,28 @@ class TenantFederationService:
             secret_replaced=secret_replaced,
             description=description,
             via=via,
+            sessions_lost_mfa=await self._end_mfa_when_trust_changed(tenant, old, new),
         )
+
+    async def _end_mfa_when_trust_changed(
+        self, tenant: TenantInDB, old: Mapping[str, Any], new: Mapping[str, Any]
+    ) -> int | None:
+        """Take MFA from the organisation's sessions when what it rested on
+        changed; the number that had it, or None when nothing changed.
+
+        Runs with the tenant row locked, in the transaction that stores the
+        change. A sign-in gives a session MFA only while it shares that row
+        (federation_router), so none is written under the old settings after
+        this. Without a stored rule no session has MFA, so nothing is read.
+        """
+        if MFA_RULE_KEY not in old or mfa_trust(old) == mfa_trust(new):
+            return None
+        ended = await self.sessions.end_mfa(tenant.id)
+        logger.info(
+            "federation_sessions_lost_mfa",
+            extra={"tenant_id": str(tenant.id), "sessions": ended},
+        )
+        return ended
 
     async def _audit(
         self,
@@ -1096,10 +1285,12 @@ class TenantFederationService:
         secret_replaced: bool,
         description: str,
         via: str = "super_api_key",
+        sessions_lost_mfa: int | None = None,
     ) -> None:
         """FEDERATION_UPDATED in the caller's transaction: if this write fails,
         the settings change rolls back with it. ``via`` names the system door
-        when no user made the change."""
+        when no user made the change. ``sessions_lost_mfa`` is recorded when
+        the change took MFA from the organisation's sessions."""
         target: dict[str, Any] = {
             "tenant_id": str(tenant.id),
             "tenant_name": tenant.name,
@@ -1121,6 +1312,8 @@ class TenantFederationService:
             "changes": federation_changes(old, new, secret_replaced=secret_replaced),
             "via": via if user is None else "admin",
         }
+        if sessions_lost_mfa is not None:
+            metadata["sessions_lost_mfa"] = sessions_lost_mfa
         await self.audit_service.log(
             tenant_id=tenant.id,
             user=user,

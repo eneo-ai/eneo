@@ -222,6 +222,21 @@ class BrowserSessionService:
             )
         )
 
+    async def end_mfa(self, tenant_id: UUID) -> int:
+        """Take MFA from every session of an organisation, in the caller's
+        transaction, and return how many had it.
+
+        For a change of the organisation's MFA rule or of what the rule
+        trusts: the sessions were judged under what no longer holds. Nobody is
+        signed out; a person signs in with MFA again to get it back.
+        """
+        result = await self.session.execute(
+            sa.update(BrowserSessions)
+            .where(BrowserSessions.tenant_id == tenant_id, BrowserSessions.mfa)
+            .values(mfa=False)
+        )
+        return affected_row_count(result)
+
     async def delete_expired(self) -> int:
         """Delete every expired session, in the caller's transaction, and
         return how many there were. An expired row admits nothing, so this

@@ -9669,7 +9669,7 @@ export interface paths {
     head?: never;
     /**
      * Change the organisation's sign-in settings
-     * @description Change the label, client ID, client secret, subject claim or allowed email domains of the registered identity provider. Send the revision from GET; a save against an older revision is refused with 409. Operator-owned fields are refused with 422. Every change is audited. A new client ID gives every person a new issuer and audience pair: with a provider that issues a subject per client, open an identity migration window from the old pair to the new one first, or bound accounts are refused `account_bound`; with one subject for every client, the new pair binds by the same subject.
+     * @description Change the label, client ID, client secret, subject claim, allowed email domains or MFA rule of the registered identity provider. Once a rule is set, changing or removing it, or changing the client ID or the subject claim, needs a session started with MFA under that rule (403 `federation_mfa_required`), and takes MFA from every session of the organisation. Send the revision from GET; a save against an older revision is refused with 409. Operator-owned fields are refused with 422. Every change is audited. A new client ID gives every person a new issuer and audience pair: with a provider that issues a subject per client, open an identity migration window from the old pair to the new one first, or bound accounts are refused `account_bound`; with one subject for every client, the new pair binds by the same subject.
      */
     patch: operations["patch_federation_api_v1_admin_federation_patch"];
     trace?: never;
@@ -12965,6 +12965,11 @@ export interface components {
        * @description The secret whose S256 hash was sent as binding_challenge at initiate. Required for a bound sign-in and refused for an unbound one.
        */
       binding_verifier?: string | null;
+      /**
+       * Replaces
+       * @description The token of the session the client already holds, when it has one. A sign-in that succeeds ends that session: the new token takes its place, as a sign-in for MFA needs. A refused sign-in leaves it as it was. A value that names no session is ignored.
+       */
+      replaces?: string | null;
     };
     /**
      * CapabilityActivationResponse
@@ -15542,6 +15547,8 @@ export interface components {
       | 9080
       | 9081
       | 9082
+      | 9083
+      | 9084
       | 9085
       | 9086
       | 9090;
@@ -15779,6 +15786,8 @@ export interface components {
        * @default sub
        */
       subject_claim?: string;
+      /** @description What counts as MFA at the identity provider; null when not set */
+      mfa?: components["schemas"]["MfaRuleSetting"] | null;
       /**
        * Configured At
        * Format: date-time
@@ -18020,6 +18029,34 @@ export interface components {
       sessions: components["schemas"]["MetadataCount"][];
       /** Questions */
       questions: components["schemas"]["MetadataCount"][];
+    };
+    /**
+     * MfaRuleSetting
+     * @description The organisation's MFA rule as both doors send and show it.
+     */
+    MfaRuleSetting: {
+      /**
+       * Claim
+       * @description The ID token claim that says MFA
+       * @enum {string}
+       */
+      claim: "acr" | "amr";
+      /**
+       * Values
+       * @description The claim values that mean MFA
+       * @example [
+       *       "urn:example:loa:substantial"
+       *     ]
+       * @example [
+       *       "mfa"
+       *     ]
+       */
+      values: string[];
+      /**
+       * Request
+       * @description How Eneo asks for MFA: `acr_values`, or `claims` with `acr` as an essential claim. Only with an `acr` rule.
+       */
+      request?: ("acr_values" | "claims") | null;
     };
     /**
      * MigrationResult
@@ -20310,6 +20347,8 @@ export interface components {
        * @example oid
        */
       subject_claim?: string | null;
+      /** @description What counts as multi-factor authentication (MFA) at the identity provider. With `acr`, the ID token's `acr` must be one of `values`. With `amr`, its `amr` must contain every one of `values`; more methods do not matter. `request` is how Eneo asks the provider for MFA when a person signs in for it, by the values of an `acr` rule, most wanted first; leave it out when the provider always requires MFA for this client. Changing or removing the rule takes MFA from every session of the organisation: people sign in with MFA again to reach what requires it. Omitted, the stored rule is kept; null removes it. */
+      mfa?: components["schemas"]["MfaRuleSetting"] | null;
     };
     /**
      * PendingObjectStoreDestination
@@ -21988,6 +22027,8 @@ export interface components {
        * @example oid
        */
       subject_claim?: string | null;
+      /** @description What counts as multi-factor authentication (MFA) at the identity provider. With `acr`, the ID token's `acr` must be one of `values`. With `amr`, its `amr` must contain every one of `values`; more methods do not matter. `request` is how Eneo asks the provider for MFA when a person signs in for it, by the values of an `acr` rule, most wanted first; leave it out when the provider always requires MFA for this client. Changing or removing the rule takes MFA from every session of the organisation: people sign in with MFA again to reach what requires it. Omitted, PUT stores no rule. */
+      mfa?: components["schemas"]["MfaRuleSetting"] | null;
     };
     /**
      * SetFederationResponse
@@ -23819,6 +23860,10 @@ export interface components {
      *     Every other field (the authorization server and its endpoints, redirect
      *     topology, scopes, the rest of the claim mapping, token auth method) is
      *     operator-owned and refused as an unknown field.
+     *
+     *     Once the organisation has an MFA rule, changing or removing it, or changing
+     *     the client ID or the subject claim, needs a session with MFA under that
+     *     rule (403 ``federation_mfa_required``).
      */
     TenantAdminFederationPatch: {
       /**
@@ -23856,6 +23901,8 @@ export interface components {
        * @example oid
        */
       subject_claim?: string;
+      /** @description What counts as multi-factor authentication (MFA) at the identity provider. With `acr`, the ID token's `acr` must be one of `values`. With `amr`, its `amr` must contain every one of `values`; more methods do not matter. `request` is how Eneo asks the provider for MFA when a person signs in for it, by the values of an `acr` rule, most wanted first; leave it out when the provider always requires MFA for this client. Changing or removing the rule takes MFA from every session of the organisation: people sign in with MFA again to reach what requires it. Omitted, the stored rule is kept; null removes it. */
+      mfa?: components["schemas"]["MfaRuleSetting"] | null;
     };
     /**
      * TenantAppTestResult
@@ -24185,6 +24232,14 @@ export interface components {
       subject_claim?: string;
       /** Token Endpoint Auth Method */
       token_endpoint_auth_method?: string | null;
+      /** @description What counts as MFA at the identity provider; null when not set */
+      mfa?: components["schemas"]["MfaRuleSetting"] | null;
+      /**
+       * Session Has Mfa
+       * @description Whether the caller's session was started with MFA under the rule. Once a rule is set, changing it, the client ID or the subject claim needs that.
+       * @default false
+       */
+      session_has_mfa?: boolean;
       /**
        * Revision
        * @description Send back with PATCH; changes whenever the settings do
@@ -62212,6 +62267,8 @@ export interface operations {
         redirect_uri?: string | null;
         /** @description Optional base64url S256 hash of a secret the client keeps (RFC 7636 4.2). The callback then needs that secret as binding_verifier. Create the secret from at least 32 random bytes. */
         binding_challenge?: string | null;
+        /** @description Sign in for multi-factor authentication (MFA): the organisation's request for MFA is added, and the callback starts a session only when the provider's answer meets the organisation's MFA rule (403 `mfa_not_met` otherwise). 409 `mfa_not_configured` when the organisation has set no rule. */
+        mfa?: boolean;
       };
       header?: never;
       path?: never;

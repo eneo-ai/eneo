@@ -345,6 +345,9 @@ async def initiate_browser_federation(
     tenant: Annotated[str | None, Query(pattern=r"^[a-z0-9-]+$")] = None,
     next: str | None = None,
     prompt: str | None = None,
+    # A sign-in for MFA: the callback sets a new session only when the
+    # provider's answer meets the organisation's rule.
+    mfa: bool = False,
 ) -> Response:
     if not gate_allows(request):
         return _federation_failure("invalid_login_attempt")
@@ -373,6 +376,7 @@ async def initiate_browser_federation(
                 channel="browser",
                 # Only the browser holding the cookie can redeem the sign-in.
                 binding_challenge=code_challenge(transaction),
+                require_mfa=mfa,
             )
         except HTTPException as exc:
             if exc.status_code == 400 and exc.detail.startswith(
@@ -383,7 +387,13 @@ async def initiate_browser_federation(
                 exc.status_code, (exc.headers or {}).get("X-Correlation-ID")
             )
         except OidcSignInError as exc:
-            return _federation_failure(exc.code, ensure_correlation_id())
+            return _federation_failure(
+                exc.code,
+                ensure_correlation_id(),
+                # Where the person was going, so the page that explains a
+                # refused sign-in for MFA can offer the way back.
+                next_path=next if mfa else None,
+            )
         response = RedirectResponse(
             result.authorization_url,
             status_code=303,
