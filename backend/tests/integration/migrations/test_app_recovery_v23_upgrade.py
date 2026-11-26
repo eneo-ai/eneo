@@ -16,8 +16,7 @@ pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 _SHARED_PARENT = "202610261200"
 _RELEASE = "202611201300"
 _DEVELOP_INDEXES = "202611190900"
-_DEVELOP = "202611201210"
-_MERGE = "202611201305"
+_MERGE = "202611261000"
 
 
 def _index_ids(cursor):
@@ -34,7 +33,6 @@ def _index_ids(cursor):
     [
         (_RELEASE, _RELEASE),
         (_DEVELOP_INDEXES, _DEVELOP_INDEXES),
-        (_DEVELOP, _DEVELOP_INDEXES),
     ],
 )
 def test_upgrade_preserves_indexes_and_applies_missing_revisions(start, index_revision):
