@@ -4,26 +4,16 @@ import type { FederationAdminPatch, FederationAdminView } from "@eneo/eneo-js";
 export type FederationView = FederationAdminView;
 
 /** The settings an admin may change; everything else belongs to the operator. */
-export type FederationField =
-  "provider" | "client_id" | "client_secret" | "allowed_domains" | "mfa";
+export type FederationField = "provider" | "client_id" | "client_secret" | "allowed_domains";
 
 export const FEDERATION_FIELDS: readonly FederationField[] = [
   "provider",
   "client_id",
   "client_secret",
-  "allowed_domains",
-  "mfa"
+  "allowed_domains"
 ];
 
-/** The organisation's rule for what counts as multi-factor authentication. */
-export type MfaRule = NonNullable<FederationAdminView["mfa"]>;
-export type MfaClaim = MfaRule["claim"];
-export type MfaRequest = NonNullable<MfaRule["request"]>;
-
-/**
- * A wrong value here locks every SSO user out; the label is only a label, and
- * the MFA rule decides what a session may reach, not whether a person signs in.
- */
+/** A wrong value here locks every SSO user out; the label is only a label. */
 export const RISKY: ReadonlySet<FederationField> = new Set([
   "client_id",
   "client_secret",
@@ -38,12 +28,6 @@ export type FederationDraft = {
   domains: string;
   /** null while the stored secret is kept; the replacement while one is typed. */
   secret: string | null;
-  /** The claim that says MFA; "" while the organisation has no rule. */
-  mfaClaim: MfaClaim | "";
-  /** One value per line (commas and spaces also separate). */
-  mfaValues: string;
-  /** How Eneo asks for MFA; "" when it does not ask. Only with an acr rule. */
-  mfaRequest: MfaRequest | "";
 };
 
 /** Why a field cannot be saved, shown at the field. */
@@ -52,8 +36,6 @@ export type FieldProblem =
   | { code: "secret_required" }
   | { code: "secret_too_short"; min: number }
   | { code: "domain_invalid"; domain: string }
-  | { code: "mfa_values_required" }
-  | { code: "mfa_values_too_many"; max: number }
   | { code: "refused" }
   | { code: "secret_masked" };
 
@@ -61,69 +43,14 @@ export type FieldProblem =
 // secret's minimum length, so a bad value is explained before a 422.
 const DOMAIN = /^[a-z0-9]+([-.][a-z0-9]+)*\.[a-z]{2,}$/;
 const SECRET_MIN_LENGTH = 8;
-// MfaRuleSetting.values max_length, and each value's.
-export const MFA_VALUES_MAX = 20;
-const MFA_VALUE_MAX_LENGTH = 255;
 
 export function draftFromView(view: FederationView): FederationDraft {
   return {
     provider: view.provider ?? "",
     clientId: view.client_id ?? "",
     domains: (view.allowed_domains ?? []).join("\n"),
-    secret: null,
-    mfaClaim: view.mfa?.claim ?? "",
-    mfaValues: (view.mfa?.values ?? []).join("\n"),
-    mfaRequest: view.mfa?.request ?? ""
+    secret: null
   };
-}
-
-/** The values as typed, each once and in order: an acr rule asks for them in it. */
-export function parseMfaValues(text: string): string[] {
-  return [...new Set(text.split(/[\s,]+/).filter(Boolean))];
-}
-
-/** The rule the draft states; null for none. Only an acr rule has values to ask by. */
-export function draftRule(draft: FederationDraft): MfaRule | null {
-  if (draft.mfaClaim === "") return null;
-  const rule: MfaRule = { claim: draft.mfaClaim, values: parseMfaValues(draft.mfaValues) };
-  if (draft.mfaClaim === "acr" && draft.mfaRequest !== "") rule.request = draft.mfaRequest;
-  return rule;
-}
-
-function sameRule(a: MfaRule | null | undefined, b: MfaRule | null | undefined): boolean {
-  if (!a || !b) return !a && !b;
-  return (
-    a.claim === b.claim &&
-    (a.request ?? null) === (b.request ?? null) &&
-    a.values.length === b.values.length &&
-    a.values.every((value, index) => value === b.values[index])
-  );
-}
-
-/**
- * Whether two rules accept the same sign-ins, whatever order the values are
- * in and however Eneo asks (MfaRule.accepts in the backend). A session that
- * met one of them has met the other.
- */
-function acceptSame(a: MfaRule | null | undefined, b: MfaRule | null | undefined): boolean {
-  if (!a || !b) return !a && !b;
-  return (
-    a.claim === b.claim &&
-    a.values.length === b.values.length &&
-    a.values.every((value) => b.values.includes(value))
-  );
-}
-
-/**
- * Whether a save changes what the sessions' MFA rests on: an existing rule,
- * or the client ID it trusts (tenant_federation_service.mfa_trust). Such a
- * save needs a session with MFA, and takes MFA from every session.
- */
-export function changesMfaTrust(view: FederationView, draft: FederationDraft): boolean {
-  if (!view.mfa) return false;
-  return (
-    !acceptSame(view.mfa, draftRule(draft)) || draft.clientId.trim() !== (view.client_id ?? "")
-  );
 }
 
 export function parseDomains(text: string): string[] {
@@ -143,8 +70,7 @@ export function changedFields(view: FederationView, draft: FederationDraft): Fed
     provider: draft.provider.trim() !== (view.provider ?? ""),
     client_id: draft.clientId.trim() !== (view.client_id ?? ""),
     client_secret: draft.secret !== null,
-    allowed_domains: !sameDomains(parseDomains(draft.domains), view.allowed_domains ?? []),
-    mfa: !sameRule(view.mfa, draftRule(draft))
+    allowed_domains: !sameDomains(parseDomains(draft.domains), view.allowed_domains ?? [])
   };
   return FEDERATION_FIELDS.filter((field) => changed[field]);
 }
@@ -162,15 +88,6 @@ export function validate(draft: FederationDraft): Partial<Record<FederationField
   }
   const invalid = parseDomains(draft.domains).find((domain) => !DOMAIN.test(domain));
   if (invalid !== undefined) problems.allowed_domains = { code: "domain_invalid", domain: invalid };
-  if (draft.mfaClaim !== "") {
-    const values = parseMfaValues(draft.mfaValues);
-    if (values.length === 0) problems.mfa = { code: "mfa_values_required" };
-    else if (values.length > MFA_VALUES_MAX) {
-      problems.mfa = { code: "mfa_values_too_many", max: MFA_VALUES_MAX };
-    } else if (values.some((value) => value.length > MFA_VALUE_MAX_LENGTH)) {
-      problems.mfa = { code: "refused" };
-    }
-  }
   return problems;
 }
 
@@ -196,11 +113,7 @@ export type Consequence =
   /** From a list to none: every member signs in, no account is created. */
   | { code: "domains_emptied" }
   | { code: "domains_removed"; domains: string[] }
-  | { code: "domains_added"; domains: string[] }
-  /** The first rule: sessions already open were judged under none. */
-  | { code: "mfa_first" }
-  /** The rule, or the client it trusts, changes: every session loses MFA. */
-  | { code: "mfa_sessions" };
+  | { code: "domains_added"; domains: string[] };
 
 /**
  * The effects the confirmation names. With domains, sign-in admits only the
@@ -212,8 +125,6 @@ export function consequences(view: FederationView, draft: FederationDraft): Cons
   const effects: Consequence[] = [];
   if (changed.includes("client_id")) effects.push({ code: "client_id" });
   if (changed.includes("client_secret")) effects.push({ code: "secret" });
-  if (changesMfaTrust(view, draft)) effects.push({ code: "mfa_sessions" });
-  else if (!view.mfa && draftRule(draft)) effects.push({ code: "mfa_first" });
   if (!changed.includes("allowed_domains")) return effects;
 
   const { added, removed } = domainChange(view, draft);
@@ -234,9 +145,7 @@ export function toFormData(view: FederationView, draft: FederationDraft): FormDa
     provider: () => draft.provider.trim(),
     client_id: () => draft.clientId.trim(),
     client_secret: () => (draft.secret ?? "").trim(),
-    allowed_domains: () => parseDomains(draft.domains).join("\n"),
-    // JSON: the rule or null, which removes it.
-    mfa: () => JSON.stringify(draftRule(draft))
+    allowed_domains: () => parseDomains(draft.domains).join("\n")
   };
   const form = new FormData();
   form.set("revision", view.revision ?? "");
@@ -250,33 +159,9 @@ function text(form: FormData, name: string): string | undefined {
 }
 
 /**
- * The rule a posted form states: the three fields of a rule and nothing else.
- * null removes the rule; undefined when the form's value is not a rule.
- */
-function ruleFromForm(value: string): MfaRule | null | undefined {
-  let posted: unknown;
-  try {
-    posted = JSON.parse(value);
-  } catch {
-    return undefined;
-  }
-  if (posted === null) return null;
-  if (typeof posted !== "object" || Array.isArray(posted)) return undefined;
-  const { claim, values, request } = posted as Record<string, unknown>;
-  if (claim !== "acr" && claim !== "amr") return undefined;
-  if (!Array.isArray(values) || !values.every((item) => typeof item === "string")) {
-    return undefined;
-  }
-  const rule: MfaRule = { claim, values: values as string[] };
-  if (request === "acr_values" || request === "claims") rule.request = request;
-  return rule;
-}
-
-/**
- * The PATCH for a posted form: the five settings an admin owns and nothing
+ * The PATCH for a posted form: the four settings an admin owns and nothing
  * else, so no operator-owned field can be smuggled in. A missing setting is
- * unchanged; an empty domain list removes the domains. null without a revision,
- * or when the posted rule is not one.
+ * unchanged; an empty domain list removes the domains. null without a revision.
  */
 export function patchFromForm(form: FormData): FederationAdminPatch | null {
   const revision = text(form, "revision");
@@ -290,11 +175,5 @@ export function patchFromForm(form: FormData): FederationAdminPatch | null {
   if (clientId !== undefined) patch.client_id = clientId;
   if (clientSecret !== undefined) patch.client_secret = clientSecret;
   if (domains !== undefined) patch.allowed_domains = parseDomains(domains);
-  const mfa = text(form, "mfa");
-  if (mfa !== undefined) {
-    const rule = ruleFromForm(mfa);
-    if (rule === undefined) return null;
-    patch.mfa = rule;
-  }
   return patch;
 }

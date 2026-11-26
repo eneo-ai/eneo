@@ -122,8 +122,7 @@ export const load = (async (event) => {
         state,
         oidcAttempt.bindingVerifier,
         event.fetch,
-        iss,
-        event.locals.id_token ?? null
+        iss
       );
       success = oidcResult !== null;
       if (oidcResult !== null) {
@@ -179,17 +178,6 @@ export const load = (async (event) => {
     errorDetails,
     correlationId: loginError?.correlationId
   });
-
-  // A sign-in for MFA that the provider answered without it. The person still
-  // has the session they came with, and /login sends a signed-in person on to
-  // where they were going, which would start the sign-in again. This page
-  // starts nothing by itself.
-  if (loginError && loginError.provider === "oidc" && loginError.code === "MFA_NOT_MET") {
-    const params = new URLSearchParams({ detailCode: "mfa_not_met" });
-    if (loginError.correlationId) params.set("correlation", loginError.correlationId);
-    if (rememberedLoginDestination) params.set("next", rememberedLoginDestination);
-    redirect(302, `/login/mfa?${params.toString()}`);
-  }
 
   // For OIDC errors with LoginError, redirect to /login with structured params
   if (loginError && loginError.provider === "oidc") {

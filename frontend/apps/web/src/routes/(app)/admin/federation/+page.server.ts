@@ -18,8 +18,6 @@ export type FederationState =
 /** Why a save failed: codes only, never a submitted value such as the secret. */
 export type SaveFailure =
   | { code: "conflict" | "not_configured" | "disabled" | "encryption_unavailable" }
-  /** A rule is set and this session has no MFA under it. */
-  | { code: "mfa_required" }
   | { code: "request_failed" }
   | { code: "endpoint_host"; host: string }
   | { code: "fields"; fields: Partial<Record<FederationField, "refused" | "secret_masked">> };
@@ -78,7 +76,6 @@ const REASONS: Record<string, SaveFailure> = {
   federation_not_configured: { code: "not_configured" },
   federation_disabled: { code: "disabled" },
   federation_encryption_unavailable: { code: "encryption_unavailable" },
-  federation_mfa_required: { code: "mfa_required" },
   federation_secret_looks_masked: { code: "fields", fields: { client_secret: "secret_masked" } }
 };
 

@@ -320,7 +320,7 @@ Eneo asks only when a person signs in for MFA, never at an ordinary sign-in. Wha
 
 ### Setting the rule
 
-An administrator sets it under **Sign-in settings** in the administration of either web app: the claim, its values and, for an `acr` rule, how Eneo asks. Before the change is saved, the confirmation says what it does to the people who are signed in. The same change with `PATCH /api/v1/admin/federation`:
+An administrator sets it under **Sign-in settings** in the administration of the React web app: the claim, its values and, for an `acr` rule, how Eneo asks. Before the change is saved, the confirmation says what it does to the people who are signed in. The Svelte web app shows the other sign-in settings but not the rule. The same change with `PATCH /api/v1/admin/federation`:
 
 ```json
 {
@@ -331,7 +331,7 @@ An administrator sets it under **Sign-in settings** in the administration of eit
 
 `"mfa": null` removes the rule; leaving the field out keeps it. `GET` shows the rule as `mfa` and, as `session_has_mfa`, whether the caller's own session has MFA. The operator sets the same field with `PUT` or `PATCH` on `/api/v1/sysadmin/tenants/{tenant_id}/federation`; a `PUT` writes the whole configuration, so a `PUT` without `mfa` stores no rule. What is not a rule answers `422`: no values, an empty or repeated value, a value with a space, another claim, or `request` with an `amr` rule. Configuration by environment variables has no rule.
 
-The first rule needs only the administrator permission. Once a rule is set, changing or removing it, or changing what it trusts (the client ID or the subject claim), needs a session with MFA under the current rule; otherwise the answer is `403` (`federation_mfa_required`). The permission alone must not relax the rule to reach what the administrator cannot reach today. The label, the secret, the allowed domains, the order of the values and how Eneo asks do not need it. The web apps say so on the form and offer the sign-in with MFA from there.
+The first rule needs only the administrator permission. Once a rule is set, changing or removing it, or changing what it trusts (the client ID or the subject claim), needs a session with MFA under the current rule; otherwise the answer is `403` (`federation_mfa_required`). The permission alone must not relax the rule to reach what the administrator cannot reach today. The label, the secret, the allowed domains, the order of the values and how Eneo asks do not need it. The React web app says so on the form and offers the sign-in with MFA from there. The Svelte web app has no sign-in for MFA: there, a change of the client ID under a rule is refused with its general save error.
 
 ### When the rule changes
 
@@ -351,13 +351,13 @@ It takes the same lock as any other change, and the organisation's sessions lose
 
 ### Signing in for MFA
 
-A person whose session lacks MFA signs in again, with the organisation's request added. The React app sends the browser to `GET /api/v1/auth/browser/initiate?next=<path>&mfa=true`. The Svelte app has the page `/login/mfa?next=<path>`, whose button starts the sign-in; a client that keeps the token, as that app's server does, sends `mfa=true` on `GET /api/v1/auth/initiate`.
+A person whose session lacks MFA signs in again, with the organisation's request added: the React web app sends the browser to `GET /api/v1/auth/browser/initiate?next=<path>&mfa=true`. No organisation has to be named there: without `tenant`, the sign-in is made at the organisation of the session the browser holds. An ordinary sign-in still names its organisation.
 
-No organisation has to be named: without `tenant`, the sign-in is made at the organisation of the session the person holds, which the browser sends as its session cookie and a client that keeps the token as `Authorization: Bearer`. An ordinary sign-in still names its organisation.
+A client that keeps the token sends `mfa=true` on `GET /api/v1/auth/initiate`, with `tenant` as for any sign-in, and replaces the token it holds with the new one itself.
 
 | The provider's answer | What happens |
 |-----------------------|--------------|
-| Meets the rule | A new session with MFA replaces the one the browser held, and the person returns to `next`. A client that keeps the token sends the one it holds as `replaces` in `POST /api/v1/auth/callback`, and that session ends when the new one starts |
+| Meets the rule | A new session with MFA replaces the one the browser held, and the person returns to `next` |
 | Does not meet the rule | No new session; the one the person had stays as it was. The page they end on says so and offers to try again or go back; it starts no sign-in by itself and does not send them on, so a provider that keeps answering without MFA cannot loop. The API answers `403` with `code` `mfa_not_met` (`eneo_error_code` 9083) |
 | The organisation has no rule | The sign-in does not start: `409` with `code` `mfa_not_configured` (`eneo_error_code` 9084) |
 

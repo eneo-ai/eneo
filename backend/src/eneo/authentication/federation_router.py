@@ -11,7 +11,6 @@ import jwt as pyjwt
 from fastapi import (
     APIRouter,
     Depends,
-    Header,
     HTTPException,
     Query,
     Response,
@@ -390,17 +389,6 @@ class CallbackRequest(BaseModel):
             "one."
         ),
     )
-    replaces: Optional[str] = Field(
-        default=None,
-        max_length=8192,
-        description=(
-            "The token of the session the client already holds, when it has "
-            "one. A sign-in that succeeds ends that session: the new token "
-            "takes its place, as a sign-in for MFA needs. A refused sign-in "
-            "leaves it as it was. A value that names no session is ignored."
-        ),
-    )
-
     model_config = {
         "json_schema_extra": {
             "example": {
@@ -631,18 +619,12 @@ async def initiate_auth(
                 "organisation's request for MFA is added, and the callback "
                 "starts a session only when the provider's answer meets the "
                 "organisation's MFA rule (403 `mfa_not_met` otherwise). 409 "
-                "`mfa_not_configured` when the organisation has set no rule. "
-                "Without `tenant`, the organisation is the one of the session "
-                "sent as `Authorization: Bearer`."
+                "`mfa_not_configured` when the organisation has set no rule."
             ),
         ),
     ] = False,
-    # Read only to choose the organisation of a sign-in for MFA; the route
-    # stays public and admits nobody by it.
-    authorization: Annotated[str | None, Header(include_in_schema=False)] = None,
 ) -> InitiateAuthResponse:
     """Get the authorization URL for the tenant's identity provider."""
-    scheme, _, held = (authorization or "").partition(" ")
     return await initiate_federated_sign_in(
         response,
         container,
@@ -652,7 +634,6 @@ async def initiate_auth(
         channel="api",
         binding_challenge=binding_challenge,
         require_mfa=mfa,
-        held_session=held if scheme.lower() == "bearer" and held else None,
     )
 
 
@@ -698,8 +679,9 @@ async def initiate_federated_sign_in(
     tenant_repo = container.tenant_repo()
     settings = get_settings()
 
-    # A sign-in for MFA is made by someone who is signed in. The session they
-    # hold says which organisation to ask, so they are not asked to choose it.
+    # A sign-in for MFA is made by someone who is signed in. The session their
+    # browser holds says which organisation to ask, so they are not asked to
+    # choose it.
     if (
         tenant is None
         and require_mfa
@@ -990,10 +972,7 @@ async def auth_callback(
     # ends every copy of it.
     return AccessTokenResponse(
         access_token=await container.browser_session_service().start(
-            signed_in.user,
-            auth_method=None,
-            mfa=signed_in.mfa,
-            replacing=callback.replaces,
+            signed_in.user, auth_method=None, mfa=signed_in.mfa
         ),
         frontend_state=signed_in.frontend_state,
     )

@@ -15,7 +15,6 @@ export const LoginErrorCode = {
   ATTEMPT_EXPIRED: "The sign-in attempt has expired. Please start the sign-in again.",
   IDENTITY_CONFLICT:
     "This account is already linked to another sign-in. Please contact your administrator.",
-  MFA_NOT_MET: "The sign-in was made without multi-factor authentication.",
   CALLBACK_FAILED: "Authentication callback failed. Please try again."
 } as const;
 

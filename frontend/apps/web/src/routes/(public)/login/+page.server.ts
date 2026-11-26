@@ -1,7 +1,15 @@
 import { env } from "$env/dynamic/private";
-import { clearOidcLoginAttempt, resolveSafeLoginDestination } from "$lib/features/auth/auth.server";
+import { getBackendUrl } from "$lib/core/environment.server";
+import {
+  clearOidcLoginAttempt,
+  createCodePair,
+  encodeState,
+  parseJwt,
+  startOidcLoginAttempt,
+  resolveSafeLoginDestination
+} from "$lib/features/auth/auth.server";
 import { loginWithEneo, type EneoLoginFailureReason } from "$lib/features/auth/eneo.server";
-import { initiateOidcLogin } from "$lib/features/auth/oidcInitiate.server";
+import { backendErrorCode } from "$lib/features/auth/LoginError";
 import { getZitadelLink } from "$lib/features/auth/zitadel.server";
 import { redirect, fail, type Actions } from "@sveltejs/kit";
 import type { PageServerLoad } from "./$types";
@@ -61,18 +69,72 @@ export const actions: Actions = {
       return fail(400, { oidcFailed: true });
     }
 
-    const started = await initiateOidcLogin(event, {
-      destination,
-      tenant: typeof tenant === "string" ? tenant : null
-    });
-    if (!started.ok) {
-      return fail(503, {
-        oidcFailed: true,
-        unavailable: started.code === "oidc_login_unavailable"
+    const attemptId = crypto.randomUUID();
+    const frontendState = encodeState({ loginMethod: "oidc", next: destination, attemptId });
+    // The backend keeps the hash; the secret stays in this browser's HttpOnly cookie.
+    const binding = await createCodePair();
+    let authorizationUrl: string;
+    let unavailable = false;
+    try {
+      const backendUrl = getBackendUrl();
+      if (!backendUrl) throw new Error("Missing backend URL");
+      const initiateUrl = new URL(`${backendUrl.replace(/\/$/, "")}/api/v1/auth/initiate`);
+      initiateUrl.searchParams.set("state", frontendState);
+      initiateUrl.searchParams.set("binding_challenge", binding.codeChallenge);
+      if (tenant !== null) initiateUrl.searchParams.set("tenant", tenant);
+      const response = await event.fetch(initiateUrl);
+      if (!response.ok) {
+        const body: unknown = await response.json().catch(() => null);
+        unavailable = backendErrorCode(body) === "oidc_login_unavailable";
+        throw new Error(`OIDC initiate returned HTTP ${response.status}`);
+      }
+
+      const responseData: unknown = await response.json();
+      if (
+        typeof responseData !== "object" ||
+        responseData === null ||
+        !("authorization_url" in responseData) ||
+        typeof responseData.authorization_url !== "string" ||
+        !("state" in responseData) ||
+        typeof responseData.state !== "string"
+      ) {
+        throw new Error("Invalid OIDC initiate response");
+      }
+      const providerUrl = new URL(responseData.authorization_url);
+      if (providerUrl.protocol !== "https:" && providerUrl.protocol !== "http:") {
+        throw new Error("Invalid OIDC authorization URL");
+      }
+      const statePayload: unknown = await parseJwt(responseData.state);
+      if (
+        typeof statePayload !== "object" ||
+        statePayload === null ||
+        !("frontend_state" in statePayload) ||
+        statePayload.frontend_state !== frontendState ||
+        !("exp" in statePayload) ||
+        typeof statePayload.exp !== "number" ||
+        !Number.isSafeInteger(statePayload.exp) ||
+        statePayload.exp <= Math.floor(Date.now() / 1000)
+      ) {
+        throw new Error("Invalid OIDC initiate state");
+      }
+      authorizationUrl = responseData.authorization_url;
+      // Start the binding when authentication begins. Failed initiation and
+      // GET requests for an error page preserve another tab's attempt.
+      startOidcLoginAttempt(
+        event.cookies,
+        destination,
+        attemptId,
+        statePayload.exp,
+        binding.codeVerifier
+      );
+    } catch (error) {
+      console.error("[OIDC] Failed to initiate authentication", {
+        reason: error instanceof Error ? error.message : "Unknown error"
       });
+      return fail(503, { oidcFailed: true, unavailable });
     }
 
-    redirect(303, started.authorizationUrl);
+    redirect(303, authorizationUrl);
   }
 };
 

@@ -12965,11 +12965,6 @@ export interface components {
        * @description The secret whose S256 hash was sent as binding_challenge at initiate. Required for a bound sign-in and refused for an unbound one.
        */
       binding_verifier?: string | null;
-      /**
-       * Replaces
-       * @description The token of the session the client already holds, when it has one. A sign-in that succeeds ends that session: the new token takes its place, as a sign-in for MFA needs. A refused sign-in leaves it as it was. A value that names no session is ignored.
-       */
-      replaces?: string | null;
     };
     /**
      * CapabilityActivationResponse
@@ -62267,7 +62262,7 @@ export interface operations {
         redirect_uri?: string | null;
         /** @description Optional base64url S256 hash of a secret the client keeps (RFC 7636 4.2). The callback then needs that secret as binding_verifier. Create the secret from at least 32 random bytes. */
         binding_challenge?: string | null;
-        /** @description Sign in for multi-factor authentication (MFA): the organisation's request for MFA is added, and the callback starts a session only when the provider's answer meets the organisation's MFA rule (403 `mfa_not_met` otherwise). 409 `mfa_not_configured` when the organisation has set no rule. Without `tenant`, the organisation is the one of the session sent as `Authorization: Bearer`. */
+        /** @description Sign in for multi-factor authentication (MFA): the organisation's request for MFA is added, and the callback starts a session only when the provider's answer meets the organisation's MFA rule (403 `mfa_not_met` otherwise). 409 `mfa_not_configured` when the organisation has set no rule. */
         mfa?: boolean;
       };
       header?: never;

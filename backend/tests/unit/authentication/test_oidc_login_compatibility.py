@@ -232,7 +232,7 @@ async def test_the_callback_route_hands_out_a_session_and_the_frontend_state(
     [(user,), started_with] = sessions.start.await_args
     assert (user.email, started_with) == (
         "user@example.com",
-        {"auth_method": None, "mfa": False, "replacing": None},
+        {"auth_method": None, "mfa": False},
     )
     assert result == {
         "access_token": "session-token",

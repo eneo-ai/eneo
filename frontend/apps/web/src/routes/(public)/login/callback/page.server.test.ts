@@ -57,12 +57,10 @@ function cookieJar(
   };
 }
 
-function callbackEvent(path: string, cookies = cookieJar(), heldToken?: string) {
+function callbackEvent(path: string, cookies = cookieJar()) {
   return {
     url: new URL(`https://eneo.example${path}`),
     cookies,
-    // The session the browser already holds, when it is signed in.
-    locals: { id_token: heldToken },
     fetch: vi.fn()
   };
 }
@@ -98,7 +96,6 @@ describe("generic OIDC browser-bound callback", () => {
       signedState,
       VERIFIER,
       expect.any(Function),
-      null,
       null
     );
     expect(cookies.delete).toHaveBeenCalledWith(RESUME_COOKIE, { path: "/" });
@@ -325,44 +322,8 @@ describe("generic OIDC browser-bound callback", () => {
       callbackState(state),
       VERIFIER,
       expect.any(Function),
-      "https://idp.example",
-      null
+      "https://idp.example"
     );
-  });
-
-  test("a sign-in for MFA that gave none ends on the page that starts nothing by itself", async () => {
-    const state = frontendState("/admin/federation");
-    mocks.loginWithOidc.mockRejectedValue(
-      new LoginError("oidc", "MFA_NOT_MET", "", { traceId: "trace-1" })
-    );
-    vi.spyOn(console, "error").mockImplementation(() => undefined);
-
-    let redirectError: unknown;
-    try {
-      await loginCallbackLoad(
-        callbackEvent(
-          `/login/callback?code=authorization-code&state=${callbackState(state)}`,
-          cookieJar("/admin/federation"),
-          "held-session-token"
-        ) as never
-      );
-    } catch (caught) {
-      redirectError = caught;
-    }
-
-    // The person still has the session they came with; /login would send them on.
-    const location = new URL(
-      (redirectError as { location: string }).location,
-      "https://eneo.example"
-    );
-    expect(location.pathname).toBe("/login/mfa");
-    expect(Object.fromEntries(location.searchParams)).toEqual({
-      detailCode: "mfa_not_met",
-      correlation: "trace-1",
-      next: "/admin/federation"
-    });
-    // The session held goes with the code, so a sign-in that succeeds ends it.
-    expect(mocks.loginWithOidc.mock.calls[0]?.[5]).toBe("held-session-token");
   });
 
   test.each([

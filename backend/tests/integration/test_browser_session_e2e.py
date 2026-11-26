@@ -1238,15 +1238,6 @@ async def test_a_sign_in_for_mfa_asks_at_the_organisation_of_the_session_held(
     assert provider.netloc == "idp.browser.local"
     assert provider.path == "/authorize"
 
-    # The client that keeps the token names its session the same way.
-    bearer = await client.get(
-        "/api/v1/auth/initiate", params={"mfa": "true"}, headers=_bearer(held)
-    )
-    assert bearer.status_code == 200, bearer.text
-    assert urlsplit(bearer.json()["authorization_url"]).netloc == "idp.browser.local"
-    without = await client.get("/api/v1/auth/initiate", params={"mfa": "true"})
-    assert without.status_code == 400, without.text
-
 
 async def test_a_token_sign_in_for_mfa_gets_a_token_only_with_mfa(
     client,
@@ -1265,7 +1256,7 @@ async def test_a_token_sign_in_for_mfa_gets_a_token_only_with_mfa(
     held = (await token_callback()).json()["access_token"]
 
     # Refused: no token, and the session the client holds stays as it was.
-    refused = await token_callback(mfa=True, holding=held)
+    refused = await token_callback(mfa=True)
 
     assert refused.status_code == 403, refused.text
     assert refused.json()["code"] == "mfa_not_met"
@@ -1275,15 +1266,9 @@ async def test_a_token_sign_in_for_mfa_gets_a_token_only_with_mfa(
         await client.get("/api/v1/users/me/", headers=_bearer(held))
     ).status_code == 200
 
-    # Met: the new token takes the place of the one the client held.
-    issued = await token_callback(mfa=True, holding=held, acr="level-2")
+    issued = await token_callback(mfa=True, acr="level-2")
     assert issued.status_code == 200, issued.text
     assert await _mfa(issued.json()["access_token"])
-    assert (
-        await client.get("/api/v1/users/me/", headers=_bearer(held))
-    ).status_code == 401
-    # What names no session ends none and stops no sign-in.
-    assert (await token_callback(holding="not-a-token")).status_code == 200
 
 
 @pytest.mark.integration
@@ -1336,15 +1321,7 @@ async def token_callback(
     async with db_container() as container:
         slug = await container.tenant_repo().generate_slug_for_tenant(test_tenant.id)
 
-    async def callback(
-        http: AsyncClient = client,
-        *,
-        mfa: bool = False,
-        holding: str | None = None,
-        **claims: Any,
-    ):
-        """One sign-in; ``mfa`` signs in for MFA, ``holding`` is the token of
-        the session the client already has."""
+    async def callback(http: AsyncClient = client, *, mfa: bool = False, **claims: Any):
         params = {"tenant": slug} | ({"mfa": "true"} if mfa else {})
         initiated = await http.get("/api/v1/auth/initiate", params=params)
         if mfa and initiated.status_code != 200:
@@ -1352,10 +1329,10 @@ async def token_callback(
             return initiated
         assert initiated.status_code == 200, initiated.text
         answer = provider.authorize(initiated.json()["authorization_url"], **claims)
-        body = {"code": answer.code, "state": initiated.json()["state"]}
-        if holding is not None:
-            body["replaces"] = holding
-        return await http.post("/api/v1/auth/callback", json=body)
+        return await http.post(
+            "/api/v1/auth/callback",
+            json={"code": answer.code, "state": initiated.json()["state"]},
+        )
 
     return callback
 
