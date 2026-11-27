@@ -37,6 +37,10 @@ Comment on the issue and wait for a maintainer to confirm your approach before y
 - Docker and VS Code with Dev Containers extension
 - Git configured with your identity
 
+Developers at a partner organisation who work on the same branches set up a
+[shared fork](#working-as-a-team-at-a-partner-organisation) first and clone
+that instead of a personal fork.
+
 **Setup Steps:**
 ```bash
 # Fork on GitHub (https://github.com/eneo-ai/eneo/fork), then clone your fork
@@ -73,8 +77,8 @@ You do not need to clone again. Without write access, a push to
 the main repository as `upstream`:
 
 ```bash
-# With the GitHub CLI: creates the fork if you have none, makes it origin
-# and renames the existing remote to upstream
+# With the GitHub CLI: creates a fork in your personal account if you have
+# none, makes it origin and renames the existing remote to upstream
 gh repo fork --remote
 
 # Or by hand, after forking on GitHub
@@ -85,9 +89,42 @@ git remote add origin https://github.com/YOUR_USERNAME/eneo.git
 git push -u origin feature/your-feature-name
 ```
 
-Fork to your personal account rather than an organisation's. GitHub offers
-**Allow edits by maintainers** only for forks owned by a user account, and it
-lets a maintainer push a small fix to your pull request.
+When you work alone, fork to your personal account. GitHub offers **Allow
+edits and access to secrets by maintainers** only for forks owned by a user
+account, and it lets a maintainer push a small fix to your pull request.
+
+#### Working as a team at a partner organisation
+
+When several developers at your organisation work on the same branches, use
+one shared fork in your organisation's GitHub account instead of a fork each.
+Someone who can create repositories in your organisation forks `eneo-ai/eneo`
+into it once and gives your developers write access to that fork:
+
+```bash
+gh repo fork eneo-ai/eneo --org YOUR_ORG --clone=false
+```
+
+Each developer then uses the shared fork as `origin` and the main repository
+as `upstream`. In a new clone:
+
+```bash
+git clone https://github.com/YOUR_ORG/eneo.git
+cd eneo
+git remote add upstream https://github.com/eneo-ai/eneo.git
+```
+
+Or in an existing clone of `eneo-ai/eneo`:
+
+```bash
+git remote rename origin upstream
+git remote add origin https://github.com/YOUR_ORG/eneo.git
+```
+
+Branches still start from `upstream/develop`, and pull requests go from the
+shared fork into `eneo-ai/eneo` with the same checks, review and merge as from
+a personal fork. Maintainers cannot push to a branch in an organisation's fork,
+so they suggest changes in the review instead, unless your organisation gives
+them access to the fork.
 
 **Browser calls from the dev server**
 
@@ -188,18 +225,18 @@ Open a pull request from your fork into `eneo-ai/eneo`'s `develop` branch and fi
 - Write the title as a Conventional Commit, for example `fix(spaces): resolve permission check bug`. A pull request with several commits lands with its title as the commit title on `develop`; one with a single commit uses that commit's message, so write both the same way.
 - Link the issue under **Planning** with `Fixes #123`.
 - Fill in **Changes**, **Why**, **User-facing** and **Testing**, plus **Accessibility** for UI changes.
-- Leave **Allow edits by maintainers** ticked so a maintainer can push a small fix for you.
+- From a personal fork, leave **Allow edits and access to secrets by maintainers** ticked so a maintainer can push a small fix for you. It also lets maintainers edit your fork's workflows, so do not tick it if you have added secrets to your fork.
 - Open it as a **draft** if you want early feedback on the direction.
 
 ### 6. Checks, Review and Merge
 
-- Four checks must pass: `CI / CI`, `Dependency Review / Dependency Review`, `PR label policy / PR labels` and `PR user-facing notes / User-facing section`. The last one runs again when you edit the description. For contributors outside the `eneo-ai` organisation, a maintainer approves the CI, Dependency Review and User-facing workflow runs before they start; PR labels runs straight away.
+- Four checks must pass: `CI / CI`, `Dependency Review / Dependency Review`, `PR label policy / PR labels` and `PR user-facing notes / User-facing section`. The last one runs again when you edit the description. For contributors outside the `eneo-ai` organisation, and after a push from someone outside it, a maintainer approves the CI, Dependency Review and User-facing workflow runs before they start; PR labels runs straight away.
 - If you have Triage access or higher, add the labels yourself. Otherwise a maintainer adds them during review and the PR label check turns green. A ready pull request into `develop` that closes no issue gets `needs:task-link`; add a closing reference such as `Fixes #123` to the description.
 - A member of `@eneo-ai/core-maintainers` reviews the pull request. Answer comments with new commits on the same branch rather than force-pushing, and resolve every conversation.
 - When the change is ready, the Core Maintainer approves it and chooses **Merge when ready**. The pull request enters the merge queue as soon as the checks are green, and the queue tests it against the latest `develop` and squash-merges it. You only need to update your branch if GitHub reports a conflict.
 - If you push new commits after that, GitHub cancels **Merge when ready** and a Core Maintainer looks at the change again.
 
-Core Maintainers is the only team with write access, so contributors always work from a fork. See [Governance and Roles](https://docs.eneo.ai/dev/contributing/governance).
+Core Maintainers is the only team with write access, so contributors always work from a fork: their own, or a [shared fork in their organisation](#working-as-a-team-at-a-partner-organisation). See [Governance and Roles](https://docs.eneo.ai/dev/contributing/governance).
 
 **For Core Maintainers:** agree on the change as a team, then choose **Merge when ready** on your own pull request. It enters the merge queue when the checks are green; no formal approval from a colleague is required on `develop`, but ask for a written review when a change is large or risky. `gh pr merge` cannot add a pull request to the queue while the repository setting **Allow auto-merge** is off, also when the checks are green, so use the button. There is no bypass, so every ordinary pull request into `develop` passes the required checks and the merge queue. Pull requests into `release/*` and `main` need one approval from someone with write access other than its author, normally another Core Maintainer, or a recorded bypass by a Core Maintainer when none is available.
 
