@@ -16,14 +16,11 @@ from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.domain.outcome import Outcome
 from eneo.authentication import auth_dependencies
 from eneo.authentication.auth_dependencies import (
-    require_api_key_permission,
+    require_api_key_administration,
     require_api_key_scope_check,
     require_user_identity,
 )
-from eneo.authentication.auth_models import (
-    AccessToken,
-    ApiKeyPermission,
-)
+from eneo.authentication.auth_models import AccessToken
 from eneo.authentication.endpoint_access import (
     Authentication,
     Authorization,
@@ -359,12 +356,13 @@ async def sign_out(
     response_model=CursorPaginatedResponse[UserSparse],
     description=(
         "List users in the current tenant. Available to authenticated tenant "
-        "members; API keys require admin scope and permission."
+        "members; an API key needs organization scope and the administration "
+        "read permission."
     ),
     responses=responses.get_responses([403]),
     dependencies=[
         Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
-        Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
+        Depends(require_api_key_administration()),
     ],
 )
 @endpoint_access(

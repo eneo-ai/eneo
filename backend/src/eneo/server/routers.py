@@ -20,12 +20,11 @@ from eneo.authentication.auth_dependencies import (
     INFO_BLOBS_READ_OVERRIDES,
     KNOWLEDGE_READ_OVERRIDES,
     MCP_APPS_READ_OVERRIDES,
-    require_api_key_permission,
+    require_api_key_administration,
     require_api_key_scope_check,
     require_file_delete_scope_guard,
     require_resource_permission_for_method,
 )
-from eneo.authentication.auth_models import ApiKeyPermission
 from eneo.authentication.federation_router import router as federation_router
 from eneo.completion_models.presentation.completion_models_router import (
     router as completion_models_router,
@@ -197,9 +196,11 @@ router = APIRouter()
 TENANT_ADMIN_SCOPE_GUARDS = (
     Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
 )
+# The organization's administration: a key of the whole organization, at the
+# level of its administration permission that the HTTP method needs.
 TENANT_ADMIN_API_KEY_GUARDS = (
     *TENANT_ADMIN_SCOPE_GUARDS,
-    Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
+    Depends(require_api_key_administration()),
 )
 router.include_router(
     crawl_run_router,
@@ -248,10 +249,7 @@ router.include_router(
     users_admin_router,
     prefix="/users",
     tags=["users"],
-    dependencies=[
-        Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
-        Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
-    ],
+    dependencies=TENANT_ADMIN_API_KEY_GUARDS,
 )
 router.include_router(users_router, prefix="/users", tags=["users"])
 router.include_router(
@@ -289,10 +287,7 @@ router.include_router(
     settings_admin_router,
     prefix="/settings",
     tags=["settings"],
-    dependencies=[
-        Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
-        Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
-    ],
+    dependencies=TENANT_ADMIN_API_KEY_GUARDS,
 )
 router.include_router(
     assistants_router,
@@ -587,10 +582,7 @@ router.include_router(
     token_usage_router,
     prefix="/token-usage",
     tags=["token-usage"],
-    dependencies=[
-        Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
-        Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
-    ],
+    dependencies=TENANT_ADMIN_API_KEY_GUARDS,
 )
 router.include_router(
     security_classifications_router,

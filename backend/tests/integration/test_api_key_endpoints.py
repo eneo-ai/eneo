@@ -2412,10 +2412,11 @@ async def test_method_aware_guard_blocks_write_key_on_assistant_delete(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_owner_scoped_governance_denials_follow_permission_then_scope_order(
+async def test_owner_scoped_keys_are_kept_out_of_governance_by_their_scope(
     client, default_user_token
 ):
-    """Owner role must not bypass API-key guard order on governance endpoints."""
+    """The owner role does not carry a scoped key into governance endpoints,
+    whatever level the key has."""
     _, assistant_id = await _create_space_and_assistant(
         client,
         bearer_token=default_user_token,
@@ -2458,11 +2459,9 @@ async def test_owner_scoped_governance_denials_follow_permission_then_scope_orde
     )
     assert read_response.status_code == 403, read_response.text
     read_body = read_response.json()
-    assert read_body["code"] == "insufficient_permission"
+    assert read_body["code"] == "insufficient_scope"
     assert read_body["request_id"] == "owner-gov-read-1"
-    assert read_body["context"]["auth_layer"] == "api_key_method"
-    assert read_body["context"]["action"] == "management"
-    assert read_body["context"]["required_level"] == "admin"
+    assert read_body["context"]["auth_layer"] == "api_key_scope"
 
     admin_response = await client.get(
         "/api/v1/allowed-origins/",
@@ -2534,11 +2533,9 @@ async def test_owner_scoped_governance_denials_cover_all_locked_governance_route
         )
         assert read_response.status_code == 403, read_response.text
         read_body = read_response.json()
-        assert read_body["code"] == "insufficient_permission"
+        assert read_body["code"] == "insufficient_scope"
         assert read_body["request_id"] == read_request_id
-        assert read_body["context"]["auth_layer"] == "api_key_method"
-        assert read_body["context"]["action"] == "management"
-        assert read_body["context"]["required_level"] == "admin"
+        assert read_body["context"]["auth_layer"] == "api_key_scope"
 
         admin_request_id = f"owner-gov-matrix-admin-{uuid4().hex[:8]}"
         admin_response = await client.get(

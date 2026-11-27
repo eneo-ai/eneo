@@ -194,6 +194,12 @@ function Overview({
                 </li>
               )
             )}
+            {permissions.administration && permissions.administration !== "none" && (
+              <li>
+                {t("api_keys_resource_administration")}:{" "}
+                {t(RESOURCE_LEVEL_LABEL[permissions.administration as ResourcePermissionLevel])}
+              </li>
+            )}
           </ul>
         ) : (
           t(`api_keys_permission_${apiKey.permission}`)

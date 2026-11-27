@@ -23,6 +23,7 @@ from eneo.authentication.auth_dependencies import (
     INFO_BLOBS_READ_OVERRIDES,
     KNOWLEDGE_READ_OVERRIDES,
     _raise_api_key_http_error,
+    require_api_key_administration,
     require_api_key_permission,
     require_resource_permission,
     require_resource_permission_for_method,
@@ -31,17 +32,22 @@ from eneo.authentication.auth_models import (
     METHOD_PERMISSION_MAP,
     PERMISSION_LEVEL_ORDER,
     ApiKeyPermission,
+    ApiKeyScopeType,
     ApiKeyV2InDB,
     ResourcePermissionLevel,
     ResourcePermissions,
+    administration_level,
 )
 from eneo.main.config import get_settings
+from eneo.roles.permissions import Permission
 from eneo.users.user_service import (
     UserService,
+    _check_administration_permission,
     _check_basic_method_permission,
     _check_management_permission,
     _check_method_resource_permission,
     _permission_allows,
+    _synthesize_service_key_permissions,
 )
 from tests.unit.api_key_test_utils import make_api_key
 
@@ -2058,8 +2064,10 @@ class TestRouteGuardCoverage:
     """
 
     @staticmethod
-    def _endpoint_has_api_key_guard(endpoint_fn) -> bool:
-        """Check if an endpoint function has require_api_key_permission in its dependencies."""
+    def _endpoint_has_api_key_guard(
+        endpoint_fn, guard: str = "require_api_key_permission"
+    ) -> bool:
+        """Check if an endpoint function has the guard in its dependencies."""
         import inspect
 
         sig = inspect.signature(endpoint_fn)
@@ -2070,10 +2078,7 @@ class TestRouteGuardCoverage:
                     # FastAPI Depends wraps the actual dependency
                     inner = dep.dependency
                     # The guard is a closure — check its qualname
-                    if (
-                        hasattr(inner, "__qualname__")
-                        and "require_api_key_permission" in inner.__qualname__
-                    ):
+                    if hasattr(inner, "__qualname__") and guard in inner.__qualname__:
                         return True
         return False
 
@@ -2099,7 +2104,7 @@ class TestRouteGuardCoverage:
         )
 
     def test_admin_api_key_mutations_have_guard(self):
-        """All API key mutation endpoints in admin_router have require_api_key_permission."""
+        """Managing another key takes the administration guard on the endpoint itself."""
         from eneo.admin.admin_router import router as admin_router_obj
 
         mutation_methods = {"POST", "PATCH", "DELETE", "PUT"}
@@ -2114,7 +2119,9 @@ class TestRouteGuardCoverage:
             if "/api-keys" not in route.path and "/api-key-policy" not in route.path:
                 continue
             endpoint = route.endpoint
-            if not self._endpoint_has_api_key_guard(endpoint):
+            if not self._endpoint_has_api_key_guard(
+                endpoint, "require_api_key_administration"
+            ):
                 unguarded.append(f"{route.methods} {route.path} ({endpoint.__name__})")
 
         assert not unguarded, (
@@ -2220,3 +2227,121 @@ class TestResourceGuardApiKeyHeader:
         guard = require_resource_permission("assistants", "read")
 
         assert await guard(self._request({"Authorization": "Bearer token"})) is None
+
+
+_EVERY_RESOURCE_AT_ADMIN = {
+    "assistants": "admin",
+    "apps": "admin",
+    "spaces": "admin",
+    "knowledge": "admin",
+    "conversations": "admin",
+    "files": "admin",
+    "jobs": "admin",
+    "prompts": "admin",
+}
+
+
+class TestAdministrationPermission:
+    """The organization's administration takes a permission of its own."""
+
+    @pytest.mark.parametrize(
+        ("scope_type", "permission", "resource_permissions", "expected"),
+        [
+            # The permission is what counts, not the resource rows.
+            ("tenant", "read", {"administration": "write"}, "write"),
+            ("tenant", "admin", _EVERY_RESOURCE_AT_ADMIN, "none"),
+            # Only a key of the whole organization reaches the administration.
+            ("space", "admin", {"administration": "admin"}, "none"),
+            # A key without per-resource permissions keeps the earlier rule.
+            ("tenant", "admin", None, "admin"),
+            ("tenant", "write", None, "none"),
+            ("space", "admin", None, "none"),
+            # Permissions that cannot be read give nothing.
+            ("tenant", "admin", {"administration": "owner"}, "none"),
+        ],
+    )
+    def test_level_a_key_holds(
+        self, scope_type, permission, resource_permissions, expected
+    ):
+        level = administration_level(
+            scope_type=scope_type,
+            permission=permission,
+            resource_permissions=resource_permissions,
+        )
+
+        assert level.value == expected
+
+    def test_the_permission_is_no_part_of_the_derived_ceiling(self):
+        from eneo.authentication.auth_models import (
+            derive_permission_from_resource_permissions,
+        )
+
+        rp = ResourcePermissions(administration=ResourcePermissionLevel.ADMIN)
+
+        assert derive_permission_from_resource_permissions(rp) is ApiKeyPermission.READ
+
+    def test_admin_on_every_resource_does_not_open_the_administration(self):
+        key = _make_key(
+            permission=ApiKeyPermission.ADMIN,
+            resource_permissions=_EVERY_RESOURCE_AT_ADMIN,
+        )
+
+        with pytest.raises(ApiKeyValidationError) as exc_info:
+            _check_administration_permission(key, "read")
+
+        assert exc_info.value.status_code == 403
+        assert exc_info.value.code == "insufficient_permission"
+
+    def test_the_level_decides_what_the_key_may_do(self):
+        key = _make_key(
+            permission=ApiKeyPermission.READ,
+            resource_permissions={"administration": "write"},
+        )
+
+        _check_administration_permission(key, "read")
+        _check_administration_permission(key, "write")
+        with pytest.raises(ApiKeyValidationError):
+            _check_administration_permission(key, "admin")
+
+    @pytest.mark.parametrize(
+        ("method", "required"),
+        [("GET", "read"), ("POST", "write"), ("PATCH", "write"), ("DELETE", "admin")],
+    )
+    async def test_guard_asks_for_the_level_the_method_needs(self, method, required):
+        request = _make_request(method=method, path="/admin/users/")
+
+        await require_api_key_administration()(request)
+
+        assert request.state._required_administration_level == required
+
+    async def test_stricter_of_router_and_endpoint_guard_wins(self):
+        request = _make_request(method="POST", path="/admin/api-keys/x/rotate")
+        router_guard = require_api_key_administration()
+        endpoint_guard = require_api_key_administration(ResourcePermissionLevel.ADMIN)
+
+        await endpoint_guard(request)
+        await router_guard(request)
+
+        assert request.state._required_administration_level == "admin"
+
+    @pytest.mark.parametrize(
+        ("scope_type", "resource_permissions", "is_admin"),
+        [
+            (ApiKeyScopeType.TENANT, {"administration": "read"}, True),
+            (ApiKeyScopeType.TENANT, _EVERY_RESOURCE_AT_ADMIN, False),
+            (ApiKeyScopeType.SPACE, {"administration": "admin"}, False),
+        ],
+    )
+    def test_service_key_acts_as_admin_only_with_the_permission(
+        self, scope_type, resource_permissions, is_admin
+    ):
+        key = _make_key(
+            scope_type=scope_type,
+            scope_id=None if scope_type is ApiKeyScopeType.TENANT else uuid4(),
+            permission=ApiKeyPermission.ADMIN,
+            resource_permissions=resource_permissions,
+        )
+
+        permissions = _synthesize_service_key_permissions(key)
+
+        assert (Permission.ADMIN in permissions) is is_admin

@@ -17,6 +17,10 @@ from uuid import UUID, uuid4
 import pytest
 import sqlalchemy as sa
 
+from eneo.audit.application.audit_service import AuditService
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.actor_types import ActorType
+from eneo.authentication.auth_models import audit_actor_for
 from eneo.users.user import UserAdd, UserState
 
 # ---------------------------------------------------------------------------
@@ -89,6 +93,7 @@ async def _create_service_key(
     permission: str = "read",
     allowed_ips: list[str] | None = None,
     expires_at: str | None = None,
+    resource_permissions: dict[str, str] | None = None,
 ) -> dict:
     body: dict = {
         "name": f"svc-key-{uuid4().hex[:8]}",
@@ -97,6 +102,8 @@ async def _create_service_key(
         "scope_type": scope_type,
         "ownership": "service",
     }
+    if resource_permissions is not None:
+        body["resource_permissions"] = resource_permissions
     if scope_id is not None:
         body["scope_id"] = scope_id
     if allowed_ips is not None:
@@ -214,6 +221,115 @@ async def test_service_key_tenant_read_no_guardrails_needed(client, default_user
     assert resp.status_code == 201, resp.text
     key = resp.json()["api_key"]
     assert key["ownership"] == "service"
+
+
+async def _new_account(client, *, secret: str):
+    name = f"provisioned-{uuid4().hex[:8]}"
+    return await client.post(
+        "/api/v1/admin/users/",
+        json={"email": f"{name}@example.com", "username": name},
+        headers={"X-API-Key": secret},
+    )
+
+
+def _in_thirty_days() -> str:
+    return (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+
+
+async def test_service_key_with_administration_write_provisions_accounts(
+    client, default_user_token, monkeypatch
+):
+    """Provisioning needs no person and no access to any resource: the key is
+    the actor, the audit says so, and write does not reach as far as delete."""
+    audited: list[dict] = []
+    log_async = AuditService.log_async
+
+    async def record(self, **kwargs):
+        audited.append(kwargs)
+        return await log_async(self, **kwargs)
+
+    monkeypatch.setattr(AuditService, "log_async", record)
+    created = await _create_service_key(
+        client,
+        token=default_user_token,
+        resource_permissions={"administration": "write"},
+        expires_at=_in_thirty_days(),
+    )
+    assert created.status_code == 201, created.text
+    key = created.json()["api_key"]
+    assert key["permission"] == "read"
+    assert key["resource_permissions"] == {"administration": "write"}
+    secret = created.json()["secret"]
+
+    resp = await _new_account(client, secret=secret)
+
+    assert resp.status_code == 201, resp.text
+    (entry,) = [call for call in audited if call["action"] == ActionType.USER_CREATED]
+    assert str(entry["entity_id"]) == resp.json()["id"]
+    assert audit_actor_for(entry["user"]) == (None, ActorType.SYSTEM)
+    assert entry["metadata"]["actor"] == {
+        "type": "service_key",
+        "id": key["id"],
+        "name": key["name"],
+        "key_prefix": key["key_prefix"],
+    }
+
+    removed = await client.delete(
+        f"/api/v1/admin/users/{resp.json()['username']}",
+        headers={"X-API-Key": secret},
+    )
+    assert removed.status_code == 403, removed.text
+    assert removed.json()["code"] == "insufficient_permission"
+
+
+async def test_admin_on_every_resource_does_not_reach_the_administration(
+    client, default_user_token
+):
+    created = await _create_service_key(
+        client,
+        token=default_user_token,
+        resource_permissions={
+            "assistants": "admin",
+            "apps": "admin",
+            "spaces": "admin",
+            "knowledge": "admin",
+            "conversations": "admin",
+            "files": "admin",
+            "jobs": "admin",
+            "prompts": "admin",
+        },
+        expires_at=_in_thirty_days(),
+    )
+    assert created.status_code == 201, created.text
+    assert created.json()["api_key"]["permission"] == "admin"
+    secret = created.json()["secret"]
+
+    listed = await client.get("/api/v1/admin/users/", headers={"X-API-Key": secret})
+    assert listed.status_code == 403, listed.text
+    assert listed.json()["code"] == "insufficient_permission"
+
+    resp = await _new_account(client, secret=secret)
+    assert resp.status_code == 403, resp.text
+    assert resp.json()["code"] == "insufficient_permission"
+
+
+async def test_a_space_key_cannot_be_given_the_administration(
+    client, default_user_token
+):
+    """Admin inside one space is not admin of the organisation."""
+    space_id = await _create_space(client, token=default_user_token)
+
+    created = await _create_service_key(
+        client,
+        token=default_user_token,
+        scope_type="space",
+        scope_id=space_id,
+        resource_permissions={"spaces": "admin", "administration": "admin"},
+        expires_at=_in_thirty_days(),
+    )
+
+    assert created.status_code == 400, created.text
+    assert "administration" in created.text
 
 
 @pytest.mark.integration

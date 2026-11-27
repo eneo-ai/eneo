@@ -139,27 +139,6 @@ def _governance_write_cases() -> list[tuple[str, str, dict | None]]:
     return cases
 
 
-def _expected_governance_write_denial_context(
-    *, permission: str, method: str, path: str
-) -> tuple[str, str]:
-    """Return expected action/required_level for method-first authorization ordering."""
-    normalized_method = method.upper()
-    if normalized_method == "PATCH":
-        if permission == "read":
-            return "patch", "write"
-        return "management", "admin"
-    if normalized_method == "DELETE":
-        return "delete", "admin"
-    if normalized_method == "POST" and path.startswith("/api/v1/roles/"):
-        if permission == "read":
-            return "post", "write"
-        return "management", "admin"
-    raise AssertionError(
-        f"Unhandled governance write case for permission={permission}, "
-        f"method={method}, path={path}"
-    )
-
-
 def _smoke_endpoints() -> list[tuple[str, str, dict | None]]:
     return [
         ("GET", "/api/v1/assistants/", None),
@@ -241,14 +220,14 @@ def _assert_api_key_error(
     return detail
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
-@pytest.mark.parametrize("permission", ["read", "write"])
-async def test_scoped_non_admin_keys_on_governance_fail_with_management_permission(
+@pytest.mark.parametrize("permission", ["read", "write", "admin"])
+async def test_scoped_keys_on_governance_fail_with_scope(
     client,
     default_user_token,
     permission: str,
 ):
+    """Governance belongs to the organization: a key of one space, assistant
+    or app is kept out by its scope, whatever its level."""
     scoped_ids = await _resolve_scoped_ids(client, bearer_token=default_user_token)
 
     for scope_type, scope_id in scoped_ids.items():
@@ -268,45 +247,6 @@ async def test_scoped_non_admin_keys_on_governance_fail_with_management_permissi
                     "X-Correlation-ID": request_id,
                 },
             )
-            detail = _assert_api_key_error(
-                response,
-                expected_code="insufficient_permission",
-                expected_auth_layer="api_key_method",
-                request_id=request_id,
-            )
-            assert detail.get("context", {}).get("action") == "management", (
-                response.text
-            )
-            assert detail.get("context", {}).get("required_level") == "admin", (
-                response.text
-            )
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_scoped_admin_keys_on_governance_fail_with_scope(
-    client,
-    default_user_token,
-):
-    scoped_ids = await _resolve_scoped_ids(client, bearer_token=default_user_token)
-
-    for scope_type, scope_id in scoped_ids.items():
-        secret = await _create_api_key(
-            client,
-            bearer_token=default_user_token,
-            scope_type=scope_type,
-            scope_id=scope_id,
-            permission="admin",
-        )
-        for path in _governance_paths():
-            request_id = f"gov-{scope_type}-admin-{uuid4().hex[:8]}"
-            response = await client.get(
-                path,
-                headers={
-                    "X-API-Key": secret,
-                    "X-Correlation-ID": request_id,
-                },
-            )
             _assert_api_key_error(
                 response,
                 expected_code="insufficient_scope",
@@ -315,10 +255,8 @@ async def test_scoped_admin_keys_on_governance_fail_with_scope(
             )
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
-@pytest.mark.parametrize("permission", ["read", "write"])
-async def test_scoped_non_admin_keys_on_governance_write_fail_with_management_permission(
+@pytest.mark.parametrize("permission", ["read", "write", "admin"])
+async def test_scoped_keys_on_governance_write_fail_with_scope(
     client,
     default_user_token,
     permission: str,
@@ -335,54 +273,6 @@ async def test_scoped_non_admin_keys_on_governance_write_fail_with_management_pe
         )
         for method, path, payload in _governance_write_cases():
             request_id = f"gov-write-{scope_type}-{permission}-{uuid4().hex[:8]}"
-            response = await client.request(
-                method,
-                path,
-                json=payload,
-                headers={
-                    "X-API-Key": secret,
-                    "X-Correlation-ID": request_id,
-                },
-            )
-            detail = _assert_api_key_error(
-                response,
-                expected_code="insufficient_permission",
-                expected_auth_layer="api_key_method",
-                request_id=request_id,
-            )
-            expected_action, expected_required = (
-                _expected_governance_write_denial_context(
-                    permission=permission,
-                    method=method,
-                    path=path,
-                )
-            )
-            assert detail.get("context", {}).get("action") == expected_action, (
-                response.text
-            )
-            assert (
-                detail.get("context", {}).get("required_level") == expected_required
-            ), response.text
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_scoped_admin_keys_on_governance_write_fail_with_scope(
-    client,
-    default_user_token,
-):
-    scoped_ids = await _resolve_scoped_ids(client, bearer_token=default_user_token)
-
-    for scope_type, scope_id in scoped_ids.items():
-        secret = await _create_api_key(
-            client,
-            bearer_token=default_user_token,
-            scope_type=scope_type,
-            scope_id=scope_id,
-            permission="admin",
-        )
-        for method, path, payload in _governance_write_cases():
-            request_id = f"gov-write-{scope_type}-admin-{uuid4().hex[:8]}"
             response = await client.request(
                 method,
                 path,
@@ -469,7 +359,8 @@ async def test_tenant_key_matrix_for_governance_and_diagnostics(
             response.status_code == 403 and detail.get("code") == "insufficient_scope"
         ), response.text
 
-    # Tenant-read keys fail governance with management permission error.
+    # A tenant key without the administration permission fails governance at
+    # the level the method needs: reading it takes read.
     for path in _governance_paths():
         request_id = f"tenant-read-gov-{uuid4().hex[:8]}"
         response = await client.get(
@@ -486,7 +377,7 @@ async def test_tenant_key_matrix_for_governance_and_diagnostics(
             request_id=request_id,
         )
         assert detail.get("context", {}).get("action") == "management", response.text
-        assert detail.get("context", {}).get("required_level") == "admin", response.text
+        assert detail.get("context", {}).get("required_level") == "read", response.text
 
     # Tenant-admin keys pass governance guards (endpoint-specific domain logic still applies).
     for path in _governance_paths():

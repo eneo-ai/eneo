@@ -33,13 +33,15 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-async function open(constraints: object = {}) {
+type Permissions = NonNullable<Parameters<typeof testAppContext>[0]>["permissions"];
+
+async function open(constraints: object = {}, permissions: Permissions = ["api_keys"]) {
   serve(constraints);
   const onCreated = vi.fn();
   const queryClient = testQueryClient();
   renderInApp(
     <CreateApiKeyDialog idPrefix="test" trigger={<Button>Skapa</Button>} onCreated={onCreated} />,
-    { queryClient, appContext: testAppContext({ permissions: ["api_keys"] }) }
+    { queryClient, appContext: testAppContext({ permissions }) }
   );
   fireEvent.click(screen.getByRole("button", { name: "Skapa" }));
   const dialog = await screen.findByRole("dialog", { name: "Skapa API-nyckel" });
@@ -212,6 +214,36 @@ describe("CreateApiKeyDialog", () => {
       })
     ).toBeTruthy();
     expect(api.POST).not.toHaveBeenCalled();
+  });
+
+  it("lets an administrator give an organization key the administration", async () => {
+    api.POST.mockReturnValue(ok({ api_key: { id: "key-1" }, secret: "sk_secret" }));
+    const { dialog } = await open({}, ["api_keys", "admin"]);
+    fireEvent.change(within(dialog).getByLabelText("Namn"), { target: { value: "Kontoflöde" } });
+    expect(within(dialog).getByRole("combobox", { name: "Administration" })).toBeTruthy();
+    await expectNoAxeViolations(dialog);
+
+    // A key of one space cannot hold it.
+    fireEvent.click(within(dialog).getByRole("radio", { name: "Yta" }));
+    expect(within(dialog).queryByRole("combobox", { name: "Administration" })).toBeNull();
+    fireEvent.click(within(dialog).getByRole("radio", { name: "Organisation" }));
+
+    // Nobody chose a level, so the key does not get it.
+    fireEvent.click(within(dialog).getByRole("button", { name: "Skapa" }));
+    await waitFor(() =>
+      expect(api.POST).toHaveBeenCalledWith("/api/v1/api-keys", {
+        body: expect.objectContaining({
+          scope_type: "tenant",
+          resource_permissions: expect.objectContaining({ administration: "none" })
+        })
+      })
+    );
+  });
+
+  it("does not offer the administration to someone who is no administrator", async () => {
+    const { dialog } = await open();
+    expect(within(dialog).getByRole("combobox", { name: "Konversationer" })).toBeTruthy();
+    expect(within(dialog).queryByRole("combobox", { name: "Administration" })).toBeNull();
   });
 
   it("scopes a key to a picked assistant, with the assistant's access", async () => {

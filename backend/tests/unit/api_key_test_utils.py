@@ -265,7 +265,10 @@ def walk_routes() -> list[RouteInfo]:
                         path_param=closure.get("path_param"),
                         self_filtering=bool(closure.get("self_filtering", False)),
                     )
-            elif dep_name == "_api_key_permission_dep":
+            elif dep_name in (
+                "_api_key_permission_dep",
+                "_api_key_administration_dep",
+            ):
                 has_api_key_permission_dep = True
             elif dep_name == "_stash":
                 has_file_delete_scope_guard_dep = True

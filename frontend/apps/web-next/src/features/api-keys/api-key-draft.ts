@@ -64,6 +64,12 @@ export type ApiKeyDraft = {
   /** A resource id typed by hand; it wins over the pick. */
   manualScopeId: string;
   resourcePermissions: ResourcePermissions;
+  /**
+   * What the key may do in the organization's administration (users, roles,
+   * settings). Apart from the resource types: it does not count toward the
+   * key's ceiling, and only a secret key of the whole organization holds it.
+   */
+  administration: ResourcePermissionLevel;
   allowedOrigins: string[];
   allowedIps: string[];
   /** An instant (ISO), or null for no expiry. */
@@ -101,6 +107,7 @@ export function newApiKeyDraft({
     scopeId,
     manualScopeId: "",
     resourcePermissions: allAt("read"),
+    administration: "none",
     allowedOrigins: [],
     allowedIps: [],
     expiresAt: null,
@@ -127,6 +134,7 @@ export function draftFromApiKey(key: ApiKey): ApiKeyDraft {
     scopeId: key.scope_id ?? null,
     manualScopeId: "",
     resourcePermissions,
+    administration: heldAdministration(key),
     allowedOrigins: key.allowed_origins ?? [],
     allowedIps: key.allowed_ips ?? [],
     expiresAt: key.expires_at ?? null,
@@ -179,10 +187,17 @@ export function resourceLevel(draft: ApiKeyDraft, key: ResourceKey): ResourcePer
   return key === requiredResource(draft.scopeType) ? "read" : "none";
 }
 
-function resourcePermissionsBody(draft: ApiKeyDraft): ResourcePermissions {
-  return Object.fromEntries(
-    RESOURCE_KEYS.map((key) => [key, resourceLevel(draft, key)])
-  ) as ResourcePermissions;
+type ResourcePermissionsBody = ResourcePermissions & {
+  administration: ResourcePermissionLevel;
+};
+
+function resourcePermissionsBody(draft: ApiKeyDraft): ResourcePermissionsBody {
+  return {
+    ...(Object.fromEntries(
+      RESOURCE_KEYS.map((key) => [key, resourceLevel(draft, key)])
+    ) as ResourcePermissions),
+    administration: administrationLevel(draft)
+  };
 }
 
 /** The key's overall ceiling: its highest resource level (a public key only reads). */
@@ -192,6 +207,54 @@ export function effectivePermission(draft: ApiKeyDraft): ApiKeyPermission {
   if (levels.includes("admin")) return "admin";
   if (levels.includes("write")) return "write";
   return "read";
+}
+
+/** Only a secret key of the whole organization can reach its administration. */
+function canHoldAdministration(key: Pick<ApiKeyDraft, "scopeType" | "keyType">): boolean {
+  return key.scopeType === "tenant" && key.keyType === "sk_";
+}
+
+/**
+ * The administration level a stored key holds. A key without per-resource
+ * access keeps the backend's earlier rule: admin opens the administration and
+ * nothing lower does (`administration_level` in auth_models.py).
+ */
+export function heldAdministration(key: ApiKey): ResourcePermissionLevel {
+  if (!canHoldAdministration({ scopeType: key.scope_type, keyType: key.key_type })) return "none";
+  const stored = key.resource_permissions;
+  if (!stored) return key.permission === "admin" ? "admin" : "none";
+  return levelOf(stored.administration);
+}
+
+/** The administration level the key gets: what is set, where the scope and type can hold it. */
+export function administrationLevel(draft: ApiKeyDraft): ResourcePermissionLevel {
+  return canHoldAdministration(draft) ? draft.administration : "none";
+}
+
+/** Who edits the key, and what it held when the form opened ("none" for a new key). */
+export type AdministrationGrant = { isAdmin: boolean; held: ResourcePermissionLevel };
+
+/** Whether the form shows the administration row: someone can give it, or the key has it. */
+export function offersAdministration(
+  draft: Pick<ApiKeyDraft, "scopeType" | "keyType">,
+  { isAdmin, held }: AdministrationGrant
+): boolean {
+  return canHoldAdministration(draft) && (isAdmin || held !== "none");
+}
+
+/** Only an administrator gives the permission; anyone editing the key can lower it. */
+export function isAdministrationLevelAllowed(
+  level: ResourcePermissionLevel,
+  { isAdmin, held }: AdministrationGrant
+): boolean {
+  return isAdmin || RESOURCE_LEVELS.indexOf(level) <= RESOURCE_LEVELS.indexOf(held);
+}
+
+/** Whether the key can change anything, a resource or the administration. */
+export function canWrite(draft: ApiKeyDraft): boolean {
+  return (
+    effectivePermission(draft) !== "read" || ["write", "admin"].includes(administrationLevel(draft))
+  );
 }
 
 /** The resource the key is scoped to; null for the whole organization. */
@@ -355,7 +418,10 @@ export function updateRequest(
   // per-resource access (a legacy key) sends it only when it was edited.
   const permissions = resourcePermissionsBody(draft);
   const opened = resourcePermissionsBody(draftFromApiKey(key));
-  if (RESOURCE_KEYS.some((resource) => opened[resource] !== permissions[resource])) {
+  if (
+    opened.administration !== permissions.administration ||
+    RESOURCE_KEYS.some((resource) => opened[resource] !== permissions[resource])
+  ) {
     update.resource_permissions = permissions;
   }
   if (key.key_type === "pk_" && !sameList(draft.allowedOrigins, key.allowed_origins ?? [])) {

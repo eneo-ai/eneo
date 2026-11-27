@@ -9,7 +9,12 @@ from eneo.authentication.api_key_resolver import (
     check_resource_permission,
 )
 from eneo.authentication.api_key_router_helpers import raise_api_key_http_error
-from eneo.authentication.auth_models import ApiKeyPermission
+from eneo.authentication.auth_models import (
+    METHOD_PERMISSION_MAP,
+    PERMISSION_LEVEL_ORDER,
+    ApiKeyPermission,
+    ResourcePermissionLevel,
+)
 from eneo.authentication.endpoint_access import (
     Authentication,
     authenticates,
@@ -131,6 +136,38 @@ def require_api_key_permission(
         request.state._required_api_key_permission = required.value
 
     return _api_key_permission_dep
+
+
+def require_api_key_administration(
+    minimum: ResourcePermissionLevel | None = None,
+) -> Callable[..., Awaitable[None]]:
+    """Guard for the organization's administration: users, roles, settings.
+
+    An API key passes with the level its ``administration`` permission holds
+    (:func:`eneo.authentication.auth_models.administration_level`), whatever
+    its resource permissions say. The level asked for is the one the HTTP
+    method needs (GET read, POST/PUT/PATCH write, DELETE admin), or
+    ``minimum`` where an endpoint asks for more than its method does.
+
+    Like the other guards here it only records what is required; the check
+    runs in ``_resolve_api_key`` (user_service) once the key is known.
+    Bearer-token requests are unaffected. NOT gated by the feature flag.
+    """
+
+    async def _api_key_administration_dep(request: Request) -> None:
+        required = (
+            minimum.value
+            if minimum is not None
+            else METHOD_PERMISSION_MAP.get(request.method, "admin")
+        )
+        # A router and one of its endpoints may both ask: the stricter wins.
+        current = getattr(request.state, "_required_administration_level", None)
+        if current is None or (
+            PERMISSION_LEVEL_ORDER[required] > PERMISSION_LEVEL_ORDER[current]
+        ):
+            request.state._required_administration_level = required
+
+    return _api_key_administration_dep
 
 
 async def require_user_identity(

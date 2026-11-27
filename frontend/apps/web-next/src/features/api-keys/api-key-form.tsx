@@ -36,11 +36,15 @@ import { Textarea } from "@/components/ui/textarea";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import {
+  administrationLevel,
   allowlistProblem,
+  canWrite,
   createRequest,
   draftFromApiKey,
   draftProblems,
-  effectivePermission,
+  heldAdministration,
+  isAdministrationLevelAllowed,
+  offersAdministration,
   isLevelAllowed,
   newApiKeyDraft,
   RESOURCE_LEVELS,
@@ -49,6 +53,7 @@ import {
   visibleResources,
   withKeyType,
   withScopeType,
+  type AdministrationGrant,
   type ApiKeyDraft,
   type DraftField,
   type ResourceKey
@@ -273,13 +278,11 @@ export function ApiKeyForm({
                 {t("api_keys_ownership_service_explainer")}
               </p>
             )}
-            {draft.ownership === "service" &&
-              scopeType === "tenant" &&
-              effectivePermission(draft) !== "read" && (
-                <p className="text-ax-warning text-xs">
-                  {t("api_keys_ownership_service_guardrail_hint")}
-                </p>
-              )}
+            {draft.ownership === "service" && scopeType === "tenant" && canWrite(draft) && (
+              <p className="text-ax-warning text-xs">
+                {t("api_keys_ownership_service_guardrail_hint")}
+              </p>
+            )}
 
             {!creating || lockedScope ? (
               <FixedValue
@@ -330,7 +333,15 @@ export function ApiKeyForm({
               </>
             )}
 
-            <ResourceAccess id={id("access")} draft={draft} onChange={update} />
+            <ResourceAccess
+              id={id("access")}
+              draft={draft}
+              administration={{
+                isAdmin: can("admin"),
+                held: stored ? heldAdministration(stored) : "none"
+              }}
+              onChange={update}
+            />
           </Section>
 
           <Section title={t("api_keys_step_security")}>
@@ -515,19 +526,29 @@ export function resourceLabelKey(key: ResourceKey, scopeType: ApiKeyScopeType): 
   return RESOURCE_LABEL[key];
 }
 
-/** Per resource type: no access, read, write or admin, within what the scope and key type allow. */
+/**
+ * Per resource type: no access, read, write or admin, within what the scope
+ * and key type allow. A secret key of the whole organization has one more
+ * row, the organization's administration, which only an administrator gives.
+ */
 function ResourceAccess({
   id,
   draft,
+  administration,
   onChange
 }: {
   id: string;
   draft: ApiKeyDraft;
+  administration: AdministrationGrant;
   onChange: (patch: Partial<ApiKeyDraft>) => void;
 }) {
   const t = useTranslations();
   const resources = visibleResources(draft);
-  const enabled = resources.filter((key) => resourceLevel(draft, key) !== "none").length;
+  const withAdministration = offersAdministration(draft, administration);
+  const administrationId = `${id}-administration`;
+  const enabled =
+    resources.filter((key) => resourceLevel(draft, key) !== "none").length +
+    (withAdministration && administrationLevel(draft) !== "none" ? 1 : 0);
   const publicKey = draft.keyType === "pk_";
 
   return (
@@ -544,7 +565,10 @@ function ResourceAccess({
           </span>
         </div>
         <span className="text-muted-foreground shrink-0 text-xs">
-          {t("api_keys_of_enabled", { count: enabled, total: resources.length })}
+          {t("api_keys_of_enabled", {
+            count: enabled,
+            total: resources.length + (withAdministration ? 1 : 0)
+          })}
         </span>
       </div>
       <ul className="divide-y rounded-lg border">
@@ -592,6 +616,41 @@ function ResourceAccess({
             </li>
           );
         })}
+        {withAdministration && (
+          <li className="flex flex-col gap-2 px-3 py-2.5 sm:flex-row sm:items-center">
+            <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+              <Label htmlFor={administrationId}>{t("api_keys_resource_administration")}</Label>
+              <span id={`${administrationId}-hint`} className="text-muted-foreground text-xs">
+                {t("api_keys_resource_administration_desc")}
+              </span>
+            </div>
+            <Select
+              value={administrationLevel(draft)}
+              onValueChange={(level) =>
+                onChange({ administration: level as ResourcePermissionLevel })
+              }
+            >
+              <SelectTrigger
+                id={administrationId}
+                className="w-full sm:w-36"
+                aria-describedby={`${administrationId}-hint`}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {RESOURCE_LEVELS.map((level) => (
+                  <SelectItem
+                    key={level}
+                    value={level}
+                    disabled={!isAdministrationLevelAllowed(level, administration)}
+                  >
+                    {t(RESOURCE_LEVEL_LABEL[level])}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </li>
+        )}
       </ul>
     </fieldset>
   );

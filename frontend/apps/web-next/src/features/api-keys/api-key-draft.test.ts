@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vitest";
 import type { ApiKey, ApiKeyCreationConstraints } from "./api-keys";
 import {
+  administrationLevel,
+  canWrite,
   createRequest,
   draftFromApiKey,
   draftProblems,
+  heldAdministration,
   ipProblem,
+  isAdministrationLevelAllowed,
   newApiKeyDraft,
+  offersAdministration,
   originProblem,
   resourceLevel,
   updateRequest,
@@ -116,7 +121,8 @@ describe("createRequest", () => {
       conversations: "none",
       files: "read",
       jobs: "none",
-      prompts: "none"
+      prompts: "none",
+      administration: "none"
     });
   });
 });
@@ -289,6 +295,69 @@ describe("updateRequest", () => {
     } as ApiKey;
     expect(updateRequest({ ...draftFromApiKey(secret), allowedIps: [] }, secret)).toEqual({
       allowed_ips: null
+    });
+  });
+});
+
+describe("administration", () => {
+  const organization = { ...newApiKeyDraft(), administration: "write" as const };
+  const organizationKey = {
+    ...key,
+    key_type: "sk_",
+    scope_type: "tenant",
+    scope_id: null,
+    allowed_origins: null
+  } as ApiKey;
+
+  it("is sent as a permission of its own, apart from the key's ceiling", () => {
+    const request = createRequest(organization);
+    expect(request.resource_permissions).toMatchObject({ administration: "write" });
+    expect(request.permission).toBe("read");
+    expect(canWrite(organization)).toBe(true);
+  });
+
+  it("belongs to a secret key of the whole organization only", () => {
+    expect(administrationLevel(withScopeType(organization, "space"))).toBe("none");
+    expect(administrationLevel(withKeyType(organization, "pk_"))).toBe("none");
+    expect(
+      offersAdministration(withScopeType(organization, "space"), { isAdmin: true, held: "none" })
+    ).toBe(false);
+  });
+
+  it("is given by an administrator; anyone else can only lower what the key holds", () => {
+    expect(offersAdministration(organization, { isAdmin: false, held: "none" })).toBe(false);
+    expect(offersAdministration(organization, { isAdmin: false, held: "write" })).toBe(true);
+    expect(isAdministrationLevelAllowed("read", { isAdmin: false, held: "write" })).toBe(true);
+    expect(isAdministrationLevelAllowed("admin", { isAdmin: false, held: "write" })).toBe(false);
+    expect(isAdministrationLevelAllowed("admin", { isAdmin: true, held: "none" })).toBe(true);
+  });
+
+  it("reads what a stored key holds, and Admin on a resource is not it", () => {
+    const resources = { ...key.resource_permissions, prompts: "admin" };
+    expect(
+      heldAdministration({ ...organizationKey, resource_permissions: resources } as ApiKey)
+    ).toBe("none");
+    expect(
+      heldAdministration({
+        ...organizationKey,
+        resource_permissions: { ...resources, administration: "admin" }
+      } as ApiKey)
+    ).toBe("admin");
+    // A key without per-resource access keeps the earlier rule.
+    const legacy = { ...organizationKey, resource_permissions: null } as ApiKey;
+    expect(heldAdministration({ ...legacy, permission: "admin" })).toBe("admin");
+    expect(heldAdministration({ ...legacy, permission: "write" })).toBe("none");
+  });
+
+  it("is saved when it is the only thing that changed", () => {
+    const stored = {
+      ...organizationKey,
+      resource_permissions: { ...key.resource_permissions, administration: "admin" }
+    } as ApiKey;
+    const draft = draftFromApiKey(stored);
+    expect(updateRequest(draft, stored)).toEqual({});
+    expect(updateRequest({ ...draft, administration: "read" }, stored)).toEqual({
+      resource_permissions: expect.objectContaining({ administration: "read" })
     });
   });
 });

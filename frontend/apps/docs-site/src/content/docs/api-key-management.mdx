@@ -9,6 +9,7 @@ import { Callout } from 'nextra/components'
 - There are two key types. `sk_` keys are for servers: up to `admin` permission, with an optional IP allowlist. `pk_` keys are for browsers: up to `read`, and they need at least one allowed origin.
 - A user key stops working when its owner is deactivated or loses access. A service key (`ownership: "service"`) does not depend on any user; only tenant administrators create them, and write or admin service keys need an IP allowlist or an expiry date.
 - Service keys cannot create user-owned resources or upload and delete files, and no API key can manage API keys; that needs a session login.
+- The organization's administration (user accounts, roles, settings) takes a permission of its own, `administration`, on a tenant-scoped `sk_` key. `admin` on a resource type does not open it.
 - The secret is shown once. If it is lost, rotate the key; the old key keeps working for `rotation_grace_hours` (24 by default).
 - Tenant administrators set limits with `require_expiration`, `max_expiration_days`, `max_rate_limit_override` and `auto_expire_unused_days`.
 
@@ -153,6 +154,8 @@ The window length is set by `API_KEY_RATE_LIMIT_WINDOW_SECONDS` (default 3600) a
 
 Some endpoints override this mapping. For example, certain POST endpoints that are semantically read operations (like search) accept `read` permission.
 
+**Administration** (always enforced): on the organization's administration endpoints the method is checked against the key's `administration` permission, not against its resource permissions. See [Organization administration](#organization-administration).
+
 **Resource-level** (feature-gated): If the key has `resource_permissions` configured, per-resource-type permissions are checked for `assistants`, `apps`, `spaces`, `knowledge`, `conversations`, `files`, `jobs`, and `prompts`. For `sk_` keys, the top-level `permission` is derived from the highest configured resource permission when the key is created or updated. For `pk_` keys, every resource permission is capped to `none` or `read`, and `jobs`/`prompts` are rejected.
 
 When resource permission enforcement is enabled, the `files` grant also governs uploads reached indirectly. Submitting uploaded file IDs to a chat, an app run (direct or queued), a service or a token preflight, and attaching files to an assistant or app, requires `files: read`; a key with `files: none` receives `403` with code `insufficient_resource_permission`, and the refusal is recorded in the audit log as a failed API key authentication.
@@ -213,6 +216,35 @@ Service keys are not space members, so `SpaceActor` derives a synthetic role:
 3. **Assistant/app-scoped**: The role applies only if the scoped resource exists in the current space
 
 A key never derives a role in a space that belongs to another tenant, whatever its scope. This means a service key with `scope: space, permission: write` gets `EDITOR` access to exactly one space, and no access to any other space.
+
+### Organization administration
+
+The organization's administration is not one of the resource types. It covers `/api/v1/admin/*` (user accounts among them) and the other organization-wide settings endpoints, such as roles, user groups, allowed origins and security classifications. A key reaches it through a permission of its own, `administration`, which is set together with the resource permissions:
+
+```json
+{
+  "scope_type": "tenant",
+  "resource_permissions": { "administration": "write" }
+}
+```
+
+| `administration` | What the key may do there |
+|------------------|---------------------------|
+| `none` (default) | Nothing. Every administration endpoint answers `403` with `code: "insufficient_permission"` |
+| `read` | `GET` requests: list users, read settings, policies and usage |
+| `write` | Also `POST`, `PUT` and `PATCH`: create and change users, roles and settings |
+| `admin` | Also `DELETE` |
+
+The rules around it:
+
+- **It is apart from the resource permissions.** `admin` on a resource type does not open the administration, and `administration` does not count toward the key's top-level `permission` or its role in a space. A key with only `administration: "write"` can create user accounts and cannot read a single assistant.
+- **Only a tenant-scoped `sk_` key can hold it.** Creating a key of a space, an assistant or an app with `administration` set, or a `pk_` key, is refused with `400`. Such a key is refused on the administration endpoints with `403` and `code: "insufficient_scope"`.
+- **Only a tenant administrator can give it or raise it.** Anyone who may edit the key can lower it. An update that does not name `administration` leaves it as it is.
+- **A user key also needs an owner who is a tenant administrator.** A service key needs no person behind it; with any level of `administration` it acts with the administrator role.
+- **A service key with `administration` at `write` or `admin` needs an IP allowlist or an expiry date**, like one with write or admin on a resource.
+- **A key without `resource_permissions`** (only the top-level `permission`) reaches the administration when it is tenant-scoped and its `permission` is `admin`.
+
+Before this permission existed, any tenant-scoped `sk_` key whose `permission` was `admin` reached the administration, so one resource type at `admin` was enough. The upgrade gives every such key `administration: "admin"`, so no integration stops working. Review those keys and lower the ones that never needed it.
 
 ### Scope Enforcement Details
 
@@ -401,6 +433,10 @@ ID for handling and diagnostics, rather than parsing the English message.
 For `file_in_use`, see the [file cleanup workflow](/guides/object-content-storage#why-can-i-not-delete-an-uploaded-file).
 Chat attachments currently remain referenced until their conversation is
 deleted; there is no standalone detach endpoint.
+
+### Can an API key create user accounts?
+
+Yes: a tenant-scoped key with `administration` at `write` or higher can call `POST /api/v1/admin/users/` (see [Organization administration](#organization-administration)). It needs no access to any resource type. Use a service key for provisioning that must keep running when people leave or change roles. It needs an IP allowlist or an expiry date, and the audit log records the key, by id and name, as the one who created the account.
 
 ### Can API keys create or manage other API keys?
 
