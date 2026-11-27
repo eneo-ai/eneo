@@ -97,7 +97,9 @@ class CompletionModels(BasePublic):
 
     __table_args__ = (
         CheckConstraint(
-            "(tenant_id IS NULL AND provider_id IS NULL) OR (tenant_id IS NOT NULL AND provider_id IS NOT NULL)",
+            "(tenant_id IS NULL AND provider_id IS NULL)"
+            " OR (tenant_id IS NOT NULL AND provider_id IS NOT NULL)"
+            " OR (tenant_id IS NOT NULL AND provider_id IS NULL AND (deleted_at IS NOT NULL OR migrated_to_model_id IS NOT NULL))",
             name="ck_completion_models_tenant_provider",
         ),
     )
@@ -159,7 +161,9 @@ class TranscriptionModels(BasePublic):
 
     __table_args__ = (
         CheckConstraint(
-            "(tenant_id IS NULL AND provider_id IS NULL) OR (tenant_id IS NOT NULL AND provider_id IS NOT NULL)",
+            "(tenant_id IS NULL AND provider_id IS NULL)"
+            " OR (tenant_id IS NOT NULL AND provider_id IS NOT NULL)"
+            " OR (tenant_id IS NOT NULL AND provider_id IS NULL AND (deleted_at IS NOT NULL OR migrated_to_model_id IS NOT NULL))",
             name="ck_transcription_models_tenant_provider",
         ),
     )
@@ -221,7 +225,9 @@ class ImageModels(BasePublic):
 
     __table_args__ = (
         CheckConstraint(
-            "(tenant_id IS NULL AND provider_id IS NULL) OR (tenant_id IS NOT NULL AND provider_id IS NOT NULL)",
+            "(tenant_id IS NULL AND provider_id IS NULL)"
+            " OR (tenant_id IS NOT NULL AND provider_id IS NOT NULL)"
+            " OR (tenant_id IS NOT NULL AND provider_id IS NULL AND deleted_at IS NOT NULL)",
             name="ck_image_models_tenant_provider",
         ),
     )
@@ -274,7 +280,9 @@ class RerankModels(BasePublic):
 
     __table_args__ = (
         CheckConstraint(
-            "(tenant_id IS NULL AND provider_id IS NULL) OR (tenant_id IS NOT NULL AND provider_id IS NOT NULL)",
+            "(tenant_id IS NULL AND provider_id IS NULL)"
+            " OR (tenant_id IS NOT NULL AND provider_id IS NOT NULL)"
+            " OR (tenant_id IS NOT NULL AND provider_id IS NULL AND deleted_at IS NOT NULL)",
             name="ck_rerank_models_tenant_provider",
         ),
         CheckConstraint(
@@ -341,7 +349,9 @@ class EmbeddingModels(BasePublic):
 
     __table_args__ = (
         CheckConstraint(
-            "(tenant_id IS NULL AND provider_id IS NULL) OR (tenant_id IS NOT NULL AND provider_id IS NOT NULL)",
+            "(tenant_id IS NULL AND provider_id IS NULL)"
+            " OR (tenant_id IS NOT NULL AND provider_id IS NOT NULL)"
+            " OR (tenant_id IS NOT NULL AND provider_id IS NULL AND deleted_at IS NOT NULL)",
             name="ck_embedding_models_tenant_provider",
         ),
     )
