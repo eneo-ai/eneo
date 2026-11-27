@@ -10,7 +10,7 @@ has it when someone gives it.
 Keys without per-resource permissions are left alone: for them the old rule
 still holds (see ``administration_level`` in ``auth_models``).
 
-Revision ID: 202611271000
+Revision ID: 202611271100
 Revises: 202611201305
 Create Date: 2026-11-27
 """
@@ -18,7 +18,7 @@ Create Date: 2026-11-27
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision = "202611271000"
+revision = "202611271100"
 down_revision = "202611201305"
 branch_labels = None
 depends_on = None
