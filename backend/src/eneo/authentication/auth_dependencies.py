@@ -207,9 +207,9 @@ async def require_user_for_creation(
             detail={
                 "code": "service_key_cannot_create_resources",
                 "message": (
-                    "Service API keys cannot create new resources. "
-                    "Create the resource with a user account; the service "
-                    "key can then operate on supported endpoints via its scope."
+                    "A service API key cannot create this kind of resource; "
+                    "it needs a person. Create it with a user account, and "
+                    "the key can then work with it within its scope."
                 ),
             },
         )

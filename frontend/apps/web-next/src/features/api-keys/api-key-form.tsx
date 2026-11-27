@@ -273,13 +273,11 @@ export function ApiKeyForm({
                 {t("api_keys_ownership_service_explainer")}
               </p>
             )}
-            {draft.ownership === "service" &&
-              scopeType === "tenant" &&
-              effectivePermission(draft) !== "read" && (
-                <p className="text-ax-warning text-xs">
-                  {t("api_keys_ownership_service_guardrail_hint")}
-                </p>
-              )}
+            {draft.ownership === "service" && effectivePermission(draft) !== "read" && (
+              <p className="text-ax-warning text-xs">
+                {t("api_keys_ownership_service_guardrail_hint")}
+              </p>
+            )}
 
             {!creating || lockedScope ? (
               <FixedValue

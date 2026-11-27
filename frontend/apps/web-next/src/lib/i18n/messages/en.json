@@ -3138,7 +3138,7 @@
   "api_keys_ownership_user_desc": "Tied to your account. Revoked if you lose access.",
   "api_keys_ownership_service_desc": "Independent of any user. For integrations and automation.",
   "api_keys_ownership_service_badge": "Service",
-  "api_keys_ownership_service_guardrail_hint": "Service keys with tenant write/admin scope require an IP allowlist or expiration.",
+  "api_keys_ownership_service_guardrail_hint": "Service keys with write or admin permission require an IP allowlist or an expiration date.",
   "api_keys_ownership_service_explainer": "Service keys are built for automation and belong to no person. Within their scope they can create, read, update and delete what a space holds: assistants, apps, services, prompts, collections, websites and knowledge. They can run apps, start crawls and syncs, upload files, and read and delete their own files. What they create belongs to the space and stays when people leave. They cannot create spaces, roles, MCP servers, icons or document templates, use endpoints that need a person (e.g. \"my profile\"), or manage API keys.",
   "api_keys_ownership_service_badge_tooltip": "Service keys belong to no person. Within their scope they can create and manage what a space holds, and their own files. Spaces, roles and API keys need a person.",
   "api_keys_capability_summary_title": "What this key can do",
