@@ -76,6 +76,7 @@ from eneo.database.tables.users_table import Users
 from eneo.database.tables.websites_spaces_table import WebsitesSpaces
 from eneo.database.tables.websites_table import Websites as WebsitesTable
 from eneo.files.file_content_loader import FileAttachmentGroup, FileContentLoader
+from eneo.files.file_home import FileHomes
 from eneo.files.file_models import File, FileMetadata
 from eneo.integration.infrastructure.repo_impl.document_counts import (
     active_document_counts,
@@ -1470,6 +1471,13 @@ class SpaceRepository:
         )
 
     async def delete(self, id: UUID):
+        """Delete a space and what is in it, in the caller's transaction.
+
+        The Files that live in the space go first, through their owner: the
+        key from a File to its home takes no action on delete, so the space
+        row cannot go while a File still lives there.
+        """
+        await FileHomes(self.session).remove_with_space(id)
         query = sa.delete(Spaces).where(Spaces.id == id)
         await self.session.execute(query)
 

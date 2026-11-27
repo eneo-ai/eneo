@@ -55,6 +55,7 @@ from eneo.database.tables.tenant_scope import in_tenant, tenant_id_of
 from eneo.database.tables.users_table import Users
 from eneo.database.tables.websites_table import Websites
 from eneo.files.file_content_loader import FileAttachmentGroup, FileContentLoader
+from eneo.files.file_home import FileHomes
 from eneo.files.file_models import File, FileMetadata, FileType
 from eneo.files.file_repo import FileRepository
 from eneo.main.exceptions import BadRequestException, NotFoundException
@@ -1049,6 +1050,25 @@ class AssistantRepository:
                 change.integration_knowledge_ids,
             )
         if change.attachments is not None:
+            # Only what is newly attached is placed: a File the assistant
+            # already has stays as it is, whatever home it has or lacks.
+            attached = set(
+                (
+                    await self.session.scalars(
+                        sa.select(AssistantsFiles.file_id).where(
+                            AssistantsFiles.assistant_id == assistant_id
+                        )
+                    )
+                ).all()
+            )
+            await FileHomes(self.session).attach(
+                (
+                    file_id
+                    for file_id, _inline_text in change.attachments
+                    if file_id not in attached
+                ),
+                space_id=space_id,
+            )
             await replace_association_values(
                 self.session,
                 AssistantsFiles,

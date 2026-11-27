@@ -15,6 +15,7 @@ from eneo.database.tables.roles_table import Roles
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.users_table import Users
+from eneo.files.file_home import FileHomes
 from eneo.main.exceptions import SystemUserProtected, UniqueException
 from eneo.main.logging import get_logger
 from eneo.main.models import ModelId
@@ -343,7 +344,13 @@ class UsersRepository:
 
     async def soft_delete(self, id: UUID):
         await self._raise_if_system_user(id)
-        # Cleanup personal space
+        # Cleanup personal space. The Files that live in it go first, as for
+        # any space: a space row cannot go while a File still lives there.
+        personal_space_ids = (
+            await self.session.scalars(sa.select(Spaces.id).where(Spaces.user_id == id))
+        ).all()
+        for personal_space_id in personal_space_ids:
+            await FileHomes(self.session).remove_with_space(personal_space_id)
         stmt = sa.delete(Spaces).where(Spaces.user_id == id)
         await self.session.execute(stmt)
 

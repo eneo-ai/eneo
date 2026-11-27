@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 
     from eneo.actors import ActorManager
     from eneo.assistants.assistant_repo import AssistantRepository
+    from eneo.files.file_home import FileHomes
     from eneo.skills.domain.skill_repo import SkillRepo
     from eneo.spaces.space import Space
     from eneo.spaces.space_repo import SpaceRepository
@@ -31,6 +32,7 @@ class ResourceMoverService:
         skill_repo: "SkillRepo",
         widget_repo: "WidgetRepo",
         assistant_repo: "AssistantRepository",
+        file_homes: "FileHomes",
     ):
         super().__init__()
         self.user = user
@@ -40,6 +42,7 @@ class ResourceMoverService:
         self.skill_repo = skill_repo
         self.widget_repo = widget_repo
         self.assistant_repo = assistant_repo
+        self.file_homes = file_homes
 
     def _require_same_tenant(self, *spaces: "Space") -> None:
         """Moves never cross a tenant boundary.
@@ -125,6 +128,18 @@ class ResourceMoverService:
             model is not None
             and not target_space.is_completion_model_in_space(model.id)
         )
+        # The Files that live in the source space and that only the assistant
+        # and its conversations use follow it. One that something else uses
+        # too can neither follow nor stay behind, so the move is refused, and
+        # the refusal says what else uses it.
+        await self.file_homes.move_with_assistant(
+            assistant_id,
+            source_space_id=locked_source_space_id,
+            target_space_id=space_id,
+            tenant_id=self.user.tenant_id,
+            viewer_user_id=self.user.id,
+        )
+
         target_space.add_assistant(assistant)
 
         if enable_model and model is not None:

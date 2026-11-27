@@ -14,6 +14,7 @@ from eneo.apps.app_runs.app_run_factory import AppRunFactory
 from eneo.database.database import AsyncSession
 from eneo.database.tables.app_table import AppRuns, AppRunsFiles, Apps
 from eneo.database.tables.spaces_table import Spaces
+from eneo.files.file_home import FileHomes
 from eneo.files.file_models import FileInfo
 from eneo.files.file_repo import FileRepository
 from eneo.files.unused_file_cleanup import delete_unused_root_files
@@ -131,7 +132,16 @@ class AppRunRepository:
 
         return await self.session.scalar(stmt)  # type: ignore[arg-type]  # Executable accepted at runtime
 
+    def _space_of_app(self, app_id: UUID) -> sa.Select[tuple[UUID]]:
+        return sa.select(Apps.space_id).where(Apps.id == app_id)
+
     async def _set_input_files(self, app_run_in_db: AppRuns, files: list[FileInfo]):
+        # A run's input lives in the space of the app that is run.
+        space_id = await self.session.scalar(self._space_of_app(app_run_in_db.app_id))
+        if space_id is not None:
+            await FileHomes(self.session).attach(
+                (file.id for file in files), space_id=space_id
+            )
         values = [dict(app_run_id=app_run_in_db.id, file_id=file.id) for file in files]
 
         stmt = sa.insert(AppRunsFiles).values(values)
@@ -180,6 +190,11 @@ class AppRunRepository:
         return await self._to_domain_many(app_runs_in_db)
 
     async def add(self, app_run: AppRun) -> AppRun:
+        if app_run.input_files:
+            # The space is taken before the run row: see FileHomes.
+            space_id = await self.session.scalar(self._space_of_app(app_run.app_id))
+            if space_id is not None:
+                await FileHomes(self.session).hold_space(space_id)
         stmt = (
             sa.insert(AppRuns)
             .values(

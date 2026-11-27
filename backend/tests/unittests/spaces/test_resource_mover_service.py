@@ -72,6 +72,7 @@ def _service(
         skill_repo=skill_repo,
         widget_repo=widget_repo,
         assistant_repo=AsyncMock(),
+        file_homes=AsyncMock(),
     )
     return service, space_repo
 
@@ -119,6 +120,7 @@ async def test_bound_assistant_cannot_move_between_spaces() -> None:
         skill_repo=skill_repo,
         widget_repo=AsyncMock(),
         assistant_repo=AsyncMock(),
+        file_homes=AsyncMock(),
     )
 
     with pytest.raises(BadRequestException, match="Remove.*Skill bindings"):
@@ -164,6 +166,7 @@ def _mover(widgets: list) -> tuple[ResourceMoverService, MagicMock, MagicMock]:
         space_repo=AsyncMock(),
         actor_manager=actor_manager,
         assistant_repo=AsyncMock(),
+        file_homes=AsyncMock(),
         skill_repo=skill_repo,
         widget_repo=widget_repo,
     )

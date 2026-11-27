@@ -91,6 +91,7 @@ from eneo.feature_flag.feature_flag_factory import FeatureFlagFactory
 from eneo.feature_flag.feature_flag_repo import FeatureFlagRepository
 from eneo.feature_flag.feature_flag_service import FeatureFlagService
 from eneo.files.file_content_loader import FileContentLoader
+from eneo.files.file_home import FileHomes
 from eneo.files.file_protocol import FileProtocol
 from eneo.files.file_repo import FileRepository
 from eneo.files.file_service import FileService
@@ -1345,6 +1346,7 @@ class Container(containers.DeclarativeContainer):
         skill_repo=skill_repo,
         widget_repo=widget_repo,
         assistant_repo=assistant_repo,
+        file_homes=providers.Factory(FileHomes, session=session),
     )
     # Personal assistant governance services are declared before assistant_service
     # because runtime enforcement injects effective_config_service into

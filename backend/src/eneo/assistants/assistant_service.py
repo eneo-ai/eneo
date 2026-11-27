@@ -55,6 +55,7 @@ from eneo.files.attachment_budget import (
     assert_prompt_and_files_fit_context,
     attachment_token_ceiling,
 )
+from eneo.files.file_home import FileHomes
 from eneo.files.file_models import File, FileType
 from eneo.files.file_reference import (
     inline_file_text_for_model,
@@ -711,8 +712,13 @@ class AssistantService:
         )
         return await with_live_bundled_tools(server, self._catalog_audit)
 
-    async def _save_generated_image(self, image: "GeneratedFile") -> "File | None":
+    async def _save_generated_image(
+        self, image: "GeneratedFile", *, question_id: UUID
+    ) -> "File | None":
         """Persist a tool-produced image or document as a generated file.
+
+        The file lives in the space of the question it was made for, from the
+        moment it is stored.
 
         Returns None for a document the file store refuses (wrong format,
         active content, too large): the answer continues without it.
@@ -733,7 +739,10 @@ class AssistantService:
             # that purpose; the file store checks its format before keeping it.
             try:
                 return await self.file_service.save_generated_document(
-                    image.data, name=image.filename, mimetype=image.mime_type
+                    image.data,
+                    name=image.filename,
+                    mimetype=image.mime_type,
+                    for_question_id=question_id,
                 )
             except (GeneratedDocumentRejected, FileTooLargeException) as exc:
                 logger.warning(
@@ -747,6 +756,7 @@ class AssistantService:
             image.data,
             name=f"generated_image.{extension}",
             mimetype=image.mime_type,
+            for_question_id=question_id,
         )
 
     def validate_space_assistant(
@@ -1915,6 +1925,11 @@ class AssistantService:
         # matching governance lock order, and hold both until the request commits.
         await self._acquire_personal_default_fit_lock(shared=True)
         assert space.id is not None
+        if attachments is not None:
+            # Attaching a file places it in the space, and whoever does that
+            # takes the space before the assistant, as a move and a deleted
+            # space do.
+            await FileHomes(self.space_repo.session).hold_space(space.id)
         await self.repo.lock(assistant_id, space.id)
         space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
         actor = self.actor_manager.get_space_actor_from_space(space=space)
@@ -3015,7 +3030,9 @@ class AssistantService:
                             chunk.response_type == ResponseType.FILES
                             and chunk.image is not None
                         ):
-                            image_file = await self._save_generated_image(chunk.image)
+                            image_file = await self._save_generated_image(
+                                chunk.image, question_id=question_id
+                            )
                             if image_file is None:
                                 continue
                             generated_files.append(image_file)
@@ -3318,7 +3335,9 @@ class AssistantService:
                         list[GeneratedFile],
                         getattr(answer, "generated_images", None) or [],
                     ):
-                        image_file = await self._save_generated_image(image)
+                        image_file = await self._save_generated_image(
+                            image, question_id=question_id
+                        )
                         if image_file is None:
                             continue
                         generated_files.append(image_file)

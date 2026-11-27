@@ -1,6 +1,6 @@
 ---
 title: Uppgraderingsanteckningar
-translationSource: guides/upgrade-notes.mdx@e66619dc838a
+translationSource: guides/upgrade-notes.mdx@fc38e88cb9e2
 ---
 
 import { Callout } from "nextra/components";
@@ -149,6 +149,7 @@ flowchart TB
 | En ny Promptguide sätter inte längre 30 dagar; befintliga guider behåller sin period | Administratörer som vill ha en gallringstid | [Sätt den](/guides/data-retention#change-the-rules) uttryckligen |
 | Kopior av borttagna konversationer svarar `410`. Inget skapar kopior ännu, så inget `410` förekommer i dag. På PostgreSQL 13 kostar läsningar av konversationer mer | API-konsumenter; installationer på PostgreSQL 13 | Behandla `410` som borta. Töm jobbkön före en nedgradering. På PostgreSQL 13, planera en övergång till 16 |
 | [Frågeloggar töms](#question-logs-emptied) | Alla | Säkerhetskopiera, stoppa gamla skrivare |
+| [En fil hör hemma i ett space](#file-home) | API-klienter som bifogar samma fil-id i flera space; driftansvariga; alla som tar bort rader direkt ur `spaces` | Ladda upp en fil en gång per space; kör ifyllnaden efter uppgraderingen; räkna in migreringen i driftstoppet för `files` |
 | [Filnamn försvinner ur granskningsloggen](#audit-names-removed) | Granskningslogg som sparas som bevis | Exportera först om du behöver namnen |
 | [Objektlagringen får inte behålla gamla versioner](#object-storage-versioning) | Installationer med objektlagring | Ge behörigheter; ingen versionshantering |
 | Den medföljande SeaweedFS-avbilden är `4.40-eneo.8` | Medföljande SeaweedFS | Sätt `ENEO_SEAWEEDFS_IMAGE` till digesten i `IMAGE-DIGESTS.txt` ([Lås versionens avbild](/guides/object-content-storage#pin-the-release-image)) |
@@ -400,6 +401,42 @@ Migreringen `202611251000` ändrar `assistants`, `services`, `apps`, `input_fiel
 **Återställning:** `alembic downgrade 202611241200`. Den nekas så länge någon rad i de ändrade tabellerna saknar person: en resurs som en tjänstenyckel har skapat, ett jobb eller en appkörning som en tjänstenyckel eller ett space har startat, eller en resurs vars skapare togs bort efter uppgraderingen. Ta bort de raderna först, eller återställ säkerhetskopian.
 
 ## Detaljer: gallring, loggar och lagring [#details-retention]
+
+### En fil hör hemma i ett space [#file-home]
+
+En fil hade en ägare och en organisation men inget space, så det ett space kräver nådde aldrig dess filer. Nu har en fil ett hem: det enda space den hör hemma i, gemensamt för filen och de filer som har skapats ur den, och det gäller under filens hela liv. Migreringen `202611261000` lägger till det som `files.home_space_id`.
+
+Så får en fil sitt hem:
+
+- **Skapad i ett space.** En fil som en assistents svar skapar hör hemma i konversationens space. En ny version av ett dokument hör hemma där filen den gjordes från hör hemma.
+- **Uppladdad för ett space.** `POST /api/v1/files/` tar ett valfritt formulärfält `space_id`. Filen hör då hemma i det spacet från början. Den som laddar upp måste kunna läsa spacet; annars nekas uppladdningen med `403`, eller `404` för ett space som inte finns, innan något har lagrats. Svaret och statuskoden för en lyckad uppladdning är oförändrade.
+- **Uppladdad utan space.** Filen är ett utkast, som varje uppladdning var förut: bara den som laddade upp når den, och ett oanvänt utkast städas bort. Den får sitt hem när den bifogas till en assistent, en app, en appkörning eller en fråga.
+
+Det här ändras för API-klienter:
+
+- **En fil, ett space.** Att bifoga en fil i ett annat space än dess hem nekas med `409` och `code: "file_home_conflict"`. Ingen kopia görs. En integration som har återanvänt samma fil-id i flera space måste ladda upp filen en gång per space.
+- En fil från före uppgraderingen som redan används någonstans kan bara bifogas igen i det space där alla dess användningar finns. På andra ställen nekas den med `409` och `code: "file_in_use_elsewhere"`.
+- En assistent eller app behåller det den redan hade bifogat. Bara en nyligen bifogad fil kontrolleras.
+
+Borttagning och flytt:
+
+- När ett space tas bort, eller en person tas bort och med den personens eget space, tas de filer bort som hör hemma i spacet. Om någon av dem fortfarande används i ett annat space nekas borttagningen med `409` och `code: "file_in_use_elsewhere"` och ingenting ändras. En fil utan hem lämnas i fred, som förut.
+- När en assistent eller en tjänst flyttas till ett annat space flyttas hemmet för de filer som bara den och dess konversationer använder. Om någon av dem också används av något annat nekas flytten med `409` och `code: "file_in_use_elsewhere"`. `details.blockers` i svaret säger vad mer som använder filerna: andra assistenter, appar och tjänster med namn, anroparens egna konversationer med namn, och bara antalet konversationer som tillhör andra. React-appen visar listan i flyttdialogen.
+
+Filer från före uppgraderingen har inget hem förrän det fylls i. Kör det här en gång efter uppgraderingen, i worker-miljön och vid en lugn tidpunkt:
+
+```bash
+python -m eneo.files.file_home_fill status   # läser bara
+python -m eneo.files.file_home_fill run
+```
+
+`run` går igenom alla space och ger varje fil som bara används i ett space det spacet som hem, en omgång per kort transaktion. Kommandot kan stoppas och köras igen. En fil som används i flera space, eller vars användning inte leder till något space, går inte att placera: den fortsätter fungera, behåller sitt id, förblir utan hem och listas som olöst i resultatet. Ingenting delas eller kopieras. Utkast rörs inte.
+
+Nyckeln från `files.home_space_id` till `spaces` gör ingenting vid borttagning. Migreringen skriver inte om någon rad, men den kontrollerar nyckeln och bygger ett index medan `files` är låst.
+
+**Gör:** räkna in migreringen i driftstoppet du planerar för `files`, och kör ifyllnaden efter uppgraderingen. Ändra integrationer som återanvänder ett fil-id mellan space så att de laddar upp en gång per space. Egen SQL som tar bort en rad ur `spaces` misslyckas så länge filer hör hemma i det spacet; ta bort space genom API:t.
+
+**Återställning:** `alembic downgrade 202611251300`. Den nekas när en fil har fått ett hem, vilket sker så snart den nya versionen har körts; återställ säkerhetskopian i stället.
 
 ### En gallringsmotor [#retention-engine]
 

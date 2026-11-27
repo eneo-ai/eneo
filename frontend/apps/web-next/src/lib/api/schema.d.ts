@@ -1415,7 +1415,7 @@ export interface paths {
     put?: never;
     /**
      * Transfer Assistant To Space
-     * @description Transfer an assistant to another space. Refused with 400 while the assistant has Skill bindings or a web widget that is not archived.
+     * @description Transfer an assistant to another space. Refused with 400 while the assistant has Skill bindings or a web widget that is not archived. Files that only the assistant and its conversations use follow it. Refused with 409 and `code: file_in_use_elsewhere` while one of them is also used by something else; `details.blockers` names the other assistants, apps and services, the caller's own conversations, and the number of conversations that belong to other people.
      */
     post: operations["transfer_assistant_to_space_api_v1_assistants__id__transfer__post"];
     delete?: never;
@@ -1955,7 +1955,7 @@ export interface paths {
     put?: never;
     /**
      * Transfer Service To Space
-     * @description Transfer a service to another space.
+     * @description Transfer a service to another space. Files that only the service's questions use follow it. Refused with 409 and `code: file_in_use_elsewhere` while one of them is also used by something else; `details.blockers` says what.
      */
     post: operations["transfer_service_to_space_api_v1_services__id__transfer__post"];
     delete?: never;
@@ -5117,7 +5117,7 @@ export interface paths {
     put?: never;
     /**
      * Upload File
-     * @description Upload a file; rejects unsupported media types and oversized files.
+     * @description Upload a file; rejects unsupported media types and oversized files. The optional form field `space_id` names the space the file is meant for: the file then belongs to that space from the start, and the caller must be able to read the space. Without it the file belongs to no space until it is attached to an assistant, an app, an app run or a question. A file belongs to one space and cannot be attached in another.
      */
     post: operations["upload_file_api_v1_files__post"];
     delete?: never;
@@ -12857,6 +12857,11 @@ export interface components {
     Body_upload_file_api_v1_files__post: {
       /** Upload File */
       upload_file: string;
+      /**
+       * Space Id
+       * @description The space the file is meant for. Optional.
+       */
+      space_id?: string | null;
     };
     /** Body_upload_file_api_v1_groups__id__info_blobs_upload__post */
     Body_upload_file_api_v1_groups__id__info_blobs_upload__post: {
@@ -15573,6 +15578,8 @@ export interface components {
       | 9082
       | 9085
       | 9086
+      | 9088
+      | 9089
       | 9090;
     /**
      * ExpiringKeySummaryItem
@@ -33478,6 +33485,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -36711,6 +36727,15 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };

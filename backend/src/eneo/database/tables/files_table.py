@@ -48,6 +48,16 @@ class Files(BasePublic):
     )
     tenant_id: Mapped[UUID] = mapped_column(ForeignKey(Tenants.id, ondelete="CASCADE"))
 
+    # The one space the file belongs in, shared by its whole family (the root
+    # and the files derived from it). Empty for a draft and for a file from
+    # before homes existed. Written only by ``eneo.files.file_home``. No
+    # action on delete: a space goes only after the files that live in it, and
+    # a delete never empties a home.
+    home_space_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("spaces.id", name="fk_files_home_space_id"),
+        nullable=True,
+    )
+
     # Set for files derived from another upload (e.g. images extracted from a
     # PDF attachment); derived files are deleted with their parent.
     parent_file_id: Mapped[Optional[UUID]] = mapped_column(
@@ -124,6 +134,11 @@ class Files(BasePublic):
             postgresql_where=text("owner_type = 'service_key'"),
         ),
         Index("ix_files_parent_file_id_id", "parent_file_id", "id"),
+        Index(
+            "ix_files_home_space_id",
+            "home_space_id",
+            postgresql_where=text("home_space_id IS NOT NULL"),
+        ),
         Index(
             "ix_files_root_created_id",
             "created_at",

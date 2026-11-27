@@ -2,6 +2,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from eneo.authentication.principal import Principal
+from eneo.files.file_home import FileHomes
 from eneo.groups_legacy.group_service import GroupService
 from eneo.main.exceptions import BadRequestException, UnauthorizedException
 from eneo.main.models import ResourcePermission
@@ -241,4 +242,28 @@ class ServiceService:
                 f"Space does not have completion model {service.completion_model.name} enabled"
             )
 
+        # Lock both spaces in a stable order before the files, then look at
+        # the service again: a question that attached a file meanwhile has
+        # committed and is seen, and one that comes later waits for the move.
+        assert source_space.id is not None
+        for locked_id in sorted({source_space.id, space_id}, key=str):
+            await self.space_repo.lock(locked_id)
+        current_space = await self.space_repo.get_space_by_service(
+            service_id=service_id
+        )
+        if current_space.id != source_space.id:
+            raise BadRequestException(
+                "Service moved concurrently; reload before retrying"
+            )
+        # The Files that live in the source space and that only the service's
+        # questions use follow it; one that something else uses too can
+        # neither follow nor stay behind, so the move is refused, and the
+        # refusal says what else uses it.
+        await FileHomes(self.space_repo.session).move_with_service(
+            service_id,
+            source_space_id=source_space.id,
+            target_space_id=space_id,
+            tenant_id=self.user.tenant_id,
+            viewer_user_id=self.user.id,
+        )
         await self.repo.add_service_to_space(service_id=service_id, space_id=space_id)

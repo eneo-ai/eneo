@@ -24,6 +24,7 @@ from eneo.database.tables.questions_table import (
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.users_table import Users
 from eneo.files.file_content_loader import FileContentLoader
+from eneo.files.file_home import FileHomes
 from eneo.files.file_models import File
 from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from eneo.info_blobs.info_blob_repo import InfoBlobRepository
@@ -201,6 +202,13 @@ class QuestionRepository:
     async def _add_files(
         self, question_id: UUID, files: list[File], file_type: str = "user"
     ):
+        # A File used in a conversation lives in the space of the assistant
+        # or service the conversation is with. One that leads to no space is
+        # attached as before and gets no home.
+        homes = FileHomes(self.session)
+        space_id = await homes.hold_space_of_question(question_id)
+        if space_id is not None:
+            await homes.attach((file.id for file in files), space_id=space_id)
         stmt = sa.insert(QuestionsFiles).values(
             [
                 dict(question_id=question_id, file_id=file.id, type=file_type)
@@ -368,6 +376,10 @@ class QuestionRepository:
         it changed, a turn the answer was generated from was removed, and the
         log is stored with its request body cleared.
         """
+        if generated_files:
+            # The space is taken before the conversation and question rows:
+            # see FileHomes.
+            await FileHomes(self.session).hold_space_of_question(question_id)
         if logging_details is not None:
             if history_revision is None:
                 raise ValueError("A logged answer needs the revision of its history")
@@ -538,6 +550,11 @@ class QuestionRepository:
             if question.skill_activation is not None
             else None
         )
+        if files or generated_files:
+            # The space is taken before the question row: see FileHomes.
+            await FileHomes(self.session).hold_space_of_conversation(
+                session_id=question.session_id, service_id=question.service_id
+            )
         stmt = sa.insert(Questions).values(**question_values).returning(Questions)
 
         stmt = self._add_options(stmt)

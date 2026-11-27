@@ -1,13 +1,25 @@
-"""Moving an assistant changes which attached knowledge its space can load."""
+"""Moving an assistant changes which attached knowledge its space can load,
+and takes along the Files that live in the space and only the assistant uses."""
 
-from uuid import uuid4
+from uuid import UUID, uuid4
 
+import pytest
 import sqlalchemy as sa
 
-from eneo.database.tables.assistant_table import AssistantsGroups, AssistantsWebsites
+from eneo.database.tables.assistant_table import (
+    Assistants,
+    AssistantsGroups,
+    AssistantsWebsites,
+)
 from eneo.database.tables.collections_table import CollectionsTable
+from eneo.database.tables.files_table import Files
+from eneo.database.tables.questions_table import Questions, QuestionsFiles
+from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import SpacesEmbeddingModels
+from eneo.database.tables.users_table import Users
 from eneo.database.tables.websites_table import Websites
+from eneo.files.file_home import FileHomes, FileInUseElsewhereError
+from eneo.files.file_models import FileType
 
 
 async def test_transfer_keeps_source_knowledge_and_reloads_only_available_attachments(
@@ -119,3 +131,192 @@ async def test_transfer_keeps_source_knowledge_and_reloads_only_available_attach
         assert {website.id for website in target.websites} == {shared_website_id}
         assert target.get_collection(shared_collection_id).space_id == organization_id
         assert target.get_website(shared_website_id).space_id == organization_id
+
+
+async def _file(session, admin_user, *, parent_id: UUID | None = None) -> UUID:
+    file = Files(
+        name="minutes.txt",
+        mimetype="text/plain",
+        file_type=FileType.TEXT.value,
+        tenant_id=admin_user.tenant_id,
+        owner_user_id=admin_user.id,
+        parent_file_id=parent_id,
+    )
+    session.add(file)
+    await session.flush()
+    return file.id
+
+
+async def _asked_of(
+    session,
+    admin_user,
+    assistant_id: UUID,
+    file_id: UUID,
+    *,
+    by: UUID | None = None,
+    name: str = "Meeting",
+) -> UUID:
+    """Use a File by asking about it in a conversation with an assistant."""
+    conversation = Sessions(
+        user_id=by or admin_user.id, name=name, assistant_id=assistant_id
+    )
+    session.add(conversation)
+    await session.flush()
+    question = Questions(
+        question="Summarise",
+        answer="",
+        num_tokens_question=0,
+        num_tokens_answer=0,
+        tenant_id=admin_user.tenant_id,
+        session_id=conversation.id,
+    )
+    session.add(question)
+    await session.flush()
+    session.add(QuestionsFiles(question_id=question.id, file_id=file_id, type="user"))
+    await session.flush()
+    return conversation.id
+
+
+async def _two_spaces_with_an_assistant(
+    container, assistant_factory, completion_model_factory
+) -> tuple[UUID, UUID, UUID, UUID]:
+    session = container.session()
+    source = await container.space_init_service().create_space(f"Source {uuid4()}")
+    target = await container.space_init_service().create_space(f"Target {uuid4()}")
+    assert source.id is not None and target.id is not None
+    model = await completion_model_factory(session, f"Move model {uuid4()}")
+    assistant = await assistant_factory(
+        session, "Minute taker", model.id, space_id=source.id
+    )
+    return source.id, target.id, assistant.id, model.id
+
+
+async def test_transfer_moves_the_home_of_the_files_only_the_assistant_uses(
+    db_container, admin_user, assistant_factory, completion_model_factory
+):
+    async with db_container() as container:
+        session = container.session()
+        source_id, target_id, assistant_id, _ = await _two_spaces_with_an_assistant(
+            container, assistant_factory, completion_model_factory
+        )
+        recording = await _file(session, admin_user)
+        transcript = await _file(session, admin_user, parent_id=recording)
+        asked_twice = await _file(session, admin_user)
+        unused_in_source = await _file(session, admin_user)
+        without_home = await _file(session, admin_user)
+        homes = FileHomes(session)
+        for file_id in (recording, asked_twice, unused_in_source):
+            await homes.set_home(
+                file_id, space_id=source_id, tenant_id=admin_user.tenant_id
+            )
+        await _asked_of(session, admin_user, assistant_id, transcript)
+        await _asked_of(session, admin_user, assistant_id, asked_twice)
+        await _asked_of(session, admin_user, assistant_id, asked_twice)
+        await _asked_of(session, admin_user, assistant_id, without_home)
+
+    async with db_container() as container:
+        await container.resource_mover_service().move_assistant_to_space(
+            assistant_id=assistant_id, space_id=target_id
+        )
+
+    async with db_container() as container:
+        assert await FileHomes(container.session()).homes_of(
+            [recording, transcript, asked_twice, unused_in_source, without_home]
+        ) == {
+            # The family follows through the use of its derived File.
+            recording: target_id,
+            transcript: target_id,
+            asked_twice: target_id,
+            # Not the assistant's: it stays where it lives.
+            unused_in_source: source_id,
+            # Moving an assistant gives no File a home.
+            without_home: None,
+        }
+
+
+async def test_a_refused_transfer_says_which_conversations_stand_in_the_way(
+    db_container, admin_user, assistant_factory, completion_model_factory
+):
+    async with db_container() as container:
+        session = container.session()
+        (
+            source_id,
+            target_id,
+            assistant_id,
+            model_id,
+        ) = await _two_spaces_with_an_assistant(
+            container, assistant_factory, completion_model_factory
+        )
+        colleague = await assistant_factory(
+            session, "Bookkeeper", model_id, space_id=source_id
+        )
+        someone_else = Users(
+            username=f"transfer-{uuid4()}",
+            email=f"transfer-{uuid4()}@example.com",
+            state="active",
+            used_tokens=0,
+            tenant_id=admin_user.tenant_id,
+        )
+        session.add(someone_else)
+        await session.flush()
+        own = await _file(session, admin_user)
+        shared = await _file(session, admin_user)
+        homes = FileHomes(session)
+        for file_id in (own, shared):
+            await homes.set_home(
+                file_id, space_id=source_id, tenant_id=admin_user.tenant_id
+            )
+        await _asked_of(session, admin_user, assistant_id, own)
+        await _asked_of(session, admin_user, assistant_id, shared)
+        mine = await _asked_of(
+            session, admin_user, colleague.id, shared, name="Budget questions"
+        )
+        await _asked_of(
+            session,
+            admin_user,
+            colleague.id,
+            shared,
+            by=someone_else.id,
+            name="Salary review for Anna",
+        )
+
+    with pytest.raises(FileInUseElsewhereError) as refusal:
+        async with db_container() as container:
+            await container.resource_mover_service().move_assistant_to_space(
+                assistant_id=assistant_id, space_id=target_id
+            )
+
+    # The person moving the assistant sees their own conversation by name.
+    # Another person's conversation is a number: neither its name nor its
+    # owner is told.
+    assert refusal.value.details == {
+        "files": 1,
+        "blockers": {
+            "assistants": [],
+            "apps": [],
+            "services": [],
+            "conversations": [
+                {"id": str(mine), "name": "Budget questions", "with": "Bookkeeper"}
+            ],
+            "other_conversations": 1,
+            "elsewhere": 0,
+        },
+    }
+    assert "Salary review" not in str(refusal.value)
+    assert "1 conversation of yours, 1 conversation of other people" in str(
+        refusal.value
+    )
+
+    # Nothing moved and nothing was copied: the assistant and both Files stay.
+    async with db_container() as container:
+        session = container.session()
+        assert await FileHomes(session).homes_of([own, shared]) == {
+            own: source_id,
+            shared: source_id,
+        }
+        assert (
+            await session.scalar(
+                sa.select(Assistants.space_id).where(Assistants.id == assistant_id)
+            )
+            == source_id
+        )

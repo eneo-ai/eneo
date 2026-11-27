@@ -18,6 +18,13 @@ from eneo.authentication.oidc.errors import (
 )
 from eneo.data_retention.derivations import DerivedSourceRemovedError
 from eneo.data_retention.domain.rules import RetentionExceedsSpaceError
+from eneo.files.file_home import (
+    FileHomeChangedError,
+    FileHomeConflictError,
+    FileHomeError,
+    FileHomeSpaceNotFoundError,
+    FileInUseElsewhereError,
+)
 from eneo.files.file_models import (
     FileInUseError,
     FileOriginalNotFoundError,
@@ -315,6 +322,11 @@ DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] 
     ObjectContentStateError: (409, None, ErrorCodes.BAD_REQUEST),
     ObjectContentBusyError: (409, None, ErrorCodes.RESOURCE_NOT_READY),
     FileInUseError: (409, None, ErrorCodes.FILE_IN_USE),
+    FileHomeConflictError: (409, None, ErrorCodes.FILE_HOME_CONFLICT),
+    FileHomeChangedError: (409, None, ErrorCodes.FILE_HOME_CONFLICT),
+    FileInUseElsewhereError: (409, None, ErrorCodes.FILE_IN_USE_ELSEWHERE),
+    FileHomeSpaceNotFoundError: (404, None, ErrorCodes.NOT_FOUND),
+    FileHomeError: (404, None, ErrorCodes.NOT_FOUND),
     FileOriginalNotFoundError: (404, None, ErrorCodes.FILE_ORIGINAL_NOT_FOUND),
     IconInUseError: (409, None, ErrorCodes.ICON_IN_USE),
     IconNotAttachableError: (400, None, ErrorCodes.ICON_NOT_ATTACHABLE),

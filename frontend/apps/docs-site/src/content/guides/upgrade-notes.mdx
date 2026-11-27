@@ -144,6 +144,7 @@ flowchart TB
 | A new Prompt Guide no longer sets 30 days; existing guides keep their period | Administrators who want a period | [Set it](/guides/data-retention#change-the-rules) explicitly |
 | Copies of removed conversations answer `410`. Nothing produces copies yet, so no `410` appears today. On PostgreSQL 13 conversation reads cost more | API consumers; PostgreSQL 13 installations | Treat `410` as gone. Before a downgrade, drain the job queue. On PostgreSQL 13, plan a move to 16 |
 | [Question logs are emptied](#question-logs-emptied) | Everyone | Back up, stop old writers |
+| [A file belongs to one space](#file-home) | API consumers that attach one file id in several spaces; operators; anyone who deletes rows from `spaces` directly | Upload a file once per space; run the fill-in after the upgrade; count the migration into the downtime for `files` |
 | [File names leave the audit log](#audit-names-removed) | Audit log kept as evidence | Export first if you need names |
 | [Object storage must not keep old versions](#object-storage-versioning) | Object storage installations | Grant permissions; no versioning |
 | Bundled SeaweedFS image is `4.40-eneo.8` | Bundled SeaweedFS | Set `ENEO_SEAWEEDFS_IMAGE` to the digest in `IMAGE-DIGESTS.txt` ([Pin the release image](/guides/object-content-storage#pin-the-release-image)) |
@@ -395,6 +396,42 @@ Migration `202611251000` changes `assistants`, `services`, `apps`, `input_fields
 **Rollback:** `alembic downgrade 202611241200`. It is refused while any row of the changed tables has no person: a resource a service key created, a job or an app run a service key or a space started, or a resource whose creator was removed after the upgrade. Remove those rows first, or restore the backup.
 
 ## Details: retention, logs and storage [#details-retention]
+
+### A file belongs to one space [#file-home]
+
+A file had an owner and an organization but no space, so nothing a space requires could reach its files. A file now has a home: the one space it belongs in, shared by the file and the files derived from it, and kept for the file's whole life. Migration `202611261000` adds it as `files.home_space_id`.
+
+How a file gets its home:
+
+- **Created in a space.** A file an assistant's answer produces lives in the space of the conversation. A new version of a document lives where the file it was made from lives.
+- **Uploaded for a space.** `POST /api/v1/files/` takes an optional form field `space_id`. The file then belongs to that space from the start. The uploader must be able to read the space; otherwise the upload is refused with `403`, or `404` for a space that does not exist, before anything is stored. The response and the status code of a successful upload are unchanged.
+- **Uploaded without a space.** The file is a draft, as every upload was before: only the uploader reaches it, and an unused draft is cleaned up. It takes its home when it is attached to an assistant, an app, an app run or a question.
+
+What changes for API consumers:
+
+- **One file, one space.** Attaching a file in another space than its home is refused with `409` and `code: "file_home_conflict"`. No copy is made. An integration that reused one file id in several spaces must upload the file once per space.
+- A file from before the upgrade that is already used somewhere can be attached again only in the space where all its uses are. Elsewhere it is refused with `409` and `code: "file_in_use_elsewhere"`.
+- An assistant or app keeps what it already had attached. Only a newly attached file is checked.
+
+Deleting and moving:
+
+- Deleting a space, or removing a person and with them their own space, removes the files that live in the space. If one of them is still used in another space, the deletion is refused with `409` and `code: "file_in_use_elsewhere"` and nothing is changed. A file without a home is left alone, as before.
+- Moving an assistant or a service to another space moves the home of the files that only it and its conversations use. If one of them is also used by something else, the move is refused with `409` and `code: "file_in_use_elsewhere"`. `details.blockers` in the answer says what else uses the files: the other assistants, apps and services by name, the caller's own conversations by name, and only the number of conversations that belong to other people. The React app shows the list in the move dialog.
+
+Files from before the upgrade have no home until it is filled in. Run this once after the upgrade, inside the worker environment and at a quiet time:
+
+```bash
+python -m eneo.files.file_home_fill status   # read only
+python -m eneo.files.file_home_fill run
+```
+
+`run` goes through the spaces and gives each file that is used in one space only that space as its home, a batch per short transaction. It can be stopped and run again. A file that is used in several spaces, or whose use leads to no space, cannot be placed: it keeps working, keeps its id, stays without a home, and is listed in the result as unresolved. Nothing is split or copied. Drafts are not touched.
+
+The key from `files.home_space_id` to `spaces` takes no action on delete. The migration rewrites no row, but it checks the key and builds an index while `files` is locked.
+
+**Do:** count the migration into the downtime you plan for `files`, and run the fill-in after the upgrade. Change integrations that reuse a file id across spaces so that they upload once per space. SQL of your own that deletes a row from `spaces` fails while files live in that space; delete spaces through the API.
+
+**Rollback:** `alembic downgrade 202611251300`. It is refused once a file has a home, which is the case as soon as the new release has run; restore the backup instead.
 
 ### One retention engine [#retention-engine]
 

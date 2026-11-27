@@ -113,7 +113,7 @@ def test_upload_request_resolves_shared_container_once_before_file_work(
     session = Session()
     file_service = AsyncMock()
 
-    async def save_file(_upload_file):
+    async def save_file(_upload_file, *, space_id=None):
         assert not session.in_transaction()
         return saved
 
@@ -177,7 +177,7 @@ async def test_upload_enqueues_audit_only_after_file_success() -> None:
     )
     service = AsyncMock()
 
-    async def save_file(_upload_file):
+    async def save_file(_upload_file, *, space_id=None):
         events.append("save")
         return file
 
