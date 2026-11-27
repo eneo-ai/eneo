@@ -12,6 +12,7 @@ from uuid import uuid4
 import pytest
 
 from eneo.jobs.job_models import JobFailureCode
+from eneo.jobs.job_repo import JobRepository
 from eneo.jobs.job_service import JobService
 from eneo.object_content.content import ObjectContentUnavailableError
 from eneo.worker import task_manager as task_manager_module
@@ -107,7 +108,8 @@ async def test_a_cancelled_job_is_recorded_as_cancelled(
 
 @pytest.mark.asyncio
 async def test_a_job_failure_is_stored_as_its_code_without_text() -> None:
-    repo = MagicMock(update_job=AsyncMock())
+    repo = JobRepository(MagicMock())
+    repo.update_job = AsyncMock()
     job_id = uuid4()
 
     await JobService(TEST_USER, repo).fail_job(

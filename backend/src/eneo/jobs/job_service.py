@@ -14,7 +14,7 @@ from eneo.jobs.job_models import (
     JobUpdate,
     Task,
 )
-from eneo.jobs.job_repo import ACTIVE_JOB_STATUSES, JobRepository
+from eneo.jobs.job_repo import JobRepository
 from eneo.jobs.job_staging import job_staging_path
 from eneo.jobs.task_models import (
     AppDispatchEnvelope,
@@ -189,19 +189,9 @@ class JobService:
         failure_code: JobFailureCode,
         only_if_queued: bool = False,
     ):
-        """Fail an active job. Store only the code since an error can quote
-        the job's input. Use only_if_queued when the caller cannot confirm that
-        it owns an in-progress job."""
-        job_update = JobUpdate(
-            status=Status.FAILED,
-            finished_at=datetime.now(timezone.utc),
-            result_location=None,
-            failure_code=failure_code,
-        )
-        return await self.job_repo.update_job(
-            job_id,
-            job_update,
-            from_statuses=(Status.QUEUED,) if only_if_queued else ACTIVE_JOB_STATUSES,
+        """Fail an active job: see ``JobRepository.fail_job``."""
+        return await self.job_repo.fail_job(
+            job_id, failure_code=failure_code, only_if_queued=only_if_queued
         )
 
     async def get_running_jobs(self):
