@@ -24,6 +24,7 @@
   import ChatComposer from "./ChatComposer.svelte";
   import { fade } from "svelte/transition";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
+  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { getChatService } from "../../ChatService.svelte";
   import { editedPassage } from "../../documentVersions";
   import { chatCapabilityAvailable } from "../../chatCapabilities";
@@ -102,7 +103,14 @@
           message.files?.some((file) => file.id === fileId) ||
           message.generated_files?.some((file) => file.id === fileId)
       );
-    if (previewedId && !present(previewedId)) untrack(() => filePreview.close());
+    // Edits to a file that has left the conversation have nowhere to be
+    // saved; whoever opened the other conversation asked about them first.
+    if (previewedId && !present(previewedId)) {
+      untrack(() => {
+        filePreview.dropEdits();
+        filePreview.close();
+      });
+    }
     if (quotedId && !present(quotedId)) filePreview.quote = null;
   });
 
@@ -152,8 +160,29 @@
       }
     };
   }
-  // Leaving the conversation would lose unsaved edits to a document. On a
-  // reload or a closed tab the browser asks with its own dialog.
+  // Leaving the conversation would lose unsaved edits to a document. Another
+  // conversation opened on this page waits for the reader's answer in the
+  // panel; on a reload or a closed tab the browser asks with its own dialog.
+  // A document still being written is cut off by it, and nothing of a
+  // half-written document is kept, so the reader is asked about that first.
+  let pendingLeave = $state<(() => void) | null>(null);
+  chat.leaveGuard = (leave) => {
+    const proceed = () => filePreview.beforeLeaving(leave);
+    if (chat.writingDocument) pendingLeave = proceed;
+    else proceed();
+  };
+  // The document was finished while the question stood: nothing to ask about.
+  $effect(() => {
+    if (!chat.writingDocument) pendingLeave = null;
+  });
+  function stopWritingAndLeave() {
+    const proceed = pendingLeave;
+    pendingLeave = null;
+    proceed?.();
+  }
+  onDestroy(() => {
+    chat.leaveGuard = null;
+  });
   beforeNavigate((navigation) => {
     if (!filePreview.unsaved) return;
     if (navigation.type === "leave" || !confirm(m.unsaved_changes_warning())) {
@@ -384,6 +413,27 @@
     </div>
   </div>
 </FilePreviewLayout>
+<AlertDialog.Root
+  open={pendingLeave !== null}
+  onOpenChange={(open) => {
+    if (!open) pendingLeave = null;
+  }}
+>
+  <AlertDialog.Content>
+    <AlertDialog.Header>
+      <AlertDialog.Title>{m.chat_leave_while_writing_title()}</AlertDialog.Title>
+      <AlertDialog.Description>{m.chat_leave_while_writing_description()}</AlertDialog.Description>
+    </AlertDialog.Header>
+    <AlertDialog.Footer>
+      <AlertDialog.Cancel onclick={() => (pendingLeave = null)}
+        >{m.chat_leave_while_writing_stay()}</AlertDialog.Cancel
+      >
+      <AlertDialog.Action onclick={stopWritingAndLeave}
+        >{m.chat_leave_while_writing_confirm()}</AlertDialog.Action
+      >
+    </AlertDialog.Footer>
+  </AlertDialog.Content>
+</AlertDialog.Root>
 {#if isDragging}
   <AttachmentDropArea bind:isDragging label={m.drop_files_here_conversation()} inlineErrors />
 {/if}

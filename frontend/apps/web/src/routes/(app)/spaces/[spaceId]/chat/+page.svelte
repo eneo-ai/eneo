@@ -44,13 +44,15 @@
   let currentTab = writable("chat");
 
   function startNewConversation() {
-    chat.newConversation();
-    const tab = "chat";
-    const nextUrl = `/spaces/${$currentSpace.routeId}/chat/?${getChatQueryParams({ chatPartner: chat.partner, tab })}`;
-    // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic path with query string
-    pushState(nextUrl, {
-      conversation: undefined,
-      tab
+    chat.whenLeavable(() => {
+      chat.newConversation();
+      const tab = "chat";
+      const nextUrl = `/spaces/${$currentSpace.routeId}/chat/?${getChatQueryParams({ chatPartner: chat.partner, tab })}`;
+      // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic path with query string
+      pushState(nextUrl, {
+        conversation: undefined,
+        tab
+      });
     });
   }
 

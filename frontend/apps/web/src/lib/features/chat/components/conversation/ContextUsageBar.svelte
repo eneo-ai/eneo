@@ -16,7 +16,7 @@
   const { onNewConversation }: Props = $props();
   const startNewConversation = () => {
     if (onNewConversation) onNewConversation();
-    else chat.newConversation();
+    else chat.whenLeavable(() => chat.newConversation());
   };
 
   const VISIBILITY_STORAGE_KEY = "contextUsageBarVisible";
