@@ -214,7 +214,8 @@ async def test_file_service_save_image_starts_short_transaction_when_needed():
                 "size": len(b"image-bytes"),
                 "mimetype": "image/jpeg",
                 "file_type": "image",
-                "user_id": service.user.id,
+                "owner_type": "user",
+                "owner_user_id": service.user.id,
                 "tenant_id": service.user.tenant_id,
             },
         )
@@ -253,7 +254,8 @@ async def test_file_service_save_image_reuses_existing_transaction():
                 "size": len(b"image-bytes"),
                 "mimetype": "image/jpeg",
                 "file_type": "image",
-                "user_id": service.user.id,
+                "owner_type": "user",
+                "owner_user_id": service.user.id,
                 "tenant_id": service.user.tenant_id,
             },
         )

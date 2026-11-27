@@ -5,6 +5,7 @@ _TABLE_MODULES = (
     "eneo.database.tables.document_templates_table",
     "eneo.database.tables.ai_models_table",
     "eneo.database.tables.allowed_origins_table",
+    "eneo.database.tables.service_principals_table",
     "eneo.database.tables.api_keys_v2_table",
     "eneo.database.tables.audit_category_config_table",
     "eneo.database.tables.audit_log_table",

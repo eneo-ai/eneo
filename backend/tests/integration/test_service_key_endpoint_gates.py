@@ -21,6 +21,7 @@ from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 import pytest
+import sqlalchemy as sa
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -410,10 +411,9 @@ async def test_service_key_creation_endpoints_return_403_with_gate_code(
     assert _has_creation_gate_code(resp.json()), f"{method} {path}: {resp.text}"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_service_key_cannot_upload_a_user_owned_file(
+async def test_a_file_a_service_key_uploads_is_owned_by_its_principal(
     client,
+    db_container,
     tenant_admin_service_secret,
 ) -> None:
     response = await client.post(
@@ -422,8 +422,23 @@ async def test_service_key_cannot_upload_a_user_owned_file(
         headers={"X-API-Key": tenant_admin_service_secret},
     )
 
-    assert response.status_code == 403, response.text
-    assert _has_creation_gate_code(response.json()), response.text
+    assert response.status_code in (200, 201), response.text
+    async with db_container() as container:
+        result = await container.session().execute(
+            sa.text(
+                "SELECT f.owner_type, f.owner_user_id, f.owner_service_id,"
+                " p.display_name, p.state"
+                " FROM files f"
+                " LEFT JOIN service_principals p ON p.id = f.owner_service_id"
+                " WHERE f.id = :id"
+            ),
+            {"id": response.json()["id"]},
+        )
+        file = result.mappings().one()
+    assert file["owner_type"] == "service_key"
+    assert file["owner_user_id"] is None
+    assert file["owner_service_id"] is not None
+    assert file["state"] == "active"
 
 
 @pytest.mark.integration

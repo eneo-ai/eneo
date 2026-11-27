@@ -818,7 +818,7 @@ class _FileIconBackfillRepository:
             row = (
                 await self._session.execute(
                     sa.select(
-                        Files.user_id,
+                        Files.owner_user_id,
                         Files.tenant_id,
                         Files.mimetype,
                         sa.func.sha256(payload_expression).label("sha256"),
@@ -849,7 +849,7 @@ class _FileIconBackfillRepository:
             )
             return _LegacySource(
                 content=content,
-                created_by_user_id=row.user_id,
+                created_by_user_id=row.owner_user_id,
                 payload_select=payload_select,
             )
 

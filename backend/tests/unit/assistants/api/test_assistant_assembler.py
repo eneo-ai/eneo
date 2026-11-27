@@ -10,6 +10,7 @@ from unittest.mock import MagicMock
 from uuid import uuid4
 
 from eneo.assistants.api.assistant_assembler import AssistantAssembler
+from eneo.authentication.principal_types import PrincipalType
 from eneo.files.file_models import File, FileType
 
 
@@ -25,7 +26,8 @@ def _file(*, file_type=FileType.TEXT, stored=True) -> File:
         mimetype="text/plain",
         file_type=file_type,
         text="x",
-        user_id=uuid4(),
+        owner_type=PrincipalType.USER,
+        owner_user_id=uuid4(),
         tenant_id=uuid4(),
         original_available=stored,
     )

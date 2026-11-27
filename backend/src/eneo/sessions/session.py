@@ -32,9 +32,11 @@ class SessionBase(BaseModel):
 
 
 class SessionAdd(SessionBase):
-    # Exactly one of user_id (real user) or api_key_id (service-key principal)
-    # is set per session. The session_service write paths enforce this invariant.
+    # A session belongs to one principal: a person (user_id), a service
+    # principal (service_principal_id) or a widget visitor. api_key_id is the
+    # key that started a service principal's session, not its owner.
     user_id: Optional[UUID] = None
+    service_principal_id: Optional[UUID] = None
     api_key_id: Optional[UUID] = None
     # Widget visitors own sessions by widget + pseudonymous visitor id.
     widget_id: Optional[UUID] = None
@@ -48,6 +50,7 @@ class SessionUpdate(SessionBase):
 
 class SessionInDB(SessionBase, InDB):
     user_id: Optional[UUID] = None
+    service_principal_id: Optional[UUID] = None
     api_key_id: Optional[UUID] = None
     widget_id: Optional[UUID] = None
     visitor_id: Optional[UUID] = None

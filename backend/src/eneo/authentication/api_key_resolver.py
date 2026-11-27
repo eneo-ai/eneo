@@ -11,9 +11,11 @@ from eneo.authentication.api_key_v2_repo import ApiKeysV2Repository
 from eneo.authentication.auth_models import (
     PERMISSION_LEVEL_ORDER,
     ApiKeyHashVersion,
+    ApiKeyOwnership,
     ApiKeyType,
     ApiKeyV2InDB,
     ResourcePermissions,
+    ServicePrincipalState,
 )
 from eneo.main.config import get_settings
 
@@ -246,7 +248,34 @@ class ApiKeyAuthResolver:
             ):
                 return None
 
+        if record.ownership == ApiKeyOwnership.SERVICE:
+            await self._ensure_service_principal_active(record)
+
         return ResolvedApiKey(key=record, plain_key=plain_key, prefix=prefix)
+
+    async def _ensure_service_principal_active(self, record: ApiKeyV2InDB) -> None:
+        """A service key acts as its principal, so a key whose principal is
+        gone or disabled signs nobody in."""
+        service_principal = (
+            None
+            if record.service_principal_id is None
+            else await self.api_key_repo.get_service_principal(
+                service_principal_id=record.service_principal_id,
+                tenant_id=record.tenant_id,
+            )
+        )
+        if service_principal is None:
+            raise ApiKeyValidationError(
+                status_code=401,
+                code="invalid_api_key",
+                message="API key service principal is invalid.",
+            )
+        if service_principal.state != ServicePrincipalState.ACTIVE:
+            raise ApiKeyValidationError(
+                status_code=403,
+                code="service_principal_disabled",
+                message="Service principal is disabled.",
+            )
 
     def _extract_prefix(self, plain_key: str) -> str | None:
         settings = get_settings()

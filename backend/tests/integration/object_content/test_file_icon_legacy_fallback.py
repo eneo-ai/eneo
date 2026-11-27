@@ -63,7 +63,7 @@ async def _seed_legacy_rows(
             """
             INSERT INTO files (
                 id, name, text, blob, checksum, size, mimetype, file_type,
-                transcription, user_id, tenant_id, parent_file_id
+                transcription, owner_user_id, tenant_id, parent_file_id
             ) VALUES (
                 :text_id, 'legacy.pdf', :extracted, :original, :text_checksum,
                 :text_size, 'application/pdf', 'text', :transcription,

@@ -10,6 +10,7 @@ import pytest
 import sqlalchemy as sa
 from fastapi import UploadFile
 
+from eneo.authentication.principal_types import PrincipalType
 from eneo.database.database import AsyncSession, DatabaseSessionManager
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.object_content_table import (
@@ -19,7 +20,7 @@ from eneo.database.tables.object_content_table import (
     ObjectStoreObjects,
 )
 from eneo.database.tables.users_table import Users
-from eneo.files.file_models import FileContentVariant, FileType
+from eneo.files.file_models import FileContentVariant, FileOwner, FileType
 from eneo.files.file_protocol import (
     FileProtocol,
     PendingFileContent,
@@ -513,7 +514,12 @@ async def test_cancellation_after_final_promotion_preserves_the_visible_family(
             root_id = roots[0].id
             repository = FileRepository(session)
             assert (await repository.get_by_id(root_id)).id == root_id
-            assert [file.id for file in await repository.get_list_by_user(user.id)] == [
+            owner = FileOwner(
+                tenant_id=user.tenant_id,
+                owner_type=PrincipalType.USER,
+                owner_user_id=user.id,
+            )
+            assert [file.id for file in await repository.get_list_by_owner(owner)] == [
                 root_id
             ]
             assert set(await session.scalars(sa.select(ObjectContents.state))) == {

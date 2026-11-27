@@ -2,7 +2,7 @@ import asyncio
 from collections.abc import AsyncGenerator, Callable, Coroutine, Sequence
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 from uuid import UUID
 
 from eneo.ai_models.completion_models.completion_model import CompletionModel
@@ -193,6 +193,18 @@ async def persist_final_skill_runtime_state(
     )
 
 
+class _SessionPrincipal(NamedTuple):
+    """Whom a request's sessions belong to, as the session columns: exactly
+    one of a person, a service principal, or a widget visitor. ``api_key_id``
+    is the key a service principal acted through, never an owner."""
+
+    user_id: UUID | None = None
+    service_principal_id: UUID | None = None
+    api_key_id: UUID | None = None
+    widget_id: UUID | None = None
+    visitor_id: UUID | None = None
+
+
 class SessionService:
     def __init__(
         self,
@@ -270,28 +282,34 @@ class SessionService:
         async with sessionmanager.session() as session, session.begin():
             yield session
 
-    def _principal_columns(
-        self,
-    ) -> tuple[UUID | None, UUID | None, UUID | None, UUID | None]:
-        """Return (user_id, api_key_id, widget_id, visitor_id) for the current
-        authenticated principal.
+    def _principal_columns(self) -> "_SessionPrincipal":
+        """The principal of the current request, as the session columns.
 
-        Service keys resolve to a synthetic UserInDB whose id is not in the
-        users table, so we cannot persist self.user.id as sessions.user_id;
-        we record the API key id instead. Widget visitors are likewise
-        synthetic and are recorded as widget + visitor id.
+        A service key resolves to a synthetic UserInDB whose id is not in the
+        users table, so self.user.id cannot be stored as sessions.user_id. Its
+        sessions belong to the key's service principal, which stays the same
+        when the key is rotated; the key's own id is kept as a trace of which
+        key acted. Widget visitors are likewise synthetic and are recorded as
+        widget + visitor id.
 
-        Exactly one principal (user, key, or widget+visitor) is non-None.
+        Exactly one principal (user, service principal, or widget+visitor) is
+        non-None.
         """
         if is_widget_visitor(self.user):
             widget = self.user.active_widget
             assert widget is not None  # guaranteed by is_widget_visitor
-            return None, None, widget.widget_id, widget.visitor_id
+            return _SessionPrincipal(
+                widget_id=widget.widget_id, visitor_id=widget.visitor_id
+            )
         if is_service_api_key(self.user):
             key = self.user.active_api_key
             assert key is not None  # guaranteed by is_service_api_key
-            return None, key.id, None, None
-        return self.user.id, None, None, None
+            if key.service_principal_id is None:
+                raise UnauthorizedException("Service key owner identity is unavailable")
+            return _SessionPrincipal(
+                service_principal_id=key.service_principal_id, api_key_id=key.id
+            )
+        return _SessionPrincipal(user_id=self.user.id)
 
     def _is_owner(self, session: SessionInDB | SessionOwnership) -> bool:
         """Match the session's principal against the current request's principal.
@@ -300,13 +318,16 @@ class SessionService:
         as a match (defends against the synthetic-user/no-user trap where two
         unrelated NULL fields would otherwise compare equal).
         """
-        user_id, api_key_id, widget_id, visitor_id = self._principal_columns()
-        if widget_id is not None:
-            return session.widget_id == widget_id and session.visitor_id == visitor_id
-        if user_id is not None:
-            return session.user_id == user_id
-        if api_key_id is not None:
-            return session.api_key_id == api_key_id
+        principal = self._principal_columns()
+        if principal.widget_id is not None:
+            return (
+                session.widget_id == principal.widget_id
+                and session.visitor_id == principal.visitor_id
+            )
+        if principal.user_id is not None:
+            return session.user_id == principal.user_id
+        if principal.service_principal_id is not None:
+            return session.service_principal_id == principal.service_principal_id
         return False
 
     def _check_owned(
@@ -340,6 +361,7 @@ class SessionService:
             if session is None
             else SessionOwnership(
                 user_id=session.user_id,
+                service_principal_id=session.service_principal_id,
                 api_key_id=session.api_key_id,
                 widget_id=session.widget_id,
                 visitor_id=session.visitor_id,
@@ -417,13 +439,13 @@ class SessionService:
         previous: bool = False,
         name_filter: str | None = None,
     ) -> tuple[list[SessionMetadataPublic], int]:
-        user_id, api_key_id, widget_id, visitor_id = self._principal_columns()
+        principal = self._principal_columns()
         return await self.session_repo.get_metadata_by_assistant(
             assistant_id=assistant_id,
-            user_id=user_id,
-            api_key_id=api_key_id,
-            widget_id=widget_id,
-            visitor_id=visitor_id,
+            user_id=principal.user_id,
+            service_principal_id=principal.service_principal_id,
+            widget_id=principal.widget_id,
+            visitor_id=principal.visitor_id,
             limit=limit,
             cursor=cursor,
             previous=previous,
@@ -472,13 +494,14 @@ class SessionService:
         name: str,
         assistant_id: UUID | None,
     ) -> SessionAdd:
-        user_id, api_key_id, widget_id, visitor_id = self._principal_columns()
+        principal = self._principal_columns()
         return SessionAdd(
             name=name,
-            user_id=user_id,
-            api_key_id=api_key_id,
-            widget_id=widget_id,
-            visitor_id=visitor_id,
+            user_id=principal.user_id,
+            service_principal_id=principal.service_principal_id,
+            api_key_id=principal.api_key_id,
+            widget_id=principal.widget_id,
+            visitor_id=principal.visitor_id,
             assistant_id=assistant_id,
         )
 
@@ -686,13 +709,13 @@ class SessionService:
         conversation of another principal and one without a chat partner, so
         callers learn nothing about conversations that are not theirs.
         """
-        user_id, api_key_id, _, _ = self._principal_columns()
+        principal = self._principal_columns()
         partner = await self.session_repo.get_owned_message_partner(
             session_id=session_id,
             message_id=message_id,
             tenant_id=self.user.tenant_id,
-            user_id=user_id,
-            api_key_id=api_key_id,
+            user_id=principal.user_id,
+            service_principal_id=principal.service_principal_id,
         )
         if partner is None:
             raise NotFoundException("Message not found.")
@@ -706,13 +729,14 @@ class SessionService:
         Separate from the conversation-level feedback (``leave_feedback``):
         neither overwrites the other.
         """
-        user_id, api_key_id, _, _ = self._principal_columns()
+        principal = self._principal_columns()
         stored = await self.session_repo.set_message_feedback(
             session_id=session_id,
             message_id=message_id,
             tenant_id=self.user.tenant_id,
-            user_id=user_id,
-            api_key_id=api_key_id,
+            user_id=principal.user_id,
+            service_principal_id=principal.service_principal_id,
+            api_key_id=principal.api_key_id,
             feedback=feedback,
         )
         if stored is None:
@@ -728,11 +752,11 @@ class SessionService:
         message with ``get_message_partner`` first to report one that is not
         theirs.
         """
-        user_id, api_key_id, _, _ = self._principal_columns()
+        principal = self._principal_columns()
         await self.session_repo.delete_message_feedback(
             session_id=session_id,
             message_id=message_id,
             tenant_id=self.user.tenant_id,
-            user_id=user_id,
-            api_key_id=api_key_id,
+            user_id=principal.user_id,
+            service_principal_id=principal.service_principal_id,
         )

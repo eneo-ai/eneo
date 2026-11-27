@@ -5,6 +5,7 @@ from uuid import uuid4
 import pytest
 
 from eneo.ai_models.completion_models.completion_model import MessageToolCall
+from eneo.authentication.principal_types import PrincipalType
 from eneo.completion_models.infrastructure.message_payload import (
     build_content,
     build_image_block,
@@ -30,7 +31,8 @@ def _image_file(blob: bytes | None = _PNG_1PX) -> File:
         checksum="",
         size=0,
         tenant_id=uuid4(),
-        user_id=uuid4(),
+        owner_type=PrincipalType.USER,
+        owner_user_id=uuid4(),
         file_type=FileType.IMAGE,
     )
 

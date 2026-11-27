@@ -14,7 +14,6 @@ from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.actor_types import ActorType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.domain.removable_names import FILE_DESCRIPTIONS, FILE_TARGET_NAME
-from eneo.authentication.auth_dependencies import require_user_for_creation
 from eneo.authentication.endpoint_access import (
     Authentication,
     Authorization,
@@ -68,18 +67,11 @@ _FileUploadContainer = Annotated[
 ]
 
 
-async def _require_upload_user_for_creation(
-    container: _FileUploadContainer,
-) -> None:
-    await require_user_for_creation(container.user())
-
-
 @router.post(
     "/",
     response_model=FilePublic,
     responses=responses.get_responses([400, 403, 413, 415, 503]),
     description="Upload a file; rejects unsupported media types and oversized files.",
-    dependencies=[Depends(_require_upload_user_for_creation)],
 )
 @endpoint_access(
     authentication=Authentication.USER,

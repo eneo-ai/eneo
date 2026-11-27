@@ -22,7 +22,6 @@ from eneo.authentication.auth_dependencies import (
     MCP_APPS_READ_OVERRIDES,
     require_api_key_permission,
     require_api_key_scope_check,
-    require_file_delete_scope_guard,
     require_resource_permission_for_method,
 )
 from eneo.authentication.auth_models import ApiKeyPermission
@@ -525,7 +524,6 @@ router.include_router(
             )
         ),
         Depends(require_api_key_scope_check(resource_type="file", path_param=None)),
-        Depends(require_file_delete_scope_guard()),
     ],
 )
 router.include_router(icons_router, prefix="/icons", tags=["icons"])

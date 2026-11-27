@@ -11,6 +11,7 @@ from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import SQLAlchemyError
 
+from eneo.authentication.principal_types import PrincipalType
 from eneo.database.database import get_session, get_session_with_transaction
 from eneo.files import file_router
 from eneo.files.file_models import (
@@ -68,9 +69,6 @@ def test_upload_route_reuses_one_non_transactional_authenticated_container() -> 
 
     assert get_session in _dependency_calls(route)
     assert get_session_with_transaction not in _dependency_calls(route)
-    assert file_router._require_upload_user_for_creation in {
-        dependency.call for dependency in route.dependant.dependencies
-    }
 
 
 @pytest.mark.parametrize(
@@ -91,7 +89,8 @@ def test_upload_request_resolves_shared_container_once_before_file_work(
         size=7,
         mimetype="text/plain",
         file_type=FileType.TEXT,
-        user_id=TEST_USER.id,
+        owner_type=PrincipalType.USER,
+        owner_user_id=TEST_USER.id,
         tenant_id=TEST_USER.tenant_id,
     )
 
@@ -172,7 +171,8 @@ async def test_upload_enqueues_audit_only_after_file_success() -> None:
         size=7,
         mimetype="text/plain",
         file_type=FileType.TEXT,
-        user_id=user.id,
+        owner_type=PrincipalType.USER,
+        owner_user_id=user.id,
         tenant_id=user.tenant_id,
     )
     service = AsyncMock()
@@ -247,7 +247,8 @@ async def test_original_signed_url_audits_the_attributable_access_grant(
         name=NAME,
         file_type=FileType.TEXT,
         mimetype="application/pdf",
-        user_id=user_id,
+        owner_type=PrincipalType.USER,
+        owner_user_id=user_id,
         tenant_id=tenant_id,
     )
     service = AsyncMock()
@@ -324,7 +325,8 @@ async def test_deleting_a_file_audits_it_without_its_name() -> None:
         size=7,
         mimetype="application/pdf",
         file_type=FileType.TEXT,
-        user_id=user.id,
+        owner_type=PrincipalType.USER,
+        owner_user_id=user.id,
         tenant_id=user.tenant_id,
     )
     service = AsyncMock()
@@ -732,7 +734,8 @@ async def test_interrupted_download_closes_content_context_once(
         name="report.pdf",
         file_type=FileType.TEXT,
         mimetype="application/pdf",
-        user_id=user_id,
+        owner_type=PrincipalType.USER,
+        owner_user_id=user_id,
         tenant_id=tenant_id,
     )
     reference = FileContentReferenceRecord(

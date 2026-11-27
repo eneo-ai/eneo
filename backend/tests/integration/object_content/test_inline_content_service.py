@@ -59,7 +59,7 @@ async def _store_inline_file(
                 mimetype="text/plain",
                 file_type="text",
                 tenant_id=tenant_id,
-                user_id=user_id,
+                owner_user_id=user_id,
                 parent_file_id=None,
             )
             session.add(owner)

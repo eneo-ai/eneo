@@ -877,57 +877,136 @@ async def test_space_scoped_user_key_delete_owned_file_allowed(
     assert get_resp.status_code == 404, get_resp.text
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_service_key_delete_files_denied_with_clear_error(
+async def _service_key(client, *, token: str, permission: str = "admin") -> dict:
+    """A space-scoped service key; returns the whole creation response."""
+    space = await _create_space(client, token=token)
+    resp = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": f"svc-file-key-{uuid4().hex[:8]}",
+            "key_type": "sk_",
+            "permission": permission,
+            "scope_type": "space",
+            "scope_id": space,
+            "ownership": "service",
+            "expires_at": _expires_in(),
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()
+
+
+async def _upload(client, *, headers: dict[str, str], name: str = "invoice.txt") -> str:
+    resp = await client.post(
+        "/api/v1/files/",
+        files={"upload_file": (name, b"amount due: 100", "text/plain")},
+        headers=headers,
+    )
+    assert resp.status_code in (200, 201), resp.text
+    return resp.json()["id"]
+
+
+async def test_service_key_uploads_reads_and_deletes_its_own_file(
     api_client, bearer_token
 ):
-    """Service keys cannot delete user-owned files, even with admin permission."""
-    space = await _create_space(api_client, token=bearer_token)
-    key = await _create_api_key(
-        api_client,
-        token=bearer_token,
-        scope_type="space",
-        scope_id=space,
-        permission="admin",
-        ownership="service",
-        expires_at=_expires_in(),
-    )
+    key = {"X-API-Key": (await _service_key(api_client, token=bearer_token))["secret"]}
 
-    resp = await api_client.delete(
-        f"/api/v1/files/{uuid4()}/",
-        headers={"X-API-Key": key},
-    )
-    assert resp.status_code == 403, resp.text
-    assert _error_code_from_response(resp) == "service_key_cannot_delete_files"
+    file_id = await _upload(api_client, headers=key)
+
+    read = await api_client.get(f"/api/v1/files/{file_id}/", headers=key)
+    assert read.status_code == 200, read.text
+    listed = await api_client.get("/api/v1/files/", headers=key)
+    assert listed.status_code == 200, listed.text
+    assert file_id in {item["id"] for item in listed.json()["items"]}
+
+    deleted = await api_client.delete(f"/api/v1/files/{file_id}/", headers=key)
+    assert deleted.status_code == 204, deleted.text
+    gone = await api_client.get(f"/api/v1/files/{file_id}/", headers=key)
+    assert gone.status_code == 404, gone.text
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_service_key_upload_files_denied_with_creation_gate_code(
+async def test_service_key_cannot_reach_a_persons_file(api_client, bearer_token):
+    person = {"Authorization": f"Bearer {bearer_token}"}
+    key = {"X-API-Key": (await _service_key(api_client, token=bearer_token))["secret"]}
+    file_id = await _upload(api_client, headers=person)
+
+    read = await api_client.get(f"/api/v1/files/{file_id}/", headers=key)
+    deleted = await api_client.delete(f"/api/v1/files/{file_id}/", headers=key)
+    listed = await api_client.get("/api/v1/files/", headers=key)
+
+    assert read.status_code in (403, 404), read.text
+    assert deleted.status_code == 404, deleted.text
+    assert file_id not in {item["id"] for item in listed.json()["items"]}
+    still_there = await api_client.get(f"/api/v1/files/{file_id}/", headers=person)
+    assert still_there.status_code == 200, still_there.text
+
+
+async def test_a_person_cannot_reach_a_service_keys_file(api_client, bearer_token):
+    person = {"Authorization": f"Bearer {bearer_token}"}
+    key = {"X-API-Key": (await _service_key(api_client, token=bearer_token))["secret"]}
+    file_id = await _upload(api_client, headers=key)
+
+    read = await api_client.get(f"/api/v1/files/{file_id}/", headers=person)
+    deleted = await api_client.delete(f"/api/v1/files/{file_id}/", headers=person)
+    listed = await api_client.get("/api/v1/files/", headers=person)
+
+    assert read.status_code in (403, 404), read.text
+    assert deleted.status_code == 404, deleted.text
+    assert file_id not in {item["id"] for item in listed.json()["items"]}
+    still_there = await api_client.get(f"/api/v1/files/{file_id}/", headers=key)
+    assert still_there.status_code == 200, still_there.text
+
+
+async def test_one_service_key_cannot_reach_another_service_keys_file(
     api_client, bearer_token
 ):
-    """Service keys cannot upload user-owned files; the API returns a clear 403."""
-    space = await _create_space(api_client, token=bearer_token)
-    key = await _create_api_key(
-        api_client,
-        token=bearer_token,
-        scope_type="space",
-        scope_id=space,
-        permission="admin",
-        ownership="service",
-        expires_at=_expires_in(),
+    first = {
+        "X-API-Key": (await _service_key(api_client, token=bearer_token))["secret"]
+    }
+    second = {
+        "X-API-Key": (await _service_key(api_client, token=bearer_token))["secret"]
+    }
+    file_id = await _upload(api_client, headers=first)
+
+    read = await api_client.get(f"/api/v1/files/{file_id}/", headers=second)
+    deleted = await api_client.delete(f"/api/v1/files/{file_id}/", headers=second)
+
+    assert read.status_code in (403, 404), read.text
+    assert deleted.status_code == 404, deleted.text
+
+
+async def test_rotated_service_key_still_owns_the_files_it_uploaded(
+    api_client, bearer_token
+):
+    created = await _service_key(api_client, token=bearer_token)
+    old_key = {"X-API-Key": created["secret"]}
+    file_id = await _upload(api_client, headers=old_key)
+
+    rotated = await api_client.post(
+        f"/api/v1/api-keys/{created['api_key']['id']}/rotate",
+        json={"disable_grace_period": True},
+        headers={"Authorization": f"Bearer {bearer_token}"},
     )
+    assert rotated.status_code == 200, rotated.text
+    new_key = {"X-API-Key": rotated.json()["secret"]}
+
+    read = await api_client.get(f"/api/v1/files/{file_id}/", headers=new_key)
+    assert read.status_code == 200, read.text
+    deleted = await api_client.delete(f"/api/v1/files/{file_id}/", headers=new_key)
+    assert deleted.status_code == 204, deleted.text
+
+
+async def test_read_only_service_key_cannot_upload(api_client, bearer_token):
+    created = await _service_key(api_client, token=bearer_token, permission="read")
 
     resp = await api_client.post(
         "/api/v1/files/",
-        files={"upload_file": ("service-upload.txt", b"temporary", "text/plain")},
-        headers={"X-API-Key": key},
+        files={"upload_file": ("invoice.txt", b"amount due: 100", "text/plain")},
+        headers={"X-API-Key": created["secret"]},
     )
 
     assert resp.status_code == 403, resp.text
-    assert _error_code_from_response(resp) == "service_key_cannot_create_resources"
-    assert "supported endpoints" in resp.text
 
 
 @pytest.mark.integration
@@ -958,7 +1037,7 @@ async def test_space_scoped_user_key_cannot_delete_another_users_file(
 
     async with db_container() as container:
         file = await container.file_repo().get_by_id(file_id=UUID(file_id))
-    assert file.user_id == other_user.id
+    assert file.owner_user_id == other_user.id
 
 
 # ---------------------------------------------------------------------------

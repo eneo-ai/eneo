@@ -9,6 +9,8 @@ from uuid import UUID
 from fastapi import UploadFile
 from starlette.datastructures import Headers
 
+from eneo.authentication.auth_models import is_service_api_key
+from eneo.authentication.principal_types import PrincipalType
 from eneo.files.file_content_loader import FileContentLoader
 from eneo.files.file_models import (
     File,
@@ -20,6 +22,7 @@ from eneo.files.file_models import (
     FileMetadata,
     FileMetadataCreate,
     FileOriginalNotFoundError,
+    FileOwner,
     FilePublic,
     FileType,
     FileUsageKind,
@@ -379,15 +382,17 @@ class FileService:
         parent_file_id: UUID | None = None,
         revises_file_id: UUID | None = None,
     ) -> FileMetadata:
-        user = self._authenticated_user()
+        owner = self._owner()
         prepared = captured_file.prepared
         return await self.repo.add_metadata(
             FileMetadataCreate(
                 name=prepared.name,
                 file_type=prepared.file_type,
                 mimetype=prepared.display_media_type,
-                user_id=user.id,
-                tenant_id=user.tenant_id,
+                owner_type=owner.owner_type,
+                owner_user_id=owner.owner_user_id,
+                owner_service_id=owner.owner_service_id,
+                tenant_id=owner.tenant_id,
                 parent_file_id=parent_file_id,
                 revises_file_id=revises_file_id,
             )
@@ -400,15 +405,16 @@ class FileService:
         *,
         policy_revision: int | None,
     ) -> ContentIntent:
-        user = self._authenticated_user()
+        owner = self._owner()
         idempotency_key = f"file:{file_id}:{pending.variant.value}:{pending.ordinal}"
         receipt = idempotency_key
         # Inline-pinned generated images keep their pre-policy receipt.
         if policy_revision is not None:
             receipt = f"{receipt}:policy_revision={policy_revision}"
         return ContentIntent(
-            tenant_id=user.tenant_id,
-            created_by_user_id=user.id,
+            tenant_id=owner.tenant_id,
+            # A trace to a person; a service principal leaves it empty.
+            created_by_user_id=owner.owner_user_id,
             access_class=ContentAccessClass.PRIVATE_RESOURCE,
             idempotency_key=idempotency_key,
             producer_receipt=receipt,
@@ -600,9 +606,9 @@ class FileService:
             await require_file_read_permission(
                 self._authenticated_user(), self._audit_service
             )
-        metadata = await self.repo.get_list_by_id_and_user(
+        metadata = await self.repo.get_list_by_id_and_owner(
             ids=file_ids,
-            user_id=self._authenticated_user().id,
+            owner=self._owner(),
         )
         return await self._hydrate_files(
             metadata,
@@ -610,14 +616,12 @@ class FileService:
         )
 
     async def get_public_files(self) -> list[FilePublic]:
-        metadata = await self.repo.get_list_by_user(
-            user_id=self._authenticated_user().id
-        )
+        metadata = await self.repo.get_list_by_owner(self._owner())
         return await self._project_public_files(metadata)
 
     async def get_public_files_by_ids(self, file_ids: list[UUID]) -> list[FilePublic]:
-        metadata = await self.repo.get_list_by_id_and_user(
-            ids=file_ids, user_id=self._authenticated_user().id
+        metadata = await self.repo.get_list_by_id_and_owner(
+            ids=file_ids, owner=self._owner()
         )
         by_id = {file.id: file for file in metadata}
         return await self._project_public_files(
@@ -627,7 +631,7 @@ class FileService:
     async def get_derived_images(self, parent_ids: list[UUID]) -> list[File]:
         metadata = await self.repo.get_by_parent_ids(
             parent_ids=parent_ids,
-            user_id=self._authenticated_user().id,
+            owner=self._owner(),
         )
         files = await self._hydrate_files(metadata)
         return [file for file in files if file.file_type == FileType.IMAGE]
@@ -666,17 +670,16 @@ class FileService:
         ]
 
     async def get_deletion_preview(self, file_id: UUID) -> FileDeletionPreview:
-        user = self._authenticated_user()
+        owner = self._owner()
         metadata = await self.repo.get_by_id_and_owner_for_lifecycle(
             file_id=file_id,
-            user_id=user.id,
-            tenant_id=user.tenant_id,
+            owner=owner,
         )
         if metadata is None:
             raise NotFoundException()
         family_ids = await self._usage.list_family(
             root_file_id=file_id,
-            tenant_id=user.tenant_id,
+            tenant_id=owner.tenant_id,
         )
         if not family_ids:
             raise NotFoundException()
@@ -686,18 +689,17 @@ class FileService:
         )
 
     async def delete_file(self, id: UUID) -> FileInfo:
-        user = self._authenticated_user()
+        owner = self._owner()
         async with self._write_transaction():
             metadata = await self.repo.get_by_id_and_owner_for_lifecycle(
                 file_id=id,
-                user_id=user.id,
-                tenant_id=user.tenant_id,
+                owner=owner,
             )
             if metadata is None:
                 raise NotFoundException()
             family_ids = await self._usage.lock_family(
                 root_file_id=id,
-                tenant_id=user.tenant_id,
+                tenant_id=owner.tenant_id,
             )
             if not family_ids:
                 raise NotFoundException()
@@ -711,8 +713,7 @@ class FileService:
             info = await self._file_info(metadata)
             deleted = await self.repo.delete_by_owner_for_lifecycle(
                 id=id,
-                user_id=user.id,
-                tenant_id=user.tenant_id,
+                owner=owner,
             )
             if deleted is None:
                 raise NotFoundException()
@@ -746,7 +747,7 @@ class FileService:
         return (await self._hydrate_files([metadata]))[0]
 
     async def save_transcription(self, file_id: UUID, transcription: str) -> str:
-        user = self._authenticated_user()
+        owner = self._owner()
         async with self._write_transaction():
             metadata = await self.repo.get_by_id_for_update(file_id)
             self._require_owner(metadata, action="update")
@@ -778,7 +779,7 @@ class FileService:
                     self.repo.session,
                     intent=ContentIntent(
                         tenant_id=metadata.tenant_id,
-                        created_by_user_id=user.id,
+                        created_by_user_id=owner.owner_user_id,
                         access_class=ContentAccessClass.PRIVATE_RESOURCE,
                         idempotency_key=f"file:{metadata.id}:transcription:0",
                         producer_receipt=f"file:{metadata.id}:transcription:0",
@@ -1271,7 +1272,7 @@ class FileService:
         raise FileOriginalNotFoundError()
 
     def _require_owner(self, file: FileMetadata, *, action: str) -> None:
-        if file.user_id == self._authenticated_user().id:
+        if self._owner().matches(file):
             return
         raise UnauthorizedException(
             "You can only access files you own.",
@@ -1281,6 +1282,27 @@ class FileService:
                 "action": action,
                 "auth_layer": "domain_policy",
             },
+        )
+
+    def _owner(self) -> FileOwner:
+        """Who the files of this request belong to: the signed-in person, or
+        the service principal behind a service key. A service key has no
+        ``users`` row, and its own id changes on rotation, so neither can own
+        a file."""
+        user = self._authenticated_user()
+        if not is_service_api_key(user):
+            return FileOwner(
+                tenant_id=user.tenant_id,
+                owner_type=PrincipalType.USER,
+                owner_user_id=user.id,
+            )
+        key = user.active_api_key
+        if key is None or key.service_principal_id is None:
+            raise UnauthorizedException("Service key owner identity is unavailable")
+        return FileOwner(
+            tenant_id=user.tenant_id,
+            owner_type=PrincipalType.SERVICE_KEY,
+            owner_service_id=key.service_principal_id,
         )
 
     def _authenticated_user(self) -> UserInDB:

@@ -149,19 +149,26 @@ async def test_delete_error_when_user_not_owner_of_session(service: SessionServi
         await service.delete(1)
 
 
-async def test_a_service_key_owns_only_its_own_conversations(
-    service: SessionService,
-):
-    key_id = uuid4()
-    service.user = TEST_USER.model_copy(
+def _service_key_user(*, key_id, service_principal_id):
+    return TEST_USER.model_copy(
         update={
             "active_api_key": SimpleNamespace(
-                id=key_id, ownership=ApiKeyOwnership.SERVICE
+                id=key_id,
+                ownership=ApiKeyOwnership.SERVICE,
+                service_principal_id=service_principal_id,
             )
         }
     )
+
+
+async def test_a_service_principal_owns_only_its_own_conversations(
+    service: SessionService,
+):
+    key_id, principal_id = uuid4(), uuid4()
+    service.user = _service_key_user(key_id=key_id, service_principal_id=principal_id)
     own = SessionOwnership(
         user_id=None,
+        service_principal_id=principal_id,
         api_key_id=key_id,
         widget_id=None,
         visitor_id=None,
@@ -172,12 +179,73 @@ async def test_a_service_key_owns_only_its_own_conversations(
     assert await service.get_session_ownership(TEST_UUID) == own
 
     for other in (
-        own._replace(api_key_id=uuid4()),
-        own._replace(user_id=TEST_USER.id, api_key_id=None),
+        own._replace(service_principal_id=uuid4()),
+        own._replace(user_id=TEST_USER.id, service_principal_id=None, api_key_id=None),
     ):
         service.session_repo.get_ownership.return_value = other
         with pytest.raises(UnauthorizedException, match="belongs to other principal"):
             await service.get_session_ownership(TEST_UUID)
+
+
+async def test_a_rotated_service_key_keeps_the_conversations_of_the_key_before_it(
+    service: SessionService,
+):
+    old_key_id, new_key_id, principal_id = uuid4(), uuid4(), uuid4()
+    started_with_the_old_key = SessionOwnership(
+        user_id=None,
+        service_principal_id=principal_id,
+        api_key_id=old_key_id,
+        widget_id=None,
+        visitor_id=None,
+        assistant_id=TEST_UUID,
+    )
+    service.session_repo.get_ownership.return_value = started_with_the_old_key
+    service.user = _service_key_user(
+        key_id=new_key_id, service_principal_id=principal_id
+    )
+
+    assert await service.get_session_ownership(TEST_UUID) == started_with_the_old_key
+
+
+async def test_a_conversation_whose_key_was_removed_still_belongs_to_its_principal(
+    service: SessionService,
+):
+    principal_id = uuid4()
+    key_removed = SessionOwnership(
+        user_id=None,
+        service_principal_id=principal_id,
+        api_key_id=None,
+        widget_id=None,
+        visitor_id=None,
+        assistant_id=TEST_UUID,
+    )
+    service.session_repo.get_ownership.return_value = key_removed
+    service.user = _service_key_user(key_id=uuid4(), service_principal_id=principal_id)
+
+    assert await service.get_session_ownership(TEST_UUID) == key_removed
+
+
+async def test_a_new_service_key_conversation_names_its_principal_and_its_key(
+    service: SessionService,
+):
+    key_id, principal_id = uuid4(), uuid4()
+    service.user = _service_key_user(key_id=key_id, service_principal_id=principal_id)
+
+    principal = service._principal_columns()
+
+    assert principal.service_principal_id == principal_id
+    assert principal.api_key_id == key_id
+    assert principal.user_id is None
+    assert principal.widget_id is None
+
+
+async def test_a_service_key_without_a_principal_owns_no_conversation(
+    service: SessionService,
+):
+    service.user = _service_key_user(key_id=uuid4(), service_principal_id=None)
+
+    with pytest.raises(UnauthorizedException):
+        service._principal_columns()
 
 
 async def test_the_ownership_read_refuses_as_the_full_read(service: SessionService):
@@ -289,7 +357,7 @@ async def test_message_partner_is_resolved_for_the_request_principal(
         message_id=message_id,
         tenant_id=TEST_USER.tenant_id,
         user_id=TEST_USER.id,
-        api_key_id=None,
+        service_principal_id=None,
     )
 
 
@@ -308,6 +376,7 @@ async def test_set_message_feedback_records_who_rated(service: SessionService):
         message_id=message_id,
         tenant_id=TEST_USER.tenant_id,
         user_id=TEST_USER.id,
+        service_principal_id=None,
         api_key_id=None,
         feedback=feedback,
     )
@@ -340,5 +409,5 @@ async def test_clear_message_feedback_is_scoped_to_the_principal(
         message_id=message_id,
         tenant_id=TEST_USER.tenant_id,
         user_id=TEST_USER.id,
-        api_key_id=None,
+        service_principal_id=None,
     )

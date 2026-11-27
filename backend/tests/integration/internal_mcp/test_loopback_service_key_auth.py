@@ -15,6 +15,7 @@ from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 import pytest
+import sqlalchemy as sa
 
 from eneo.authentication.auth_models import is_service_api_key
 from eneo.internal_mcp.foundation import internal_tool_context
@@ -100,6 +101,24 @@ async def test_revoked_service_key_no_longer_authenticates(
             key_id=service_principal_token.key_id,
             tenant_id=service_principal_token.tenant_id,
             revoked_at=datetime.now(timezone.utc),
+        )
+
+    with pytest.raises(AuthenticationException):
+        async with internal_tool_context(_loopback_ctx(service_principal_token.token)):
+            pass
+
+
+async def test_service_key_of_a_disabled_principal_no_longer_authenticates(
+    db_container, service_principal_token
+):
+    async with db_container() as container:
+        await container.session().execute(
+            sa.text(
+                "UPDATE service_principals SET state = 'disabled', disabled_at = now()"
+                " WHERE id = (SELECT service_principal_id FROM api_keys_v2"
+                " WHERE id = :key_id)"
+            ),
+            {"key_id": service_principal_token.key_id},
         )
 
     with pytest.raises(AuthenticationException):

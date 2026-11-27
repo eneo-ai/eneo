@@ -5,6 +5,7 @@ from uuid import uuid4
 
 import pytest
 
+from eneo.authentication.principal_types import PrincipalType
 from eneo.ai_models.completion_models.completion_model import (
     FunctionDefinition,
     Message,
@@ -120,7 +121,8 @@ def test_context_with_messages(context_builder: ContextBuilder):
         checksum="",
         size=0,
         tenant_id=uuid4(),
-        user_id=uuid4(),
+        owner_type=PrincipalType.USER,
+        owner_user_id=uuid4(),
         file_type=FileType.TEXT,
     )
 
@@ -167,7 +169,8 @@ def test_context_with_images(context_builder: ContextBuilder):
         checksum="",
         size=0,
         tenant_id=uuid4(),
-        user_id=uuid4(),
+        owner_type=PrincipalType.USER,
+        owner_user_id=uuid4(),
         file_type=FileType.IMAGE,
     )
 
@@ -186,7 +189,8 @@ def test_context_with_messages_and_images(context_builder: ContextBuilder):
         checksum="",
         size=0,
         tenant_id=uuid4(),
-        user_id=uuid4(),
+        owner_type=PrincipalType.USER,
+        owner_user_id=uuid4(),
         file_type=FileType.IMAGE,
     )
 
@@ -491,7 +495,8 @@ def _image_file(blob: bytes = _PNG_1PX) -> File:
         checksum="",
         size=len(blob),
         tenant_id=uuid4(),
-        user_id=uuid4(),
+        owner_type=PrincipalType.USER,
+        owner_user_id=uuid4(),
         file_type=FileType.IMAGE,
     )
 

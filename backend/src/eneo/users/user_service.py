@@ -39,6 +39,7 @@ from eneo.authentication.auth_models import (
     CredentialFacts,
     FederatedIdentity,
     JWTPayload,
+    ServicePrincipalState,
     compute_effective_state,
 )
 from eneo.authentication.auth_service import INTERNAL_MCP_AUDIENCE, AuthService
@@ -1167,10 +1168,10 @@ class UserService:
         only for its own loopback MCP servers, so only
         ``authenticate_internal_mcp_token`` falls through to the key itself;
         session authentication never does. The key must still be active:
-        revoking, suspending or expiring it ends the principal's access before
-        the token expires. Origin and IP guardrails do not apply here, the
-        loopback caller is Eneo itself, and no usage is recorded: the API call
-        that minted the token already was.
+        revoking, suspending or expiring it, or disabling its service
+        principal, ends the access before the token expires. Origin and IP
+        guardrails do not apply here, the loopback caller is Eneo itself, and
+        no usage is recorded: the API call that minted the token already was.
         """
         key = await self.api_key_v2_repo.get(
             key_id=payload.user_id, tenant_id=payload.tenant_id
@@ -1184,6 +1185,19 @@ class UserService:
             rotation_grace_until=key.rotation_grace_until,
         )
         if effective_state != ApiKeyState.ACTIVE:
+            return None
+        service_principal = (
+            None
+            if key.service_principal_id is None
+            else await self.api_key_v2_repo.get_service_principal(
+                service_principal_id=key.service_principal_id,
+                tenant_id=key.tenant_id,
+            )
+        )
+        if (
+            service_principal is None
+            or service_principal.state != ServicePrincipalState.ACTIVE
+        ):
             return None
         return await self._build_service_user(key)
 
@@ -1440,43 +1454,6 @@ class UserService:
         request.state.api_key_scope_type = resolved.key.scope_type
         request.state.api_key_scope_id = resolved.key.scope_id
         request.state.api_key_resource_permissions = resolved.key.resource_permissions
-
-        # File DELETE scope guard (stashed by router-level dep). User-owned
-        # scoped keys continue to FileService, where delete_by_owner enforces
-        # tenant and file ownership in SQL. Service keys have no real users.id
-        # owner, so they cannot delete user-owned files until files support
-        # service-principal ownership.
-        if getattr(request.state, "_require_file_delete_scope_guard", False):
-            if ownership == ApiKeyOwnership.SERVICE:
-                scope_type_str = (
-                    resolved.key.scope_type.value
-                    if hasattr(resolved.key.scope_type, "value")
-                    else str(resolved.key.scope_type)
-                )
-                exc = ApiKeyValidationError(
-                    status_code=403,
-                    code="service_key_cannot_delete_files",
-                    message=(
-                        "Service API keys cannot delete files because files are owned "
-                        "by users. Use a user-owned API key with files admin permission "
-                        "to upload and clean up runtime files."
-                    ),
-                    context={
-                        "resource_type": "file",
-                        "action": "delete",
-                        "auth_layer": "api_key_scope",
-                        "required_capability": "user_owned_api_key",
-                        "scope_type": scope_type_str,
-                        "ownership": "service",
-                    },
-                )
-                await self._log_api_key_auth_failed(
-                    user,
-                    resolved.key,
-                    exc,
-                    request=request,
-                )
-                raise exc
 
         # Method-level permission: ALWAYS enforced (not gated by flag).
         # Routes with resource guards use read-overrides; others use basic check.

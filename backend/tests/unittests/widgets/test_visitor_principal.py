@@ -64,7 +64,7 @@ def test_session_principal_is_widget_plus_visitor():
     user = build_visitor_user(widget, visitor_id, _tenant(widget.tenant_id))  # type: ignore[arg-type]
     service = _session_service(user)
 
-    assert service._principal_columns() == (None, None, widget.id, visitor_id)
+    assert service._principal_columns() == (None, None, None, widget.id, visitor_id)
 
     own = SimpleNamespace(
         widget_id=widget.id, visitor_id=visitor_id, user_id=None, api_key_id=None
@@ -92,7 +92,7 @@ def test_session_principal_is_widget_plus_visitor():
 def test_real_user_principal_is_unchanged():
     user = SimpleNamespace(id=uuid4(), tenant_id=uuid4(), active_api_key=None)
     service = _session_service(user)
-    assert service._principal_columns() == (user.id, None, None, None)
+    assert service._principal_columns() == (user.id, None, None, None, None)
     assert service._is_owner(
         SimpleNamespace(
             user_id=user.id, api_key_id=None, widget_id=None, visitor_id=None

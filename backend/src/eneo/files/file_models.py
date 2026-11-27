@@ -1,9 +1,11 @@
+from dataclasses import dataclass
 from enum import Enum, StrEnum
 from typing import Any, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
 
+from eneo.authentication.principal_types import PrincipalType
 from eneo.files.extensions import MIMETYPE_EXTENSIONS_MAPPER
 from eneo.main.models import InDB
 
@@ -106,19 +108,66 @@ class FileBaseWithContent(FileBase):
 
 
 class FileInfo(InDB, FileBase):
-    user_id: UUID
+    owner_type: PrincipalType
+    owner_user_id: UUID | None = None
+    owner_service_id: UUID | None = None
     tenant_id: UUID
     revises_file_id: Optional[UUID] = None
+
+
+@dataclass(frozen=True, slots=True)
+class FileOwner:
+    """The one principal that owns a file and the files derived from it: a
+    person, or the service principal behind a service key."""
+
+    tenant_id: UUID
+    owner_type: PrincipalType
+    owner_user_id: UUID | None = None
+    owner_service_id: UUID | None = None
+
+    def __post_init__(self) -> None:
+        user_owner = (
+            self.owner_type is PrincipalType.USER
+            and self.owner_user_id is not None
+            and self.owner_service_id is None
+        )
+        service_owner = (
+            self.owner_type is PrincipalType.SERVICE_KEY
+            and self.owner_user_id is None
+            and self.owner_service_id is not None
+        )
+        if not (user_owner or service_owner):
+            raise ValueError("File owner identity does not match its principal type")
+
+    def matches(self, file: "FileMetadata | FileInfo") -> bool:
+        return (
+            file.tenant_id == self.tenant_id
+            and file.owner_type is self.owner_type
+            and file.owner_user_id == self.owner_user_id
+            and file.owner_service_id == self.owner_service_id
+        )
 
 
 class FileMetadataCreate(BaseModel):
     name: str
     file_type: FileType
     mimetype: Optional[str] = None
-    user_id: UUID
+    owner_type: PrincipalType
+    owner_user_id: UUID | None = None
+    owner_service_id: UUID | None = None
     tenant_id: UUID
     parent_file_id: Optional[UUID] = None
     revises_file_id: Optional[UUID] = None
+
+    @model_validator(mode="after")
+    def validate_owner_identity(self) -> "FileMetadataCreate":
+        FileOwner(
+            tenant_id=self.tenant_id,
+            owner_type=self.owner_type,
+            owner_user_id=self.owner_user_id,
+            owner_service_id=self.owner_service_id,
+        )
+        return self
 
 
 class FileMetadata(InDB, FileMetadataCreate):
@@ -126,7 +175,9 @@ class FileMetadata(InDB, FileMetadataCreate):
 
 
 class File(InDB, FileBaseWithContent):
-    user_id: UUID
+    owner_type: PrincipalType
+    owner_user_id: UUID | None = None
+    owner_service_id: UUID | None = None
     tenant_id: UUID
     parent_file_id: Optional[UUID] = None
     # The earlier version of a conversation document this file was saved

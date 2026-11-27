@@ -1,9 +1,9 @@
 """Integration tests for SessionRepository tenant filtering.
 
-Service-key sessions persist with user_id=NULL — the principal is carried on
-api_key_id instead. The repo's tenant-scoping path therefore cannot rely on
-an INNER JOIN against Users; it LEFT JOINs both principal tables and matches
-against whichever tenant_id is present.
+Service-key sessions persist with user_id=NULL — the owner is the key's
+service principal instead. The repo's tenant-scoping path therefore cannot
+rely on an INNER JOIN against Users; it LEFT JOINs both principal tables and
+matches against whichever tenant_id is present.
 
 These tests pin that contract: tenant-scoped queries must return sessions for
 both user principals and service-key principals in the queried tenant, and
@@ -21,6 +21,7 @@ import sqlalchemy as sa
 
 from eneo.database.tables.api_keys_v2_table import ApiKeysV2
 from eneo.database.tables.assistant_table import Assistants
+from eneo.database.tables.service_principals_table import ServicePrincipals
 from eneo.database.tables.sessions_table import Sessions
 from init_db import add_tenant_user
 
@@ -62,11 +63,22 @@ async def _insert_service_key(
 ) -> UUID:
     key_id = uuid4()
     suffix = secrets.token_hex(4)
+    service_principal_id = await session.scalar(
+        sa.insert(ServicePrincipals)
+        .values(
+            tenant_id=tenant_id,
+            display_name=f"svc-{suffix}",
+            scope_type="tenant",
+            created_by_user_id=creator_user_id,
+        )
+        .returning(ServicePrincipals.id)
+    )
     await session.execute(
         sa.insert(ApiKeysV2).values(
             id=key_id,
             tenant_id=tenant_id,
             ownership="service",
+            service_principal_id=service_principal_id,
             scope_type="tenant",
             permission="read",
             key_type="sk_",
@@ -96,6 +108,13 @@ async def _insert_session(
             id=session_id,
             name=name,
             user_id=user_id,
+            service_principal_id=(
+                None
+                if api_key_id is None
+                else sa.select(ApiKeysV2.service_principal_id)
+                .where(ApiKeysV2.id == api_key_id)
+                .scalar_subquery()
+            ),
             api_key_id=api_key_id,
             assistant_id=assistant_id,
         )
@@ -207,4 +226,69 @@ async def test_get_metadata_by_assistant_includes_service_key_sessions(
 
         assert s_user in ids
         assert s_svc in ids
+        assert total == 2
+
+
+async def test_a_service_principal_lists_the_conversations_of_all_its_keys(
+    db_container, admin_user
+):
+    async with db_container() as container:
+        db = container.session()
+        repo = container.session_repo()
+        assistant_id = await _insert_assistant(db, owner_user_id=admin_user.id)
+
+        first_key = await _insert_service_key(
+            db, tenant_id=admin_user.tenant_id, creator_user_id=admin_user.id
+        )
+        principal_id = await db.scalar(
+            sa.select(ApiKeysV2.service_principal_id).where(ApiKeysV2.id == first_key)
+        )
+        # A rotated key: a new key row for the same service principal.
+        rotated_key = uuid4()
+        await db.execute(
+            sa.insert(ApiKeysV2).values(
+                id=rotated_key,
+                tenant_id=admin_user.tenant_id,
+                ownership="service",
+                service_principal_id=principal_id,
+                rotated_from_key_id=first_key,
+                scope_type="tenant",
+                permission="read",
+                key_type="sk_",
+                key_hash=f"hash-{uuid4().hex}",
+                hash_version="argon2id-v1",
+                key_prefix="sk_rotated",
+                key_suffix="abcd",
+                name="svc-rotated",
+                state="active",
+                created_by_user_id=admin_user.id,
+            )
+        )
+        other_key = await _insert_service_key(
+            db, tenant_id=admin_user.tenant_id, creator_user_id=admin_user.id
+        )
+
+        before_rotation = await _insert_session(
+            db, name="before-rotation", api_key_id=first_key, assistant_id=assistant_id
+        )
+        after_rotation = await _insert_session(
+            db, name="after-rotation", api_key_id=rotated_key, assistant_id=assistant_id
+        )
+        another_principals = await _insert_session(
+            db, name="another-service", api_key_id=other_key, assistant_id=assistant_id
+        )
+        a_persons = await _insert_session(
+            db, name="a-person", user_id=admin_user.id, assistant_id=assistant_id
+        )
+        await db.flush()
+
+        rows, total = await repo.get_metadata_by_assistant(
+            assistant_id=assistant_id,
+            service_principal_id=principal_id,
+        )
+
+        ids = {row.id for row in rows}
+        assert ids == {before_rotation, after_rotation}
+        assert another_principals not in ids
+        assert a_persons not in ids
         assert total == 2

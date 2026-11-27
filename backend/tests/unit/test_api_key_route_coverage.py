@@ -735,7 +735,7 @@ class TestHighRiskExactRouteGuards:
         )
         assert route_is_session_only(route)
 
-    def test_files_routes_have_scope_resource_and_delete_scope_guards(self):
+    def test_files_routes_have_scope_and_resource_guards(self):
         list_route = _find_route_by_method_and_paths("GET", "/files/", "/files")
         post_route = _find_route_by_method_and_paths("POST", "/files/", "/files")
         detail_get_route = _find_route_by_method_and_paths(
@@ -757,10 +757,6 @@ class TestHighRiskExactRouteGuards:
             assert _route_has_dep_name(route, "_resource_permission_dep"), (
                 f"{label} missing _resource_permission_dep"
             )
-
-        assert _route_has_dep_name(detail_delete_route, "_stash"), (
-            "DELETE /files/{id}/ missing deferred file delete scope guard (_stash)"
-        )
 
     def test_prompts_route_has_scope_and_resource_permission_guard(self):
         route = _find_route_by_method_and_paths(
@@ -1210,10 +1206,9 @@ class TestScopeCheckPathParamSafety:
             "DELETE",
             "/files/{id}/",
         ): "Files are owner-scoped: file_service.delete_file() calls "
-        "repo.delete_by_owner_for_lifecycle("
-        "id, user_id=self.user.id, tenant_id=self.user.tenant_id). "
-        "The file delete scope guard "
-        "blocks service keys because files are user-owned.",
+        "repo.delete_by_owner_for_lifecycle(id, owner=self._owner()). "
+        "The owner is the signed-in person, or the service principal behind "
+        "a service key, so a key deletes only what its own principal owns.",
         (
             "POST",
             "/files/{id}/signed-url/",

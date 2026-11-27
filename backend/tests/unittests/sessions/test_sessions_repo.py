@@ -151,7 +151,7 @@ async def test_owned_message_partner_is_scoped_to_the_message_owner_and_tenant()
         message_id=message_id,
         tenant_id=tenant_id,
         user_id=user_id,
-        api_key_id=None,
+        service_principal_id=None,
     )
 
     assert partner == OwnedChatPartner(assistant_id)
@@ -161,15 +161,15 @@ async def test_owned_message_partner_is_scoped_to_the_message_owner_and_tenant()
     assert "questions.session_id =" in sql
     assert "questions.tenant_id =" in sql
     assert "sessions.user_id =" in sql
-    assert "sessions.api_key_id" not in sql
+    assert "sessions.service_principal_id" not in sql
     assert "help_assistant_runs" in sql
     assert {session_id, message_id, tenant_id, user_id}.issubset(
         set(compiled.params.values())
     )
 
 
-async def test_owned_message_partner_matches_a_service_key_principal():
-    api_key_id = uuid4()
+async def test_owned_message_partner_matches_a_service_principal_not_its_key():
+    service_principal_id = uuid4()
     repo, session = _repo_returning(None)
 
     partner = await repo.get_owned_message_partner(
@@ -177,14 +177,15 @@ async def test_owned_message_partner_matches_a_service_key_principal():
         message_id=uuid4(),
         tenant_id=uuid4(),
         user_id=None,
-        api_key_id=api_key_id,
+        service_principal_id=service_principal_id,
     )
 
     assert partner is None
     compiled = _compiled(session)
-    assert "sessions.api_key_id =" in str(compiled)
+    assert "sessions.service_principal_id =" in str(compiled)
+    assert "sessions.api_key_id" not in str(compiled)
     assert "sessions.user_id =" not in str(compiled)
-    assert api_key_id in compiled.params.values()
+    assert service_principal_id in compiled.params.values()
 
 
 async def test_a_request_without_a_principal_owns_no_message():
@@ -195,13 +196,13 @@ async def test_a_request_without_a_principal_owns_no_message():
         message_id=uuid4(),
         tenant_id=uuid4(),
         user_id=None,
-        api_key_id=None,
+        service_principal_id=None,
     )
 
     sql = str(_compiled(session))
     assert "false" in sql
     assert "sessions.user_id =" not in sql
-    assert "sessions.api_key_id =" not in sql
+    assert "sessions.service_principal_id =" not in sql
 
 
 async def test_set_message_feedback_upserts_only_an_owned_message():
@@ -213,6 +214,7 @@ async def test_set_message_feedback_upserts_only_an_owned_message():
         message_id=message_id,
         tenant_id=uuid4(),
         user_id=user_id,
+        service_principal_id=None,
         api_key_id=None,
         feedback=MessageFeedback(value=-1, text="Fel paragraf"),
     )
@@ -238,6 +240,7 @@ async def test_set_message_feedback_writes_nothing_for_a_foreign_message():
         message_id=uuid4(),
         tenant_id=uuid4(),
         user_id=uuid4(),
+        service_principal_id=None,
         api_key_id=None,
         feedback=MessageFeedback(value=1),
     )
@@ -255,7 +258,7 @@ async def test_delete_message_feedback_is_scoped_to_the_owner():
         message_id=message_id,
         tenant_id=uuid4(),
         user_id=user_id,
-        api_key_id=None,
+        service_principal_id=None,
     )
 
     compiled = _compiled(session)

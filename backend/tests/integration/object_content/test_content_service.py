@@ -268,7 +268,7 @@ async def test_single_upload_renews_before_head_and_cannot_be_reconciled(
                     mimetype=captured.verified_media_type,
                     file_type="text",
                     tenant_id=tenant_id,
-                    user_id=user_id,
+                    owner_user_id=user_id,
                     parent_file_id=None,
                 )
                 session.add(owner)
@@ -387,7 +387,7 @@ async def test_slow_multipart_part_keeps_its_lease_until_the_sdk_call_finishes(
                     mimetype=captured.verified_media_type,
                     file_type="text",
                     tenant_id=tenant_id,
-                    user_id=user_id,
+                    owner_user_id=user_id,
                     parent_file_id=None,
                 )
                 session.add(owner)
@@ -481,7 +481,7 @@ async def test_service_owns_real_upload_read_and_final_delete_lifecycle(
                 mimetype=captured.verified_media_type,
                 file_type="text",
                 tenant_id=tenant_id,
-                user_id=user_id,
+                owner_user_id=user_id,
                 parent_file_id=None,
             )
             session.add(owner)
@@ -624,7 +624,7 @@ async def test_batch_object_store_reads_use_one_source_query(
                     mimetype=captured.verified_media_type,
                     file_type="text",
                     tenant_id=tenant_id,
-                    user_id=user_id,
+                    owner_user_id=user_id,
                     parent_file_id=None,
                 )
                 session.add(owner)
@@ -722,7 +722,7 @@ async def test_service_rejects_replaced_bytes_before_response_and_marks_them_cor
                 mimetype="application/octet-stream",
                 file_type="text",
                 tenant_id=tenant_id,
-                user_id=user_id,
+                owner_user_id=user_id,
                 parent_file_id=None,
             )
             session.add(owner)
