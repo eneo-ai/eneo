@@ -113,6 +113,10 @@ class ErrorCodes(int, Enum):
     # A federated sign-in whose identity cannot be bound to the account its
     # email names (users.identity_binding_repo.IdentityConflictError).
     IDENTITY_CONFLICT = 9082
+    # A sign-in for MFA that the provider's answer does not meet, or that the
+    # organisation has set no rule for (authentication.oidc.errors).
+    OIDC_MFA_NOT_MET = 9083
+    OIDC_MFA_NOT_CONFIGURED = 9084
     # A conversation that holds content copied from a conversation that was
     # removed: the copy is no longer readable and is removed in turn.
     DERIVED_SOURCE_REMOVED = 9085

@@ -67,6 +67,9 @@ class OidcTransaction:
     channel: OidcChannel
     # S256 of the starting client's binding secret; None when unbound.
     binding_challenge: str | None
+    # A sign-in for MFA: an answer that does not meet the organisation's rule
+    # starts no session. One stored before this existed asked for none.
+    mfa_required: bool = False
 
     @classmethod
     def start(
@@ -81,6 +84,7 @@ class OidcTransaction:
         config_version: str | None,
         issuer: str,
         iss_parameter_supported: bool,
+        mfa_required: bool = False,
     ) -> "OidcTransaction":
         if channel == "browser" and binding_challenge is None:
             raise ValueError("A browser sign-in is always bound to its cookie.")
@@ -99,6 +103,7 @@ class OidcTransaction:
             iss_parameter_supported=iss_parameter_supported,
             channel=channel,
             binding_challenge=binding_challenge,
+            mfa_required=mfa_required,
         )
 
 

@@ -313,7 +313,7 @@ async def user_login_with_email_and_password(
     # ends every copy of it.
     return AccessToken(
         access_token=await container.browser_session_service().start(
-            user, auth_method=PASSWORD_AUTH_METHOD
+            user, auth_method=PASSWORD_AUTH_METHOD, mfa=False
         ),
         token_type="bearer",
     )

@@ -1,6 +1,6 @@
 ---
 title: Uppgraderingsanteckningar
-translationSource: guides/upgrade-notes.mdx@975cd4811b68
+translationSource: guides/upgrade-notes.mdx@2dfc982e9d0b
 ---
 
 import { Callout } from "nextra/components";
@@ -110,6 +110,7 @@ flowchart TB
 | SSO erbjuds bara med discovery-adress, klient-id och klienthemlighet | Alla | Ta bort `OIDC_*`-variabler som varningen nämner; lagra de tillåtna domänerna på leverantören om åtkomsttoken använder dem |
 | [Flyttskriptet tappade de tillåtna domänerna](#move-script-allowed-domains) | Körde flyttskriptet med `OIDC_ALLOWED_DOMAINS` satt | Kontrollera lagrade domäner |
 | [Administratörer kan ändra inloggningsinställningarna](#admins-change-sign-in-settings) | Lagrade inställningar | Granska administratörsrollen |
+| [En organisation kan ange vad som räknas som MFA](#mfa-on-the-session) | Lagrade inställningar; automation som ersätter dem med `PUT` | Ingenting; skicka `mfa` med `PUT` när en regel är satt |
 | SCIM-konton binds vid första inloggningen | SCIM-installationer | Inget |
 | Organisationslistan vid inloggning visar bara organisationer med lagrad leverantör | Installationer med flera organisationer | [Registrera](/guides/oidc-federation) saknade leverantörer |
 | Miljöinställningar ignorerar inställningar som är lagrade på organisationen; bara `{PUBLIC_ORIGIN}/login/callback` godtas; en inloggning som inte anger någon organisation använder den första aktiva organisationen | Miljöinställningar | Flytta lagrade värden in i Eneo vid behov ([OIDC-inställningar](/guides/oidc-federation)) |
@@ -278,6 +279,16 @@ Flyttskriptet till och med 2.3 lämnade de lagrade tillåtna domänerna tomma: i
 Med lagrade inställningar kan en organisations administratör ändra klient-id, klienthemlighet, tillåtna domäner och subjektsanspråk.
 
 **Gör:** granska vem som har administratörsrollen. Ett felaktigt värde stoppar inloggning via SSO; `/login?showUsernameAndPassword=true` finns kvar.
+
+### En organisation kan ange vad som räknas som MFA [#mfa-on-the-session]
+
+En administratör kan ange vilka värden i `acr` eller `amr` i leverantörens ID-token som betyder flerfaktorsautentisering. Varje session sparar sedan om inloggningen hade det. Ingenting kräver MFA än, och utan regel sparas varje session utan MFA. Se [Flerfaktorsautentisering](/guides/oidc-federation#multi-factor-authentication-mfa).
+
+Migrering `202611271000` lägger till en kolumn i `browser_sessions` och en i `spaces`, båda med ett fast standardvärde, så ingen rad skrivs om.
+
+**Gör:** ingenting vid uppgraderingen. När en regel är satt måste automation som ersätter inställningarna med `PUT` skicka `mfa`, annars tas regeln bort och organisationens alla sessioner förlorar MFA.
+
+**Återställning:** `alembic downgrade 202611201305` tar bort båda kolumnerna och vägras så länge något space kräver MFA. Regeln ligger kvar i de lagrade inställningarna och den tidigare versionen bortser från den.
 
 ### Att spara leverantörsinställningar kontrollerar det inloggningen kontrollerar [#provider-save-checks-sign-in]
 

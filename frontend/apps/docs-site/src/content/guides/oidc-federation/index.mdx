@@ -90,10 +90,12 @@ What Eneo expects from any OIDC provider on the generic sign-in (`/api/v1/auth/i
 - The ID token's signature against the provider's JWKS, using only the allowed algorithms (never `none` or a symmetric algorithm)
 - `iss` equals the issuer the sign-in started with. If the provider's issuer changes during a sign-in, that sign-in ends with `400` (`oidc_transaction_invalid`) before the code is sent anywhere. When the provider's discovery said at the start that it sends the `iss` parameter on its redirect ([RFC 9207](https://www.rfc-editor.org/rfc/rfc9207)), that parameter must be present and equal too; otherwise it may be missing, but one that is sent must be equal
 - `aud` contains Eneo's client ID; `azp`, when present, equals it, and it is required when `aud` names several clients
-- `exp`, `iat` and `sub` are present, the token has not expired, and `iat` and `auth_time` are not in the future (`oidc_clock_leeway_seconds`, default 120 seconds, allows for clock skew)
+- `exp`, `iat` and `sub` are present, the token has not expired, and `iat` is not in the future (`oidc_clock_leeway_seconds`, default 120 seconds, allows for clock skew)
 - `nonce` equals the one Eneo sent for this sign-in
 
 A response that fails any check ends the sign-in with `401` (`oidc_response_not_verified`); nothing falls back to a weaker check.
+
+`auth_time`, `acr` and `amr` say how the person signed in, not who they are, and never end a sign-in. One that Eneo cannot trust (the wrong form, or an `auth_time` in the future) counts as missing, and the backend log names it (`oidc_optional_claim_ignored`, with the claim and a reason, never its value).
 
 **Eneo's requests to the provider** (discovery, token and JWKS, when the provider is saved, tested and at sign-in) follow these rules, so neither a discovery document nor a stored setting can send the code and client secret elsewhere:
 
@@ -284,6 +286,82 @@ The three user routes answer `404` when the id names no account of your organisa
 - Before you change the client ID with a provider that issues a subject per client, open a migration window from the old pair to the new one; before you change the subject claim, one from each pair to itself.
 - An ordinary upgrade keeps everyone's current session. Rolling the session and binding migrations back and upgrading again gives every session a new id, so people sign in again. The rollback also drops every binding, migration window and re-binding allowance: after the next upgrade, each account is bound by its email on its next sign-in, as after the first upgrade.
 - There is no administration screen for bindings yet: use the API above.
+
+## Multi-Factor Authentication (MFA)
+
+The identity provider decides whether a person used a second factor and says so in the signed ID token. Eneo does not guess how: the organisation states which claim its provider uses and which values mean MFA. Eneo compares, and stores yes or no on the session when it is created. It keeps none of the claims and no MFA age: the session's lifetime bounds the answer, and the provider decides how often it asks for a factor.
+
+Nothing requires MFA yet. This is where the answer is recorded; a space that requires it comes in a later release.
+
+### The rule
+
+| Rule | A sign-in has MFA when |
+|------|------------------------|
+| `acr` | the token's `acr` is one of the rule's values |
+| `amr` | the token's `amr` contains every one of the rule's values; more methods do not matter |
+
+Prefer `acr`: the provider then decides which methods count, and Eneo compares one value. Where the provider cannot send a usable `acr`, name an `amr` value it sets only for MFA, such as `mfa` (RFC 8176), rather than a list of methods such as `pwd` and `otp`: a list makes the organisation decide which combination counts, which is the provider's judgement.
+
+Before you set a rule, sign in at a test installation once with MFA and once without, and compare the `acr` and `amr` the provider sends. A provider that sends the same value either way gives every session MFA, and one that never sends the value gives it to nobody.
+
+A missing claim means no MFA. So does a claim in a form Eneo cannot trust: it [counts as missing](#provider-contract) and never ends the sign-in. A password sign-in never has MFA.
+
+### Asking for MFA
+
+An `acr` rule can also say how Eneo asks the provider for MFA, by the rule's values, most wanted first:
+
+| `request` | Added to the authorization request |
+|-----------|------------------------------------|
+| `acr_values` | `acr_values=<the values, separated by spaces>` |
+| `claims` | `claims={"id_token":{"acr":{"essential":true,"values":[...]}}}` |
+| left out | nothing: for a provider that always requires MFA for Eneo's client |
+
+Eneo asks only when a person signs in for MFA, never at an ordinary sign-in. What the provider answers is still judged by the rule.
+
+### Setting the rule
+
+An administrator sets it under **Sign-in settings** in the administration of the React web app: the claim, its values and, for an `acr` rule, how Eneo asks. Before the change is saved, the confirmation says what it does to the people who are signed in. The Svelte web app shows the other sign-in settings but not the rule. The same change with `PATCH /api/v1/admin/federation`:
+
+```json
+{
+  "revision": "<from GET>",
+  "mfa": { "claim": "acr", "values": ["<the value your provider sends>"], "request": "acr_values" }
+}
+```
+
+`"mfa": null` removes the rule; leaving the field out keeps it. `GET` shows the rule as `mfa` and, as `session_has_mfa`, whether the caller's own session has MFA. The operator sets the same field with `PUT` or `PATCH` on `/api/v1/sysadmin/tenants/{tenant_id}/federation`; a `PUT` writes the whole configuration, so a `PUT` without `mfa` stores no rule. What is not a rule answers `422`: no values, an empty or repeated value, a value with a space, another claim, or `request` with an `amr` rule. Configuration by environment variables has no rule.
+
+The first rule needs only the administrator permission. Once a rule is set, changing or removing it, or changing what it trusts (the client ID or the subject claim), needs a session with MFA under the current rule; otherwise the answer is `403` (`federation_mfa_required`). The permission alone must not relax the rule to reach what the administrator cannot reach today. The label, the secret, the allowed domains, the order of the values and how Eneo asks do not need it. The React web app says so on the form and offers the sign-in with MFA from there. The Svelte web app has no sign-in for MFA: there, a change of the client ID under a rule is refused with its general save error.
+
+### When the rule changes
+
+When the rule changes, or the issuer, the discovery endpoint, the client ID or the subject claim does, every session of the organisation loses MFA in the same transaction, the administrator's own included. Nobody is signed out. People sign in with MFA again to reach what requires it. The change is audited as `federation_updated` with the number of sessions that lost MFA (`sessions_lost_mfa`). A sign-in that finishes while the settings change gets a session without MFA.
+
+### When nobody can meet the rule
+
+A wrong rule, or a provider that cannot give MFA, leaves no session able to change the rule. The operator's route uses the installation's own key and no session, so it stays as the way to repair or remove it:
+
+```bash
+curl -X PATCH "$ENEO_URL/api/v1/sysadmin/tenants/$TENANT_ID/federation" \
+  -H "X-API-Key: $ENEO_SUPER_API_KEY" -H "Content-Type: application/json" \
+  -d '{"mfa": null}'
+```
+
+It takes the same lock as any other change, and the organisation's sessions lose MFA in the same way.
+
+### Signing in for MFA
+
+A person whose session lacks MFA signs in again, with the organisation's request added: the React web app sends the browser to `GET /api/v1/auth/browser/initiate?next=<path>&mfa=true`. No organisation has to be named there: without `tenant`, the sign-in is made at the organisation of the session the browser holds. An ordinary sign-in still names its organisation.
+
+A client that keeps the token sends `mfa=true` on `GET /api/v1/auth/initiate`, with `tenant` as for any sign-in, and replaces the token it holds with the new one itself.
+
+| The provider's answer | What happens |
+|-----------------------|--------------|
+| Meets the rule | A new session with MFA replaces the one the browser held, and the person returns to `next` |
+| Does not meet the rule | No new session; the one the person had stays as it was. The page they end on says so and offers to try again or go back; it starts no sign-in by itself and does not send them on, so a provider that keeps answering without MFA cannot loop. The API answers `403` with `code` `mfa_not_met` (`eneo_error_code` 9083) |
+| The organisation has no rule | The sign-in does not start: `409` with `code` `mfa_not_configured` (`eneo_error_code` 9084) |
+
+A session's answer never changes from no to yes, so a token made from the earlier session, for a module or a tool, gains nothing when the person signs in again.
 
 ---
 

@@ -5888,5 +5888,7 @@
   "federation_admin_jit_on": "New accounts are created at first sign-in: people in these domains without an account get one if their email address is verified.",
   "federation_admin_jit_off": "New accounts are not created at first sign-in: only people who already have an account can sign in.",
   "federation_admin_jit_no_domains": "New accounts are not created while the list is empty: only people who already have an account can sign in. Add domains to create accounts at first sign-in.",
-  "federation_admin_jit_link": "Change under {setting}"
+  "federation_admin_jit_link": "Change under {setting}",
+  "eneo_error_9083": "The sign-in was made without multi-factor authentication.",
+  "eneo_error_9084": "The organisation has not set what counts as multi-factor authentication."
 }

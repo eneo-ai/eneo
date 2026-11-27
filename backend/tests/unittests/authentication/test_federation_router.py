@@ -162,6 +162,7 @@ class _SessionsHandBack:
         user: UserInDB,
         *,
         auth_method: str | None,
+        mfa: bool,  # noqa: ARG002
         replacing: str | None = None,  # noqa: ARG002
     ) -> str:
         return self.auth_service.create_access_token_for_user(

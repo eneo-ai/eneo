@@ -105,6 +105,7 @@ flowchart TB
 | SSO is offered only with a discovery URL, client ID and client secret | Everyone | Remove `OIDC_*` variables the warning names; store the allowed domains on the provider if access tokens use them |
 | [The move script dropped the allowed domains](#move-script-allowed-domains) | Ran the move script with `OIDC_ALLOWED_DOMAINS` set | Check stored domains |
 | [Administrators can change the sign-in settings](#admins-change-sign-in-settings) | Stored settings | Review the administrator role |
+| [An organisation can say what counts as MFA](#mfa-on-the-session) | Stored settings; automation that replaces them with `PUT` | Nothing; send `mfa` with `PUT` once a rule is set |
 | SCIM accounts are bound at first sign-in | SCIM installations | Nothing |
 | The login tenant list shows only tenants with a stored provider | Multi-tenant installations | [Register](/guides/oidc-federation) missing providers |
 | Environment settings ignore settings stored on the organization; only `{PUBLIC_ORIGIN}/login/callback` is accepted; a sign-in that names no organization uses the first active tenant | Environment settings | Move stored values into Eneo if needed ([OIDC settings](/guides/oidc-federation)) |
@@ -273,6 +274,16 @@ The move script up to 2.3 left the stored allowed domains empty: no domain check
 With stored settings, an organisation's administrator can change client ID, client secret, allowed domains and subject claim.
 
 **Do:** review who holds the administrator role. A wrong value stops single sign-on; `/login?showUsernameAndPassword=true` stays available.
+
+### An organisation can say what counts as MFA [#mfa-on-the-session]
+
+An administrator can set which `acr` or `amr` values in the provider's ID token mean multi-factor authentication. Each session then records whether its sign-in had it. Nothing requires MFA yet, and without a rule every session is recorded without it. See [Multi-Factor Authentication](/guides/oidc-federation#multi-factor-authentication-mfa).
+
+Migration `202611271000` adds one column to `browser_sessions` and one to `spaces`, both with a constant default, so no row is rewritten.
+
+**Do:** nothing at the upgrade. Once a rule is set, automation that replaces the settings with `PUT` must send `mfa`, or the rule is removed and every session of the organisation loses MFA.
+
+**Rollback:** `alembic downgrade 202611201305` removes both columns and is refused while a space requires MFA. The rule stays in the stored settings and the earlier release ignores it.
 
 ### Saving provider settings checks what sign-in checks [#provider-save-checks-sign-in]
 

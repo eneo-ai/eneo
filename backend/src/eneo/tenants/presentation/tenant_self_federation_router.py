@@ -3,8 +3,8 @@
 Interactive sessions only (an API key is refused with session_auth_required) and
 only the caller's tenant: there is no tenant in the path or the body. The
 operator registers the IdP through the super-key routes; this door edits the
-label, client ID, secret and allowed domains. TenantFederationService owns the
-rules, the lock and the always-on audit.
+label, client ID, secret, allowed domains, subject claim and the MFA rule.
+TenantFederationService owns the rules, the lock and the always-on audit.
 """
 
 from typing import Annotated
@@ -63,7 +63,7 @@ _REASON = (
 async def get_federation(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ) -> TenantFederationAdminView:
-    return container.tenant_federation_service().admin_view(container.user().tenant)
+    return await container.tenant_federation_service().admin_view(container.user())
 
 
 @router.patch(
@@ -71,8 +71,12 @@ async def get_federation(
     response_model=TenantFederationAdminView,
     summary="Change the organisation's sign-in settings",
     description=(
-        "Change the label, client ID, client secret, subject claim or allowed "
-        "email domains of the registered identity provider. Send the revision "
+        "Change the label, client ID, client secret, subject claim, allowed "
+        "email domains or MFA rule of the registered identity provider. Once a "
+        "rule is set, changing or removing it, or changing the client ID or the "
+        "subject claim, needs a session started with MFA under that rule (403 "
+        "`federation_mfa_required`), and takes MFA from every session of the "
+        "organisation. Send the revision "
         "from GET; a save against an older revision is refused with 409. "
         "Operator-owned fields are refused with 422. Every change is audited. "
         "A new client ID gives every person a new issuer and audience pair: "

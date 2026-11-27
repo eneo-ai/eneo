@@ -24,6 +24,7 @@ from eneo.main.container.container import Container
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 from eneo.tenants.tenant_federation_service import (
+    MfaRuleSetting,
     PatchFederationRequest,
     SetFederationRequest,
     stored_subject_claim,
@@ -90,6 +91,10 @@ class FederationInfo(BaseModel):
     email_verified_claims: list[str] | None = None
     subject_claim: str = Field(
         default="sub", description="The token claim an account is bound to"
+    )
+    mfa: MfaRuleSetting | None = Field(
+        default=None,
+        description="What counts as MFA at the identity provider; null when not set",
     )
     configured_at: datetime
     encryption_status: Literal["encrypted", "plaintext"]
@@ -267,6 +272,7 @@ async def get_tenant_federation(
         signing_algorithms=metadata.get("signing_algorithms"),
         email_verified_claims=metadata.get("email_verified_claims"),
         subject_claim=stored_subject_claim(tenant.federation_config),
+        mfa=MfaRuleSetting.of(tenant.federation_config),
         configured_at=configured_at,
         encryption_status=metadata["encryption_status"],
     )

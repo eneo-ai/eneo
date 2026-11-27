@@ -535,6 +535,7 @@ async def test_moving_global_oidc_into_eneo_keeps_its_domain_policy(
                 tenant_repo=tenant_repo,
                 encryption_service=encryption,
                 audit_service=AsyncMock(),
+                sessions=AsyncMock(),
             ),
             settings=settings,
         ).migrate_env_oidc_to_tenant_federation()

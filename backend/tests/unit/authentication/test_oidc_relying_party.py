@@ -8,6 +8,7 @@ never retried through a weaker path.
 
 import asyncio
 import json
+import logging
 import secrets
 import time
 from datetime import datetime, timezone
@@ -20,11 +21,12 @@ import pytest
 from fastapi import HTTPException
 
 from eneo.audit.domain.action_types import ActionType
-from eneo.authentication import federation_router
+from eneo.authentication import auth_service, federation_router
 from eneo.authentication.auth_models import FederatedIdentity
 from eneo.authentication.federation_router import CallbackRequest
 from eneo.authentication.oidc import profile as oidc_profile
 from eneo.authentication.oidc import transaction as oidc_transaction
+from eneo.authentication.oidc import verification as oidc_verification
 from eneo.authentication.oidc.authorization import build_authorization_request
 from eneo.authentication.oidc.errors import (
     OidcLoginUnavailableError,
@@ -205,14 +207,6 @@ async def test_a_provider_that_ignores_pkce_still_signs_in(monkeypatch):
         pytest.param(
             FakeOidcProvider(token_claims={"iat": NOW + 600}), id="future-iat"
         ),
-        pytest.param(
-            FakeOidcProvider(token_claims={"auth_time": NOW + 600}),
-            id="future-auth-time",
-        ),
-        pytest.param(FakeOidcProvider(token_claims={"acr": 2}), id="acr-not-text"),
-        pytest.param(
-            FakeOidcProvider(token_claims={"amr": "pwd"}), id="amr-not-a-list"
-        ),
         pytest.param(FakeOidcProvider(token_claims={"sub": DROP}), id="missing-sub"),
     ],
 )
@@ -254,6 +248,119 @@ async def test_an_id_token_without_an_optional_claim_signs_in(monkeypatch, claim
     assert login.signed_in_user(await login.sign_in())
     (id_token,) = provider.id_tokens
     assert claim not in jwt.decode(id_token, options={"verify_signature": False})
+
+
+# How the person signed in, in each form a provider can get it wrong.
+UNTRUSTED_OPTIONAL_CLAIMS = [
+    pytest.param("acr", 2, id="acr-a-number"),
+    pytest.param("acr", ["level-2"], id="acr-a-list"),
+    pytest.param("acr", "", id="acr-empty"),
+    pytest.param("amr", "pwd", id="amr-text"),
+    pytest.param("amr", {"pwd": True}, id="amr-an-object"),
+    pytest.param("amr", ["pwd", 2], id="amr-with-an-entry-that-is-not-text"),
+    pytest.param("auth_time", "2026-01-01T00:00:00Z", id="auth-time-text"),
+    pytest.param("auth_time", True, id="auth-time-true"),
+    pytest.param("auth_time", float("nan"), id="auth-time-nan"),
+    pytest.param("auth_time", float("inf"), id="auth-time-infinite"),
+    pytest.param("auth_time", -1, id="auth-time-negative"),
+    pytest.param("auth_time", NOW + 600, id="auth-time-in-the-future"),
+]
+
+
+@pytest.mark.parametrize(("claim", "value"), UNTRUSTED_OPTIONAL_CLAIMS)
+async def test_an_optional_claim_that_cannot_be_trusted_does_not_stop_the_sign_in(
+    monkeypatch, claim, value
+):
+    provider = FakeOidcProvider(token_claims={claim: value})
+    login = Login(monkeypatch, provider, existing_email="user@example.com")
+
+    assert login.signed_in_user(await login.sign_in())
+    assert _token_posts(provider) == 1
+
+
+@pytest.mark.parametrize(("claim", "value"), UNTRUSTED_OPTIONAL_CLAIMS)
+async def test_an_optional_claim_that_cannot_be_trusted_counts_as_missing(
+    monkeypatch, claim, value
+):
+    provider = FakeOidcProvider(
+        token_claims={"acr": "level-2", "amr": ["pwd", "otp"]} | {claim: value}
+    )
+
+    verified = await _verified(monkeypatch, provider)
+
+    # The other two are kept as the provider stated them.
+    assert {
+        "acr": verified.acr,
+        "amr": verified.amr,
+        "auth_time": verified.auth_time,
+    } == {
+        "acr": "level-2",
+        "amr": ("pwd", "otp"),
+        "auth_time": provider.session_auth_time,
+    } | {claim: None}
+    assert claim not in verified.claims
+
+
+async def test_an_empty_list_of_methods_is_a_statement_of_its_own(monkeypatch):
+    verified = await _verified(monkeypatch, FakeOidcProvider(token_claims={"amr": []}))
+
+    assert verified.amr == ()
+
+
+@pytest.fixture
+def sign_in_log(caplog: pytest.LogCaptureFixture):
+    """Everything the sign-in logs, at every level, with its extra fields."""
+    # SimpleLogger does not propagate to the root logger caplog listens on.
+    loggers = [
+        module.logger for module in (auth_service, federation_router, oidc_verification)
+    ]
+    levels = [logger.level for logger in loggers]
+    for logger in loggers:
+        logger.addHandler(caplog.handler)
+        logger.setLevel(logging.DEBUG)
+    try:
+        yield lambda: [repr(vars(record)) for record in caplog.records]
+    finally:
+        for logger, level in zip(loggers, levels, strict=True):
+            logger.removeHandler(caplog.handler)
+            logger.setLevel(level)
+
+
+async def test_an_ignored_claim_is_logged_by_name_and_never_by_value(
+    monkeypatch, sign_in_log
+):
+    provider = FakeOidcProvider(token_claims={"amr": "method-7f3a"})
+    login = Login(monkeypatch, provider, existing_email="user@example.com")
+
+    await login.sign_in()
+
+    [ignored] = [
+        line for line in sign_in_log() if "oidc_optional_claim_ignored" in line
+    ]
+    assert "'claim': 'amr'" in ignored and "'reason': 'not_a_list'" in ignored
+    assert not [line for line in sign_in_log() if "method-7f3a" in line]
+
+
+async def test_a_claim_eneo_does_not_use_is_neither_kept_nor_logged(
+    monkeypatch, sign_in_log
+):
+    provider = FakeOidcProvider(token_claims={"clearance": "level-7f3a"})
+    login = Login(monkeypatch, provider)
+
+    result = await login.sign_in(email="new.person@example.com")
+
+    session = jwt.decode(result["access_token"], options={"verify_signature": False})
+    assert login.users._created_user is not None
+    kept = [
+        repr(result),
+        repr(session),
+        repr(login.users._created_user),
+        repr(login.audit.logged_events),
+        repr(login.redis._store),
+        *sign_in_log(),
+    ]
+    assert sign_in_log()
+    assert not [text for text in kept if "clearance" in text or "level-7f3a" in text]
 
 
 class TestIssuerParameter:
@@ -382,8 +489,8 @@ class TestIssuerBoundAtInitiate:
         assert login.audit.logged_events == []
 
 
-async def test_the_verified_authentication_carries_the_provider_facts(monkeypatch):
-    provider = FakeOidcProvider(token_claims={"acr": "level-2", "amr": ["pwd", "otp"]})
+async def _verified(monkeypatch, provider: FakeOidcProvider):
+    """What one answer from the provider verifies to."""
     install(monkeypatch, provider)
     profile = await load_profile(
         provider.federation_config(), discovery_ttl_seconds=3600
@@ -402,14 +509,19 @@ async def test_the_verified_authentication_carries_the_provider_facts(monkeypatc
     answer = provider.authorize(
         build_authorization_request(profile, transaction, state="state")
     )
-
-    verified = await verify_response(
+    return await verify_response(
         profile,
         transaction,
         CallbackResponse(code=answer.code),
         jwks_ttl_seconds=3600,
         correlation_id="facts",
     )
+
+
+async def test_the_verified_authentication_carries_the_provider_facts(monkeypatch):
+    provider = FakeOidcProvider(token_claims={"acr": "level-2", "amr": ["pwd", "otp"]})
+
+    verified = await _verified(monkeypatch, provider)
 
     assert (verified.issuer, verified.client_id, verified.subject) == (
         provider.issuer,

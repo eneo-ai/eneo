@@ -46,3 +46,31 @@ class OidcResponseNotVerifiedError(OidcSignInError):
 
     def __init__(self, message: str = "The sign-in response could not be verified."):
         super().__init__(message)
+
+
+class OidcMfaNotMetError(OidcSignInError):
+    """A sign-in for MFA whose answer does not meet the organisation's rule
+    (403). No session is started, and the one the person had stays as it was."""
+
+    code = "mfa_not_met"
+
+    def __init__(
+        self,
+        message: str = "The sign-in did not use multi-factor authentication.",
+    ):
+        super().__init__(message)
+
+
+class OidcMfaNotConfiguredError(OidcSignInError):
+    """A sign-in for MFA in an organisation that has not said what counts as
+    MFA at its identity provider (409)."""
+
+    code = "mfa_not_configured"
+
+    def __init__(
+        self,
+        message: str = (
+            "The organisation has not set what counts as multi-factor authentication."
+        ),
+    ):
+        super().__init__(message)

@@ -1,12 +1,18 @@
 """Turn the provider's authorization response into one verified authentication.
 
-Every check of the response refuses with ``OidcResponseNotVerifiedError``, and
+Every check of who signed in refuses with ``OidcResponseNotVerifiedError``, and
 a sign-in whose provider changed after it started with
 ``OidcTransactionInvalidError``; nothing here falls back to a weaker check
 when a stronger one fails.
+
+``acr``, ``amr`` and ``auth_time`` say how the person signed in, not who they
+are. One that cannot be trusted counts as missing and the sign-in goes on: a
+provider that changes their form must not lock everyone out, and whoever reads
+them later reads "not stated".
 """
 
 import base64
+import math
 import re
 import secrets
 import time
@@ -155,13 +161,58 @@ async def _exchange_code(
     return body or {}
 
 
-def _optional_number(claims: Mapping[str, object], name: str) -> int | float | None:
-    value = claims.get(name)
+def _ignore(claim: str, reason: str, correlation_id: str) -> None:
+    # Never the value: what a provider puts in a claim Eneo could not read is
+    # not Eneo's to log.
+    logger.warning(
+        "oidc_optional_claim_ignored",
+        extra={"claim": claim, "reason": reason, "correlation_id": correlation_id},
+    )
+
+
+def _acr(claims: Mapping[str, object], correlation_id: str) -> str | None:
+    value = claims.get("acr")
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        _ignore("acr", "not_text", correlation_id)
+        return None
+    if not value:
+        _ignore("acr", "empty", correlation_id)
+        return None
+    return value
+
+
+def _amr(claims: Mapping[str, object], correlation_id: str) -> tuple[str, ...] | None:
+    value = claims.get("amr")
+    if value is None:
+        return None
+    if not isinstance(value, list):
+        _ignore("amr", "not_a_list", correlation_id)
+        return None
+    methods = cast(list[object], value)
+    # All or nothing: half a list would state methods the provider did not.
+    if not all(isinstance(method, str) for method in methods):
+        _ignore("amr", "not_a_list_of_text", correlation_id)
+        return None
+    return tuple(cast(list[str], methods))
+
+
+def _auth_time(claims: Mapping[str, object], correlation_id: str) -> int | None:
+    value = claims.get("auth_time")
     if value is None:
         return None
     if isinstance(value, bool) or not isinstance(value, int | float):
-        raise ValueError(name)
-    return value
+        _ignore("auth_time", "not_a_number", correlation_id)
+        return None
+    # A float can be NaN or infinite, which PyJWT's JSON parser accepts.
+    if not math.isfinite(value) or value < 0:
+        _ignore("auth_time", "not_a_time", correlation_id)
+        return None
+    if value > time.time() + (OIDC_CLOCK_LEEWAY_SECONDS or 0):
+        _ignore("auth_time", "in_the_future", correlation_id)
+        return None
+    return int(value)
 
 
 async def verify_response(
@@ -269,24 +320,13 @@ async def verify_response(
     if not isinstance(subject, str) or not subject:
         raise _refuse("subject_missing", correlation_id)
 
-    try:
-        auth_time = _optional_number(claims, "auth_time")
-    except ValueError:
-        raise _refuse("auth_time_invalid", correlation_id) from None
-    if auth_time is not None and auth_time > time.time() + (
-        OIDC_CLOCK_LEEWAY_SECONDS or 0
-    ):
-        raise _refuse("auth_time_in_future", correlation_id)
-
-    acr = claims.get("acr")
-    if acr is not None and not isinstance(acr, str):
-        raise _refuse("acr_invalid", correlation_id)
-    amr = claims.get("amr")
-    if amr is not None and not (
-        isinstance(amr, list)
-        and all(isinstance(method, str) for method in cast(list[object], amr))
-    ):
-        raise _refuse("amr_invalid", correlation_id)
+    acr = _acr(claims, correlation_id)
+    amr = _amr(claims, correlation_id)
+    auth_time = _auth_time(claims, correlation_id)
+    # An ignored value leaves the claims too, so nothing reads it from there.
+    for name, kept in (("acr", acr), ("amr", amr), ("auth_time", auth_time)):
+        if kept is None:
+            claims.pop(name, None)
 
     return VerifiedAuthentication(
         issuer=transaction.issuer,
@@ -294,8 +334,8 @@ async def verify_response(
         subject=subject,
         claims=claims,
         acr=acr,
-        amr=tuple(cast(list[str], amr)) if amr is not None else None,
-        auth_time=int(auth_time) if auth_time is not None else None,
+        amr=amr,
+        auth_time=auth_time,
         email_claim=profile.email_claim,
         subject_claim=profile.subject_claim,
         email_verified_claims=profile.email_verified_claims,

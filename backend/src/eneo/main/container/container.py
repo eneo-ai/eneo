@@ -939,13 +939,6 @@ class Container(containers.DeclarativeContainer):
         audit_config_service=audit_config_service,
         feature_flag_service=feature_flag_service,
     )
-    tenant_federation_service = providers.Factory(
-        TenantFederationService,
-        tenant_repo=tenant_repo,
-        encryption_service=encryption_service,
-        audit_service=audit_service,
-    )
-
     # Completion model adapters
     context_builder = providers.Factory(ContextBuilder)
     completion_service = providers.Factory(
@@ -1067,6 +1060,13 @@ class Container(containers.DeclarativeContainer):
         session=session,
         auth_service=auth_service,
         audit_service=audit_service,
+    )
+    tenant_federation_service = providers.Factory(
+        TenantFederationService,
+        tenant_repo=tenant_repo,
+        encryption_service=encryption_service,
+        audit_service=audit_service,
+        sessions=browser_session_service,
     )
     scim_token_repository = providers.Factory(
         ScimTokenRepository,

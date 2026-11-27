@@ -8,7 +8,8 @@ Bearer token, is pinned in test_browser_session_router.py.
 
 import hashlib
 from datetime import datetime, timezone
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import AsyncMock
 from urllib.parse import parse_qs, urlsplit
 from uuid import uuid4
@@ -22,6 +23,8 @@ from eneo.authentication import federation_router
 from eneo.authentication.auth_service import AuthService
 from eneo.authentication.browser_session_service import BrowserSessionService
 from eneo.authentication.federation_router import CallbackRequest
+from eneo.authentication.oidc.authorization import build_authorization_request
+from eneo.authentication.oidc.transaction import OidcTransaction
 from eneo.settings.encryption_service import EncryptionService
 from eneo.tenants.tenant import TenantInDB, TenantState
 from eneo.users.user import UserInDB
@@ -224,9 +227,13 @@ async def test_the_callback_route_hands_out_a_session_and_the_frontend_state(
         CallbackRequest(code=answer.code, state=started.state), login.container
     )
 
-    # A provider sign-in starts a session that is no password session.
+    # A provider sign-in starts a session that is no password session, and
+    # without MFA while the organisation has stated no rule.
     [(user,), started_with] = sessions.start.await_args
-    assert (user.email, started_with) == ("user@example.com", {"auth_method": None})
+    assert (user.email, started_with) == (
+        "user@example.com",
+        {"auth_method": None, "mfa": False},
+    )
     assert result == {
         "access_token": "session-token",
         "frontend_state": '{"next":"/spaces"}',
@@ -244,6 +251,37 @@ async def test_the_authorization_request_keeps_its_parameters(monkeypatch):
     assert query["redirect_uri"] == [REDIRECT_URI]
     assert query["scope"] == ["openid email profile"]
     assert query["state"] == [started.state]
+
+
+def test_what_a_sign_in_for_mfa_asks_never_replaces_a_request_parameter():
+    profile = SimpleNamespace(
+        client_id="eneo-client",
+        scopes=("openid",),
+        authorization_endpoint="https://idp.example/authorize",
+    )
+    transaction = OidcTransaction.start(
+        "login",
+        channel="api",
+        binding_challenge=None,
+        redirect_uri=REDIRECT_URI,
+        tenant_id="tenant",
+        tenant_slug="example",
+        config_version=None,
+        issuer="https://idp.example",
+        iss_parameter_supported=False,
+        mfa_required=True,
+    )
+
+    url = build_authorization_request(
+        cast(Any, profile),
+        transaction,
+        state="state",
+        asking_for={"acr_values": "level-2", "state": "another", "scope": "all"},
+    )
+
+    query = parse_qs(urlsplit(url).query)
+    assert query["acr_values"] == ["level-2"]
+    assert (query["state"], query["scope"]) == (["state"], ["openid"])
 
 
 async def test_browser_login_sets_the_session_cookie(monkeypatch):
@@ -273,6 +311,7 @@ async def test_browser_login_sets_the_session_cookie(monkeypatch):
     sessions.start.side_effect = (
         lambda user,
         auth_method,
+        mfa,
         replacing=None: AuthService().create_access_token_for_user(
             user, auth_method=auth_method
         )

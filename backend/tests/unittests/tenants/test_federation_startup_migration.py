@@ -83,6 +83,7 @@ def _make_service(*, settings=None, tenant=None, encryption_service=None):
             tenant_repo=tenant_repo,
             encryption_service=encryption_service,
             audit_service=audit_service,
+            sessions=AsyncMock(),
         ),
         settings=settings or MockSettings(),
     )

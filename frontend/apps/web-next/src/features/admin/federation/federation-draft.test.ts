@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 import type { FederationView } from "./federation";
 import {
   changedFields,
+  changesMfaTrust,
   consequences,
   domainChange,
   draftFromView,
+  draftRule,
+  MFA_VALUES_MAX,
   parseDomains,
   toPatch,
   validate,
@@ -40,7 +43,10 @@ describe("draftFromView", () => {
       provider: "Entra ID",
       clientId: "eneo-client",
       domains: "sundsvall.se\nexample.se",
-      secret: null
+      secret: null,
+      mfaClaim: "",
+      mfaValues: "",
+      mfaRequest: ""
     });
   });
 });
@@ -178,5 +184,100 @@ describe("what a save does to sign-in", () => {
     expect(changedFields(listed, next)).toEqual(["allowed_domains"]);
     expect(domainChange(listed, next)).toEqual({ added: [], removed: [] });
     expect(consequences(listed, next)).toEqual([]);
+  });
+});
+
+describe("the MFA rule", () => {
+  const ruled: FederationView = {
+    ...view,
+    mfa: { claim: "acr", values: ["level-3", "level-2"], request: "acr_values" }
+  };
+  const draft = (changes: Partial<FederationDraft>): FederationDraft => ({
+    ...draftFromView(ruled),
+    ...changes
+  });
+
+  it("starts from the stored rule and sends nothing while it is untouched", () => {
+    expect(draftFromView(ruled)).toMatchObject({
+      mfaClaim: "acr",
+      mfaValues: "level-3\nlevel-2",
+      mfaRequest: "acr_values"
+    });
+    expect(changedFields(ruled, draftFromView(ruled))).toEqual([]);
+    expect(toPatch(ruled, draftFromView(ruled))).toEqual({ revision: "rev-1" });
+  });
+
+  it("reads the values as typed, each once and in order", () => {
+    expect(draftRule(draft({ mfaValues: " level-3, level-2\n\nlevel-3 " }))).toEqual({
+      claim: "acr",
+      values: ["level-3", "level-2"],
+      request: "acr_values"
+    });
+  });
+
+  it("sends the first rule, and null to remove one", () => {
+    const first = edit({ mfaClaim: "amr", mfaValues: "mfa" });
+    expect(changedFields(view, first)).toEqual(["mfa"]);
+    expect(toPatch(view, first)).toEqual({
+      revision: "rev-1",
+      mfa: { claim: "amr", values: ["mfa"] }
+    });
+    expect(toPatch(ruled, draft({ mfaClaim: "" }))).toEqual({ revision: "rev-1", mfa: null });
+  });
+
+  it("asks only by an acr rule", () => {
+    expect(draftRule(draft({ mfaClaim: "amr" }))).toEqual({
+      claim: "amr",
+      values: ["level-3", "level-2"]
+    });
+  });
+
+  it("needs at least one value, and no more than the backend takes", () => {
+    expect(validate(draft({ mfaValues: " \n" })).mfa).toEqual({
+      key: "federation_admin_mfa_values_required"
+    });
+    const many = Array.from({ length: MFA_VALUES_MAX + 1 }, (_, index) => `v${index}`).join("\n");
+    expect(validate(draft({ mfaValues: many })).mfa).toEqual({
+      key: "federation_admin_mfa_values_too_many",
+      values: { max: MFA_VALUES_MAX }
+    });
+    expect(validate(draft({ mfaClaim: "", mfaValues: "" })).mfa).toBeUndefined();
+  });
+
+  it("a first rule tells that open sessions have no MFA", () => {
+    const first = edit({ mfaClaim: "acr", mfaValues: "level-2" });
+    expect(changesMfaTrust(view, first)).toBe(false);
+    expect(consequences(view, first)).toEqual([{ code: "mfa_first" }]);
+  });
+
+  it("a change of what the rule accepts, or of the client ID, takes MFA from every session", () => {
+    for (const changes of [
+      { mfaValues: "level-2" },
+      { mfaClaim: "amr" as const },
+      { mfaClaim: "" as const }
+    ]) {
+      expect(changesMfaTrust(ruled, draft(changes))).toBe(true);
+      expect(consequences(ruled, draft(changes))).toEqual([{ code: "mfa_sessions" }]);
+    }
+    expect(consequences(ruled, draft({ clientId: "another-client" }))).toEqual([
+      { code: "client_id" },
+      { code: "mfa_sessions" }
+    ]);
+    // Without a rule no session has MFA to lose.
+    expect(consequences(view, edit({ clientId: "another-client" }))).toEqual([
+      { code: "client_id" }
+    ]);
+  });
+
+  it("the order of the values and how Eneo asks leave the sessions as they are", () => {
+    for (const changes of [
+      { mfaValues: "level-2\nlevel-3" },
+      { mfaRequest: "claims" as const },
+      { mfaRequest: "" as const }
+    ]) {
+      expect(changedFields(ruled, draft(changes))).toEqual(["mfa"]);
+      expect(changesMfaTrust(ruled, draft(changes))).toBe(false);
+      expect(consequences(ruled, draft(changes))).toEqual([]);
+    }
   });
 });

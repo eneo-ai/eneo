@@ -5888,5 +5888,7 @@
   "federation_admin_jit_on": "Nya konton skapas vid första inloggningen: personer i domänerna som saknar konto får ett om e-postadressen är verifierad.",
   "federation_admin_jit_off": "Nya konton skapas inte vid första inloggningen: bara personer som redan har ett konto kan logga in.",
   "federation_admin_jit_no_domains": "Nya konton skapas inte så länge listan är tom: bara personer som redan har ett konto kan logga in. Lägg till domäner för att skapa konton vid första inloggningen.",
-  "federation_admin_jit_link": "Ändra under {setting}"
+  "federation_admin_jit_link": "Ändra under {setting}",
+  "eneo_error_9083": "Inloggningen gjordes utan flerfaktorsautentisering.",
+  "eneo_error_9084": "Organisationen har inte angett vad som räknas som flerfaktorsautentisering."
 }

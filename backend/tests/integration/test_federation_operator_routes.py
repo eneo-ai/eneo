@@ -145,6 +145,8 @@ async def test_put_get_patch_test_delete_answer_as_before(
         "signing_algorithms": None,
         "email_verified_claims": None,
         "subject_claim": "sub",
+        # No rule for what counts as MFA until one is set.
+        "mfa": None,
         "encryption_status": "encrypted",
     }
 
@@ -214,6 +216,41 @@ async def test_optional_provider_keys_round_trip(
     get = await client.get(url, headers=headers)
     assert get.json()["signing_algorithms"] == ["PS256"]
     assert get.json()["email_verified_claims"] is None
+
+
+async def test_the_mfa_rule_is_set_by_put_and_gone_after_a_put_without_it(
+    client: AsyncClient,
+    super_admin_token: str,
+    oidc_mock,
+    mock_transcription_models,
+):
+    slug = f"fed-mfa-{uuid4().hex[:6]}"
+    tenant = await _tenant(client, super_admin_token, slug)
+    idp = _idp(slug)
+    oidc_mock(discovery=_discovery(idp))
+    headers = {"X-API-Key": super_admin_token}
+    url = f"/api/v1/sysadmin/tenants/{tenant['id']}/federation"
+    rule = {"claim": "acr", "values": ["level-2"], "request": "acr_values"}
+
+    put = await client.put(
+        url, json={**_put_body(slug, idp), "mfa": rule}, headers=headers
+    )
+    assert put.status_code == 200, put.text
+    assert (await _stored(tenant["id"]))["mfa"] == rule
+    assert (await client.get(url, headers=headers)).json()["mfa"] == rule
+
+    # A PUT writes the whole configuration: what it leaves out is not kept.
+    again = await client.put(url, json=_put_body(slug, idp), headers=headers)
+    assert again.status_code == 200, again.text
+    assert "mfa" not in await _stored(tenant["id"])
+    assert (await client.get(url, headers=headers)).json()["mfa"] is None
+
+    refused = await client.put(
+        url,
+        json={**_put_body(slug, idp), "mfa": {"claim": "amr", "values": []}},
+        headers=headers,
+    )
+    assert refused.status_code == 422, refused.text
 
 
 async def test_the_subject_claim_is_set_by_put_and_patch(
