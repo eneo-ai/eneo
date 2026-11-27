@@ -8,9 +8,17 @@ import psycopg2
 import pytest
 import sqlalchemy as sa
 
+from eneo.database.tables.ai_models_table import CompletionModels
+from eneo.database.tables.api_keys_v2_table import ApiKeysV2
+from eneo.database.tables.app_table import AppRuns, Apps
 from eneo.database.tables.assistant_table import Assistants
+from eneo.database.tables.files_table import Files
+from eneo.database.tables.job_table import Jobs
+from eneo.database.tables.service_principals_table import ServicePrincipals
 from eneo.database.tables.service_table import Services
+from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import Spaces
+from eneo.database.tables.tenant_table import Tenants
 from init_db import add_tenant_user
 
 
@@ -148,4 +156,173 @@ async def test_deleting_an_organisation_removes_its_assistants_and_services(
         ) == {other_tenants, other_tenants_outside_a_space}
         assert await _existing(session, Services, [other_tenants_service]) == {
             other_tenants_service
+        }
+
+
+async def _service_principal(session, *, tenant_id: UUID) -> UUID:
+    principal_id = uuid4()
+    await session.execute(
+        sa.insert(ServicePrincipals).values(
+            id=principal_id,
+            tenant_id=tenant_id,
+            display_name=f"principal-{uuid4().hex[:8]}",
+            scope_type="tenant",
+        )
+    )
+    return principal_id
+
+
+async def _job(session, *, service_principal_id: UUID, status: str) -> UUID:
+    job_id = uuid4()
+    await session.execute(
+        sa.insert(Jobs).values(
+            id=job_id,
+            task="crawl",
+            status=status,
+            service_principal_id=service_principal_id,
+        )
+    )
+    return job_id
+
+
+async def _conversation(
+    session, *, service_principal_id: UUID, assistant_id: UUID | None
+) -> UUID:
+    conversation_id = uuid4()
+    await session.execute(
+        sa.insert(Sessions).values(
+            id=conversation_id,
+            name="conversation",
+            service_principal_id=service_principal_id,
+            assistant_id=assistant_id,
+        )
+    )
+    return conversation_id
+
+
+async def _service_key(session, *, tenant_id: UUID, service_principal_id: UUID) -> UUID:
+    key_id = uuid4()
+    await session.execute(
+        sa.insert(ApiKeysV2).values(
+            id=key_id,
+            tenant_id=tenant_id,
+            ownership="service",
+            service_principal_id=service_principal_id,
+            scope_type="tenant",
+            permission="read",
+            key_type="sk_",
+            key_hash=uuid4().hex,
+            hash_version="hmac_sha256",
+            key_prefix="sk_",
+            key_suffix="abcd",
+            name="service key",
+        )
+    )
+    return key_id
+
+
+async def _service_file(
+    session, *, tenant_id: UUID, service_principal_id: UUID
+) -> UUID:
+    file_id = uuid4()
+    await session.execute(
+        sa.insert(Files).values(
+            id=file_id,
+            name="made-by-a-key.txt",
+            tenant_id=tenant_id,
+            owner_type="service_key",
+            owner_service_id=service_principal_id,
+        )
+    )
+    return file_id
+
+
+async def _app_run(
+    session, *, tenant_id: UUID, space_id: UUID, service_principal_id: UUID
+) -> UUID:
+    app_id, run_id = uuid4(), uuid4()
+    await session.execute(
+        sa.insert(Apps).values(
+            id=app_id,
+            name="app",
+            published=False,
+            tenant_id=tenant_id,
+            space_id=space_id,
+        )
+    )
+    model_id = await session.scalar(sa.select(CompletionModels.id).limit(1))
+    await session.execute(
+        sa.insert(AppRuns).values(
+            id=run_id,
+            tenant_id=tenant_id,
+            app_id=app_id,
+            completion_model_id=model_id,
+            service_principal_id=service_principal_id,
+        )
+    )
+    return run_id
+
+
+async def test_deleting_an_organisation_removes_what_its_service_keys_left(
+    db_container, admin_user, doomed_tenant_user
+):
+    """A service principal goes with its organisation, and so does the work
+    done in its name: nothing of it may keep the organisation from going."""
+    doomed = doomed_tenant_user
+    async with db_container() as container:
+        session = container.session()
+        doomed_space = await _space(session, tenant_id=doomed.tenant_id)
+        assistant = await _assistant(session, user_id=None, space_id=doomed_space)
+        principal = await _service_principal(session, tenant_id=doomed.tenant_id)
+        jobs = [
+            await _job(session, service_principal_id=principal, status=status)
+            for status in ("complete", "queued")
+        ]
+        conversations = [
+            await _conversation(
+                session, service_principal_id=principal, assistant_id=assistant
+            ),
+            # Its assistant is gone; only the principal still ties it down.
+            await _conversation(
+                session, service_principal_id=principal, assistant_id=None
+            ),
+        ]
+        key = await _service_key(
+            session, tenant_id=doomed.tenant_id, service_principal_id=principal
+        )
+        file = await _service_file(
+            session, tenant_id=doomed.tenant_id, service_principal_id=principal
+        )
+        app_run = await _app_run(
+            session,
+            tenant_id=doomed.tenant_id,
+            space_id=doomed_space,
+            service_principal_id=principal,
+        )
+        kept_principal = await _service_principal(
+            session, tenant_id=admin_user.tenant_id
+        )
+        kept_job = await _job(
+            session, service_principal_id=kept_principal, status="complete"
+        )
+        kept_conversation = await _conversation(
+            session, service_principal_id=kept_principal, assistant_id=None
+        )
+        await session.flush()
+
+        await container.tenant_repo().delete_tenant_by_id(doomed.tenant_id)
+
+        assert await _existing(session, Tenants, [doomed.tenant_id]) == set()
+        assert await _existing(session, ServicePrincipals, [principal]) == set()
+        assert await _existing(session, Jobs, jobs) == set()
+        assert await _existing(session, Sessions, conversations) == set()
+        assert await _existing(session, ApiKeysV2, [key]) == set()
+        assert await _existing(session, Files, [file]) == set()
+        assert await _existing(session, AppRuns, [app_run]) == set()
+        assert await _existing(session, ServicePrincipals, [kept_principal]) == {
+            kept_principal
+        }
+        assert await _existing(session, Jobs, [kept_job]) == {kept_job}
+        assert await _existing(session, Sessions, [kept_conversation]) == {
+            kept_conversation
         }
