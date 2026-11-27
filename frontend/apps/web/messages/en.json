@@ -5819,6 +5819,8 @@
   "eneo_error_9082": "This account is already linked to another sign-in. Contact your administrator for help.",
   "eneo_error_9085": "This conversation holds content from a conversation that has been removed, so it can no longer be opened.",
   "eneo_error_9086": "The retention period is longer than the limit that applies here.",
+  "eneo_error_9088": "One or more files belong to another space and cannot be used here. Upload them again in this space.",
+  "eneo_error_9089": "One or more files are also used elsewhere. A file belongs to one space: remove the other uses, or upload the file again here.",
   "organization_skills_rollout_attachment_limit": "Too many Skills including helpers",
   "organization_skills_rollout_conflicting_revisions": "Conflicting versions of the same Skill",
   "required_field": "This field is required",

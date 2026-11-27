@@ -97,6 +97,10 @@ const ERROR_CODE_MESSAGES: Partial<Record<EneoErrorCode, () => string>> = {
   // --- Retention periods ---
   9086: () => m.eneo_error_9086(), // RETENTION_EXCEEDS_SPACE
 
+  // --- A file belongs to one space ---
+  9088: () => m.eneo_error_9088(), // FILE_HOME_CONFLICT
+  9089: () => m.eneo_error_9089(), // FILE_IN_USE_ELSEWHERE
+
   // --- Skill lifecycle ---
   9081: () => m.eneo_error_9081(), // SKILL_REFERENCED_BY_REVISION
   9048: () => m.eneo_error_9048(), // SKILL_SLUG_TAKEN
