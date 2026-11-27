@@ -518,7 +518,7 @@ class Worker:
                         success = task_manager.successful()
                 except (Exception, asyncio.CancelledError) as exc:
                     if await self._record_job_failure(
-                        job_id, actor, exc, only_if_queued=claim_pending
+                        job_id, exc, only_if_queued=claim_pending
                     ):
                         if task_manager is not None:
                             await task_manager.publish_status(Status.FAILED)
@@ -557,7 +557,6 @@ class Worker:
     async def _record_job_failure(
         self,
         job_id: UUID,
-        actor: "JobActor | None",
         exc: BaseException,
         *,
         only_if_queued: bool = False,
@@ -567,12 +566,17 @@ class Worker:
 
         Like a task's own failure it is stored as its code: a commit error
         carries SQL with bound values.
+
+        Nobody is signed in for it. The job may have failed because whoever
+        queued it cannot be signed in any more (a revoked key, a disabled
+        principal, a removed person), and that must not keep the failure
+        from being written.
         """
         code = failure_code_for_exception(exc)
         try:
             async with sessionmanager.session() as session, session.begin():
-                container = await self._create_container(session, actor=actor)
-                failed = await container.job_service().fail_job(
+                container = await self._create_container(session)
+                failed = await container.job_repo().fail_job(
                     job_id, failure_code=code, only_if_queued=only_if_queued
                 )
             return failed is not None

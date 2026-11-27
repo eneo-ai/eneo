@@ -312,7 +312,7 @@ async def test_commit_failure_records_the_job_failure_in_a_fresh_session(
     task_container.task_manager.return_value = task_manager
     task_container.job_repo.return_value.mark_job_started = AsyncMock(return_value=True)
     recovery_container = MagicMock()
-    recovery_container.job_service.return_value = AsyncMock()
+    recovery_container.job_repo.return_value = AsyncMock()
     containers = [task_container, recovery_container]
 
     async def create_container(session, actor=None):
@@ -333,7 +333,7 @@ async def test_commit_failure_records_the_job_failure_in_a_fresh_session(
     # The task body succeeded inside the transaction that was then lost...
     task_job_service.complete_job.assert_awaited_once_with(job_id, "done")
     # ...so the failure is written where it survives, as its code.
-    recovery_container.job_service.return_value.fail_job.assert_awaited_once_with(
+    recovery_container.job_repo.return_value.fail_job.assert_awaited_once_with(
         job_id, failure_code=JobFailureCode.PROCESSING_FAILED, only_if_queued=False
     )
 
@@ -385,7 +385,7 @@ async def test_cancelled_task_records_cancelled_in_fresh_session_after_rollback(
     task_container.task_manager.return_value = task_manager
     task_container.job_repo.return_value.mark_job_started = AsyncMock(return_value=True)
     recovery_container = MagicMock()
-    recovery_container.job_service.return_value = AsyncMock()
+    recovery_container.job_repo.return_value = AsyncMock()
     containers = [task_container, recovery_container]
 
     async def create_container(session, actor=None):
@@ -413,13 +413,13 @@ async def test_cancelled_task_records_cancelled_in_fresh_session_after_rollback(
     assert tx_contexts[0].rolled_back is True
     assert tx_contexts[0].committed is False
     assert tx_contexts[1].committed is True
-    recovery_container.job_service.return_value.fail_job.assert_awaited_once_with(
+    recovery_container.job_repo.return_value.fail_job.assert_awaited_once_with(
         job_id, failure_code=JobFailureCode.CANCELLED, only_if_queued=False
     )
     assert published_when_recovery_committed[-1] is True
 
 
-def _recovery_worker(monkeypatch, job_service: AsyncMock):
+def _recovery_worker(monkeypatch, job_repo: AsyncMock):
     from types import SimpleNamespace
     from unittest.mock import MagicMock
 
@@ -433,10 +433,12 @@ def _recovery_worker(monkeypatch, job_service: AsyncMock):
         SimpleNamespace(session=lambda: _AsyncContext(db)),
     )
     container = MagicMock()
-    container.job_service.return_value = job_service
+    container.job_repo.return_value = job_repo
     worker = worker_module.Worker()
 
     async def create_container(session, actor=None):
+        # The failure is written without signing anybody in.
+        assert actor is None
         return container
 
     monkeypatch.setattr(worker, "_create_container", create_container)
@@ -467,13 +469,13 @@ async def test_a_commit_failure_is_recorded_as_its_code_without_text(
 ) -> None:
     """A commit error can carry SQL with bound values; the job record keeps
     only the failure code, which both apps explain."""
-    job_service = AsyncMock()
-    worker = _recovery_worker(monkeypatch, job_service)
+    job_repo = AsyncMock()
+    worker = _recovery_worker(monkeypatch, job_repo)
     job_id = uuid4()
 
-    await worker._record_job_failure(job_id, None, error)
+    await worker._record_job_failure(job_id, error)
 
-    job_service.fail_job.assert_awaited_once_with(
+    job_repo.fail_job.assert_awaited_once_with(
         job_id, failure_code=code, only_if_queued=False
     )
 
@@ -494,7 +496,7 @@ async def test_a_failure_that_cannot_be_recorded_is_logged_without_its_text(
     try:
         with caplog.at_level(logging.DEBUG):
             await worker._record_job_failure(
-                uuid4(), None, RuntimeError("commit refused: Lönelista 2026")
+                uuid4(), RuntimeError("commit refused: Lönelista 2026")
             )
     finally:
         worker_module.logger.removeHandler(caplog.handler)

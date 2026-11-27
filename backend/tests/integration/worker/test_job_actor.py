@@ -13,8 +13,12 @@ import sqlalchemy as sa
 from eneo.authentication.auth_models import is_service_api_key, is_space_actor
 from eneo.authentication.principal import Principal
 from eneo.authentication.principal_types import PrincipalType
+from eneo.database.tables.job_table import Jobs
+from eneo.jobs.job_models import Task
 from eneo.jobs.task_models import ResourceTaskParams, task_actor
+from eneo.main.models import Status
 from eneo.worker.job_actor import JobActor, load_job_user
+from eneo.worker.worker import Worker
 
 
 @pytest.fixture
@@ -77,6 +81,40 @@ async def test_a_job_does_not_run_once_its_key_is_revoked(db_container, service_
 
     async with db_container() as container:
         assert await load_job_user(container, JobActor.of(service_key.params)) is None
+
+
+async def test_a_failure_is_recorded_for_a_job_whose_key_is_revoked(
+    db_container, service_key
+):
+    """The key cannot be signed in again, so the job cannot run. That it
+    failed is written all the same: nobody has to be signed in for that."""
+    job_id = uuid4()
+    async with db_container() as container:
+        await container.session().execute(
+            sa.insert(Jobs).values(
+                id=job_id,
+                task=Task.CRAWL.value,
+                status=Status.IN_PROGRESS.value,
+                service_principal_id=service_key.key.service_principal_id,
+                api_key_id=service_key.key.id,
+            )
+        )
+        await container.api_key_v2_repo().update(
+            key_id=service_key.key.id,
+            tenant_id=service_key.tenant_id,
+            revoked_at=datetime.now(timezone.utc),
+        )
+
+    recorded = await Worker()._record_job_failure(
+        job_id, AssertionError("the key could not be signed in")
+    )
+
+    assert recorded is True
+    async with db_container() as container:
+        job = await container.job_repo().get_job(job_id)
+    assert job.status == Status.FAILED
+    assert job.failure_code is not None
+    assert job.finished_at is not None
 
 
 async def test_a_job_does_not_run_while_its_principal_is_disabled(

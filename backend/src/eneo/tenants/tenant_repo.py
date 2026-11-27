@@ -14,8 +14,11 @@ from sqlalchemy.orm import InstrumentedAttribute, selectinload
 
 from eneo.database.repositories.base import BaseRepositoryDelegate
 from eneo.database.tables.assistant_table import Assistants
+from eneo.database.tables.job_table import Jobs
 from eneo.database.tables.module_table import Modules
+from eneo.database.tables.service_principals_table import ServicePrincipals
 from eneo.database.tables.service_table import Services
+from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.tenant_table import Tenants, tenants_modules_table
 from eneo.database.tables.users_table import Users
 from eneo.main import exceptions
@@ -293,6 +296,20 @@ class TenantRepository:
                 sa.delete(table).where(
                     table.space_id.is_(None),
                     table.user_id.in_(tenant_users),
+                )
+            )
+        # A service principal goes with its organisation, but a job or a
+        # conversation of one refuses to lose its principal, and nothing else
+        # removes those first: a job has no other tie to the organisation, a
+        # conversation only through its assistant. Its keys, files and app
+        # runs name the organisation themselves and go with it.
+        tenant_principals = sa.select(ServicePrincipals.id).where(
+            ServicePrincipals.tenant_id == id
+        )
+        for owned in (Jobs, Sessions):
+            await self.session.execute(
+                sa.delete(owned).where(
+                    owned.service_principal_id.in_(tenant_principals)
                 )
             )
         return cast(TenantInDB, await self.delegate.delete(id))
