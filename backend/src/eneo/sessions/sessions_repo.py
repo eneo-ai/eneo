@@ -19,6 +19,7 @@ from eneo.database.database import AsyncSession
 from eneo.database.repositories.base import BaseRepositoryDelegate
 from eneo.database.tables.api_keys_v2_table import ApiKeysV2
 from eneo.database.tables.assistant_table import Assistants
+from eneo.database.tables.group_chats_table import GroupChatsTable
 from eneo.database.tables.help_assistant_runs_table import HelpAssistantRuns
 from eneo.database.tables.info_blobs_table import InfoBlobs
 from eneo.database.tables.questions_table import (
@@ -52,6 +53,7 @@ from eneo.user_groups.user_group import UserGroupState
 
 class OwnedChatPartner(NamedTuple):
     assistant_id: UUID | None
+    group_chat_id: UUID | None
 
 
 class SessionOwnership(NamedTuple):
@@ -62,24 +64,29 @@ class SessionOwnership(NamedTuple):
     widget_id: UUID | None
     visitor_id: UUID | None
     assistant_id: UUID | None
+    group_chat_id: UUID | None
 
 
 @dataclass(frozen=True, slots=True)
 class ChatPartnerAccess:
-    """An assistant the user has conversations with.
+    """An assistant or group chat the user has conversations with.
 
     ``space`` carries what ``SpaceActor`` needs to decide whether the user may
-    still open it.
+    still open it; ``published`` only matters for group chats.
     """
 
-    assistant_id: UUID
+    assistant_id: UUID | None
+    group_chat_id: UUID | None
     name: str
+    published: bool
     space_name: str
     space: SpaceAccessFacts
 
     @property
     def id(self) -> UUID:
-        return self.assistant_id
+        partner_id = self.group_chat_id or self.assistant_id
+        assert partner_id is not None
+        return partner_id
 
 
 class RecentSessionRow(NamedTuple):
@@ -88,6 +95,7 @@ class RecentSessionRow(NamedTuple):
     created_at: datetime
     last_activity_at: datetime
     assistant_id: UUID | None
+    group_chat_id: UUID | None
 
 
 def session_turn_options() -> list[Any]:
@@ -324,6 +332,7 @@ class SessionRepository:
                 Sessions.widget_id,
                 Sessions.visitor_id,
                 Sessions.assistant_id,
+                Sessions.group_chat_id,
             ).where(Sessions.id == id)
         )
         row = (await self.session.execute(query)).one_or_none()
@@ -338,7 +347,7 @@ class SessionRepository:
     ) -> OwnedChatPartner | None:
         """Read only the partner IDs required to authorize diagnostics."""
         query = (
-            sa.select(Sessions.assistant_id)
+            sa.select(Sessions.assistant_id, Sessions.group_chat_id)
             .join(Users, Sessions.user_id == Users.id)
             .where(Sessions.id == session_id)
             .where(Sessions.user_id == user_id)
@@ -348,7 +357,10 @@ class SessionRepository:
         row = (await self.session.execute(query)).one_or_none()
         if row is None:
             return None
-        return OwnedChatPartner(assistant_id=row.assistant_id)
+        return OwnedChatPartner(
+            assistant_id=row.assistant_id,
+            group_chat_id=row.group_chat_id,
+        )
 
     async def get_chat_partners_of_user(
         self,
@@ -357,7 +369,7 @@ class SessionRepository:
         tenant_id: UUID,
         user_group_ids: Collection[UUID],
     ) -> list[ChatPartnerAccess]:
-        """Every assistant the user has conversations with.
+        """Every assistant and group chat the user has conversations with.
 
         Each comes with the facts of its space that decide whether the user
         can still open it: the space's kind and default assistant, the user's
@@ -366,9 +378,14 @@ class SessionRepository:
         own membership only; resource-scoped API key ids are left out.
         """
         partners = self._exclude_helper_run_sessions(
-            sa.select(Sessions.assistant_id)
+            sa.select(Sessions.assistant_id, Sessions.group_chat_id)
             .where(Sessions.user_id == user_id)
-            .where(Sessions.assistant_id.is_not(None))
+            .where(
+                sa.or_(
+                    Sessions.assistant_id.is_not(None),
+                    Sessions.group_chat_id.is_not(None),
+                )
+            )
             .distinct()
         ).subquery("partners")
         # The space's own assistant, picked the way the space load picks it.
@@ -385,7 +402,10 @@ class SessionRepository:
         query = (
             sa.select(
                 partners.c.assistant_id,
+                partners.c.group_chat_id,
                 Assistants.name.label("assistant_name"),
+                GroupChatsTable.name.label("group_chat_name"),
+                GroupChatsTable.published.label("group_chat_published"),
                 Spaces.id.label("space_id"),
                 Spaces.name.label("space_name"),
                 Spaces.user_id.label("space_user_id"),
@@ -394,8 +414,21 @@ class SessionRepository:
                 sa.Nullable(SpacesUsers.role),
             )
             .select_from(partners)
-            .join(Assistants, Assistants.id == partners.c.assistant_id)
-            .join(Spaces, Spaces.id == Assistants.space_id)
+            .outerjoin(GroupChatsTable, GroupChatsTable.id == partners.c.group_chat_id)
+            # A group chat conversation belongs to the group chat, whatever
+            # assistant answered in it.
+            .outerjoin(
+                Assistants,
+                sa.and_(
+                    partners.c.group_chat_id.is_(None),
+                    Assistants.id == partners.c.assistant_id,
+                ),
+            )
+            .join(
+                Spaces,
+                Spaces.id
+                == sa.func.coalesce(GroupChatsTable.space_id, Assistants.space_id),
+            )
             .outerjoin(
                 SpacesUsers,
                 sa.and_(
@@ -452,10 +485,13 @@ class SessionRepository:
                     assistant_ids=frozenset(),
                     app_ids=frozenset(),
                 )
+            is_group_chat = row.group_chat_id is not None
             partner_access.append(
                 ChatPartnerAccess(
-                    assistant_id=row.assistant_id,
-                    name=row.assistant_name,
+                    assistant_id=None if is_group_chat else row.assistant_id,
+                    group_chat_id=row.group_chat_id,
+                    name=row.group_chat_name if is_group_chat else row.assistant_name,
+                    published=bool(row.group_chat_published),
                     space_name=row.space_name,
                     space=space,
                 )
@@ -467,6 +503,7 @@ class SessionRepository:
         *,
         user_id: UUID,
         assistant_ids: Collection[UUID],
+        group_chat_ids: Collection[UUID],
         limit: int,
     ) -> list[RecentSessionRow]:
         """The user's own conversations with these partners, latest activity first.
@@ -494,9 +531,18 @@ class SessionRepository:
                     Sessions.created_at,
                     last_activity_at,
                     Sessions.assistant_id,
+                    Sessions.group_chat_id,
                 )
                 .where(Sessions.user_id == user_id)
-                .where(Sessions.assistant_id.in_(assistant_ids))
+                .where(
+                    sa.or_(
+                        sa.and_(
+                            Sessions.group_chat_id.is_(None),
+                            Sessions.assistant_id.in_(assistant_ids),
+                        ),
+                        Sessions.group_chat_id.in_(group_chat_ids),
+                    )
+                )
                 .order_by(last_activity_at.desc(), Sessions.id.desc())
                 .limit(limit)
             )
@@ -528,7 +574,7 @@ class SessionRepository:
         user_id: UUID | None,
         api_key_id: UUID | None,
     ) -> sa.Select[Any]:
-        """A message in one of the principal's assistant conversations."""
+        """A message in one of the principal's assistant or group chat conversations."""
         query = (
             sa.select(*columns)
             .select_from(Questions)
@@ -537,7 +583,12 @@ class SessionRepository:
             .where(Questions.session_id == session_id)
             .where(Questions.tenant_id == tenant_id)
             .where(self._owned_by(user_id, api_key_id))
-            .where(Sessions.assistant_id.is_not(None))
+            .where(
+                sa.or_(
+                    Sessions.assistant_id.is_not(None),
+                    Sessions.group_chat_id.is_not(None),
+                )
+            )
         )
         return self._exclude_helper_run_sessions(query)
 
@@ -553,10 +604,11 @@ class SessionRepository:
         """The chat partner of a message in one of the principal's conversations.
 
         None when the message is not in that session, the session belongs to
-        another principal or tenant, or it has no assistant.
+        another principal or tenant, or it has no assistant or group chat.
         """
         query = self._owned_message(
             Sessions.assistant_id,
+            Sessions.group_chat_id,
             session_id=session_id,
             message_id=message_id,
             tenant_id=tenant_id,
@@ -566,7 +618,10 @@ class SessionRepository:
         row = (await self.session.execute(query)).one_or_none()
         if row is None:
             return None
-        return OwnedChatPartner(assistant_id=row.assistant_id)
+        return OwnedChatPartner(
+            assistant_id=row.assistant_id,
+            group_chat_id=row.group_chat_id,
+        )
 
     async def set_message_feedback(
         self,
@@ -666,6 +721,7 @@ class SessionRepository:
         api_key_id: UUID | None = None,
         widget_id: UUID | None = None,
         visitor_id: UUID | None = None,
+        group_chat_id: UUID | None = None,
         name_filter: str | None = None,
         start_date: datetime | None = None,
         end_date: datetime | None = None,
@@ -681,6 +737,8 @@ class SessionRepository:
 
         if assistant_id is not None:
             query = query.where(Sessions.assistant_id == assistant_id)
+        if group_chat_id is not None:
+            query = query.where(Sessions.group_chat_id == group_chat_id)
 
         # Principal scoping: user_id and api_key_id are mutually exclusive in
         # session_service callers (exactly one is non-None per request).
@@ -765,6 +823,89 @@ class SessionRepository:
 
         total_count = await self._get_total_count(
             assistant_id=assistant_id,
+            user_id=user_id,
+            api_key_id=api_key_id,
+            widget_id=widget_id,
+            visitor_id=visitor_id,
+            name_filter=normalized_name_filter,
+            start_date=start_date,
+            end_date=end_date,
+            tenant_id=tenant_id,
+        )
+
+        if cursor is not None:
+            if previous:
+                query = query.where(Sessions.created_at > cursor).order_by(
+                    Sessions.created_at.asc(),
+                    Sessions.id.asc(),
+                )
+                if limit is not None:
+                    query = query.limit(limit + 1)
+                result = await self.session.execute(query)
+                items = list(result.tuples())
+                items.reverse()
+                return (self._to_session_metadata(items), total_count)
+            else:
+                query = query.where(Sessions.created_at <= cursor).order_by(
+                    Sessions.created_at.desc(),
+                    Sessions.id.desc(),
+                )
+        else:
+            query = query.order_by(Sessions.created_at.desc(), Sessions.id.desc())
+
+        if limit is not None:
+            query = query.limit(limit + 1)
+
+        result = await self.session.execute(query)
+        items = list(result.tuples())
+        return self._to_session_metadata(items), total_count
+
+    async def get_metadata_by_group_chat(
+        self,
+        group_chat_id: UUID,
+        user_id: UUID | None = None,
+        api_key_id: UUID | None = None,
+        widget_id: UUID | None = None,
+        visitor_id: UUID | None = None,
+        limit: int | None = None,
+        cursor: datetime | None = None,
+        previous: bool = False,
+        name_filter: str | None = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
+        tenant_id: UUID | None = None,
+    ) -> tuple[list[SessionMetadataPublic], int]:
+        normalized_name_filter = name_filter.strip() if name_filter else None
+        query = sa.select(
+            Sessions.id, Sessions.name, Sessions.created_at, Sessions.updated_at
+        ).where(Sessions.group_chat_id == group_chat_id)
+
+        if tenant_id is not None:
+            query = self._filter_by_tenant(query, tenant_id)
+        query = self._exclude_unreadable_copies(
+            self._exclude_helper_run_sessions(query)
+        )
+
+        if user_id is not None:
+            query = query.where(Sessions.user_id == user_id)
+        if api_key_id is not None:
+            query = query.where(Sessions.api_key_id == api_key_id)
+        if widget_id is not None:
+            query = query.where(
+                Sessions.widget_id == widget_id, Sessions.visitor_id == visitor_id
+            )
+
+        if normalized_name_filter is not None:
+            query = query.where(Sessions.name.ilike(f"%{normalized_name_filter}%"))
+
+        if start_date is not None:
+            query = query.where(Sessions.created_at >= start_date)
+
+        if end_date is not None:
+            query = query.where(Sessions.created_at <= end_date)
+
+        total_count = await self._get_total_count(
+            group_chat_id=group_chat_id,
             user_id=user_id,
             api_key_id=api_key_id,
             widget_id=widget_id,

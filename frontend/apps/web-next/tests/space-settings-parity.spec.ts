@@ -227,6 +227,7 @@ test("settings explain presented MCP and model restrictions and confirm clear th
   );
   const impact: Schema<"UpdateSpaceDryRunResponse"> = {
     assistants: [],
+    group_chats: [],
     apps: [],
     services: [],
     completion_models: [],

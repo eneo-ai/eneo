@@ -26,6 +26,7 @@ const classifications: Schema<"SecurityClassificationPublic">[] = [
 ];
 const emptyImpact = (): Schema<"UpdateSpaceDryRunResponse"> => ({
   assistants: [],
+  group_chats: [],
   apps: [],
   services: [],
   completion_models: [],

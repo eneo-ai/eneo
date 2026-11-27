@@ -42,7 +42,13 @@ const app = {
   permissions: PERMISSIONS
 } as AppSparse;
 const assistant = makeAssistant({ id: "as-1", name: "Upphandlingsassistenten" }) as ChatAppItem;
-const otherAssistant = makeAssistant({ id: "as-2", name: "Samrådsassistenten" }) as ChatAppItem;
+const groupChat = {
+  id: "gc-1",
+  type: "group-chat",
+  name: "Samrådsgruppen",
+  published: false,
+  permissions: PERMISSIONS
+} as unknown as ChatAppItem;
 
 function Page({
   scope: Scope,
@@ -172,13 +178,13 @@ describe("a resource's menu dialog when a turned phone swaps rows for cards", ()
     expect(openDialog()).toBe(dialog);
   });
 
-  it("keeps an assistant's move dialog and another assistant's delete dialog open", async () => {
-    space.current = makeSpace({ assistants: [assistant, otherAssistant] });
+  it("keeps an assistant's move dialog and a group chat's delete dialog open", async () => {
+    space.current = makeSpace({ assistants: [assistant], groupChats: [groupChat] });
     setViewport("phone");
     renderInApp(
       <Page scope={ChatAppActionScope}>
         <ChatAppTile item={assistant} showStatus />
-        <ChatAppTile item={otherAssistant} showStatus />
+        <ChatAppTile item={groupChat} showStatus />
       </Page>
     );
 
@@ -190,7 +196,7 @@ describe("a resource's menu dialog when a turned phone swaps rows for cards", ()
     fireEvent.click(within(move!).getByRole("button", { name: "Avbryt" }));
     await waitFor(() => expect(openDialog()).toBeNull());
 
-    choose("Samrådsassistenten", "Ta bort");
+    choose("Samrådsgruppen", "Ta bort");
     await waitFor(() => expect(openDialog()).not.toBeNull());
     const remove = openDialog();
     act(() => setViewport("phone"));

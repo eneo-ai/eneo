@@ -20,6 +20,7 @@ class Permission(str, Enum):
     # decoupled from ASSISTANTS.
     PERSONAL_SKILLS = "personal_skills"
     PERSONAL_CHAT = "personal_chat"
+    GROUP_CHATS = "group_chats"
     APPS = "apps"
     SERVICES = "services"
     COLLECTIONS = "collections"

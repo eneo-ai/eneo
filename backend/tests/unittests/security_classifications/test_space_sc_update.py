@@ -30,6 +30,7 @@ def test_update_space_with_high_sc():
         collections=[],
         integration_knowledge_list=[],
         members={},
+        group_chats=[],
         security_classification=None,
     )
 
@@ -160,6 +161,7 @@ def test_update_personal_space_with_sc():
         collections=[],
         integration_knowledge_list=[],
         members={},
+        group_chats=[],
         security_classification=None,
     )
 
@@ -192,6 +194,7 @@ def test_adding_models_with_lower_sc_than_space():
         collections=[],
         integration_knowledge_list=[],
         members={},
+        group_chats=[],
         security_classification=None,
     )
 

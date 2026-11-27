@@ -9,6 +9,7 @@ API_V2_CRITICAL_MODULES = [
     "files",
     "spaces",
     "groups_legacy",
+    "group_chat",
     "conversations",
     "authentication",
     "users",

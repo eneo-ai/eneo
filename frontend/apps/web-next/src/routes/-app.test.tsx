@@ -133,6 +133,9 @@ beforeEach(async () => {
   vi.doMock("@/features/assistants/editor/assistant-editor", () => ({
     AssistantEditor: ({ assistantId }: { assistantId: string }) => <EditorDraft id={assistantId} />
   }));
+  vi.doMock("@/features/group-chats/group-chat-editor", () => ({
+    GroupChatEditor: ({ groupChatId }: { groupChatId: string }) => <EditorDraft id={groupChatId} />
+  }));
   // Chat streaming has its own feature and browser tests; keep its state observable here.
   vi.doMock("@/features/chat/chat-page", async () => {
     const { replaceUrl } = await import("@/lib/navigation");
@@ -183,12 +186,6 @@ it("opens the knowledge hub and passes the operator's runtime integration form U
   });
   await screen.findByRole("heading", { name: "https://forms.example.test/request" });
   expect(document.title).toBe(`${messages.knowledge} · Upphandling · Eneo`);
-});
-
-it("redirects a former group editor bookmark to the same assistant editor", async () => {
-  replies.set("/api/v1/spaces/space-1/", makeSpace());
-  const { router } = await renderRoute("/spaces/space-1/group-chats/former/edit");
-  expect(router.state.location.pathname).toBe("/spaces/space-1/assistants/former/edit");
 });
 
 it("redirects the integration index to the knowledge tab", async () => {
@@ -462,7 +459,7 @@ it.each(["assistants", "apps"] as const)(
   }
 );
 
-it.each(["apps", "assistants"] as const)(
+it.each(["apps", "assistants", "group-chats"] as const)(
   "keeps the %s editor draft across section navigation and resets it for another resource",
   async (kind) => {
     replies.set("/api/v1/spaces/space-1/", makeSpace());
@@ -535,17 +532,17 @@ it.each(["services", "services/service-1"])(
   }
 );
 
-it.each([["apps/missing", "/api/v1/apps/missing/"]])(
-  "maps a missing space resource %s to not-found after reading it",
-  async (path, apiPath) => {
-    replies.set("/api/v1/spaces/space-1/", makeSpace());
-    replies.set(apiPath, new Response(null, { status: 404 }));
-    replies.set("/api/v1/apps/missing/runs/", { items: [] });
-    await renderRoute(`/spaces/space-1/${path}`);
-    await screen.findByRole("heading", { name: messages.page_not_found });
-    expect(requestedPaths()).toContain(apiPath);
-  }
-);
+it.each([
+  ["apps/missing", "/api/v1/apps/missing/"],
+  ["group-chats/missing/edit", "/api/v1/group-chats/missing/"]
+])("maps a missing space resource %s to not-found after reading it", async (path, apiPath) => {
+  replies.set("/api/v1/spaces/space-1/", makeSpace());
+  replies.set(apiPath, new Response(null, { status: 404 }));
+  replies.set("/api/v1/apps/missing/runs/", { items: [] });
+  await renderRoute(`/spaces/space-1/${path}`);
+  await screen.findByRole("heading", { name: messages.page_not_found });
+  expect(requestedPaths()).toContain(apiPath);
+});
 
 it("shows a resource load failure through the route error boundary", async () => {
   replies.set("/api/v1/spaces/space-1/", makeSpace());

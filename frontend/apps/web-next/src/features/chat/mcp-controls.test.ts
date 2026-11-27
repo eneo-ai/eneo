@@ -120,7 +120,8 @@ describe("MCP chat controls", () => {
         servers,
         capabilities: [],
         disabledServerIds: new Set(["a", "missing"]),
-        autoAcceptTools: false
+        autoAcceptTools: false,
+        supportsToolApproval: true
       })
     ).toEqual({
       require_tool_approval: true,
@@ -132,7 +133,8 @@ describe("MCP chat controls", () => {
         servers,
         capabilities: [],
         disabledServerIds: new Set(),
-        autoAcceptTools: true
+        autoAcceptTools: true,
+        supportsToolApproval: true
       })
     ).toEqual({
       require_tool_approval: undefined,
@@ -140,20 +142,15 @@ describe("MCP chat controls", () => {
     });
   });
 
-  it("applies approval preferences when only a specialist can use tools", () => {
-    const options = {
-      servers: [],
-      capabilities: [],
-      disabledServerIds: new Set<string>(),
-      autoAcceptTools: false
-    };
-    expect(mcpConversationOptions(options).require_tool_approval).toBeUndefined();
-    expect(mcpConversationOptions({ ...options, hasSpecialists: true }).require_tool_approval).toBe(
-      true
-    );
+  it("does not request tool approval for partners that do not support it", () => {
     expect(
-      mcpConversationOptions({ ...options, hasSpecialists: true, autoAcceptTools: true })
-        .require_tool_approval
+      mcpConversationOptions({
+        servers: [server("a")],
+        capabilities: [],
+        disabledServerIds: new Set(),
+        autoAcceptTools: false,
+        supportsToolApproval: false
+      }).require_tool_approval
     ).toBeUndefined();
   });
 
@@ -164,7 +161,8 @@ describe("MCP chat controls", () => {
         servers: [],
         capabilities: [{ purpose: "web_search", available: true, reason: null }],
         disabledServerIds: new Set(),
-        autoAcceptTools
+        autoAcceptTools,
+        supportsToolApproval: true
       }).require_tool_approval;
     expect(options(false)).toBe(true);
     expect(options(true)).toBeUndefined();

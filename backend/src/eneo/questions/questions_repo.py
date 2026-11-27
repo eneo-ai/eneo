@@ -28,7 +28,7 @@ from eneo.files.file_models import File
 from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from eneo.info_blobs.info_blob_repo import InfoBlobRepository
 from eneo.logging.logging import LoggingDetails
-from eneo.questions.question import ConsultationInfo, Question, QuestionAdd
+from eneo.questions.question import Question, QuestionAdd
 from eneo.questions.question_file_projection import attach_question_files
 from eneo.skills.domain.skill import (
     SkillActivationEvidence,
@@ -52,6 +52,7 @@ class StoredSkillActivation(NamedTuple):
 
 class QuestionSessionPartner(NamedTuple):
     assistant_id: UUID | None
+    group_chat_id: UUID | None
 
 
 class QuestionRepository:
@@ -73,20 +74,6 @@ class QuestionRepository:
         self.file_content_loader = file_content_loader
         # The principal's ``files`` read grant; see ``attach_question_files``.
         self.include_user_uploads = include_user_uploads
-
-    async def update_consultations(
-        self,
-        *,
-        question_id: UUID,
-        tenant_id: UUID,
-        consultations: Sequence[ConsultationInfo],
-    ) -> None:
-        """Record specialist progress without replacing the parent answer."""
-        await self.session.execute(
-            sa.update(Questions)
-            .where(Questions.id == question_id, Questions.tenant_id == tenant_id)
-            .values(consultations=[item.storage_record() for item in consultations])
-        )
 
     async def _hydrate_questions(
         self,
@@ -270,7 +257,7 @@ class QuestionRepository:
         tenant_id: UUID,
     ) -> QuestionSessionPartner | None:
         result = await self.session.execute(
-            sa.select(Sessions.assistant_id)
+            sa.select(Sessions.assistant_id, Sessions.group_chat_id)
             .select_from(Questions)
             .join(Sessions, Sessions.id == Questions.session_id)
             .where(
@@ -281,8 +268,11 @@ class QuestionRepository:
         row = result.one_or_none()
         if row is None:
             return None
-        (assistant_id,) = row
-        return QuestionSessionPartner(assistant_id=assistant_id)
+        assistant_id, group_chat_id = row
+        return QuestionSessionPartner(
+            assistant_id=assistant_id,
+            group_chat_id=group_chat_id,
+        )
 
     async def get_with_skill_activation(
         self,
@@ -344,7 +334,6 @@ class QuestionRepository:
         skill_context_tokens: int | None = None,
         completion_model_id: UUID | None = None,
         tool_calls: list["ToolCallInfo"] | None = None,
-        consultations: list[ConsultationInfo] | None = None,
         reasoning: str | None = None,
         info_blob_chunks: list[InfoBlobChunkInDBWithScore] | None = None,
         generated_files: list[File] | None = None,
@@ -404,10 +393,6 @@ class QuestionRepository:
         if tool_calls is not None:
             # JSON mode: the column is JSONB and the records carry UUIDs.
             update_values["tool_calls"] = [tc.storage_record() for tc in tool_calls]
-        if consultations is not None:
-            update_values["consultations"] = [
-                item.storage_record() for item in consultations
-            ]
         if reasoning is not None:
             update_values["reasoning"] = reasoning
         update_values.update(
@@ -528,10 +513,6 @@ class QuestionRepository:
             # JSONB column; the records carry UUIDs.
             question_values["tool_calls"] = [
                 tc.storage_record() for tc in question.tool_calls
-            ]
-        if question.consultations is not None:
-            question_values["consultations"] = [
-                item.storage_record() for item in question.consultations
             ]
         question_values["skill_activation_data"] = (
             question.skill_activation.model_dump(mode="json")

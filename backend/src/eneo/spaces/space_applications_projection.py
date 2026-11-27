@@ -26,6 +26,19 @@ class AssistantApplicationsProjection:
 
 
 @dataclass(frozen=True, slots=True)
+class GroupChatApplicationsProjection:
+    id: UUID
+    created_at: datetime
+    updated_at: datetime
+    name: str
+    user_id: UUID
+    published: bool
+    metadata_json: dict[str, object] | None
+    icon_id: UUID | None
+    insight_enabled: bool
+
+
+@dataclass(frozen=True, slots=True)
 class AppApplicationsProjection:
     id: UUID
     created_at: datetime
@@ -52,5 +65,6 @@ class ServiceApplicationsProjection:
 class SpaceApplicationsProjection:
     access: SpaceAccessFacts
     assistants: tuple[AssistantApplicationsProjection, ...]
+    group_chats: tuple[GroupChatApplicationsProjection, ...]
     apps: tuple[AppApplicationsProjection, ...]
     services: tuple[ServiceApplicationsProjection, ...]

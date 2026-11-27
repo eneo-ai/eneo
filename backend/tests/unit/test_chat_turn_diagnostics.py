@@ -74,7 +74,7 @@ async def _read(
 
 @pytest.mark.parametrize(
     "partner",
-    [None, OwnedChatPartner(None)],
+    [None, OwnedChatPartner(None, uuid4()), OwnedChatPartner(None, None)],
 )
 async def test_missing_or_unsupported_conversation_fails_before_evidence_load(partner):
     container, _, _, question_repo, _ = _container(
@@ -98,7 +98,7 @@ async def test_missing_or_unsupported_conversation_fails_before_evidence_load(pa
 )
 async def test_revoked_assistant_access_fails_before_evidence_load(assistant_error):
     container, _, _, question_repo, _ = _container(
-        partner=OwnedChatPartner(uuid4()),
+        partner=OwnedChatPartner(uuid4(), None),
         stored=StoredSkillActivation(_evidence()),
         assistant_error=assistant_error,
     )
@@ -115,7 +115,7 @@ async def test_revoked_assistant_access_fails_before_evidence_load(assistant_err
 
 async def test_message_must_belong_to_the_authorized_session():
     container, _, _, question_repo, _ = _container(
-        partner=OwnedChatPartner(uuid4()),
+        partner=OwnedChatPartner(uuid4(), None),
         stored=None,
     )
 
@@ -135,7 +135,7 @@ async def test_authorized_turn_returns_only_typed_diagnostics(evidence):
     message_id = uuid4()
     assistant_id = uuid4()
     container, user, session_repo, question_repo, assistant_service = _container(
-        partner=OwnedChatPartner(assistant_id),
+        partner=OwnedChatPartner(assistant_id, None),
         stored=StoredSkillActivation(evidence),
     )
 
@@ -166,12 +166,12 @@ async def test_authorized_turn_returns_only_typed_diagnostics(evidence):
 async def test_session_and_current_partner_are_authorized_before_evidence_load():
     order: list[str] = []
     container, _, session_repo, question_repo, assistant_service = _container(
-        partner=OwnedChatPartner(uuid4()),
+        partner=OwnedChatPartner(uuid4(), None),
         stored=StoredSkillActivation(_evidence()),
     )
     session_repo.get_owned_chat_partner.side_effect = lambda **_: order.append(
         "session"
-    ) or OwnedChatPartner(uuid4())
+    ) or OwnedChatPartner(uuid4(), None)
     assistant_service.get_assistant.side_effect = lambda *_: order.append(
         "partner"
     ) or (SimpleNamespace(), [])

@@ -307,9 +307,11 @@ function derivedCurrentSpace(space: Readable<Space>) {
       members: $space.members.items,
       applications: {
         assistants: $space.applications?.assistants.items ?? [],
-        chat: [...($space.applications?.assistants.items ?? [])].sort((a, b) =>
-          a.name.localeCompare(b.name)
-        ),
+        groupChats: $space.applications?.group_chats.items ?? [],
+        chat: [
+          ...($space.applications?.assistants.items ?? []),
+          ...($space.applications?.group_chats.items ?? [])
+        ].sort((a, b) => a.name.localeCompare(b.name)),
         apps: $space.applications?.apps.items ?? [],
         services: ($space.applications?.services.items ?? []).filter((service) => {
           return !service.name.startsWith("_eneo");
@@ -326,6 +328,8 @@ function derivedCurrentSpace(space: Readable<Space>) {
             return $space.permissions?.includes(action) ?? false;
           case "assistant":
             return $space.applications?.assistants.permissions?.includes(action) ?? false;
+          case "group_chat":
+            return $space.applications?.group_chats.permissions?.includes(action) ?? false;
           case "default_assistant":
             return $space.default_assistant?.permissions?.includes(action) ?? false;
           case "app":
@@ -358,6 +362,7 @@ type Resource =
   | "space"
   | "assistant"
   | "default_assistant"
+  | "group_chat"
   | "service"
   | "website"
   | "integrationKnowledge"

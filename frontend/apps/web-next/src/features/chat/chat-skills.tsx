@@ -507,10 +507,7 @@ export function ChatSkills({ tools }: { tools?: ChatToolsProps } = {}) {
   }, [searchInput]);
   const skills = usePersonalChatSkills({ withLibrary: open, search });
   const toolCount = tools ? toolCounts(tools) : null;
-  const withTools =
-    tools && toolCount && (toolCount.total > 0 || tools.hasSpecialists)
-      ? { tools, count: toolCount }
-      : null;
+  const withTools = tools && toolCount && toolCount.total > 0 ? { tools, count: toolCount } : null;
   if (!skills.visible) return withTools ? <ChatTools {...withTools.tools} /> : null;
 
   // Refusals and the search belong to the visit that made them: closing forgets them.

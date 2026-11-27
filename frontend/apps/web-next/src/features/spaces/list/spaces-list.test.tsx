@@ -67,7 +67,8 @@ const space = (overrides: Record<string, unknown>) => ({
   organization: false,
   permissions: ["read", "delete"],
   applications: {
-    assistants: count(3),
+    assistants: count(2),
+    group_chats: count(1),
     services: count(0),
     apps: count(1)
   },

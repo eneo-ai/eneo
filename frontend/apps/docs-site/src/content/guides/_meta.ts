@@ -7,7 +7,6 @@ const meta: MetaRecord = {
   "audit-logging": "Audit Logging",
   "data-retention": "Data Retention",
   skills: "Skills",
-  "assistant-specialists": "Assistant Specialists",
   "ai-providers": "AI Provider Configuration",
   "mcp-servers": "MCP Servers",
   capabilities: "Functions",

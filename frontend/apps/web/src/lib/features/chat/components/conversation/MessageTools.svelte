@@ -18,7 +18,6 @@
   import { getMessageContext } from "../../MessageContext.svelte";
   import { getChatService } from "../../ChatService.svelte";
   import { citedTextDocumentReferences, dedupeByDocument } from "../../mcpReferenceDocs";
-  import { specialistsByReference } from "../../consultationReferences";
   import {
     getPartnerKnowledgeMode,
     getPartnerKnowledgeSources,
@@ -50,7 +49,6 @@
   // One chip per document: several passages from the same document (chunk
   // fragments of one uri) collapse to a single reference entry.
   const mcpRefDocs = $derived(dedupeByDocument(mcpRefs));
-  const viaSpecialist = $derived(specialistsByReference(message.consultations));
 
   type MetaBag = Record<string, unknown> & {
     sourceType?: string;
@@ -177,12 +175,6 @@
       {number}
     </span>
   {/snippet}
-  {#snippet via(refId: string)}
-    {@const specialist = viaSpecialist.get(refId)}
-    {#if specialist}
-      <span class="text-muted text-xs">{m.reference_via_specialist({ name: specialist })}</span>
-    {/if}
-  {/snippet}
   {#if referencesExpanded}
     <div class="mb-2 flex w-full flex-wrap gap-2 pt-2 md:pb-6">
       {#each message.references as reference, index (reference.id)}
@@ -205,7 +197,6 @@
             >
               {@render docBadge(docNumber)}
               {info.title}
-              {@render via(ref.id)}
             </button>
           </BlobPreview>
         {:else if (info.sourceType === "crawl-page" || info.sourceType === "web-search") && /^https?:\/\//i.test(ref.uri)}
@@ -220,7 +211,6 @@
               aria-hidden="true"
             ></span>
             {info.title}
-            {@render via(ref.id)}
           </a>
           <!-- eslint-enable svelte/no-navigation-without-resolve -->
         {:else}
@@ -239,7 +229,6 @@
               >
                 {@render docBadge(docNumber)}
                 {info.title}{info.section ? ` → ${info.section}` : ""}
-                {@render via(ref.id)}
               </button>
             {/snippet}
           </McpResourceSnippetModal>

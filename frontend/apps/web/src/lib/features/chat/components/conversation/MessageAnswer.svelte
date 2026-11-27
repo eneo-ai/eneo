@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { awaitingConsultationSteps } from "../../consultationApproval";
   import { analysisStep } from "../../analysisStep";
   import { analysisStepLabels } from "../../analysisStepLabels";
   import { toolFileInputs, type ToolInputFile } from "../../toolFileInputs";
@@ -18,7 +17,6 @@
   import McpAppFrames from "../../mcp-apps/McpAppFrames.svelte";
   import { getMcpAppPane } from "../../mcp-apps/McpAppPane.svelte";
   import ReasoningTrace from "./ReasoningTrace.svelte";
-  import ConsultationTrace from "./ConsultationTrace.svelte";
   import InternalToolStep from "./InternalToolStep.svelte";
   import ToolStepIcon from "./ToolStepIcon.svelte";
   import SkillActivationStep from "./SkillActivationStep.svelte";
@@ -116,45 +114,13 @@
   const submittingToolIds = new SvelteSet<string>();
   const deniedToolIds = new SvelteSet<string>();
   let isSubmittingBulk = $state(false);
-  const pendingApprovalId = $derived(chat.pendingToolApproval?.approvalId);
-  $effect(() => {
-    // Provider IDs can be reused by a later specialist or model round.
-    if (pendingApprovalId) {
-      deniedToolIds.clear();
-      submittingToolIds.clear();
-      expandedToolCalls.clear();
-    }
-  });
 
   // Split tool calls: pending approvals stay as prominent cards below (a
   // blocking decision must never hide); everything else (running, done, denied)
   // folds into the collapsible reasoning trace above them.
   const isPending = (tc: { tool_call_id?: string }) =>
     !!tc.tool_call_id && pendingToolIds.includes(tc.tool_call_id);
-  const pendingConsultations = $derived(
-    (message.consultations ?? []).filter(
-      (consultation) => pendingApprovalId && consultation.approval_id === pendingApprovalId
-    )
-  );
-  const pendingToolCalls = $derived([
-    ...(pendingConsultations.length ? [] : (mcpToolCalls ?? []).filter(isPending)).map((step) => ({
-      ...step,
-      consultationName: "",
-      step_id: undefined
-    })),
-    ...pendingConsultations.flatMap((consultation) =>
-      awaitingConsultationSteps(consultation)
-        .filter((step) => step.tool_call_id && pendingToolIds.includes(step.tool_call_id))
-        .map((step) => ({
-          ...step,
-          consultationName: consultation.assistant_name,
-          tool_call_id: step.tool_call_id ?? undefined,
-          arguments: step.arguments ?? undefined,
-          approved: step.approved ?? undefined,
-          result_status: step.result_status ?? undefined
-        }))
-    )
-  ]);
+  const pendingToolCalls = $derived((mcpToolCalls ?? []).filter(isPending));
   const tracedToolCalls = $derived((mcpToolCalls ?? []).filter((tc) => !isPending(tc)));
 
   const conversationFiles = $derived.by(() => {
@@ -444,24 +410,32 @@
     )
   ]);
 
-  const answeringAssistants = $derived(
-    (message.tools?.assistants ?? []).filter((assistant) => assistant.id !== chat.partner.id)
-  );
+  const showAnswerLabel = $derived.by(() => {
+    let hasInfo = message.tools && message.tools.assistants.length > 0;
+    let isSameAssistant = message.tools.assistants.some(({ id }) => id === chat.partner.id);
+    let isEnabled =
+      chat.partner.type === "default-assistant" ||
+      ("show_response_label" in chat.partner && chat.partner.show_response_label);
+    return hasInfo && !isSameAssistant && isEnabled;
+  });
 </script>
 
 <div class="relative pt-4 text-lg">
   <span class="sr-only">{m.answer()}</span>
-  {#each answeringAssistants as mention (mention.id)}
-    <div
-      {...dynamicColour({ basedOn: mention.id })}
-      class="bg-dynamic-dimmer text-dynamic-stronger mb-4 -ml-2 flex w-fit items-center gap-2 rounded-full px-4 py-2 text-base font-medium"
-    >
-      <IconSpeechBubble class="stroke-2"></IconSpeechBubble>
-      <span>
-        {formatEmojiTitle(mention.handle ?? m.unknown_assistant())}
-      </span>
-    </div>
-  {/each}
+  {#if showAnswerLabel}
+    {#each message.tools?.assistants ?? [] as mention (mention.id)}
+      <div
+        {...dynamicColour({ basedOn: mention.id })}
+        class="bg-dynamic-dimmer text-dynamic-stronger mb-4 -ml-2 flex w-fit items-center gap-2 rounded-full px-4 py-2 text-base font-medium"
+      >
+        <IconSpeechBubble class="stroke-2"></IconSpeechBubble>
+        <span>
+          {formatEmojiTitle(mention.handle ?? m.unknown_assistant())}
+        </span>
+      </div>
+    {/each}
+  {/if}
+
   <!-- Reasoning text belongs at the top of the trace: it rides in the first
        run's box when that run is external, otherwise it gets its own box so
        it never renders below tool activity it preceded. -->
@@ -582,7 +556,7 @@
 
   {#if pendingToolCalls.length > 0}
     <div class="mb-5 flex flex-col gap-2">
-      {#each pendingToolCalls as toolCall, idx (toolCall.step_id ?? toolCall.tool_call_id ?? idx)}
+      {#each pendingToolCalls as toolCall, idx (toolCall.tool_call_id ?? idx)}
         {@const isLastToolCall = idx === pendingToolCalls.length - 1}
         {@const isPendingTool =
           toolCall.tool_call_id && pendingToolIds.includes(toolCall.tool_call_id)}
@@ -629,9 +603,6 @@
 
             <!-- Tool info -->
             <div class="flex min-w-0 flex-1 flex-col gap-0.5">
-              {#if toolCall.consultationName}
-                <span class="text-muted text-xs">{toolCall.consultationName}</span>
-              {/if}
               <div class="flex items-center gap-2">
                 <span class="text-default truncate text-sm font-medium"
                   >{toolDisplayName(
@@ -759,9 +730,6 @@
       file: MessageDocumentLink
     }}
   />
-  {#if message.consultations?.length}
-    <ConsultationTrace consultations={message.consultations} streaming={isStreamingTurn} />
-  {/if}
 </div>
 
 <McpImageAttachments />

@@ -17,7 +17,7 @@
   import { slide } from "svelte/transition";
   import { Badge } from "$lib/components/ui/badge/index.js";
 
-  import type { ToolStepStatus as Status } from "../../toolStepStatus";
+  type Status = "preparing" | "running" | "complete" | "failed" | "denied";
 
   let {
     name,

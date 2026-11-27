@@ -247,7 +247,7 @@
         : undefined;
     // Approval controls external MCP servers only. Eneo's read-only internal
     // knowledge/files tools are core capabilities and always auto-execute.
-    const toolApprovalEnabled = !autoAcceptTools && (hasMcpTools || hasDelegatedTools);
+    const toolApprovalEnabled = !autoAcceptTools && hasMcpTools;
     // The question is echoed in the conversation as soon as the backend
     // confirms it, so clear the composer now instead of showing it dimmed
     // behind a spinner until the answer finishes. The full draft (mention
@@ -354,9 +354,13 @@
     chat.requestPreflight(composeQuotedQuestion(quote, $question), fileIds, tools);
   });
 
-  const shouldShowMentionButton = $derived(
-    chat.partner.type === "default-assistant" && chat.partner.tools.assistants.length > 0
-  );
+  const shouldShowMentionButton = $derived.by(() => {
+    const hasTools = chat.partner.tools.assistants.length > 0;
+    const isEnabled =
+      chat.partner.type === "default-assistant" ||
+      ("allow_mentions" in chat.partner && chat.partner.allow_mentions);
+    return hasTools && isEnabled;
+  });
 
   // MCP servers available to the current partner (drives the toolbar popover).
   // For the personal/default assistant the policy GRANTS servers that are not
@@ -469,9 +473,6 @@
   // capabilities this user may use (a capability the role withholds is not a
   // row, so it must not open an empty popover either).
   const hasMcpTools = $derived(generalMcpServers.length + capabilityServers.length > 0);
-  // An assistant with specialists consults them with their own tools, so the
-  // approval switch covers those tools even when the assistant has none itself.
-  const hasDelegatedTools = $derived((chat.partner?.specialists?.length ?? 0) > 0);
 
   // Knowledge sources attached to the partner (read-only indicator; knowledge
   // cannot be toggled per conversation the way MCP servers can).
@@ -497,8 +498,9 @@
     const history = (chat.currentConversation?.messages ?? []).flatMap(
       (message) => message.files ?? []
     );
+    // Group chats type their (always empty) attachments without a mode.
     const toolAttachments = (chat.partner?.attachments ?? []).filter(
-      (file) => file.inline_text === false
+      (file) => "inline_text" in file && file.inline_text === false
     );
     return [...pending, ...history, ...toolAttachments].some(
       (file) => file.has_download_reference === true
@@ -683,13 +685,12 @@
         />
       {/if}
 
-      {#if hasMcpTools || hasDelegatedTools || internalMcpServers.length > 0}
+      {#if hasMcpTools || internalMcpServers.length > 0}
         <ChatMcpServers
           servers={generalMcpServers}
           {capabilityServers}
           internalServers={internalMcpServers}
           modelSupportsTools={supportsToolCalling}
-          delegatedTools={hasDelegatedTools}
           disabledServerIds={disabledMcpServerIds}
           onSelectionChange={persistMcpServerSelection}
           bind:autoAcceptTools

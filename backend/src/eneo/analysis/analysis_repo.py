@@ -4,11 +4,12 @@ from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import InstrumentedAttribute, aliased
+from sqlalchemy.orm import InstrumentedAttribute, aliased, selectinload
 
 from eneo.analysis.analysis import MessageFeedbackCounts
 from eneo.data_retention.derivations import copy_session_valid, readable_sessions
 from eneo.database.tables.assistant_table import Assistants
+from eneo.database.tables.group_chats_table import GroupChatsTable
 from eneo.database.tables.help_assistant_runs_table import HelpAssistantRuns
 from eneo.database.tables.questions_table import (
     QuestionFeedback,
@@ -75,6 +76,7 @@ class SessionMetadataRow(NamedTuple):
     id: UUID
     created_at: datetime
     assistant_id: UUID | None
+    group_chat_id: UUID | None
 
 
 class QuestionMetadataRow(NamedTuple):
@@ -180,6 +182,9 @@ class AnalysisRepository:
     async def get_assistant_count(self, tenant_id: UUID | None = None):
         return await self._get_count(Assistants, tenant_id=tenant_id)
 
+    async def get_group_chat_count(self, tenant_id: UUID | None = None):
+        return await self._get_count(table=GroupChatsTable, tenant_id=tenant_id)
+
     async def get_session_count(self, tenant_id: UUID | None = None):
         return await self._get_count(Sessions, tenant_id=tenant_id)
 
@@ -253,6 +258,40 @@ class AnalysisRepository:
             [SessionInDB.model_validate(session) for session in sessions]
         )
 
+    async def get_group_chat_sessions_since(
+        self,
+        group_chat_id: UUID,
+        from_date: datetime | None = None,
+        to_date: datetime | None = None,
+        tenant_id: UUID | None = None,
+    ):
+        if tenant_id is None:
+            raise ValueError("tenant_id is required for insights session queries")
+
+        stmt = sa.select(Sessions).where(Sessions.group_chat_id == group_chat_id)
+
+        stmt = stmt.join(Users, Sessions.user_id == Users.id).where(
+            Users.tenant_id == tenant_id
+        )
+        stmt = _exclude_helper_run_sessions(stmt, Sessions.id)
+        stmt = _exclude_unreadable_copies(stmt, Sessions.id)
+
+        if from_date is not None:
+            stmt = stmt.where(Sessions.created_at >= from_date)
+
+        if to_date is not None:
+            stmt = stmt.where(Sessions.created_at <= to_date)
+
+        stmt = stmt.order_by(Sessions.created_at).options(
+            *session_turn_options(), selectinload(Sessions.group_chat)
+        )
+
+        sessions = await self.session.scalars(stmt)
+
+        return await self._hydrate_sessions(
+            [SessionInDB.model_validate(session) for session in sessions]
+        )
+
     async def get_assistant_question_texts_since(
         self,
         *,
@@ -268,6 +307,25 @@ class AnalysisRepository:
             include_followups=include_followups,
             tenant_id=tenant_id,
             assistant_id=assistant_id,
+            group_chat_id=None,
+        )
+
+    async def get_group_chat_question_texts_since(
+        self,
+        *,
+        group_chat_id: UUID,
+        from_date: datetime,
+        to_date: datetime,
+        include_followups: bool,
+        tenant_id: UUID,
+    ) -> list[QuestionTextRow]:
+        return await self._get_question_texts_since(
+            from_date=from_date,
+            to_date=to_date,
+            include_followups=include_followups,
+            tenant_id=tenant_id,
+            assistant_id=None,
+            group_chat_id=group_chat_id,
         )
 
     async def _get_question_texts_since(
@@ -277,8 +335,15 @@ class AnalysisRepository:
         to_date: datetime,
         include_followups: bool,
         tenant_id: UUID,
-        assistant_id: UUID,
+        assistant_id: UUID | None,
+        group_chat_id: UUID | None,
     ) -> list[QuestionTextRow]:
+        if assistant_id is None and group_chat_id is None:
+            raise ValueError("Either assistant_id or group_chat_id is required")
+
+        if assistant_id is not None and group_chat_id is not None:
+            raise ValueError("Only one of assistant_id or group_chat_id can be set")
+
         question_rank = (
             sa.func.row_number()
             .over(
@@ -304,7 +369,11 @@ class AnalysisRepository:
         )
         base_stmt = _exclude_helper_run_sessions(base_stmt, Sessions.id)
         base_stmt = _exclude_unreadable_copies(base_stmt, Sessions.id)
-        base_stmt = base_stmt.where(Sessions.assistant_id == assistant_id)
+
+        if assistant_id is not None:
+            base_stmt = base_stmt.where(Sessions.assistant_id == assistant_id)
+        else:
+            base_stmt = base_stmt.where(Sessions.group_chat_id == group_chat_id)
 
         ranked_questions = base_stmt.subquery()
 
@@ -441,7 +510,8 @@ class AnalysisRepository:
         self,
         *,
         tenant_id: UUID,
-        assistant_id: UUID,
+        assistant_id: UUID | None = None,
+        group_chat_id: UUID | None = None,
         from_date: datetime | None = None,
         to_date: datetime | None = None,
         include_followups: bool = True,
@@ -452,6 +522,9 @@ class AnalysisRepository:
         Without follow-ups only each conversation's first answer counts, the
         same answers the question history lists.
         """
+        if (assistant_id is None) == (group_chat_id is None):
+            raise ValueError("Exactly one of assistant_id or group_chat_id is required")
+
         stmt = (
             sa.select(
                 sa.func.count().filter(QuestionFeedback.value == 1).label("positive"),
@@ -464,7 +537,11 @@ class AnalysisRepository:
             .where(Users.tenant_id == tenant_id)
         )
         stmt = _exclude_helper_run_sessions(stmt, Sessions.id)
-        stmt = stmt.where(Sessions.assistant_id == assistant_id)
+
+        if assistant_id is not None:
+            stmt = stmt.where(Sessions.assistant_id == assistant_id)
+        else:
+            stmt = stmt.where(Sessions.group_chat_id == group_chat_id)
         if from_date is not None:
             stmt = stmt.where(Sessions.created_at >= from_date)
         if to_date is not None:
@@ -612,6 +689,7 @@ class AnalysisRepository:
                 Sessions.id,
                 Sessions.created_at,
                 Sessions.assistant_id,
+                Sessions.group_chat_id,
             )
             .join(Users, Sessions.user_id == Users.id)
             .where(Users.tenant_id == tenant_id)
@@ -630,6 +708,7 @@ class AnalysisRepository:
                 id=row.id,
                 created_at=row.created_at,
                 assistant_id=row.assistant_id,
+                group_chat_id=row.group_chat_id,
             )
             for row in result
         ]
@@ -754,6 +833,90 @@ class AnalysisRepository:
         return [
             CountBucketRow(created_at=row.created_at, total=row.total) for row in result
         ]
+
+    async def get_group_chat_conversation_counts(
+        self,
+        group_chat_id: UUID,
+        from_date: datetime | None = None,
+        to_date: datetime | None = None,
+        tenant_id: UUID | None = None,
+    ) -> tuple[int, int]:
+        """Get conversation and question counts for a group chat efficiently.
+
+        Returns a tuple of (session_count, question_count) using optimized COUNT queries
+        instead of fetching full session data.
+        """
+        # Count sessions
+        session_count_stmt = sa.select(sa.func.count(Sessions.id)).where(
+            Sessions.group_chat_id == group_chat_id
+        )
+        session_count_stmt = _exclude_helper_run_sessions(
+            session_count_stmt, Sessions.id
+        )
+
+        if tenant_id is not None:
+            session_count_stmt = session_count_stmt.join(
+                Users, Sessions.user_id == Users.id
+            ).where(Users.tenant_id == tenant_id)
+
+        if from_date is not None:
+            session_count_stmt = session_count_stmt.where(
+                Sessions.created_at >= from_date
+            )
+        if to_date is not None:
+            session_count_stmt = session_count_stmt.where(
+                Sessions.created_at <= to_date
+            )
+
+        session_count = await self.session.scalar(session_count_stmt) or 0
+
+        # Count questions for sessions matching the criteria
+        question_count_stmt = (
+            sa.select(sa.func.count(Questions.id))
+            .join(Sessions, Questions.session_id == Sessions.id)
+            .where(Sessions.group_chat_id == group_chat_id)
+        )
+        question_count_stmt = _exclude_helper_run_sessions(
+            question_count_stmt, Sessions.id
+        )
+
+        if tenant_id is not None:
+            question_count_stmt = question_count_stmt.join(
+                Users, Sessions.user_id == Users.id
+            ).where(Users.tenant_id == tenant_id)
+
+        if from_date is not None:
+            question_count_stmt = question_count_stmt.where(
+                Sessions.created_at >= from_date
+            )
+        if to_date is not None:
+            question_count_stmt = question_count_stmt.where(
+                Sessions.created_at <= to_date
+            )
+
+        question_count = await self.session.scalar(question_count_stmt) or 0
+
+        return session_count, question_count
+
+    async def count_group_chat_questions_since(
+        self,
+        *,
+        group_chat_id: UUID,
+        from_date: datetime,
+        to_date: datetime,
+        tenant_id: UUID,
+    ) -> int:
+        stmt = (
+            sa.select(sa.func.count(Questions.id))
+            .join(Sessions, Questions.session_id == Sessions.id)
+            .join(Users, Sessions.user_id == Users.id)
+            .where(Users.tenant_id == tenant_id)
+            .where(Sessions.group_chat_id == group_chat_id)
+            .where(Sessions.created_at >= from_date)
+            .where(Sessions.created_at <= to_date)
+        )
+        stmt = _exclude_helper_run_sessions(stmt, Sessions.id)
+        return await self.session.scalar(stmt) or 0
 
     async def get_active_assistant_count_for_tenant(
         self,

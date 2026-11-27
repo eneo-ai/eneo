@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, AsyncGenerator, Optional
+from typing import TYPE_CHECKING, Any, AsyncIterator, Optional
 
 if TYPE_CHECKING:
     from eneo.ai_models.completion_models.completion_model import (
@@ -118,7 +118,7 @@ class CompletionModelAdapter(ABC):
         approval_manager: Any | None = None,
         approval_context: dict[str, Any] | None = None,
         pending_approval_ids: set[str] | None = None,
-    ) -> "AsyncGenerator[Completion, None]":
+    ) -> "AsyncIterator[Completion]":
         """
         Phase 2 (Iteration): Iterate pre-created stream INSIDE EventSourceResponse.
 

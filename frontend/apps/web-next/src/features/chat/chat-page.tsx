@@ -34,7 +34,9 @@ type ActiveConversation = {
   focusComposer?: boolean;
 };
 
-function hasInsights(partner: ChatPartner): partner is ChatPartner & { type: "assistant" } {
+function hasInsights(partner: ChatPartner): partner is ChatPartner & {
+  type: "assistant" | "group-chat";
+} {
   return Boolean(
     partner.insightEnabled &&
     partner.permissions?.includes("insight_view") &&
@@ -124,7 +126,7 @@ export function ChatPage({
   const rescueFocus = useFocusRescue();
   const debugRef = useRef<ChatDebugHandle>(null);
   const { can } = useAppContext();
-  const debugAvailable = can("assistant_debug");
+  const debugAvailable = can("assistant_debug") && partner.type !== "group-chat";
 
   /** Opens a saved conversation: the current view goes until it has loaded. */
   function openSession(sessionId: string) {

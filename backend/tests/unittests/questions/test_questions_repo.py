@@ -74,7 +74,7 @@ async def test_get_session_partner_uses_tenant_scoped_scalar_join():
     tenant_id = uuid4()
     assistant_id = uuid4()
     result = MagicMock()
-    result.one_or_none.return_value = (assistant_id,)
+    result.one_or_none.return_value = (assistant_id, None)
     session = AsyncMock()
     session.execute.return_value = result
     repo = QuestionRepository(session, include_user_uploads=True)
@@ -84,7 +84,10 @@ async def test_get_session_partner_uses_tenant_scoped_scalar_join():
         tenant_id=tenant_id,
     )
 
-    assert partner == QuestionSessionPartner(assistant_id=assistant_id)
+    assert partner == QuestionSessionPartner(
+        assistant_id=assistant_id,
+        group_chat_id=None,
+    )
     statement = session.execute.await_args.args[0]
     compiled = statement.compile(dialect=postgresql.dialect())
     sql = str(compiled)

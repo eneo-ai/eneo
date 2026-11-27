@@ -13,7 +13,6 @@ from uuid import uuid4
 import litellm
 import pytest
 from litellm.types.utils import Delta, ModelResponseStream, StreamingChoices
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.actors import ActorFactory, ActorManager
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
@@ -86,7 +85,7 @@ def turn(monkeypatch: pytest.MonkeyPatch) -> TurnFixture:
                 updated_at=now,
                 tenant_id=tenant_id,
                 name="Builder",
-                permissions=[Permission.ASSISTANTS],
+                permissions=[Permission.ASSISTANTS, Permission.GROUP_CHATS],
             )
         ],
     )
@@ -246,7 +245,7 @@ def turn(monkeypatch: pytest.MonkeyPatch) -> TurnFixture:
     helper_history = Mock()
     helper_history.exists_for_assistant = AsyncMock(return_value=False)
     repo = Mock()
-    repo.session = AsyncSession(autobegin=False)
+    repo.session = None
     service = AssistantService(
         repo=repo,
         space_repo=space_repo,

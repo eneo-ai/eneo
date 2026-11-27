@@ -72,7 +72,8 @@ function CountTiles() {
   const tiles = [
     can("read", "assistant") && {
       title: t("assistants"),
-      count: space.applications?.assistants.count ?? 0,
+      count:
+        (space.applications?.assistants.count ?? 0) + (space.applications?.group_chats.count ?? 0),
       href: `${base}/assistants`
     },
     can("read", "app") && {
