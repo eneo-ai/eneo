@@ -75,7 +75,7 @@ class App:
         updated_at: datetime | None,
         id: UUID | None,
         tenant_id: UUID,
-        user_id: UUID,
+        user_id: UUID | None,
         space_id: UUID,
         name: str,
         description: str | None,
@@ -92,6 +92,7 @@ class App:
         source_template: AppTemplate | None = None,
         data_retention_days: Optional[int] = None,
         icon_id: Optional[UUID] = None,
+        created_by_service_id: UUID | None = None,
     ):
         super().__init__()
         self._input_fields = input_fields
@@ -101,7 +102,9 @@ class App:
         self.updated_at = updated_at
         self.id = id
         self.tenant_id = tenant_id
+        # Who made the app: a person (user_id) or a service principal.
         self.user_id = user_id
+        self.created_by_service_id = created_by_service_id
         self.space_id = space_id
         self.name = name
         self.description = description

@@ -77,6 +77,9 @@ async def reconcile_app_run_jobs(container: Container) -> None:
             extra={"count": len(failed_ids)},
         )
         for run_id, user_id, app_id, space_id, personal in targets:
+            if user_id is None:
+                # Only a person has a channel to hear it on.
+                continue
             await publish_task_status(
                 Channel(type=ChannelType.APP_RUN_UPDATES, user_id=user_id),
                 RedisMessage(

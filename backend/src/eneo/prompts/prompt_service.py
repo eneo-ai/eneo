@@ -3,6 +3,7 @@
 
 from uuid import UUID
 
+from eneo.authentication.principal import Principal
 from eneo.main.exceptions import (
     BadRequestException,
     NotFoundException,
@@ -12,6 +13,15 @@ from eneo.prompts.prompt import Prompt
 from eneo.prompts.prompt_factory import PromptFactory
 from eneo.prompts.prompt_repo import PromptRepository
 from eneo.users.user import UserInDB
+
+
+def wrote_prompt(user: UserInDB, prompt: Prompt) -> bool:
+    """Whether this principal wrote the prompt. Only its writer may change or
+    remove it; a prompt with no writer left belongs to nobody."""
+    principal = Principal.from_user(user)
+    if principal.is_service_key:
+        return prompt.created_by_service_id == principal.principal_service_id
+    return prompt.user_id is not None and prompt.user_id == principal.principal_user_id
 
 
 class PromptService:
@@ -42,16 +52,22 @@ class PromptService:
     ):
         """Create a prompt.
 
-        ``owner_user_id`` overrides the caller's user id for the ``user_id``
-        FK. Pass the owning resource's user_id when the prompt is created as
-        a child of an existing entity (e.g. an assistant's or app's prompt
-        being edited). Required when the caller is a service key, whose
-        synthetic id has no row in ``users``.
+        The prompt records who wrote it: the caller, a person or the service
+        principal behind a service key. ``owner_user_id`` names a person
+        instead: pass the owning resource's creator when the prompt is written
+        as a child of an existing entity (an app's prompt being edited), so
+        that person keeps the right to edit it.
         """
+        creator = (
+            Principal.from_user(self.user).creator_columns()
+            if owner_user_id is None
+            else {"user_id": owner_user_id, "created_by_service_id": None}
+        )
         prompt = self.factory.create_prompt(
             text=text,
             description=description,
-            user_id=owner_user_id if owner_user_id is not None else self.user.id,
+            user_id=creator["user_id"],
+            created_by_service_id=creator["created_by_service_id"],
             tenant_id=self.user.tenant_id,
         )
 
@@ -61,9 +77,8 @@ class PromptService:
         self, id: UUID, description: str | None
     ) -> Prompt:
         prompt = await self.get_prompt(id)
-        assert prompt.user is not None
 
-        if prompt.user.id != self.user.id:
+        if not wrote_prompt(self.user, prompt):
             raise UnauthorizedException("Prompt belongs to other user")
 
         result = await self.repo.update_prompt_description(
@@ -74,9 +89,8 @@ class PromptService:
 
     async def delete_prompt(self, id: UUID):
         prompt = await self.get_prompt(id)
-        assert prompt.user is not None
 
-        if prompt.user.id != self.user.id:
+        if not wrote_prompt(self.user, prompt):
             raise UnauthorizedException("Prompt belongs to other user")
 
         is_selected = await self.repo.is_selected(id)

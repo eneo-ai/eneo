@@ -12,8 +12,9 @@ class PromptFactory:
     def create_prompt(
         text: str | None,
         description: str | None,
-        user_id: UUID,
+        user_id: UUID | None,
         tenant_id: UUID,
+        created_by_service_id: UUID | None = None,
     ) -> Prompt:
         return Prompt(
             created_at=None,
@@ -25,6 +26,7 @@ class PromptFactory:
             user=None,
             tenant_id=tenant_id,
             user_id=user_id,
+            created_by_service_id=created_by_service_id,
         )
 
     @staticmethod
@@ -41,4 +43,5 @@ class PromptFactory:
             user=prompt_in_db.user,  # type: ignore[arg-type]  # Users ORM object satisfies UserSparse at runtime via Pydantic from_orm
             tenant_id=prompt_in_db.tenant_id,
             user_id=prompt_in_db.user_id,
+            created_by_service_id=prompt_in_db.created_by_service_id,
         )

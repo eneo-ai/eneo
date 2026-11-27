@@ -68,7 +68,9 @@ class ServiceUpdatePublic(ServiceCreatePublic):
 
 
 class ServiceCreate(ServiceBase):
-    user_id: UUID
+    # Who made the service: a person or a service principal, never both.
+    user_id: UUID | None = None
+    created_by_service_id: UUID | None = None
     groups: list[ModelId] = []
     completion_model_id: UUID = Field(
         validation_alias=AliasChoices(
@@ -87,12 +89,13 @@ class ServiceInDBBase(InDB, ServiceBase):
 
 
 class Service(InDB, ServiceBase, ResourcePermissionsMixin):
-    user_id: UUID
+    user_id: UUID | None = None
+    created_by_service_id: UUID | None = None
     space_id: Optional[UUID] = None
     groups: list[GroupInDBBase]
     completion_model_id: UUID
     completion_model: Annotated[Optional[CompletionModel], SkipValidation] = None
-    user: UserInDBBase
+    user: UserInDBBase | None = None
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -110,7 +113,8 @@ class ServicePublic(ServicePublicBase, ResourcePermissionsMixin):
 
 
 class ServicePublicWithUser(ServicePublic):
-    user: UserPublicBase
+    # The person who made the service; empty when a service key made it.
+    user: UserPublicBase | None = None
 
 
 class RunService(BaseModel):
@@ -144,10 +148,11 @@ class RunnerResult(BaseModel):
 
 
 class ServiceSparse(ResourcePermissionsMixin, ServiceBase, InDB):
-    user_id: UUID
+    user_id: UUID | None = None
 
 
 class CreateSpaceService(ServiceBase):
-    user_id: UUID
+    user_id: UUID | None = None
+    created_by_service_id: UUID | None = None
     space_id: UUID
     completion_model_id: Optional[UUID] = None

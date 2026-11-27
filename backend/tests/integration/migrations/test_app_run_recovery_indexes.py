@@ -74,6 +74,10 @@ def test_recovery_indexes_wait_for_an_in_flight_job_write():
                 writer.commit()
             upgrade.result(timeout=15)
 
+        # The recovery statements read the columns jobs have today, so they
+        # are planned against today's schema; the indexes are still there.
+        command.upgrade(expand._alembic_config(url), "head")
+
         with closing(expand._connect(url)) as connection, connection.cursor() as query:
             query.execute(
                 "SELECT indexrelid::regclass::text FROM pg_index "

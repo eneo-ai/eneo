@@ -16,6 +16,7 @@ import sqlalchemy as sa
 from dependency_injector import providers
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from eneo.authentication.principal import Principal
 from eneo.crawler.engine import (
     ConditionalGet,
     CrawlFinished,
@@ -37,7 +38,6 @@ from eneo.model_providers.infrastructure.litellm_provider import (
     load_active_litellm_provider,
 )
 from eneo.tenants.crawler_settings_helper import get_crawler_setting
-from eneo.users.user_repo import UsersRepository
 from eneo.websites.crawl_dependencies.crawl_models import CrawlTask
 from eneo.websites.domain.crawl_assessment import (
     BENIGN_RESOURCE_REASONS,
@@ -75,6 +75,7 @@ from eneo.worker.crawl_context import (
     CrawlContext,
     EmbeddingModelSpec,
 )
+from eneo.worker.job_actor import JobActor, load_job_user
 from eneo.worker.redis.client import record_crawl_scheduler_run
 
 logger = get_logger(__name__)
@@ -389,14 +390,22 @@ async def queue_website_crawls(container: Container):
                 # Build the repository on the per-website session. The
                 # container-built repository keeps the cron session inside its
                 # delegate, and that session has no transaction here.
-                user = await UsersRepository(website_session).get_user_by_id(
-                    website.user_id
+                #
+                # A schedule belongs to the space, so the crawl runs as the
+                # space and keeps running when whoever set it up is gone.
+                actor = (
+                    await Container(session=providers.Object(website_session))
+                    .user_service()
+                    .get_space_actor_user(
+                        space_id=website.space_id, tenant_id=website.tenant_id
+                    )
                 )
-                assert user is not None
+                if actor is None:
+                    raise RuntimeError("Scheduled website has no space to run as")
                 website_container = Container(
                     session=providers.Object(website_session),
-                    user=providers.Object(user),
-                    tenant=providers.Object(user.tenant),
+                    user=providers.Object(actor),
+                    tenant=providers.Object(actor.tenant),
                 )
 
                 await website_container.crawl_service().crawl(
@@ -415,7 +424,6 @@ async def queue_website_crawls(container: Container):
                     "website_id": str(website.id),
                     "tenant_id": str(website.tenant_id),
                     "space_id": str(website.space_id),
-                    "user_id": str(website.user_id),
                 },
             )
 
@@ -603,7 +611,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
     try:
         async with Container.session_scope():
-            user = await container.user_repo().get_user_by_id(params.user_id)
+            user = await load_job_user(container, JobActor.of(params))
         if user is None:
             raise ValueError("The crawl attempt user no longer exists")
 
@@ -692,6 +700,15 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
                 if website_row is None:
                     raise Exception(f"Website {params.website_id} not found")
+                # A space runs its own websites only, whatever the job names.
+                if (
+                    params.acting_space_id is not None
+                    and website_row.space_id != params.acting_space_id
+                ):
+                    raise Exception(
+                        f"Website {params.website_id} is not in the space "
+                        "this crawl runs as"
+                    )
 
                 website = website_row
 
@@ -768,7 +785,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     website_id=website.id,
                     tenant_id=website.tenant_id,
                     tenant_slug=tenant.slug if tenant else None,
-                    user_id=container.user().id,
+                    **Principal.from_user(container.user()).creator_columns(),
                     attempt_id=attempt_id,
                     lease_owner=lease_owner,
                     # Embedding model - use EmbeddingModelSpec DTO (already extracted)

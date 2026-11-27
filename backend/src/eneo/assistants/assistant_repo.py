@@ -14,6 +14,7 @@ from sqlalchemy.orm import selectinload
 from eneo.assistants.assistant import Assistant
 from eneo.assistants.assistant_factory import AssistantFactory
 from eneo.assistants.assistant_update import AssistantUpdate
+from eneo.authentication.principal import CreatorColumns
 from eneo.database.association_writes import (
     replace_association_ids,
     replace_association_values,
@@ -50,6 +51,7 @@ from eneo.database.tables.org_space_assistant_roles_table import (
 )
 from eneo.database.tables.prompts_table import Prompts, PromptsAssistants
 from eneo.database.tables.spaces_table import Spaces
+from eneo.database.tables.tenant_scope import in_tenant, tenant_id_of
 from eneo.database.tables.users_table import Users
 from eneo.database.tables.websites_table import Websites
 from eneo.files.file_content_loader import FileAttachmentGroup, FileContentLoader
@@ -245,15 +247,42 @@ class AssistantRepository:
             runtime_policy_version=None,
         )
 
+    async def _tenant_ids(self, records: Sequence[Assistants]) -> dict[UUID, UUID]:
+        """The organisation of each assistant. The creator's, when the row
+        has one loaded; otherwise looked up through the space."""
+        tenant_ids = {
+            record.id: record.user.tenant_id
+            for record in records
+            if record.user is not None
+        }
+        without_creator = [
+            record.id for record in records if record.id not in tenant_ids
+        ]
+        if without_creator:
+            rows = await self.session.execute(
+                sa.select(Assistants.id, tenant_id_of(Assistants)).where(
+                    Assistants.id.in_(without_creator)
+                )
+            )
+            tenant_ids.update(
+                {
+                    assistant_id: tenant_id
+                    for assistant_id, tenant_id in rows.tuples()
+                    if tenant_id is not None
+                }
+            )
+        return tenant_ids
+
     async def _load_attachments(
         self,
         records: Sequence[Assistants],
     ) -> dict[UUID, list[File]]:
+        tenant_ids = await self._tenant_ids(records)
         groups = [
             FileAttachmentGroup(
                 owner_kind="assistant",
                 owner_id=record.id,
-                tenant_id=record.user.tenant_id,
+                tenant_id=tenant_ids[record.id],
                 files=tuple(
                     FileMetadata.model_validate(attachment.file)
                     for attachment in record.attachments
@@ -567,7 +596,14 @@ class AssistantRepository:
 
         return await self.session.scalars(query)
 
-    async def add(self, assistant: Assistant):
+    async def add(self, assistant: Assistant, *, creator: CreatorColumns | None = None):
+        """Store a new assistant.
+
+        ``creator`` says who makes it: pass the acting principal's columns,
+        because the assistant's ``user`` no longer carries the API key and a
+        service key would be stored as a person. Left out, the assistant's
+        ``user`` is the person who makes it.
+        """
         completion_model_id = (
             assistant.completion_model.id
             if assistant.completion_model is not None
@@ -577,13 +613,15 @@ class AssistantRepository:
         template_id = (
             assistant.source_template.id if assistant.source_template else None
         )
-        assert assistant.user is not None
+        if creator is None:
+            assert assistant.user is not None
+            creator = {"user_id": assistant.user.id, "created_by_service_id": None}
         query = (
             sa.insert(Assistants)
             .values(
                 id=assistant.id,
                 name=assistant.name,
-                user_id=assistant.user.id,
+                **creator,
                 completion_model_id=completion_model_id,
                 completion_model_kwargs=assistant.completion_model_kwargs.model_dump(),
                 logging_enabled=assistant.logging_enabled,
@@ -676,8 +714,7 @@ class AssistantRepository:
     ):
         query = (
             sa.select(Assistants)
-            .join(Users)
-            .where(Users.tenant_id == tenant_id)
+            .where(in_tenant(Assistants, tenant_id))
             .order_by(Assistants.created_at)
         )
 

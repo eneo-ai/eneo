@@ -27,7 +27,11 @@
           <span aria-hidden="true">{m.version()}:</span>
           {formatDateTime($previewedPrompt?.created_at)}
         </h2>
-        <MemberChip member={$previewedPrompt.user}></MemberChip>
+        {#if $previewedPrompt.user}
+          <MemberChip member={$previewedPrompt.user}></MemberChip>
+        {:else}
+          <span class="text-secondary text-sm font-normal">{m.prompt_author_none()}</span>
+        {/if}
       </div>
 
       <div class="flex-grow overflow-y-auto p-8 whitespace-pre-wrap">

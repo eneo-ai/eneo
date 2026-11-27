@@ -200,24 +200,37 @@ async def _publish_prepared_pages(
         async with asyncio.timeout(ctx.max_transaction_wall_time_seconds):
             async with sessionmanager.session() as session, session.begin():
                 await _require_current_publication_lease(session, ctx)
-                tenant_limit, user_limit = (
-                    await session.execute(
-                        sa.select(Tenants.quota_limit, Users.quota_limit)
-                        .select_from(Users)
-                        .join(Tenants, Tenants.id == Users.tenant_id)
-                        .where(
-                            Users.id == ctx.user_id,
-                            Tenants.id == ctx.tenant_id,
+                # A crawl a person started also counts against that person's
+                # limit. One a service key or the space's schedule started has
+                # no person: only the organisation's limit applies.
+                if ctx.user_id is None:
+                    tenant_limit = (
+                        await session.execute(
+                            sa.select(Tenants.quota_limit).where(
+                                Tenants.id == ctx.tenant_id
+                            )
                         )
-                    )
-                ).one()
+                    ).scalar_one()
+                    user_limit = None
+                else:
+                    tenant_limit, user_limit = (
+                        await session.execute(
+                            sa.select(Tenants.quota_limit, Users.quota_limit)
+                            .select_from(Users)
+                            .join(Tenants, Tenants.id == Users.tenant_id)
+                            .where(
+                                Users.id == ctx.user_id,
+                                Tenants.id == ctx.tenant_id,
+                            )
+                        )
+                    ).one()
                 info_blob_repo = InfoBlobRepository(session)
                 tenant_usage = await info_blob_repo.get_retained_size_of_tenant(
                     ctx.tenant_id
                 )
                 user_usage = (
                     await info_blob_repo.get_retained_size_of_user(ctx.user_id)
-                    if user_limit is not None
+                    if ctx.user_id is not None and user_limit is not None
                     else 0
                 )
 
@@ -298,7 +311,11 @@ async def _publish_prepared_pages(
                             else {}
                         )
                         tenant_released = sum(releasable.values())
-                        user_released = releasable.get(ctx.user_id, 0)
+                        user_released = (
+                            releasable.get(ctx.user_id, 0)
+                            if ctx.user_id is not None
+                            else 0
+                        )
                         ensure_quota_capacity(
                             tenant_usage=tenant_usage - tenant_released,
                             tenant_limit=tenant_limit,
@@ -328,6 +345,7 @@ async def _publish_prepared_pages(
                                 http_etag=prepared.http_etag,
                                 http_last_modified=prepared.http_last_modified,
                                 user_id=prepared.user_id,
+                                created_by_service_id=prepared.created_by_service_id,
                                 tenant_id=prepared.tenant_id,
                                 website_id=prepared.website_id,
                                 embedding_model_id=prepared.embedding_model_id,
@@ -810,6 +828,7 @@ async def persist_batch(
             tenant_id=ctx.tenant_id,
             website_id=ctx.website_id,
             user_id=ctx.user_id,
+            created_by_service_id=ctx.created_by_service_id,
             embedding_model_id=embedding_model.id,
         )
         prepared_pages.append(prepared_page)

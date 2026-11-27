@@ -948,7 +948,7 @@ async def test_admin_crawl_and_audit_commit_together(
     dispatch.assert_not_awaited()
 
 
-async def test_service_admin_key_can_read_and_cancel_but_cannot_create_crawl_jobs(
+async def test_service_admin_key_can_read_start_and_cancel_crawls(
     client, db_container, admin_user, website_id, headers, monkeypatch
 ):
     from datetime import timedelta
@@ -968,16 +968,37 @@ async def test_service_admin_key_can_read_and_cancel_but_cannot_create_crawl_job
     assert (
         await client.get("/api/v1/admin/crawler/", headers=key_headers)
     ).status_code == 200
-    response = await client.post(
+    started = await client.post(
         f"/api/v1/admin/crawler/websites/{website_id}/run/", headers=key_headers
     )
-    assert response.status_code == 403, response.text
-    assert response.json()["code"] == "service_key_cannot_create_resources"
-
-    started = await client.post(
-        f"/api/v1/admin/crawler/websites/{website_id}/run/", headers=headers
-    )
     assert started.status_code == 200, started.text
+    async with db_container(user=admin_user) as container:
+        job = (
+            await container.session().execute(
+                sa.text(
+                    "SELECT j.user_id, j.service_principal_id FROM jobs j"
+                    " JOIN crawl_attempts a ON a.dispatch_id = j.id"
+                    " WHERE a.crawl_run_id = :run_id"
+                ),
+                {"run_id": started.json()["id"]},
+            )
+        ).one()
+    # The run belongs to the service principal behind the key, not a person.
+    assert job.user_id is None
+    assert job.service_principal_id is not None
+    # The view names the service that asked, since no person did.
+    details = await client.get(
+        f"/api/v1/admin/crawler/runs/{started.json()['id']}/", headers=headers
+    )
+    assert details.status_code == 200, details.text
+    assert details.json()["initiated_by"] is None
+    assert details.json()["initiated_by_service"] == {
+        "id": str(job.service_principal_id),
+        "name": key["api_key"]["name"],
+    }
+    # A person created the source, so no service is named as its creator.
+    assert details.json()["owner"] is not None
+    assert details.json()["created_by_service"] is None
     cancelled = await client.post(
         f"/api/v1/admin/crawler/runs/{started.json()['id']}/cancel/",
         headers=key_headers,

@@ -279,7 +279,6 @@ async def update_info_blob(
     info_blob_upsert = InfoBlobUpdate(
         id=id,
         **info_blob.metadata.model_dump(),
-        user_id=current_user.id,
     )
 
     service = container.info_blob_service()

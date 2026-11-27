@@ -17,6 +17,7 @@ from eneo.authentication.endpoint_access import (
     Authorization,
     endpoint_access,
 )
+from eneo.authentication.principal import Principal
 from eneo.collections.presentation.collection_models import (
     CollectionPublic,
     CollectionUpdate,
@@ -112,6 +113,7 @@ async def get_group_by_id(
 async def create_group(
     group: CreateGroupRequest,
     container: Annotated[Container, Depends(get_container(with_user=True))],
+    # A collection made here is in no space, and a service key acts in spaces.
     _user_for_creation: None = Depends(require_user_for_creation),
 ):
     """
@@ -284,7 +286,6 @@ async def add_info_blobs(
     # request-scoped authentication can block API-key hash upgrades until after
     # this publication has already needed to commit.
     current_user = container.user()
-    await require_user_for_creation(current_user)
     if len(info_blobs.info_blobs) > 128:
         raise BadRequestException("Too many info-blobs!")
 
@@ -295,7 +296,7 @@ async def add_info_blobs(
         InfoBlobAdd(
             **blob.model_dump(),
             **blob.metadata.model_dump() if blob.metadata else {},
-            user_id=current_user.id,
+            **Principal.from_user(current_user).creator_columns(),
             group_id=id,
             tenant_id=current_user.tenant_id,
         )
@@ -398,7 +399,6 @@ async def upload_file(
         Container,
         Depends(get_container(with_user=True, with_upload_admission=True)),
     ],
-    _user_for_creation: None = Depends(require_user_for_creation),
 ):
     """Starts a job, use the job operations to keep track of this job"""
     from eneo.audit.domain.action_types import ActionType

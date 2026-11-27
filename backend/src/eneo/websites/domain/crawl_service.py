@@ -4,6 +4,7 @@ from uuid import UUID, uuid4
 from eneo.database.transaction_callbacks import after_outer_transaction
 from eneo.jobs.job_manager import job_manager
 from eneo.jobs.job_models import Task
+from eneo.jobs.task_models import task_actor
 from eneo.main.logging import get_logger
 from eneo.websites.application.crawl_dispatch import reconcile_crawl_work
 from eneo.websites.crawl_dependencies.crawl_models import CrawlTask
@@ -52,7 +53,7 @@ class CrawlService:
             schema_version=1,
             attempt_id=attempt_id,
             attempt_number=1,
-            user_id=self.job_service.user.id,
+            **task_actor(self.job_service.user),
             website_id=website.id,
             run_id=run.id,
             url=website.url,

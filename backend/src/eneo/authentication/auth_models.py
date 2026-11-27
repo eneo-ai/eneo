@@ -170,6 +170,16 @@ def is_widget_visitor(user: object) -> bool:
     return getattr(user, "active_widget", None) is not None
 
 
+def is_space_actor(user: "UserInDB") -> bool:
+    """Whether this is the made-up user a space's own scheduled work runs as.
+
+    Such work, a crawl schedule or an organisation's content sync, belongs to
+    the space and not to whoever set it up. It has that one space's rights and
+    leaves no creator on what it writes.
+    """
+    return isinstance(getattr(user, "acting_space_id", None), UUID)
+
+
 def is_service_api_key(user: "UserInDB") -> bool:
     """Single source of truth: is the request authenticated via a service API key?
 

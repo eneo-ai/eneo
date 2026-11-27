@@ -556,7 +556,11 @@ class SpaceFactory:
         def _build_service(service: "Services") -> Service:
             return Service(
                 **service.to_dict(),  # pyright: ignore[reportUnknownMemberType,reportUnknownArgumentType] -- sqlalchemy_mixins.SerializeMixin lacks type stubs
-                user=UserInDBBase.model_validate(service.user),
+                user=(
+                    None
+                    if service.user is None
+                    else UserInDBBase.model_validate(service.user)
+                ),
                 completion_model=next(
                     (
                         model

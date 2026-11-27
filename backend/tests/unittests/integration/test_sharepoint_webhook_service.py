@@ -62,10 +62,21 @@ class Setup:
     oauth_token_repo: AsyncMock
     job_repo: AsyncMock
     user_repo: AsyncMock
+    space_actors: AsyncMock
     change_key_service: AsyncMock
     sharepoint_subscription_repo: AsyncMock
     subscription: SharePointSubscription
     redis: AsyncMock
+
+
+async def _space_actor(*, space_id, tenant_id) -> SimpleNamespace:
+    """The made-up user a space's own sync runs as."""
+    return SimpleNamespace(
+        id=space_id,
+        tenant_id=tenant_id,
+        acting_space_id=space_id,
+        active_api_key=None,
+    )
 
 
 @pytest.fixture
@@ -75,6 +86,8 @@ def setup():
     oauth_token_repo = AsyncMock()
     job_repo = AsyncMock()
     user_repo = AsyncMock()
+    space_actors = AsyncMock()
+    space_actors.get_space_actor_user.side_effect = _space_actor
     change_key_service = AsyncMock()
     sharepoint_subscription_repo = AsyncMock()
     redis = AsyncMock()
@@ -91,6 +104,7 @@ def setup():
         oauth_token_repo=oauth_token_repo,
         job_repo=job_repo,
         user_repo=user_repo,
+        space_actors=space_actors,
         change_key_service=change_key_service,
         sharepoint_subscription_repo=sharepoint_subscription_repo,
         redis_client=redis,
@@ -105,6 +119,7 @@ def setup():
         oauth_token_repo=oauth_token_repo,
         job_repo=job_repo,
         user_repo=user_repo,
+        space_actors=space_actors,
         change_key_service=change_key_service,
         sharepoint_subscription_repo=sharepoint_subscription_repo,
         subscription=subscription,
@@ -134,6 +149,7 @@ def mock_knowledge_db():
     """Create a mock IntegrationKnowledge DB model."""
     knowledge = MagicMock()
     knowledge.id = uuid4()
+    knowledge.space_id = uuid4()
     knowledge.user_integration_id = uuid4()
     knowledge.site_id = "site-123"
     knowledge.folder_id = None
@@ -270,6 +286,7 @@ async def test_configured_client_state_is_compared_stripped_as_utf8(
             oauth_token_repo=setup.oauth_token_repo,
             job_repo=setup.job_repo,
             user_repo=setup.user_repo,
+            space_actors=setup.space_actors,
             change_key_service=setup.change_key_service,
             sharepoint_subscription_repo=setup.sharepoint_subscription_repo,
             redis_client=setup.redis,
@@ -571,7 +588,6 @@ def _running_sync_setup(setup: Setup, knowledge_db, integration_db, user) -> Non
     setup.service._fetch_knowledge_by_subscription = AsyncMock(
         return_value=[(knowledge_db, integration_db)]
     )
-    setup.user_repo.list_tenant_admins.return_value = [user]
     setup.change_key_service.should_process.return_value = True
 
 
@@ -668,9 +684,6 @@ async def test_tenant_app_integration_uses_tenant_app_id(
         return_value=[(mock_knowledge_db, mock_tenant_app_integration_db)]
     )
 
-    # Mock tenant admin lookup
-    setup.user_repo.list_tenant_admins.return_value = [mock_user]
-
     # Mock change key service to allow notification
     setup.change_key_service.should_process.return_value = True
     setup.change_key_service.update_change_key.return_value = None
@@ -690,9 +703,10 @@ async def test_tenant_app_integration_uses_tenant_app_id(
         # Verify OAuth token was NOT fetched
         setup.oauth_token_repo.one_or_none.assert_not_called()
 
-        # Verify admin user was fetched
-        setup.user_repo.list_tenant_admins.assert_called_once_with(
-            tenant_id=mock_tenant_app_integration_db.tenant_id
+        # The sync runs as the space the knowledge is in, not as a person
+        setup.space_actors.get_space_actor_user.assert_awaited_once_with(
+            space_id=mock_knowledge_db.space_id,
+            tenant_id=mock_tenant_app_integration_db.tenant_id,
         )
 
         # Verify job was queued with tenant_app_id
@@ -744,8 +758,8 @@ async def test_user_oauth_integration_uses_oauth_token(
             user_integration_id=mock_user_integration_db.id
         )
 
-        # Verify admin user was NOT fetched
-        setup.user_repo.list_tenant_admins.assert_not_called()
+        # A personal connection syncs as its person, not as the space
+        setup.space_actors.get_space_actor_user.assert_not_awaited()
 
         # Verify job was queued with token_id
         mock_job_service.queue_job.assert_called_once()
@@ -755,58 +769,48 @@ async def test_user_oauth_integration_uses_oauth_token(
         assert params.tenant_app_id is None  # No tenant app for user OAuth
 
 
-async def test_tenant_app_integration_uses_admin_user_for_job(
+async def test_tenant_app_integration_syncs_as_the_space(
     setup: Setup,
     mock_notification,
     mock_knowledge_db,
     mock_tenant_app_integration_db,
-    mock_user,
 ):
-    """Tenant app integrations use tenant admin as job owner."""
-    # Mock database responses
+    """An organisation's connection has no person: the job has no owner and
+    names the space it runs as."""
     setup.service._fetch_knowledge_by_subscription = AsyncMock(
         return_value=[(mock_knowledge_db, mock_tenant_app_integration_db)]
     )
-
-    # Mock admin user lookup
-    admin_user = mock_user.copy() if hasattr(mock_user, "copy") else mock_user
-    admin_user.id = uuid4()
-    setup.user_repo.list_tenant_admins.return_value = [admin_user]
-
-    # Mock change key service
     setup.change_key_service.should_process.return_value = True
     setup.change_key_service.update_change_key.return_value = None
-
-    # Mock job service
     mock_job_service = AsyncMock()
-    mock_job_service.queue_job = AsyncMock()
 
     with patch(
         "eneo.integration.infrastructure.sharepoint_webhook_service.JobService",
         return_value=mock_job_service,
-    ):
-        notifications = {"value": [mock_notification]}
+    ) as job_service_class:
+        await _handle(setup.service, {"value": [mock_notification]})
 
-        await _handle(setup.service, notifications)
+    params = mock_job_service.queue_job.call_args.kwargs["task_params"]
+    assert params.user_id is None
+    assert params.service_principal_id is None
+    assert params.acting_space_id == mock_knowledge_db.space_id
+    assert params.tenant_id == mock_tenant_app_integration_db.tenant_id
+    queued_as = job_service_class.call_args.kwargs["user"]
+    assert queued_as.acting_space_id == mock_knowledge_db.space_id
+    setup.user_repo.get_user_by_id.assert_not_awaited()
 
-        # Verify job was created with admin user
-        mock_job_service.queue_job.assert_called_once()
-        call_args = mock_job_service.queue_job.call_args
-        params = call_args.kwargs["task_params"]
-        assert params.user_id == admin_user.id
 
-
-async def test_missing_tenant_admin_skips_integration(
+async def test_a_space_that_is_gone_skips_the_integration(
     setup: Setup, mock_notification, mock_knowledge_db, mock_tenant_app_integration_db
 ):
-    """Missing tenant admin causes integration to be skipped with warning."""
+    """Without its space there is nobody for the sync to run as."""
     # Mock database responses
     setup.service._fetch_knowledge_by_subscription = AsyncMock(
         return_value=[(mock_knowledge_db, mock_tenant_app_integration_db)]
     )
 
-    # Mock admin user lookup - no admins found
-    setup.user_repo.list_tenant_admins.return_value = []
+    setup.space_actors.get_space_actor_user.side_effect = None
+    setup.space_actors.get_space_actor_user.return_value = None
 
     # Mock change key service
     setup.change_key_service.should_process.return_value = True
@@ -1125,7 +1129,6 @@ async def test_queue_sync_for_knowledge_uses_the_rows_own_resource(
     setup.service._fetch_knowledge = AsyncMock(  # pyright: ignore[reportPrivateUsage]
         return_value=[(mock_knowledge_db, mock_tenant_app_integration_db)]
     )
-    setup.user_repo.list_tenant_admins.return_value = [mock_user]
     job_service = AsyncMock()
 
     with patch(
@@ -1176,6 +1179,7 @@ async def test_missed_notifications_queue_a_sync_for_every_row_on_the_subscripti
 ):
     file_scoped = MagicMock()
     file_scoped.id = uuid4()
+    file_scoped.space_id = uuid4()
     file_scoped.site_id = "site-123"
     file_scoped.drive_id = None
     file_scoped.resource_type = "site"
@@ -1190,7 +1194,6 @@ async def test_missed_notifications_queue_a_sync_for_every_row_on_the_subscripti
             (file_scoped, mock_tenant_app_integration_db),
         ]
     )
-    setup.user_repo.list_tenant_admins.return_value = [mock_user]
     job_service = AsyncMock()
 
     with patch(
@@ -1292,7 +1295,6 @@ async def test_a_change_behind_a_dead_queued_sync_is_served_by_the_catch_up(
         return_value=[(mock_knowledge_db, mock_tenant_app_integration_db)]
     )
     setup.session.begin = MagicMock(return_value=_Transaction())
-    setup.user_repo.list_tenant_admins.return_value = [mock_user]
     job_service = AsyncMock()
 
     with patch(

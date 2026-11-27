@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import cast
+from typing import TypedDict, cast
 from uuid import UUID, uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,7 +14,7 @@ from eneo.jobs.job_models import (
     JobUpdate,
     Task,
 )
-from eneo.jobs.job_repo import ACTIVE_JOB_STATUSES, JobRepository
+from eneo.jobs.job_repo import JobRepository
 from eneo.jobs.job_staging import job_staging_path
 from eneo.jobs.task_models import (
     AppDispatchEnvelope,
@@ -22,6 +22,7 @@ from eneo.jobs.task_models import (
     Transcription,
     UploadInfoBlob,
     build_dispatch_envelope,
+    task_actor,
 )
 from eneo.main.exceptions import NotFoundException
 from eneo.main.logging import get_logger
@@ -39,6 +40,12 @@ async def _enqueue_committed_job(task: Task, job_id: UUID, params: TaskParams) -
             "Queue did not confirm job dispatch",
             extra={"job_id": str(job_id), "task": task.value},
         )
+
+
+class JobOwner(TypedDict):
+    user_id: UUID | None
+    service_principal_id: UUID | None
+    api_key_id: UUID | None
 
 
 class JobService:
@@ -72,7 +79,7 @@ class JobService:
         """
         if task in KNOWLEDGE_TASKS:
             raise ValueError(f"Knowledge task {task.value} requires durable dispatch")
-        job = Job(task=task, name=name, status=Status.QUEUED, user_id=self.user.id)
+        job = Job(task=task, name=name, status=Status.QUEUED, **self._owner())
         if dispatch_envelope is None:
             job_in_db = await self.job_repo.add_job(job=job)
         else:
@@ -124,11 +131,12 @@ class JobService:
             )
         if task not in (Task.UPLOAD_FILE, Task.TRANSCRIPTION):
             raise ValueError(f"Task {task.value} does not support durable dispatch")
-        if task_params.user_id != self.user.id:
+        owner = self._owner()
+        if not task_params.same_actor(owner["user_id"], owner["service_principal_id"]):
             raise ValueError("Durable knowledge job user does not match service user")
 
         envelope = build_dispatch_envelope(task, task_params)
-        job = Job(task=task, name=name, status=Status.QUEUED, user_id=self.user.id)
+        job = Job(task=task, name=name, status=Status.QUEUED, **self._owner())
         job_in_db = await self.job_repo.add_durable_job(
             job,
             job_id=job_id or uuid4(),
@@ -181,28 +189,36 @@ class JobService:
         failure_code: JobFailureCode,
         only_if_queued: bool = False,
     ):
-        """Fail an active job. Store only the code since an error can quote
-        the job's input. Use only_if_queued when the caller cannot confirm that
-        it owns an in-progress job."""
-        job_update = JobUpdate(
-            status=Status.FAILED,
-            finished_at=datetime.now(timezone.utc),
-            result_location=None,
-            failure_code=failure_code,
-        )
-        return await self.job_repo.update_job(
-            job_id,
-            job_update,
-            from_statuses=(Status.QUEUED,) if only_if_queued else ACTIVE_JOB_STATUSES,
+        """Fail an active job: see ``JobRepository.fail_job``."""
+        return await self.job_repo.fail_job(
+            job_id, failure_code=failure_code, only_if_queued=only_if_queued
         )
 
     async def get_running_jobs(self):
-        return await self.job_repo.get_running_jobs(self.user.id)
+        owner = self._owner()
+        return await self.job_repo.get_running_jobs(
+            user_id=owner["user_id"],
+            service_principal_id=owner["service_principal_id"],
+        )
 
     async def get_job(self, job_id: UUID):
         job = await self.job_repo.get_job(job_id)
+        owner = self._owner()
 
-        if job is None or job.user_id != self.user.id:
+        if job is None or not job.owned_by(
+            owner["user_id"], owner["service_principal_id"]
+        ):
             raise NotFoundException()
 
         return job
+
+    def _owner(self) -> JobOwner:
+        """Whom the caller's jobs belong to: the person, or the service
+        principal behind a service key. The key's own id changes on rotation
+        and is never the owner."""
+        actor = task_actor(self.user)
+        return {
+            "user_id": actor["user_id"],
+            "service_principal_id": actor["service_principal_id"],
+            "api_key_id": actor["api_key_id"],
+        }

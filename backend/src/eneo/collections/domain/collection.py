@@ -2,6 +2,7 @@ from typing import TYPE_CHECKING, Optional, Union, cast, overload
 
 from typing_extensions import override
 
+from eneo.authentication.principal import Principal
 from eneo.base.base_entity import Entity
 from eneo.main.models import NOT_PROVIDED, NotProvided, is_provided
 
@@ -23,16 +24,19 @@ class Collection(Entity):
         created_at: Optional["datetime"],
         updated_at: Optional["datetime"],
         space_id: "UUID",
-        user_id: "UUID",
+        user_id: Optional["UUID"],
         tenant_id: "UUID",
         name: str,
         size: int,
         num_info_blobs: int,
         embedding_model: "EmbeddingModel",
+        created_by_service_id: Optional["UUID"] = None,
     ):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
         self.space_id = space_id
+        # Who made the collection: a person (user_id) or a service principal.
         self.user_id = user_id
+        self.created_by_service_id = created_by_service_id
         self.tenant_id = tenant_id
         self.name = name
         self.size = size
@@ -77,7 +81,7 @@ class Collection(Entity):
             created_at=None,
             updated_at=None,
             space_id=cast("UUID", space_id),
-            user_id=cast("UserInDB", user).id,
+            **Principal.from_user(cast("UserInDB", user)).creator_columns(),
             tenant_id=cast("UserInDB", user).tenant_id,
             name=cast(str, name),
             size=0,
@@ -129,6 +133,7 @@ class Collection(Entity):
                 "UUID", record.space_id
             ),  # DB invariant: collection rows attached to spaces have non-null space_id
             user_id=record.user_id,
+            created_by_service_id=record.created_by_service_id,
             tenant_id=record.tenant_id,
             name=record.name,
             size=record.size,

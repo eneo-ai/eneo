@@ -15,6 +15,7 @@ from eneo.database.tables.questions_table import (
     Questions,
 )
 from eneo.database.tables.sessions_table import Sessions
+from eneo.database.tables.tenant_scope import in_tenant
 from eneo.database.tables.users_table import Users
 from eneo.files.file_content_loader import FileContentLoader
 from eneo.info_blobs.info_blob_repo import InfoBlobRepository
@@ -164,6 +165,8 @@ class AnalysisRepository:
         if tenant_id is not None:
             if table == Questions:
                 stmt = stmt.where(Questions.tenant_id == tenant_id)
+            elif table == Assistants:
+                stmt = stmt.where(in_tenant(Assistants, tenant_id))
             else:
                 stmt = stmt.join(Users).where(Users.tenant_id == tenant_id)
 
@@ -190,8 +193,7 @@ class AnalysisRepository:
         assistant_count = (
             sa.select(sa.func.count())
             .select_from(Assistants)
-            .join(Users, Assistants.user_id == Users.id)
-            .where(Users.tenant_id == tenant_id)
+            .where(in_tenant(Assistants, tenant_id))
             .scalar_subquery()
         )
         session_count = _exclude_helper_run_sessions(
@@ -580,8 +582,7 @@ class AnalysisRepository:
         """
         stmt = (
             sa.select(Assistants.id, Assistants.created_at)
-            .join(Users, Assistants.user_id == Users.id)
-            .where(Users.tenant_id == tenant_id)
+            .where(in_tenant(Assistants, tenant_id))
             .order_by(Assistants.created_at)
         )
 
@@ -685,8 +686,7 @@ class AnalysisRepository:
         bucket = _hour_bucket(Assistants.created_at, time_zone)
         stmt = (
             sa.select(bucket, sa.func.count().label("total"))
-            .join(Users, Assistants.user_id == Users.id)
-            .where(Users.tenant_id == tenant_id)
+            .where(in_tenant(Assistants, tenant_id))
             .group_by(bucket)
             .order_by(bucket)
         )
@@ -772,8 +772,8 @@ class AnalysisRepository:
         stmt = (
             sa.select(sa.func.count(sa.distinct(Sessions.assistant_id)))
             .join(Assistants, Sessions.assistant_id == Assistants.id)
-            .join(Users, Assistants.user_id == Users.id)
-            .where(Users.tenant_id == tenant_id)
+            .outerjoin(Users, Assistants.user_id == Users.id)
+            .where(in_tenant(Assistants, tenant_id))
             .where(Users.deleted_at.is_(None))  # Exclude deleted users
             .where(Assistants.published.is_(True))
             .where(Assistants.insight_enabled.is_(True))
@@ -799,8 +799,8 @@ class AnalysisRepository:
         stmt = (
             sa.select(sa.func.count())
             .select_from(Assistants)
-            .join(Users, Assistants.user_id == Users.id)
-            .where(Users.tenant_id == tenant_id)
+            .outerjoin(Users, Assistants.user_id == Users.id)
+            .where(in_tenant(Assistants, tenant_id))
             .where(Users.deleted_at.is_(None))
             .where(Assistants.published.is_(True))
             .where(Assistants.insight_enabled.is_(True))

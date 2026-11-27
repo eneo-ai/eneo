@@ -28,6 +28,7 @@ Each item can stop the backend from starting, stop sign-in or lose data:
 12. Run the sessions check against the 2.3 database: a session with both or neither of a user and an API key stops `db-init`. See [Web widgets](#widgets).
 13. Replace API keys that integrations or modules still use but that are listed as Expired, or that the unused-key policy will expire: they stop signing in at the first nightly run. See [API keys that should have expired](#api-keys-expire).
 14. Plan downtime for `db-init` in proportion to the size of `files` and `sessions`: migrations `202611241100` and `202611241200` lock each table while they check every row. See [Service keys own their files and conversations](#service-key-files).
+15. Plan downtime for `db-init` in proportion to the size of `info_blobs` and `jobs`: migrations `202611251000` to `202611251300` lock each table they change while they check every row. See [Resources and scheduled work no longer need a person](#creator-optional).
 
 **Rolling back to 2.3:** restore the `pg_dump` backup taken before `db-init`, with a matching object storage snapshot. A schema downgrade stops at migration `202610291900` ("Cannot discard approved Skill reference history") once an approved Skill revision references another Skill. A downgrade never brings back emptied or deleted logs, cleared names or rewritten audit entries.
 
@@ -133,6 +134,7 @@ flowchart TB
 | The audit action `user_access_token_issued` records each token the operator takes for a user with the super API key, always and before the token is issued | Clients with a fixed list of audit actions | Accept the new value |
 | [API keys that should have expired stop working](#api-keys-expire) | Integrations and modules with API keys; tenants with the unused-key policy | Replace the keys; check the policy's days |
 | [Service keys own their files and conversations](#service-key-files) | Integrations with service API keys; operators; anyone who writes to `api_keys_v2`, `files` or `sessions` directly | Plan downtime; expect `200` where file upload and delete answered `403` |
+| [Resources and scheduled work no longer need a person](#creator-optional) | API consumers that read the creator of a resource; integrations with service API keys; operators; anyone who reads `user_id` on the changed tables directly | Accept an empty creator; plan downtime; deploy backend and both frontends together |
 
 ### Retention, logs and storage [#retention-logs-storage]
 
@@ -364,6 +366,33 @@ Migration `202611241000` creates `service_principals` and gives each existing se
 **Do:** stop every backend and worker before `db-init`, and plan downtime in proportion to the size of `files` and `sessions`. SQL of your own that reads `files.user_id` must read `files.owner_user_id`; SQL that inserts a service key into `api_keys_v2` must set `service_principal_id`; SQL that finds a service key's conversations must use `sessions.service_principal_id`.
 
 **Rollback:** `alembic downgrade 202611201305`. It is refused while a service principal owns a file, or owns a conversation whose key has been deleted; delete those files and conversations first.
+
+### Resources and scheduled work no longer need a person [#creator-optional]
+
+The person who created an assistant, an app, a service, a prompt, a collection, a website or an info blob was required, so nothing could be created or run without one. Access never came from the creator: it comes from the space. The creator is now a record of who made the resource, and it may be empty.
+
+What changes for the API:
+
+- `user_id` may be `null` or missing on assistants, services and apps, and `user` may be `null` or missing on assistants, services, prompts and app runs. `owner` may be `null` in the admin crawler details; when a service key created the source or requested the crawl, the new `created_by_service` and `initiated_by_service` name the service. A client that reads these must accept that there is no person.
+- A service key creates assistants, apps, services, collections, websites, info blobs and integration knowledge in a space, starts syncs and crawls, and runs apps. These calls answered `403 service_key_cannot_create_resources` and now answer as they do for a person. The resource records the key's service principal as its creator. See [What service keys cannot do](/docs/api-key-management#what-service-keys-cannot-do) for what still needs a person.
+- `POST /api/v1/services/` (a service outside a space) with a service key answers `403 service_key_cannot_create_resources`. The call failed before.
+- New: `GET /api/v1/spaces/{id}/storage/` answers how much one space stores, for the admins of that space. There is no limit per space.
+
+What changes in behavior:
+
+- Removing a person in Eneo works as before: the person is marked as removed, their own space is deleted with what is in it, and what they created in shared spaces stays. Only the database rule changes: if a row is deleted from `users` directly, the resources that person created now stay with an empty creator, where the database deleted them before.
+- A scheduled crawl runs as the space the website is in, not as the person who added the website. It keeps running when that person is gone. An organization's SharePoint connection syncs as the space too; it used to run as the oldest tenant administrator.
+- Content that a scheduled crawl or such a sync publishes has no creator, so it counts toward the organization's storage limit only. Before, it counted toward the limit of the person who added the website. Content a person publishes still counts toward that person's limit.
+- A model provider with an outbound header set to **Block the request** on a missing value now refuses scheduled crawls and the SharePoint syncs of an organization's connection: they run as the space, which has no attributes. Before, they used the attributes of the person who added the website and of the oldest tenant administrator. Check such headers before you upgrade; the setting that leaves the header out is not affected. See [Outbound headers](/guides/ai-providers#outbound-headers).
+- The organization's storage total counts all its content, with or without a creator.
+- Changing the metadata of an info blob no longer changes who created it.
+- A job that a service key or a space queues is not listed for any person.
+
+Migration `202611251000` changes `assistants`, `services`, `apps`, `input_fields` and `prompts`, and migration `202611251300` changes `groups`, `websites` and `info_blobs`: `user_id` may be empty and becomes empty when the person is removed, and `created_by_service_id` is added. Migration `202611251100` lets `jobs.user_id` be empty and adds `jobs.service_principal_id` and `jobs.api_key_id`. Migration `202611251200` does the same for `app_runs` with `app_runs.service_principal_id`. No row is rewritten and every existing row keeps its person, but each migration checks every row of its tables while they are locked. `info_blobs` is usually the largest.
+
+**Do:** stop every backend and worker before `db-init`, and plan downtime in proportion to the size of `info_blobs` and `jobs`. Deploy the backend and both frontends together: the web apps of this release show a resource without a creator, the older ones expect one. SQL of your own that reads `user_id` on these tables must accept `NULL`; a row a service key made has its creator in `created_by_service_id`, or for `jobs` and `app_runs` its owner in `service_principal_id`.
+
+**Rollback:** `alembic downgrade 202611241200`. It is refused while any row of the changed tables has no person: a resource a service key created, a job or an app run a service key or a space started, or a resource whose creator was removed after the upgrade. Remove those rows first, or restore the backup.
 
 ## Details: retention, logs and storage [#details-retention]
 

@@ -15,6 +15,7 @@ from eneo.jobs.task_models import (
     KnowledgeOriginalAdmission,
     Transcription,
     UploadInfoBlob,
+    task_actor,
 )
 from eneo.main.exceptions import (
     FileNotSupportedException,
@@ -125,7 +126,7 @@ class TaskService:
         if task_type == Task.UPLOAD_FILE:
             params: UploadInfoBlob | Transcription = UploadInfoBlob(
                 filename=sanitized_filename,
-                user_id=self.user.id,
+                **task_actor(self.user),
                 group_id=group_id,
                 space_id=space_id,
                 mimetype=mimetype,
@@ -135,7 +136,7 @@ class TaskService:
             # task_type == Task.TRANSCRIPTION (get_task_type raises for any other value)
             params = Transcription(
                 filename=sanitized_filename,
-                user_id=self.user.id,
+                **task_actor(self.user),
                 group_id=group_id,
                 space_id=space_id,
                 mimetype=mimetype,

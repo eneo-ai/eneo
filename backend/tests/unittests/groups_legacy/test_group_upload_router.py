@@ -8,7 +8,6 @@ from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
-from eneo.authentication.auth_dependencies import require_user_for_creation
 from eneo.groups_legacy.api import group_router
 from eneo.jobs.task_service import TaskService
 from eneo.main.exceptions import ErrorCodes
@@ -67,7 +66,6 @@ def _upload_app(task_service: TaskService) -> FastAPI:
     add_exception_handlers(app)
     app.include_router(group_router.router)
     app.dependency_overrides[container_dependency.call] = Container
-    app.dependency_overrides[require_user_for_creation] = lambda: None
     return app
 
 
@@ -196,7 +194,6 @@ async def test_collection_upload_is_audited_without_the_file_name() -> None:
             file=BytesIO(b"payload"), filename=name, content_type="application/pdf"
         ),
         container=Container(),
-        _user_for_creation=None,
     )
 
     audit = audit_service.log_async.await_args.kwargs

@@ -80,7 +80,7 @@ async def redispatch_stale_jobs(
             task = Task(job.task)
             if envelope.task != task:
                 raise ValueError("task does not match the persisted job")
-            if envelope.params.user_id != job.user_id:
+            if not envelope.params.same_actor(job.user_id, job.service_principal_id):
                 raise ValueError("user does not match the persisted job")
         except (ValidationError, ValueError) as exc:
             job.status = Status.FAILED.value

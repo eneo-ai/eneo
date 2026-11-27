@@ -38,7 +38,7 @@ def _serialize_skill_provenance(
 
 async def get_update_targets_for_jobs(
     session: AsyncSession, job_ids: list[UUID]
-) -> Sequence[tuple[UUID, UUID, UUID, UUID, bool]]:
+) -> Sequence[tuple[UUID, UUID | None, UUID, UUID, bool]]:
     stmt = (
         sa.select(
             AppRuns.id,
@@ -150,10 +150,24 @@ class AppRunRepository:
         assert isinstance(app_run_in_db, AppRuns)
         return await self._to_domain(app_run_in_db)
 
-    async def get_for_app(self, app_id: UUID, user_id: UUID) -> list[AppRun]:
+    async def get_for_app(
+        self,
+        app_id: UUID,
+        *,
+        user_id: UUID | None,
+        service_principal_id: UUID | None,
+    ) -> list[AppRun]:
+        """The owner's runs of the app. An owner is a person or a service
+        principal; a caller that is neither has none."""
+        if user_id is not None:
+            owned = AppRuns.user_id == user_id
+        elif service_principal_id is not None:
+            owned = AppRuns.service_principal_id == service_principal_id
+        else:
+            owned = sa.false()
         stmt = (
             sa.select(AppRuns)
-            .where(AppRuns.user_id == user_id)
+            .where(owned)
             .where(AppRuns.app_id == app_id)
             .order_by(AppRuns.created_at.desc())
         )
@@ -176,6 +190,7 @@ class AppRunRepository:
                 skill_provenance=_serialize_skill_provenance(app_run.skill_provenance),
                 tenant_id=app_run.tenant_id,
                 user_id=app_run.user_id,
+                service_principal_id=app_run.service_principal_id,
                 app_id=app_run.app_id,
                 completion_model_id=app_run.completion_model_id,
             )

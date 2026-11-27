@@ -12,6 +12,7 @@ from eneo.ai_models.completion_models.completion_model import (
 )
 from eneo.apps.apps.api.app_models import InputField, InputFieldType
 from eneo.apps.apps.app import App
+from eneo.authentication.principal import Principal
 from eneo.database.tables.ai_models_table import CompletionModels
 from eneo.database.tables.app_table import Apps
 from eneo.files.file_models import File
@@ -86,7 +87,7 @@ class AppFactory:
             created_at=None,
             updated_at=None,
             id=None,
-            user_id=user.id,
+            **Principal.from_user(user).creator_columns(),
             tenant_id=user.tenant_id,
             space_id=space_id,
             name=name,
@@ -121,7 +122,7 @@ class AppFactory:
         attachment_list = list(attachments) if attachments is not None else []
 
         app = App(
-            user_id=user.id,
+            **Principal.from_user(user).creator_columns(),
             tenant_id=user.tenant_id,
             space_id=space_id,
             name=name or template.name,
@@ -178,6 +179,7 @@ class AppFactory:
             id=cast(UUID | None, app_in_db.id),
             space_id=app_in_db.space_id,
             user_id=app_in_db.user_id,
+            created_by_service_id=app_in_db.created_by_service_id,
             tenant_id=app_in_db.tenant_id,
             name=app_in_db.name,
             description=app_in_db.description,
@@ -253,6 +255,7 @@ class AppFactory:
             id=cast(UUID | None, app_in_db.id),
             space_id=app_in_db.space_id,
             user_id=app_in_db.user_id,
+            created_by_service_id=app_in_db.created_by_service_id,
             tenant_id=app_in_db.tenant_id,
             name=app_in_db.name,
             description=app_in_db.description,

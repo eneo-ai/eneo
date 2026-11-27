@@ -21,9 +21,10 @@ class AppRunFactory:
         app: App,
         files: list[FileInfo],
         text: str | None,
-        user_id: UUID,
+        user_id: UUID | None,
         tenant_id: UUID,
         skill_provenance: tuple[SkillExecutionReference, ...],
+        service_principal_id: UUID | None = None,
     ) -> AppRun:
         if app.id is None:
             raise ValueError("App must have an id before creating an app run")
@@ -50,6 +51,7 @@ class AppRunFactory:
             skill_provenance=skill_provenance,
             job=None,
             completion_model_id=app.completion_model.id,
+            service_principal_id=service_principal_id,
         )
 
     def create_app_run_from_db(
@@ -58,7 +60,11 @@ class AppRunFactory:
         *,
         input_files: list[FileInfo] | None = None,
     ) -> AppRun:
-        user = UserSparse.model_validate(app_run_in_db.user)
+        user = (
+            None
+            if app_run_in_db.user is None
+            else UserSparse.model_validate(app_run_in_db.user)
+        )
         job_in_db = cast(JobInDb | None, app_run_in_db.job)
         job = JobInDb.model_validate(job_in_db) if job_in_db is not None else None
 
@@ -85,4 +91,5 @@ class AppRunFactory:
             ),
             job=job,
             completion_model_id=app_run_in_db.completion_model_id,
+            service_principal_id=app_run_in_db.service_principal_id,
         )

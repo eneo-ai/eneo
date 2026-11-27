@@ -31,10 +31,12 @@ from eneo.authentication.auth_models import (
     METHOD_PERMISSION_MAP,
     PERMISSION_LEVEL_ORDER,
     AccessToken,
+    ApiKeyHashVersion,
     ApiKeyOwnership,
     ApiKeyPermission,
     ApiKeyScopeType,
     ApiKeyState,
+    ApiKeyType,
     ApiKeyV2InDB,
     CredentialFacts,
     FederatedIdentity,
@@ -56,7 +58,7 @@ from eneo.database.tables.prompts_table import PromptsAssistants
 from eneo.database.tables.service_table import Services
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import Spaces
-from eneo.database.tables.users_table import Users
+from eneo.database.tables.tenant_scope import tenant_id_of
 from eneo.database.tables.websites_table import CrawlRuns, Websites
 from eneo.info_blobs.info_blob_repo import InfoBlobRepository
 from eneo.main.config import get_settings
@@ -143,9 +145,9 @@ _SERVICE_KEY_BASE_PERMISSIONS: frozenset[Permission] = frozenset(
         # Web search: automations asking an assistant keep the capability the
         # assistant offers; the route guards and the tenant's providers still
         # bound what a key can reach. Image, document and spreadsheet
-        # creation are deliberately absent: their outputs are persisted as
-        # files keyed on user_id, and the synthetic service user has no users
-        # row to key them on.
+        # creation are deliberately absent: they are not granted to service
+        # keys. Their outputs are files, which a service principal can own,
+        # so granting them is a product decision, not a technical limit.
         Permission.WEB_SEARCH,
     }
 )
@@ -1173,9 +1175,22 @@ class UserService:
         guardrails do not apply here, the loopback caller is Eneo itself, and
         no usage is recorded: the API call that minted the token already was.
         """
-        key = await self.api_key_v2_repo.get(
+        return await self.get_service_key_user(
             key_id=payload.user_id, tenant_id=payload.tenant_id
         )
+
+    async def get_service_key_user(
+        self, *, key_id: UUID, tenant_id: UUID
+    ) -> "UserInDB | None":
+        """The made-up user a service key signs in as, rebuilt from the key
+        without its secret: for Eneo's own callers that act on the key's
+        behalf later, a loopback tool call or a queued job in the worker.
+
+        None when the key is not a service key of this organisation, is no
+        longer active, or its service principal is disabled: whoever ended the
+        key's access ended this too.
+        """
+        key = await self.api_key_v2_repo.get(key_id=key_id, tenant_id=tenant_id)
         if key is None or key.ownership != ApiKeyOwnership.SERVICE:
             return None
         effective_state = compute_effective_state(
@@ -1244,6 +1259,51 @@ class UserService:
         if is_organization:
             return Permission.ADMIN in user.permissions
         return bool(is_member)
+
+    async def get_space_actor_user(
+        self, *, space_id: UUID, tenant_id: UUID
+    ) -> "UserInDB | None":
+        """The made-up user a space's own scheduled work runs as.
+
+        A crawl schedule or an organisation's content sync belongs to the
+        space, not to whoever set it up, so it must keep running when that
+        person is gone. The actor is built in memory with the rights of an
+        admin in that one space and nothing outside it; no user and no key is
+        stored for it. None when the space is not in the organisation.
+        """
+        assert self._session is not None
+        name = await self._session.scalar(
+            sa.select(Spaces.name).where(
+                Spaces.id == space_id, Spaces.tenant_id == tenant_id
+            )
+        )
+        if name is None:
+            return None
+        # Rights are derived the way a service key's are, from a scope and a
+        # permission, so the space acts through the same checks as any caller.
+        scope = ApiKeyV2InDB(
+            id=space_id,
+            tenant_id=tenant_id,
+            ownership=ApiKeyOwnership.SERVICE,
+            key_prefix="space",
+            key_suffix="space",
+            name=name,
+            key_type=ApiKeyType.SK,
+            permission=ApiKeyPermission.ADMIN,
+            scope_type=ApiKeyScopeType.SPACE,
+            scope_id=space_id,
+            state=ApiKeyState.ACTIVE,
+            key_hash="",
+            hash_version=ApiKeyHashVersion.HMAC_SHA256.value,
+        )
+        user = await self._build_service_user(scope)
+        return user.model_copy(
+            update={
+                "email": f"space-{space_id.hex[:8]}@space.actor",
+                "username": f"Space ({name})",
+                "acting_space_id": space_id,
+            }
+        )
 
     async def _build_service_user(self, key: ApiKeyV2InDB) -> "UserInDB":
         """Build a synthetic UserInDB for service keys — no DB user lookup.
@@ -1550,15 +1610,19 @@ class UserService:
     async def _get_assistant_scope_context(
         self, assistant_id: UUID
     ) -> tuple[UUID, UUID]:
+        # The organisation comes from the assistant's space, not its creator:
+        # an assistant made by a service key has no person behind it.
         stmt = (
-            sa.select(Assistants.space_id, Users.tenant_id)
-            .join(Users, Users.id == Assistants.user_id)
+            sa.select(
+                Assistants.space_id,
+                tenant_id_of(Assistants).label("tenant_id"),
+            )
             .where(Assistants.id == assistant_id)
             .limit(1)
         )
         record = await self.repo.session.execute(stmt)
         row = record.first()
-        if row is None or row.space_id is None:
+        if row is None or row.space_id is None or row.tenant_id is None:
             raise ApiKeyValidationError(
                 status_code=404,
                 code="resource_not_found",

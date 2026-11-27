@@ -1132,6 +1132,15 @@
         )
       });
     }
+    if (ownership === "service" && writeKeys.includes("spaces")) {
+      rows.push({
+        kind: "deny",
+        msg: apiKeysMessage(
+          "api_keys_capability_spaces_service_no_create",
+          "Cannot create new spaces. That needs a person."
+        )
+      });
+    }
     if (adminKeys.length > 0) {
       rows.push({
         kind: "allow",
@@ -1153,35 +1162,37 @@
       return;
     }
 
-    if (ownership === "service") {
-      rows.push({
-        kind: "deny",
-        msg: apiKeysMessage(
-          "api_keys_capability_files_service_blocked",
-          "Service keys cannot upload or delete files."
-        )
-      });
-      return;
-    }
-
+    // A service key's files are owned by its service principal, a user key's
+    // by its user. Each reaches only its own.
+    const ofService = ownership === "service";
     const level = getResourcePermission("files");
     if (level === "read") {
       rows.push({
         kind: "allow",
-        msg: apiKeysMessage(
-          "api_keys_capability_files_read_user",
-          "Can read files owned by the key's user."
-        )
+        msg: ofService
+          ? apiKeysMessage(
+              "api_keys_capability_files_read_service",
+              "Can read the key's own files."
+            )
+          : apiKeysMessage(
+              "api_keys_capability_files_read_user",
+              "Can read files owned by the key's user."
+            )
       });
       return;
     }
 
     rows.push({
       kind: "allow",
-      msg: apiKeysMessage(
-        "api_keys_capability_files_upload_read_user",
-        "Can upload and read files owned by the key's user."
-      )
+      msg: ofService
+        ? apiKeysMessage(
+            "api_keys_capability_files_upload_read_service",
+            "Can upload and read the key's own files."
+          )
+        : apiKeysMessage(
+            "api_keys_capability_files_upload_read_user",
+            "Can upload and read files owned by the key's user."
+          )
     });
 
     if (level === "write") {
@@ -1197,17 +1208,27 @@
 
     rows.push({
       kind: "allow",
-      msg: apiKeysMessage(
-        "api_keys_capability_files_delete_user",
-        "Can delete files owned by the key's user."
-      )
+      msg: ofService
+        ? apiKeysMessage(
+            "api_keys_capability_files_delete_service",
+            "Can delete the key's own files."
+          )
+        : apiKeysMessage(
+            "api_keys_capability_files_delete_user",
+            "Can delete files owned by the key's user."
+          )
     });
     rows.push({
       kind: "deny",
-      msg: apiKeysMessage(
-        "api_keys_capability_files_no_other_users",
-        "Cannot delete files owned by other users."
-      )
+      msg: ofService
+        ? apiKeysMessage(
+            "api_keys_capability_files_no_other_owners",
+            "Cannot reach files owned by people or other service keys."
+          )
+        : apiKeysMessage(
+            "api_keys_capability_files_no_other_users",
+            "Cannot delete files owned by other users."
+          )
     });
   }
 

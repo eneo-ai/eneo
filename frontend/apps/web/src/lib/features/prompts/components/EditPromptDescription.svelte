@@ -24,7 +24,7 @@
 
   let isOpen = false;
 
-  $: isPromptCreatedByUser = user.id === prompt.user.id;
+  $: isPromptCreatedByUser = user.id === prompt.user?.id;
 
   function saveDescription() {
     updatePromptDescription({
@@ -55,7 +55,9 @@
           </span>
         {/snippet}
       </Tooltip.Trigger>
-      <Tooltip.Content>{m.only_author_can_change_description()}</Tooltip.Content>
+      <Tooltip.Content>
+        {prompt.user ? m.only_author_can_change_description() : m.prompt_without_author_locked()}
+      </Tooltip.Content>
     </Tooltip.Root>
   {/if}
 

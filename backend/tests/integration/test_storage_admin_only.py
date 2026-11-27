@@ -5,6 +5,9 @@ its members' ids, emails and roles; ``GET /api/v1/storage/`` totals the
 tenant's storage. Both feed the admin usage page, so a session user without
 ``Permission.ADMIN`` must be refused even when holding every other permission.
 
+``GET /api/v1/spaces/{id}/storage/`` is one space's own number, for the admins
+of that space; it is not the tenant view and carries no member list.
+
 Run with:
     uv run pytest tests/integration/test_storage_admin_only.py -v
 """
@@ -14,6 +17,7 @@ from __future__ import annotations
 from uuid import uuid4
 
 import pytest
+import sqlalchemy as sa
 
 from eneo.main.models import ModelId
 from eneo.roles.permissions import Permission
@@ -30,6 +34,11 @@ def _auth(token: str) -> dict[str, str]:
 
 
 async def _user_token(db_container, permissions: list[Permission]) -> str:
+    return (await _user(db_container, permissions))[1]
+
+
+async def _user(db_container, permissions: list[Permission]) -> tuple[str, str]:
+    """A new user of the tenant: their id and a token to sign in with."""
     async with db_container() as container:
         admin = await container.user_repo().get_user_by_email("test@example.com")
         role = await container.role_repo().create_role(
@@ -48,7 +57,8 @@ async def _user_token(db_container, permissions: list[Permission]) -> str:
                 roles=[ModelId(id=role.id)],
             )
         )
-        return container.auth_service().create_access_token_for_user(user)
+        token = container.auth_service().create_access_token_for_user(user)
+        return str(user.id), token
 
 
 @pytest.fixture
@@ -104,3 +114,81 @@ async def test_an_admins_tenant_api_key_still_reads_tenant_storage(
     resp = await client.get(path, headers={"X-API-Key": admin_user_api_key.key})
 
     assert resp.status_code == 200, resp.text
+
+
+async def _space_member(client, db_container, admin_token, space, role: str) -> str:
+    """A user without tenant admin rights who has this role in the space."""
+    user_id, token = await _user(
+        db_container, [p for p in Permission if p is not Permission.ADMIN]
+    )
+    resp = await client.post(
+        f"/api/v1/spaces/{space['id']}/members/",
+        json={"id": user_id, "role": role},
+        headers=_auth(admin_token),
+    )
+    assert resp.status_code == 200, resp.text
+    return token
+
+
+async def test_a_space_admin_reads_what_their_space_stores(
+    client, db_container, patch_auth_service_jwt, admin_token, shared_space
+):
+    collection = await client.post(
+        f"/api/v1/spaces/{shared_space['id']}/knowledge/groups/",
+        json={"name": "Handbook"},
+        headers=_auth(admin_token),
+    )
+    assert collection.status_code == 201, collection.text
+    async with db_container() as container:
+        await container.session().execute(
+            sa.text("UPDATE groups SET size = 4096 WHERE id = :id"),
+            {"id": collection.json()["id"]},
+        )
+    token = await _space_member(
+        client, db_container, admin_token, shared_space, "admin"
+    )
+
+    resp = await client.get(
+        f"/api/v1/spaces/{shared_space['id']}/storage/", headers=_auth(token)
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {
+        "size": 4096,
+        "collections_size": 4096,
+        "websites_size": 0,
+        "integration_knowledge_size": 0,
+    }
+
+
+@pytest.mark.parametrize("role", ["editor", "viewer"])
+async def test_other_members_cannot_read_what_the_space_stores(
+    client, db_container, patch_auth_service_jwt, admin_token, shared_space, role
+):
+    token = await _space_member(client, db_container, admin_token, shared_space, role)
+
+    resp = await client.get(
+        f"/api/v1/spaces/{shared_space['id']}/storage/", headers=_auth(token)
+    )
+
+    assert resp.status_code == 403, resp.text
+
+
+async def test_a_space_admin_reads_no_other_space(
+    client, db_container, patch_auth_service_jwt, admin_token, shared_space
+):
+    other = await client.post(
+        "/api/v1/spaces/",
+        json={"name": f"storage-space-{uuid4().hex[:8]}"},
+        headers=_auth(admin_token),
+    )
+    assert other.status_code == 201, other.text
+    token = await _space_member(
+        client, db_container, admin_token, shared_space, "admin"
+    )
+
+    resp = await client.get(
+        f"/api/v1/spaces/{other.json()['id']}/storage/", headers=_auth(token)
+    )
+
+    assert resp.status_code == 403, resp.text

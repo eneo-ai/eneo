@@ -14,6 +14,7 @@ from uuid import UUID
 import aiohttp
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from eneo.authentication.principal import Principal
 from eneo.info_blobs.info_blob import InfoBlobAdd, InfoBlobUpdate, SourceMetadataEntry
 from eneo.integration.domain.skip_reasons import (
     SkipReasonCode,
@@ -379,7 +380,6 @@ class SharePointIndex:
                 await self.info_blob_service.repo.update(
                     InfoBlobUpdate(
                         id=existing_blob.id,
-                        user_id=self.user.id,
                         title=title,
                         url=url,
                         source_metadata=source_metadata,
@@ -396,7 +396,7 @@ class SharePointIndex:
 
         info_blob_add = InfoBlobAdd(
             title=title,
-            user_id=self.user.id,
+            **Principal.from_user(self.user).creator_columns(),
             text=sanitized_text,
             group_id=None,
             url=url,

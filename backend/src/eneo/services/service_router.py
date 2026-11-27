@@ -3,6 +3,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends
 
+from eneo.authentication.auth_dependencies import require_user_for_creation
 from eneo.authentication.endpoint_access import (
     Authentication,
     Authorization,
@@ -42,6 +43,10 @@ router = APIRouter()
 async def create_service(
     service_model: ServiceCreatePublic,
     container: Annotated[Container, Depends(get_container(with_user=True))],
+    # A service made here lives outside any space, so its creator is all that
+    # ties it to an organisation. A service key has no person to be that
+    # creator; it creates services in a space instead.
+    _user_for_creation: None = Depends(require_user_for_creation),
 ):
     """Create a service.
 

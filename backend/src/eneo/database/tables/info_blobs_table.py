@@ -115,8 +115,20 @@ class InfoBlobs(BasePublic):
     version_state: Mapped[str] = mapped_column(String(16), nullable=False)
 
     # Foreign keys
-    user_id: Mapped[UUID] = mapped_column(
-        ForeignKey(Users.id, ondelete="CASCADE"), index=True
+    # Who made the row: a person (user_id) or the service principal behind a
+    # service key. A trace, never a right: access comes from the space.
+    user_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Users.id, ondelete="SET NULL", name="fk_info_blobs_user_id"),
+        nullable=True,
+        index=True,
+    )
+    created_by_service_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(
+            "service_principals.id",
+            ondelete="SET NULL",
+            name="fk_info_blobs_created_by_service",
+        ),
+        nullable=True,
     )
     tenant_id: Mapped[UUID] = mapped_column(ForeignKey(Tenants.id, ondelete="CASCADE"))
     group_id: Mapped[Optional[UUID]] = mapped_column(

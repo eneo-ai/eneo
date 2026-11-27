@@ -31,7 +31,7 @@ from eneo.authentication.endpoint_access import (
 )
 from eneo.jobs.job_manager import job_manager
 from eneo.jobs.job_models import Task
-from eneo.jobs.task_models import AnalyzeConversationInsightsTask
+from eneo.jobs.task_models import AnalyzeConversationInsightsTask, task_actor
 from eneo.main.container.container import Container
 from eneo.main.exceptions import (
     BadRequestException,
@@ -516,7 +516,6 @@ async def ask_unified_questions_about_questions(
 
     if should_queue_job:
         tenant_id = container.user().tenant_id
-        user_id = container.user().id
         new_job_id = uuid4()
         manager = AnalysisJobManager(container.redis_client())
         await manager.create_job(
@@ -529,7 +528,7 @@ async def ask_unified_questions_about_questions(
             task=Task.ANALYZE_CONVERSATION_INSIGHTS,
             job_id=new_job_id,
             params=AnalyzeConversationInsightsTask(
-                user_id=user_id,
+                **task_actor(container.user()),
                 from_date=from_date.isoformat(),
                 to_date=to_date.isoformat(),
                 include_followups=include_followups,

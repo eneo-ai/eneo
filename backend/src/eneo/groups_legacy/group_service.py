@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING, BinaryIO, cast
 from uuid import UUID
 
 from eneo.ai_models.ai_models_service import AIModelsService
+from eneo.authentication.principal import Principal
 from eneo.collections.domain.collection import Collection
 from eneo.groups_legacy.api.group_models import (
     CreateGroupRequest,
@@ -58,7 +59,7 @@ class GroupService:
     async def create_group(self, group: CreateGroupRequest):
         group_create = GroupCreate(
             **group.model_dump(),
-            user_id=self.user.id,
+            **Principal.from_user(self.user).creator_columns(),
             tenant_id=self.user.tenant_id,
         )
 
@@ -112,7 +113,7 @@ class GroupService:
         group_create = CreateSpaceGroup(
             name=name,
             space_id=space_id,
-            user_id=self.user.id,
+            **Principal.from_user(self.user).creator_columns(),
             tenant_id=self.user.tenant_id,
             embedding_model_id=embedding_model_id,
         )

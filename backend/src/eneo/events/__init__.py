@@ -5,14 +5,12 @@ from .model_events import (
     ModelMigrationCompleted,
     ModelMigrationFailed,
     ModelMigrationStarted,
-    ModelUsageStatsUpdated,
 )
 
 __all__ = [
     "ModelMigrationStarted",
     "ModelMigrationCompleted",
     "ModelMigrationFailed",
-    "ModelUsageStatsUpdated",
     "EventPublisher",
     "EventHandler",
     "get_event_publisher",

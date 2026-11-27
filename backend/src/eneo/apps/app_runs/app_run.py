@@ -15,7 +15,9 @@ class AppRun:
     id: UUID | None
     job_id: UUID | None
     app_id: UUID
-    user_id: UUID
+    # The owner: the person who started the run, or (below) the service
+    # principal of the service key that did.
+    user_id: UUID | None
     tenant_id: UUID
     input_files: list[FileInfo]
     input_text: str | None
@@ -27,6 +29,16 @@ class AppRun:
     skill_provenance: tuple[SkillExecutionReference, ...] | None
     job: JobInDb | None
     completion_model_id: UUID
+    service_principal_id: UUID | None = None
+
+    def owned_by(self, user_id: UUID | None, service_principal_id: UUID | None) -> bool:
+        """Whether the run belongs to exactly this owner; a run with no owner
+        belongs to nobody."""
+        if self.user_id is not None:
+            return self.user_id == user_id
+        if self.service_principal_id is not None:
+            return self.service_principal_id == service_principal_id
+        return False
 
     def update(
         self,

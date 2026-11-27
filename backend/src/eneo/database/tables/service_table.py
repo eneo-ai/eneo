@@ -20,7 +20,20 @@ class Services(BasePublic):
     completion_model_kwargs: Mapped[Optional[dict[str, object]]] = mapped_column(JSONB)
 
     # Foreign keys
-    user_id: Mapped[UUID] = mapped_column(ForeignKey(Users.id, ondelete="CASCADE"))
+    # Who made the row: a person (user_id) or the service principal behind a
+    # service key. A trace, never a right: access comes from the space.
+    user_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Users.id, ondelete="SET NULL", name="fk_services_user_id"),
+        nullable=True,
+    )
+    created_by_service_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(
+            "service_principals.id",
+            ondelete="SET NULL",
+            name="fk_services_created_by_service",
+        ),
+        nullable=True,
+    )
     completion_model_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(CompletionModels.id, ondelete="SET NULL"),
     )
@@ -32,7 +45,7 @@ class Services(BasePublic):
     groups: Mapped[list[CollectionsTable]] = relationship(
         secondary="services_groups", order_by=CollectionsTable.created_at
     )
-    user: Mapped[Users] = relationship()
+    user: Mapped[Optional[Users]] = relationship()
     completion_model: Mapped[CompletionModels] = relationship()
     service_groups: Mapped[list["ServicesGroups"]] = relationship(viewonly=True)
 

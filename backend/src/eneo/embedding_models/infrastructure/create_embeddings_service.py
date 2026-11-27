@@ -69,8 +69,10 @@ class CreateEmbeddingsService:
     ) -> None:
         super().__init__()
         self.tenant = tenant
-        # The acting user (in workers, the job's user: for a crawl, the website
-        # owner); the source of dynamic outbound-header values.
+        # Who is acting, and the source of dynamic outbound-header values. In
+        # workers it is whoever the job runs as: the person or service key
+        # that started a crawl, or the space for a scheduled one, which has
+        # no attributes.
         self.user = user
         self.config = config or SETTINGS
         self.encryption_service = encryption_service

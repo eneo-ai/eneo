@@ -30,6 +30,7 @@ from eneo.main.models import Channel, ChannelType, RedisMessage, Status
 from eneo.observability.error_log import log_error
 from eneo.redis.connection import build_arq_redis_settings
 from eneo.server.dependencies import lifespan
+from eneo.worker.job_actor import JobActor, load_job_user
 from eneo.worker.task_manager import (
     JobCheckpointError,
     TaskManager,
@@ -229,16 +230,19 @@ class Worker:
     async def _create_container(
         self,
         session: AsyncSession,
-        user_id: UUID | None = None,
+        actor: "JobActor | None" = None,
     ) -> Container:
         container = Container(session=providers.Object(session))
-        if user_id is not None:
-            await self._override_user(container=container, user_id=user_id)
+        if actor is not None and actor.present:
+            await self._override_user(container=container, actor=actor)
         return container
 
-    async def _override_user(self, container: Container, user_id: UUID):
-        user_repo = container.user_repo()
-        user = await user_repo.get_user_by_id(id=user_id)
+    async def _override_user(self, container: Container, actor: "JobActor"):
+        """Run the job as whoever queued it: the person, or the service key's
+        made-up user, signed in again from the key. A caller whose access has
+        ended since (a removed person, a revoked key, a disabled principal)
+        is not found, and the job fails."""
+        user = await load_job_user(container, actor)
         assert user is not None
         override_user(container=container, user=user)
 
@@ -288,12 +292,8 @@ class Worker:
                 )
 
                 async with sessionmanager.session() as session, session.begin():
-                    user_id = (
-                        cast(UUID | None, getattr(params, "user_id", None))
-                        if with_user
-                        else None
-                    )
-                    container = await self._create_container(session, user_id=user_id)
+                    actor = JobActor.of(params) if with_user else None
+                    container = await self._create_container(session, actor=actor)
                     job_id = _job_id_from_ctx(ctx)
                     assert job_id is not None
                     return await func(job_id, params, container=container)
@@ -378,6 +378,16 @@ class Worker:
                                 # This creates a pure Python object with no ORM bindings.
                                 # No expunge() needed - we're not using the ORM object after this.
                                 user = UserInDB.model_validate(user_row)
+                elif with_user and JobActor.of(params).is_service_key:
+                    # A job a service key queued: sign the key's made-up user
+                    # in again. It is built in memory, so it is as free of the
+                    # session as the validated person above.
+                    async with sessionmanager.session() as session:
+                        async with session.begin():
+                            user = await load_job_user(
+                                Container(session=providers.Object(session)),
+                                JobActor.of(params),
+                            )
                     # Session returned to pool HERE (~50ms total)
                     # `user` is now a Pydantic model - pure Python data, session-independent
 
@@ -443,7 +453,8 @@ class Worker:
 
                 job_id = _job_id_from_ctx(ctx)
                 assert job_id is not None
-                user_id = params.user_id if with_user else None
+                actor = JobActor.of(params) if with_user else None
+                user_id = actor.user_id if actor is not None else None
 
                 task_manager: TaskManager | None = None
                 claim_pending = claim_before_run is not None
@@ -460,9 +471,7 @@ class Worker:
                         AsyncExitStack() as transactions,
                     ):
                         await transactions.enter_async_context(session.begin())
-                        container = await self._create_container(
-                            session, user_id=user_id
-                        )
+                        container = await self._create_container(session, actor=actor)
                         # Hold the row through completion so recovery skips live work.
                         repo = container.job_repo()
                         if claim_before_run is not None:
@@ -509,7 +518,7 @@ class Worker:
                         success = task_manager.successful()
                 except (Exception, asyncio.CancelledError) as exc:
                     if await self._record_job_failure(
-                        job_id, user_id, exc, only_if_queued=claim_pending
+                        job_id, exc, only_if_queued=claim_pending
                     ):
                         if task_manager is not None:
                             await task_manager.publish_status(Status.FAILED)
@@ -548,7 +557,6 @@ class Worker:
     async def _record_job_failure(
         self,
         job_id: UUID,
-        user_id: UUID | None,
         exc: BaseException,
         *,
         only_if_queued: bool = False,
@@ -558,12 +566,17 @@ class Worker:
 
         Like a task's own failure it is stored as its code: a commit error
         carries SQL with bound values.
+
+        Nobody is signed in for it. The job may have failed because whoever
+        queued it cannot be signed in any more (a revoked key, a disabled
+        principal, a removed person), and that must not keep the failure
+        from being written.
         """
         code = failure_code_for_exception(exc)
         try:
             async with sessionmanager.session() as session, session.begin():
-                container = await self._create_container(session, user_id=user_id)
-                failed = await container.job_service().fail_job(
+                container = await self._create_container(session)
+                failed = await container.job_repo().fail_job(
                     job_id, failure_code=code, only_if_queued=only_if_queued
                 )
             return failed is not None

@@ -5,6 +5,7 @@ from uuid import UUID
 
 import aiohttp
 
+from eneo.authentication.principal import Principal
 from eneo.info_blobs.info_blob import InfoBlobAdd
 from eneo.integration.domain.entities.oauth_token import ConfluenceToken, OauthToken
 from eneo.integration.infrastructure.clients.confluence_content_client import (
@@ -171,7 +172,7 @@ class ConfluenceContentService:
             )
             info_blob_add = InfoBlobAdd(
                 title=str(item.get("title") or ""),
-                user_id=self.user.id,
+                **Principal.from_user(self.user).creator_columns(),
                 text=str(text) if text else "",
                 group_id=None,
                 url=f"{token.base_web_url}{links_dict.get('webui', '')}",

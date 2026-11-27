@@ -25,7 +25,6 @@ from eneo.authentication.api_key_notification_auto_follow import (
 from eneo.authentication.auth_dependencies import (
     get_scope_filter,
     require_resource_permission_for_method,
-    require_user_for_creation,
 )
 from eneo.authentication.auth_models import (
     ApiKeyNotificationTargetType,
@@ -96,10 +95,22 @@ async def create_assistant(
     request: Request,
     assistant: AssistantCreatePublic,
     container: Annotated[Container, Depends(get_container(with_user=True))],
-    _user_for_creation: None = Depends(require_user_for_creation),
 ):
     # Scope validation: scoped keys cannot create assistants outside their scope
     scope_filter = get_scope_filter(request)
+    if scope_filter.scope_type in ("assistant", "app"):
+        # A key for one assistant or app reaches that resource, not its space:
+        # a new assistant beside it is outside what the key was given.
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "insufficient_scope",
+                "message": (
+                    f"API key is scoped to one {scope_filter.scope_type}. "
+                    "Cannot create an assistant."
+                ),
+            },
+        )
     if scope_filter.space_id is not None:
         if scope_filter.space_id != assistant.space_id:
             raise HTTPException(

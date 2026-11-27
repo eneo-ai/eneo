@@ -91,6 +91,7 @@ class PromptRepository:
                 text=prompt.text,
                 description=prompt.description,
                 user_id=prompt.user_id,
+                created_by_service_id=prompt.created_by_service_id,
                 tenant_id=prompt.tenant_id,
             )
             .returning(Prompts)

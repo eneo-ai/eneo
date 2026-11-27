@@ -236,7 +236,9 @@
                 ? m.crawl_origin_scheduled()
                 : details.initiated_by?.username ||
                   details.initiated_by?.email ||
-                  m.admin_crawler_not_recorded()}
+                  (details.initiated_by_service
+                    ? m.admin_crawler_service_named({ name: details.initiated_by_service.name })
+                    : m.admin_crawler_no_person())}
             </p>
             <CrawlRunDetailsContent
               run={details.run}
@@ -275,10 +277,17 @@
               </div>
               <div class="min-w-0">
                 <dt class="text-secondary">{m.admin_crawler_source_owner()}</dt>
-                <dd class="mt-1 break-words">{details.owner.username || details.owner.email}</dd>
-                <dd class="text-secondary break-all text-xs">
-                  {details.owner.username ? details.owner.email : ""}
-                </dd>
+                {#if details.owner}
+                  <dd class="mt-1 break-words">{details.owner.username || details.owner.email}</dd>
+                  <dd class="text-secondary break-all text-xs">
+                    {details.owner.username ? details.owner.email : ""}
+                  </dd>
+                {:else if details.created_by_service}
+                  <dd class="mt-1 break-words">{details.created_by_service.name}</dd>
+                  <dd class="text-secondary text-xs">{m.api_keys_ownership_service()}</dd>
+                {:else}
+                  <dd class="mt-1 break-words">{m.admin_crawler_no_person()}</dd>
+                {/if}
               </div>
               <div>
                 <dt class="text-secondary">{m.admin_crawler_schedule()}</dt>

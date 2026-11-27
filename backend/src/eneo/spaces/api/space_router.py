@@ -90,6 +90,7 @@ from eneo.spaces.api.space_models import (
     UpdateSpaceMemberRequest,
     UpdateSpaceRequest,
 )
+from eneo.storage.presentation.storage_models import SpaceStorageModel
 from eneo.websites.presentation.website_models import WebsiteCreate, WebsitePublic
 
 if TYPE_CHECKING:
@@ -578,7 +579,6 @@ async def create_space_assistant(
     id: UUID,
     assistant_in: CreateSpaceAssistantRequest,
     container: Annotated[Container, Depends(get_container(with_user=True))],
-    _user_for_creation: None = Depends(require_user_for_creation),
 ):
     service = container.assistant_service()
     assembler = container.assistant_assembler()
@@ -662,7 +662,6 @@ async def create_app(
         Container,
         Depends(get_container(with_user=True, with_upload_admission=True)),
     ],
-    _user_for_creation: None = Depends(require_user_for_creation),
 ):
     space_service = container.space_service()
     app_service = container.app_service()
@@ -709,7 +708,6 @@ async def create_space_services(
     id: UUID,
     service_in: CreateSpaceServiceRequest,
     container: Annotated[Container, Depends(get_container(with_user=True))],
-    _user_for_creation: None = Depends(require_user_for_creation),
 ):
     service_service = container.service_service()
     assembler = container.space_assembler()
@@ -749,6 +747,32 @@ async def get_space_knowledge(
     return assembler.from_space_to_model(space).knowledge
 
 
+@router.get(
+    "/{id}/storage/",
+    response_model=SpaceStorageModel,
+    description="How much this space stores, in bytes, by kind of knowledge. "
+    "For admins of the space. Informational: there is no limit per space, and "
+    "the organization's total and limit are not included.",
+    responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_SPACE_OPERATION_ACCESS_REASON,
+)
+async def get_space_storage(
+    id: UUID, container: Annotated[Container, Depends(get_container(with_user=True))]
+) -> SpaceStorageModel:
+    await container.space_service().require_space_admin(id)
+    stored = await container.storage_service().get_space_storage(id)
+    return SpaceStorageModel(
+        size=stored.size,
+        collections_size=stored.collections_size,
+        websites_size=stored.websites_size,
+        integration_knowledge_size=stored.integration_knowledge_size,
+    )
+
+
 @router.post(
     "/{id}/knowledge/groups/",
     response_model=CollectionPublic,
@@ -765,7 +789,6 @@ async def create_space_groups(
     id: UUID,
     group: CreateSpaceGroupsRequest,
     container: Annotated[Container, Depends(get_container(with_user=True))],
-    _user_for_creation: None = Depends(require_user_for_creation),
 ):
     svc = container.collection_crud_service()
     user = container.user()
@@ -851,7 +874,6 @@ async def create_space_websites(
     id: UUID,
     website: WebsiteCreate,
     container: Annotated[Container, Depends(get_container(with_user=True))],
-    _user_for_creation: None = Depends(require_user_for_creation),
 ):
     service = container.website_crud_service()
     user = container.user()
@@ -965,7 +987,6 @@ async def create_space_integration_knowledge(
     user_integration_id: UUID,
     data: CreateSpaceIntegrationKnowledge,
     container: Annotated[Container, Depends(get_container(with_user=True))],
-    _user_for_creation: None = Depends(require_user_for_creation),
 ):
     service = container.integration_knowledge_service()
 
@@ -1034,7 +1055,6 @@ async def create_space_integration_knowledge_batch(
     user_integration_id: UUID,
     data: CreateSpaceIntegrationKnowledgeBatchRequest,
     container: Annotated[Container, Depends(get_container(with_user=True))],
-    _user_for_creation: None = Depends(require_user_for_creation),
 ):
     service = container.integration_knowledge_service()
 
@@ -1410,7 +1430,6 @@ async def trigger_integration_full_sync(
     id: UUID,
     integration_knowledge_id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
-    _user_for_creation: None = Depends(require_user_for_creation),
 ):
     service = container.integration_knowledge_service()
 

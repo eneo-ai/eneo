@@ -2,7 +2,7 @@ import base64
 import json
 import logging
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Optional, cast
+from typing import Any, Awaitable, Callable, Optional, cast
 from uuid import UUID
 
 from sqlalchemy import and_, func, select, true
@@ -28,13 +28,8 @@ from eneo.database.tables.assistant_template_table import AssistantTemplates
 from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.service_table import Services
 from eneo.database.tables.spaces_table import Spaces, SpacesCompletionModels
+from eneo.database.tables.tenant_scope import in_tenant
 from eneo.database.tables.users_table import Users
-
-if TYPE_CHECKING:
-    from eneo.completion_models.domain.completion_model_repo import (
-        CompletionModelRepository,
-    )
-
 
 EntityDetailsFetcher = Callable[
     [UUID, UUID, int, dict[str, Any] | None],
@@ -45,14 +40,9 @@ EntityDetailsFetcher = Callable[
 class CompletionModelUsageService:
     """Service for tracking and retrieving completion model usage statistics."""
 
-    def __init__(
-        self,
-        session: AsyncSession,
-        completion_model_repo: "CompletionModelRepository",
-    ):
+    def __init__(self, session: AsyncSession):
         super().__init__()
         self.session = session
-        self.completion_model_repo = completion_model_repo
         self.logger = logging.getLogger(__name__)
 
     async def get_model_usage_statistics(
@@ -289,10 +279,8 @@ class CompletionModelUsageService:
             # Direct tenant_id field
             return table.tenant_id == tenant_id
         elif entity_type in {"assistant", "service"}:
-            # Via user relationship - need to join with Users table
-            return table.user_id.in_(
-                select(Users.id).where(Users.tenant_id == tenant_id)
-            )
+            # Neither table has a tenant_id: through the space.
+            return in_tenant(table, tenant_id)
         elif entity_type in {"assistant_template", "app_template"}:
             # Templates carry their own tenant_id and soft-delete marker. Scope
             # strictly to this tenant and skip soft-deleted rows so the impact
@@ -611,97 +599,6 @@ class CompletionModelUsageService:
                 exc_info=True,
             )
             raise
-
-    async def recalculate_all_usage_stats(self, tenant_id: UUID) -> None:
-        """Perform full recalculation of all usage statistics.
-
-        TODO: This is a heavy operation that should definitely be run
-        as a background job for production use with 10k+ users.
-        """
-        self.logger.info(f"Starting recalculate_all_usage_stats for tenant {tenant_id}")
-
-        # Get all models enabled for tenant (settings are now directly on model table)
-        # This is done in a separate read-only transaction
-        model_ids = []
-        async with self.session.begin():
-            stmt = select(CompletionModels.id, CompletionModels.name).where(
-                CompletionModels.tenant_id == tenant_id,
-                CompletionModels.is_enabled == True,
-            )
-            self.logger.debug(f"Query for completion models: {stmt}")
-
-            result = await self.session.execute(stmt)
-            model_rows = result.fetchall()
-
-            self.logger.info(
-                f"Found {len(model_rows)} completion models for tenant {tenant_id}"
-            )
-
-            # Log details of each model
-            for model_row in model_rows:
-                self.logger.info(
-                    f"  - Model ID: {model_row.id}, Name: {model_row.name}"
-                )
-
-            model_ids = [row.id for row in model_rows]
-
-        if not model_ids:
-            self.logger.warning(f"No completion models found for tenant {tenant_id}")
-            return
-
-        self.logger.info(f"Starting recalculation for {len(model_ids)} models")
-
-        # Process each model in its own transaction for better isolation
-        processed_count = 0
-        failed_count = 0
-
-        for i, model_id in enumerate(model_ids, 1):
-            try:
-                self.logger.info(f"Processing model {i}/{len(model_ids)}: {model_id}")
-
-                # Each model gets its own transaction to prevent one failure from affecting others
-                async with self.session.begin():
-                    await self._recalculate_model_stats(model_id, tenant_id)
-
-                processed_count += 1
-                self.logger.info(
-                    f"Successfully completed processing model {i}/{len(model_ids)}: {model_id}"
-                )
-
-            except Exception as e:
-                failed_count += 1
-                self.logger.error(
-                    f"Failed to recalculate stats for model {model_id} (tenant {tenant_id})",
-                    extra={
-                        "tenant_id": str(tenant_id),
-                        "model_id": str(model_id),
-                        "error": str(e),
-                        "error_type": type(e).__name__,
-                    },
-                    exc_info=True,
-                )
-                # Continue with other models even if one fails
-                continue
-
-        if failed_count > 0:
-            self.logger.warning(
-                f"Usage stats recalculation completed with errors: {processed_count} successful, {failed_count} failed",
-                extra={
-                    "tenant_id": str(tenant_id),
-                    "processed_count": processed_count,
-                    "failed_count": failed_count,
-                    "total_models": len(model_ids),
-                },
-            )
-        else:
-            self.logger.info(
-                "Full usage stats recalculation completed successfully",
-                extra={
-                    "tenant_id": str(tenant_id),
-                    "model_count": len(model_ids),
-                    "processed_count": processed_count,
-                },
-            )
 
     async def recalculate_all_usage_stats_in_transaction(self, tenant_id: UUID) -> None:
         """Perform full recalculation of all usage statistics within an existing transaction.

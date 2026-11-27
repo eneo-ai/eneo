@@ -45,7 +45,13 @@ def job_event_payload(job: JobInDb) -> str:
 
 
 async def publish_job_update(job: JobInDb, redis: aioredis.Redis | None = None) -> None:
-    """Publish one job's current state to its owner's channel; never raises."""
+    """Publish one job's current state to its owner's channel; never raises.
+
+    Only a person has a channel: a job a service key queued is read with
+    ``GET /jobs/``.
+    """
+    if job.user_id is None:
+        return
     try:
         client: Any = redis or get_redis()
         await client.publish(job_updates_channel(job.user_id), job_event_payload(job))

@@ -115,6 +115,30 @@ class JobRepository:
             publish_job_update_after_commit(self.delegate.session, updated)
         return updated
 
+    async def fail_job(
+        self,
+        id: UUID,
+        *,
+        failure_code: JobFailureCode,
+        only_if_queued: bool = False,
+    ):
+        """Fail an active job. Store only the code since an error can quote
+        the job's input. Use only_if_queued when the caller cannot confirm that
+        it owns an in-progress job.
+
+        It asks for nobody's sign-in: the worker records a failure also when
+        whoever queued the job can no longer be signed in."""
+        return await self.update_job(
+            id,
+            JobUpdate(
+                status=Status.FAILED,
+                finished_at=datetime.now(timezone.utc),
+                result_location=None,
+                failure_code=failure_code,
+            ),
+            from_statuses=(Status.QUEUED,) if only_if_queued else ACTIVE_JOB_STATUSES,
+        )
+
     async def announce(self, *ids: UUID) -> None:
         """Publish the current state of these jobs once the transaction commits.
 
@@ -301,14 +325,24 @@ class JobRepository:
         await self.announce(*(id for id, _task in failed))
         return failed
 
-    async def get_running_jobs(self, user_id: UUID):
+    async def get_running_jobs(
+        self, *, user_id: UUID | None, service_principal_id: UUID | None
+    ):
+        """The owner's recent jobs. An owner is a person or a service
+        principal; a caller that is neither has none."""
+        if user_id is not None:
+            owned = Jobs.user_id == user_id
+        elif service_principal_id is not None:
+            owned = Jobs.service_principal_id == service_principal_id
+        else:
+            owned = sa.false()
         one_week_ago = datetime.now(timezone.utc) - timedelta(weeks=1)
         twenty_four_hours_ago = datetime.now(timezone.utc) - timedelta(hours=24)
         five_minutes_ago = datetime.now(timezone.utc) - timedelta(minutes=5)
 
         stmt = (
             sa.select(Jobs)
-            .where(Jobs.user_id == user_id)
+            .where(owned)
             .where(Jobs.created_at >= one_week_ago)
             .where(
                 # Include running, queued, recently failed, OR recently completed jobs

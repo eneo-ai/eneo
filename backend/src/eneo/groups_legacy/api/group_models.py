@@ -30,7 +30,9 @@ class GroupUpdate(GroupUpdatePublic):
 
 
 class GroupCreate(GroupBase):
-    user_id: UUID
+    # Who made the collection: a person or a service principal.
+    user_id: UUID | None = None
+    created_by_service_id: UUID | None = None
     tenant_id: UUID
     embedding_model_id: UUID = Field(
         validation_alias=AliasChoices(
@@ -50,7 +52,7 @@ class GroupInDBBase(InDB):
     size: int
     name: str
     embedding_model_id: UUID
-    user_id: UUID
+    user_id: UUID | None = None
     tenant_id: UUID
 
 

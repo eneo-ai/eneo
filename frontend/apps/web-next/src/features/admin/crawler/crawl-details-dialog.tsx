@@ -294,14 +294,25 @@ function SourceTab({
           {details.space_name ?? t("admin_crawler_not_recorded")}
         </MetadataListItem>
         <MetadataListItem label={t("admin_crawler_source_owner")}>
-          <span className="flex flex-col">
-            <span className="break-words">{details.owner.username || details.owner.email}</span>
-            {details.owner.username ? (
-              <span className="text-ax-text-secondary text-xs break-all">
-                {details.owner.email}
+          {details.owner ? (
+            <span className="flex flex-col">
+              <span className="break-words">{details.owner.username || details.owner.email}</span>
+              {details.owner.username ? (
+                <span className="text-ax-text-secondary text-xs break-all">
+                  {details.owner.email}
+                </span>
+              ) : null}
+            </span>
+          ) : details.created_by_service ? (
+            <span className="flex flex-col">
+              <span className="break-words">{details.created_by_service.name}</span>
+              <span className="text-ax-text-secondary text-xs">
+                {t("api_keys_ownership_service")}
               </span>
-            ) : null}
-          </span>
+            </span>
+          ) : (
+            t("admin_crawler_no_person")
+          )}
         </MetadataListItem>
         <MetadataListItem label={t("admin_crawler_schedule")}>
           {t(intervalLabelKey(details.update_interval))}
@@ -483,7 +494,11 @@ export function CrawlDetailsDialog({
                               ? t("crawl_origin_scheduled")
                               : data.initiated_by?.username ||
                                 data.initiated_by?.email ||
-                                t("admin_crawler_not_recorded")}
+                                (data.initiated_by_service
+                                  ? t("admin_crawler_service_named", {
+                                      name: data.initiated_by_service.name
+                                    })
+                                  : t("admin_crawler_no_person"))}
                           </p>
                           <CrawlRunDetailsContent
                             key={runId}

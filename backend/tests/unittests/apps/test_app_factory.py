@@ -185,3 +185,37 @@ def test_create_app_from_db_preserves_completion_model_provider_type(
     assert app.completion_model is not None
     assert app.completion_model.provider_type == "vllm"
     assert app.completion_model.supported_model_kwargs.top_p.supported is True
+
+
+def test_an_app_a_service_key_creates_records_its_principal(factory: AppFactory):
+    service_principal_id = uuid4()
+    key = MagicMock(ownership="service", service_principal_id=service_principal_id)
+    # The made-up user a service key signs in as: its id is the key's id.
+    user = MagicMock(id=key.id, tenant_id=uuid4(), active_api_key=key)
+
+    app = factory.create_app(
+        user=user,
+        space=MagicMock(),
+        name="Invoice app",
+        completion_model=MagicMock(),
+        transcription_model=MagicMock(),
+    )
+
+    assert app.user_id is None
+    assert app.created_by_service_id == service_principal_id
+    assert app.tenant_id == user.tenant_id
+
+
+def test_an_app_a_person_creates_records_that_person(factory: AppFactory):
+    user = MagicMock(id=uuid4(), tenant_id=uuid4(), active_api_key=None)
+
+    app = factory.create_app(
+        user=user,
+        space=MagicMock(),
+        name="Invoice app",
+        completion_model=MagicMock(),
+        transcription_model=MagicMock(),
+    )
+
+    assert app.user_id == user.id
+    assert app.created_by_service_id is None

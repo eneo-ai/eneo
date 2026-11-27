@@ -8,7 +8,7 @@ import { Callout } from 'nextra/components'
 
 - There are two key types. `sk_` keys are for servers: up to `admin` permission, with an optional IP allowlist. `pk_` keys are for browsers: up to `read`, and they need at least one allowed origin.
 - A user key stops working when its owner is deactivated or loses access. A service key (`ownership: "service"`) does not depend on any user; only tenant administrators create them, and write or admin service keys need an IP allowlist or an expiry date.
-- Service keys cannot create user-owned resources, and no API key can manage API keys; that needs a session login. A service key can upload files, and read and delete the files it uploaded.
+- A service key creates assistants, apps, services, collections, websites and files in the spaces it reaches, and what it creates keeps working when people leave. A few things still need a person, such as spaces, roles and MCP servers, and no API key can manage API keys; that needs a session login.
 - The secret is shown once. If it is lost, rotate the key; the old key keeps working for `rotation_grace_hours` (24 by default).
 - Tenant administrators set limits with `require_expiration`, `max_expiration_days`, `max_rate_limit_override` and `auto_expire_unused_days`.
 
@@ -62,9 +62,17 @@ Only tenant administrators can create service keys. Service keys with write or a
 
 #### What service keys cannot do
 
-Service keys are automation principals, not service accounts. They can read, update, and delete supported existing resources within their scope, but they **cannot create new user-owned resources**. Endpoints that would insert a row keyed on `user_id` (assistants, apps, spaces, group chats, prompts, collections, websites, info blobs, roles, MCP servers, and the like) return `403` with `code: "service_key_cannot_create_resources"` when called by a service key. Resource creation belongs to humans; the service key can operate on supported endpoints once the resource exists.
+A service key works inside spaces. Within its scope it creates, reads, updates and deletes what a space holds: assistants, apps, services, prompts, collections, websites, info blobs and integration knowledge. It starts crawls and syncs and runs apps. What it creates belongs to the space like anything else there; the row records the key's [service principal](#the-service-principal-behind-a-service-key) as its creator in `created_by_service_id`, and `user_id` is empty. Access comes from the space, never from who created a resource, so people in the space see and manage what a service key made.
 
-Files are the exception: a file is owned by a person or by a service principal. A service key can upload files, use them in the requests it makes, and read and delete them. The owner is the key's [service principal](#the-service-principal-behind-a-service-key), so a rotated key keeps the files the key before it uploaded. A service key cannot reach a person's files or another service key's files, and a person cannot reach a service key's files.
+A few things still need a person, because they record a person and nothing else yet. These endpoints return `403` with `code: "service_key_cannot_create_resources"` when called by a service key:
+
+- creating a space (`POST /spaces/`)
+- creating a service or a collection outside a space (`POST /services/` and the deprecated `POST /groups/`)
+- uploading an icon, creating a role, an MCP server or a document template
+- starting a run with a help assistant
+- saving a new version of a conversation document
+
+Files, jobs, app runs and conversations are owned, not just created. A service key's files, the jobs it queues, the apps it runs and the conversations it starts are owned by its service principal, so a rotated key keeps them. A service key cannot reach a person's files or another service key's files, and a person cannot reach a service key's files.
 
 Three related guardrails come from the same principle:
 
@@ -90,7 +98,8 @@ A key's id changes when the key is rotated, so the key is a poor identity for wh
 
 - It is created together with the service key and carries the key's name, description and scope. Renaming the key renames the principal.
 - A rotated key points at the same principal as the key it replaces, so the whole rotation chain is one principal.
-- What a service key creates belongs to its principal, not to the key: the files it uploads and the conversations it starts. A rotated key keeps them. A revoked or expired key that started conversations can be deleted; the conversations stay with the principal.
+- What a service key owns belongs to its principal, not to the key: the files it uploads, the conversations it starts, the jobs it queues and the apps it runs. A rotated key keeps them. A revoked or expired key that started conversations can be deleted; the conversations stay with the principal.
+- What a service key creates in a space names the principal as its creator. The resource belongs to the space and does not depend on the principal.
 - User keys have no service principal.
 - A principal is `active` or `disabled`. While it is disabled, every key that belongs to it is refused with `403` and `code: "service_principal_disabled"`. A principal is never deleted while a key points at it.
 
@@ -211,8 +220,8 @@ Permissions define what operations a key can perform within its scope:
 | Permission | Space Role | User keys can do | Service keys can do |
 |-----------|-----------|------------------|---------------------|
 | `read` | VIEWER | Read resources, list items | Same |
-| `write` | EDITOR | Create and update resources | Update supported existing resources (creation is gated) |
-| `admin` | ADMIN | Delete resources, manage space settings | Delete supported existing resources, manage settings (creation is gated) |
+| `write` | EDITOR | Create and update resources | Same, except for [the few things that still need a person](#what-service-keys-cannot-do) |
+| `admin` | ADMIN | Delete resources, manage space settings | Same |
 
 For files, `write` allows a key to upload files: a user key's files are owned by that user, a service key's by its service principal. `admin` is required to delete files, and deletion is still limited to files with that same owner.
 
@@ -365,7 +374,7 @@ Use a `pk_` key only for browser-based integrations. `pk_` keys are read-only, m
 
 Use a user key when the integration should follow a specific user's lifecycle and memberships. If the user is deactivated, removed from a space, or loses required permissions, the key stops working.
 
-Use a service key for production automation that must outlive an individual employee. Service keys are created by tenant administrators, resolve to a synthetic service identity, and are authorized by their key scope and permission instead of a real user's memberships. The important caveat is that service keys cannot create user-owned resources; they are for operating on supported resources that already exist.
+Use a service key for production automation that must outlive an individual employee. Service keys are created by tenant administrators, resolve to a synthetic service identity, and are authorized by their key scope and permission instead of a real user's memberships. A service key can also build what it operates on: it creates assistants, apps, collections and websites in the spaces it reaches. See [What service keys cannot do](#what-service-keys-cannot-do) for the few things that still need a person.
 
 ### What new permissions do v2 keys have?
 
@@ -420,9 +429,13 @@ No. API-key management endpoints require a session login. API-key callers, inclu
 
 ### Can service keys create resources?
 
-No. This is the main caveat with service keys: they are automation principals, not resource owners. Service keys can operate on supported existing resources within their scope, but endpoints that create new rows owned by `user_id` reject service-key callers with `code: "service_key_cannot_create_resources"`.
+Yes, inside a space. A service key creates assistants, apps, services, collections, websites, info blobs and integration knowledge in the spaces its scope reaches, and it uploads its own files. The resource belongs to the space, and its creator is the key's service principal instead of a person.
 
-Create assistants, apps, spaces, group chats, prompts, collections, websites, info blobs, roles, and MCP servers with a user account first. Then use the service key for supported automation around those resources. Files are different: a service key uploads its own files and can read and delete them.
+A space itself, a role, an MCP server, an icon and a document template still need a user account, and so does anything created outside a space; those endpoints reject service-key callers with `code: "service_key_cannot_create_resources"`.
+
+### What happens to resources when their creator leaves?
+
+They stay. The creator of an assistant, app, service, prompt, collection, website or info blob is a record of who made it, not an owner, and the resource keeps working in its space when that person is removed. Scheduled crawls and syncs of an organization's connection run as the space itself, not as the person who set them up, so they keep running too. A person's own space is the exception: it is deleted with the person, and so is what is in it.
 
 ### What happens to our old keys?
 

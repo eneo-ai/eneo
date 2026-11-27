@@ -918,10 +918,11 @@ another use remains. Do not keep a file ID to reuse later without attaching the
 file somewhere: [Files nothing uses anymore](#files-nothing-uses-anymore) are
 deleted after 24 hours.
 
-Use credentials for the owning user/principal, with the required scope and
-permissions. Conversation deletion checks `assistants` and `conversations`
-admin permission; file deletion requires a user-owned key with `files` admin
-permission. Adapt the `/api/v1` prefix to your gateway's environment and version.
+Use credentials for the user or service principal that owns the files, with
+the required scope and permissions. Conversation deletion checks `assistants`
+and `conversations` admin permission; file deletion needs `files` admin
+permission and reaches only files with the same owner: a user key deletes its
+user's files, a service key the files of its service principal. Adapt the `/api/v1` prefix to your gateway's environment and version.
 
 If the conversation must be retained, retain its attached files too. Do not
 delete conversation history merely to make file cleanup succeed. For other
