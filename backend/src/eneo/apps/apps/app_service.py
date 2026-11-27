@@ -14,6 +14,7 @@ from eneo.apps.apps.app_repo import AppRepository
 from eneo.authentication.api_key_scope_revoker import ApiKeyScopeRevoker
 from eneo.authentication.auth_models import ApiKeyScopeType, ApiKeyStateReasonCode
 from eneo.files.attachment_budget import assert_prompt_and_files_fit_context
+from eneo.files.file_home import FileHomes
 from eneo.files.file_models import File
 from eneo.files.file_service import FileService, require_requested_files
 from eneo.files.transcriber import Transcriber
@@ -143,7 +144,12 @@ class AppService:
             base_instructions=base_instructions,
         )
 
-    async def _lock_app(self, app_id: UUID) -> App:
+    async def _lock_app(self, app_id: UUID, space_id: UUID) -> App:
+        # The update that follows holds the space as well (see AppRepository
+        # .update), and whoever takes both takes the space first, as a move
+        # and a deleted space do. Taking the app first lets a deletion of the
+        # space and this update each hold what the other waits for.
+        await FileHomes(self.repo.session).hold_space(space_id)
         app = await self.repo.get_for_update(app_id)
         if app is None:
             raise NotFoundException()
@@ -442,7 +448,7 @@ class AppService:
             or skill_references is not None
         )
         if requires_context_validation or is_provided(icon_id):
-            app = await self._lock_app(app_id)
+            app = await self._lock_app(app_id, app.space_id)
         previous_icon_id = app.icon_id
         await self.icon_repo.ensure_attachable(
             previous_icon_id,
@@ -698,7 +704,7 @@ class AppService:
             )
 
         if publish:
-            app = await self._lock_app(app_id)
+            app = await self._lock_app(app_id, app.space_id)
             composition = await self._compose_app_prompt(app)
             await self._validate_configured_context(app=app, composition=composition)
 

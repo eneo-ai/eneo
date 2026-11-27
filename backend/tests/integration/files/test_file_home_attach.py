@@ -7,6 +7,7 @@ using the same file id in another space is refused.
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from typing import Any
 from uuid import UUID, uuid4
@@ -20,11 +21,16 @@ from eneo.ai_models.completion_models.completion_model import (
     ResponseType,
 )
 from eneo.completion_models.infrastructure.completion_service import CompletionService
+from eneo.database.database import sessionmanager
 from eneo.database.tables.app_table import AppRuns
 from eneo.database.tables.assistant_table import AssistantsFiles
 from eneo.database.tables.files_table import Files
-from eneo.database.tables.spaces_table import SpacesCompletionModels
-from eneo.files.file_home import FileHomeConflictError, FileHomes
+from eneo.database.tables.spaces_table import Spaces, SpacesCompletionModels
+from eneo.files.file_home import (
+    FileHomeConflictError,
+    FileHomes,
+    FileHomeSpaceNotFoundError,
+)
 from eneo.main.models import ModelId
 from eneo.questions.question import QuestionAdd
 from eneo.roles.permissions import Permission
@@ -192,6 +198,47 @@ async def test_an_assistant_can_be_saved_with_what_it_already_had_attached(
     refused = await _attach(client, headers, third, [file_id])
     assert refused.status_code == 409, refused.text
     assert refused.json()["code"] == "file_in_use_elsewhere"
+
+
+async def test_changing_an_app_and_deleting_its_space_wait_for_each_other(
+    client, db_container, two_spaces
+) -> None:
+    """A change of an app holds its space too, and takes it before the app:
+    with the app first, the change and a deletion of the space would each
+    hold what the other waits for."""
+    headers, space_id, _, _ = two_spaces
+    created = await client.post(
+        f"/api/v1/spaces/{space_id}/applications/apps/",
+        json={"name": "Meeting notes"},
+        headers=headers,
+    )
+    assert created.status_code == 201, created.text
+    app_id = UUID(created.json()["id"])
+    space_held = asyncio.Event()
+
+    async def delete() -> str:
+        async with sessionmanager.session() as session, session.begin():
+            await FileHomes(session).remove_with_space(UUID(space_id))
+            space_held.set()
+            # Long enough for the change to take what it takes first.
+            await asyncio.sleep(0.5)
+            await session.execute(sa.delete(Spaces).where(Spaces.id == UUID(space_id)))
+            return "deleted"
+
+    async def change() -> str:
+        try:
+            async with db_container() as container:
+                await space_held.wait()
+                await container.app_service().update_app(
+                    app_id, prompt_text="Summarise the meeting."
+                )
+        except FileHomeSpaceNotFoundError:
+            return "space gone"
+        return "changed"
+
+    deleted, changed = await asyncio.gather(delete(), change())
+
+    assert (deleted, changed) == ("deleted", "space gone")
 
 
 async def test_a_file_attached_to_an_app_lives_in_the_apps_space(
