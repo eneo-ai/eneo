@@ -14,6 +14,7 @@ def _key(scope_type: str = "space", permission: str = "write") -> MagicMock:
     key = MagicMock()
     key.scope_type = scope_type
     key.permission = permission
+    key.resource_permissions = None
     return key
 
 

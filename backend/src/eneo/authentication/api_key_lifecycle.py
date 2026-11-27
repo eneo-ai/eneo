@@ -33,6 +33,7 @@ from eneo.authentication.auth_models import (
     ResourcePermissions,
     compute_effective_state,
     derive_permission_from_resource_permissions,
+    stored_resource_permissions,
 )
 from eneo.main.config import get_settings
 
@@ -66,7 +67,7 @@ def _resource_permissions_to_json(
     if resource_permissions is None:
         return None
     if isinstance(resource_permissions, ResourcePermissions):
-        return resource_permissions.model_dump(mode="json", exclude_unset=True)
+        return stored_resource_permissions(resource_permissions, exclude_unset=True)
     return resource_permissions
 
 

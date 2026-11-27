@@ -789,8 +789,8 @@ class TestUserListingEndpointSplitGate:
     def test_listing_route_has_route_level_permission_guard(self):
         """GET /users/ must have route-level admin permission guard for API keys."""
         route = self._get_users_listing_route()
-        assert self._route_has_dependency(route, "_api_key_permission_dep"), (
-            "GET /users/ missing route-level require_api_key_permission; "
+        assert self._route_has_dependency(route, "_api_key_administration_dep"), (
+            "GET /users/ missing route-level require_api_key_administration; "
             "API keys below admin must not list the tenant directory"
         )
 
@@ -845,7 +845,7 @@ class TestAdminApiKeyGuardContract:
 
         assert list_route is not None, "GET /api-keys route not found"
         assert self._route_has_dependency(list_route, "_scope_check_dep")
-        assert not self._route_has_dependency(list_route, "_api_key_permission_dep")
+        assert not self._route_has_dependency(list_route, "_api_key_administration_dep")
 
 
 class TestModelProvidersBearerRoleContract:

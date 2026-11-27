@@ -994,3 +994,106 @@ def test_resolve_client_ip_accepts_ipv6():
         trusted_proxy_headers=[],
     )
     assert ip == "2001:db8::1"
+
+
+def _create_request(**overrides: object) -> ApiKeyCreateRequest:
+    return ApiKeyCreateRequest.model_validate(
+        {
+            "name": "Provisioning",
+            "key_type": "sk_",
+            "scope_type": "tenant",
+            "resource_permissions": {"administration": "write"},
+            **overrides,
+        }
+    )
+
+
+async def test_create_lets_an_admin_give_the_administration_permission():
+    service = _service_with_user(permissions=[Permission.ADMIN])
+
+    await service.validate_create_request(request=_create_request())
+
+
+async def test_create_refuses_administration_from_someone_who_is_no_admin():
+    service = _service_with_user(permissions=[])
+
+    with pytest.raises(ApiKeyValidationError) as exc_info:
+        await service.validate_create_request(request=_create_request())
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.code == "insufficient_permission"
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"scope_type": "space", "scope_id": str(uuid4())},
+        {"key_type": "pk_", "allowed_origins": ["https://example.org"]},
+    ],
+)
+async def test_create_refuses_administration_outside_an_organization_secret_key(
+    overrides,
+):
+    service = _service_with_user(permissions=[Permission.ADMIN])
+
+    with pytest.raises(ApiKeyValidationError) as exc_info:
+        await service.validate_create_request(request=_create_request(**overrides))
+
+    assert exc_info.value.status_code == 400
+
+
+async def test_create_service_key_with_administration_write_needs_a_guardrail():
+    service = _service_with_user(permissions=[Permission.ADMIN])
+
+    with pytest.raises(ApiKeyValidationError) as exc_info:
+        await service.validate_create_request(
+            request=_create_request(ownership="service")
+        )
+
+    assert "IP allowlist or expiration" in exc_info.value.message
+
+
+def _organization_key(resource_permissions: dict[str, str] | None) -> SimpleNamespace:
+    return SimpleNamespace(
+        key_type=ApiKeyType.SK.value,
+        scope_type=ApiKeyScopeType.TENANT.value,
+        tenant_id=uuid4(),
+        permission=ApiKeyPermission.ADMIN.value,
+        resource_permissions=resource_permissions,
+    )
+
+
+async def test_update_that_does_not_name_administration_leaves_it_as_it_is():
+    service = _service_with_user(permissions=[])
+    key = _organization_key({"assistants": "admin", "administration": "admin"})
+    updates = {"resource_permissions": {"assistants": "read"}}
+
+    await service.validate_update_request(key=key, updates=updates)  # type: ignore[arg-type]
+
+    assert updates["resource_permissions"]["administration"] == "admin"
+
+
+async def test_update_lets_anyone_lower_administration_but_only_an_admin_raise_it():
+    key = _organization_key({"assistants": "read", "administration": "write"})
+
+    lowered = {"resource_permissions": {"assistants": "read", "administration": "none"}}
+    await _service_with_user(permissions=[]).validate_update_request(
+        key=key,  # type: ignore[arg-type]
+        updates=lowered,
+    )
+    # A key that no longer holds the permission does not carry it either.
+    assert "administration" not in lowered["resource_permissions"]
+
+    raised = {"resource_permissions": {"assistants": "read", "administration": "admin"}}
+    with pytest.raises(ApiKeyValidationError) as exc_info:
+        await _service_with_user(permissions=[]).validate_update_request(
+            key=key,  # type: ignore[arg-type]
+            updates=raised,
+        )
+    assert exc_info.value.status_code == 403
+
+    await _service_with_user(permissions=[Permission.ADMIN]).validate_update_request(
+        key=key,  # type: ignore[arg-type]
+        updates=raised,
+    )
+    assert raised["resource_permissions"]["administration"] == "admin"

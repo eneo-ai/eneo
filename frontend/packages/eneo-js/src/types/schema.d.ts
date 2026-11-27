@@ -562,7 +562,7 @@ export interface paths {
     };
     /**
      * Get Tenant Users
-     * @description List users in the current tenant. Available to authenticated tenant members; API keys require admin scope and permission.
+     * @description List users in the current tenant. Available to authenticated tenant members; an API key needs organization scope and the administration read permission.
      */
     get: operations["get_tenant_users_api_v1_users__get"];
     put?: never;
@@ -21254,6 +21254,11 @@ export interface components {
      *     as the maximum configured level by
      *     :func:`derive_permission_from_resource_permissions`.  pk_ keys may use the
      *     same shape, but policy validation caps each resource at ``read``.
+     *
+     *     ``administration`` is apart from the resource types: it opens the
+     *     organization's administration (users, roles, settings, policies) and does
+     *     not count toward the derived ``permission``. See
+     *     :func:`administration_level`.
      */
     ResourcePermissions: {
       /** @default none */
@@ -21272,6 +21277,8 @@ export interface components {
       jobs?: components["schemas"]["ResourcePermissionLevel"];
       /** @default none */
       prompts?: components["schemas"]["ResourcePermissionLevel"];
+      /** @default none */
+      administration?: components["schemas"]["ResourcePermissionLevel"];
     };
     /**
      * RetentionPolicyResponse

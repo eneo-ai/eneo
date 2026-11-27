@@ -12,6 +12,7 @@ from pydantic import (
     ConfigDict,
     EmailStr,
     Field,
+    ValidationError,
     ValidationInfo,
     field_serializer,
     field_validator,
@@ -267,6 +268,11 @@ class ResourcePermissions(BaseModel):
     as the maximum configured level by
     :func:`derive_permission_from_resource_permissions`.  pk_ keys may use the
     same shape, but policy validation caps each resource at ``read``.
+
+    ``administration`` is apart from the resource types: it opens the
+    organization's administration (users, roles, settings, policies) and does
+    not count toward the derived ``permission``. See
+    :func:`administration_level`.
     """
 
     assistants: ResourcePermissionLevel = ResourcePermissionLevel.NONE
@@ -277,6 +283,7 @@ class ResourcePermissions(BaseModel):
     files: ResourcePermissionLevel = ResourcePermissionLevel.NONE
     jobs: ResourcePermissionLevel = ResourcePermissionLevel.NONE
     prompts: ResourcePermissionLevel = ResourcePermissionLevel.NONE
+    administration: ResourcePermissionLevel = ResourcePermissionLevel.NONE
 
     model_config = ConfigDict(extra="forbid")
 
@@ -293,7 +300,15 @@ RESOURCE_PERMISSION_FIELDS: tuple[str, ...] = (
 )
 
 
-PK_FORBIDDEN_RESOURCE_FIELDS: tuple[str, ...] = ("jobs", "prompts")
+# Not a resource type, so it is no part of RESOURCE_PERMISSION_FIELDS and of
+# the permission derived from them.
+ADMINISTRATION_PERMISSION_FIELD = "administration"
+
+PK_FORBIDDEN_RESOURCE_FIELDS: tuple[str, ...] = (
+    "jobs",
+    "prompts",
+    ADMINISTRATION_PERMISSION_FIELD,
+)
 
 
 _LEVEL_TO_PERMISSION: dict[int, ApiKeyPermission] = {
@@ -319,6 +334,20 @@ def derive_permission_from_resource_permissions(
     return _LEVEL_TO_PERMISSION.get(max_level, ApiKeyPermission.READ)
 
 
+def stored_resource_permissions(
+    rp: ResourcePermissions, *, exclude_unset: bool = False
+) -> dict[str, str]:
+    """The permissions as the key's row keeps them.
+
+    ``administration`` is kept only on a key that holds it, so every other
+    key's row reads the same as before the permission existed.
+    """
+    stored = rp.model_dump(mode="json", exclude_unset=exclude_unset)
+    if rp.administration is ResourcePermissionLevel.NONE:
+        stored.pop(ADMINISTRATION_PERMISSION_FIELD, None)
+    return stored
+
+
 def default_public_resource_permissions() -> ResourcePermissions:
     """Safe default allowlist for newly created browser/public keys."""
     return ResourcePermissions(
@@ -332,6 +361,31 @@ class ApiKeyScopeType(str, Enum):
     SPACE = "space"
     ASSISTANT = "assistant"
     APP = "app"
+
+
+def administration_level(
+    *,
+    scope_type: "ApiKeyScopeType | str",
+    permission: "ApiKeyPermission | str",
+    resource_permissions: "ResourcePermissions | dict[str, str] | None",
+) -> ResourcePermissionLevel:
+    """What a key may do in the organization's administration.
+
+    Only a key of the whole organization reaches it, with the level its
+    ``administration`` permission holds. A key without per-resource
+    permissions keeps the rule from before they existed: ``admin`` opens the
+    administration and nothing lower does. Unreadable permissions give none.
+    """
+    if ApiKeyScopeType(scope_type) is not ApiKeyScopeType.TENANT:
+        return ResourcePermissionLevel.NONE
+    if resource_permissions is None:
+        if ApiKeyPermission(permission) is ApiKeyPermission.ADMIN:
+            return ResourcePermissionLevel.ADMIN
+        return ResourcePermissionLevel.NONE
+    try:
+        return ResourcePermissions.model_validate(resource_permissions).administration
+    except ValidationError:
+        return ResourcePermissionLevel.NONE
 
 
 class ApiKeyNotificationTargetType(str, Enum):

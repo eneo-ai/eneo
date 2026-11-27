@@ -39,6 +39,8 @@ from eneo.authentication.auth_models import (
     CredentialFacts,
     FederatedIdentity,
     JWTPayload,
+    ResourcePermissionLevel,
+    administration_level,
     compute_effective_state,
 )
 from eneo.authentication.auth_service import INTERNAL_MCP_AUDIENCE, AuthService
@@ -153,23 +155,51 @@ _SERVICE_KEY_BASE_PERMISSIONS: frozenset[Permission] = frozenset(
 def _synthesize_service_key_permissions(key: ApiKeyV2InDB) -> set[Permission]:
     """Derive a tenant-level permission set for a service-key synthetic user.
 
-    A TENANT+ADMIN key gets ADMIN on top of the resource set; all other
-    scope/permission combinations get the resource set only. The route-level
-    scope and permission guards still narrow what the key can actually call.
+    A key that holds the administration permission, at any level, gets ADMIN
+    on top of the resource set; every other key gets the resource set only.
+    The route-level scope and permission guards still narrow what the key can
+    actually call, the administration guard by the level the key holds.
     """
     permissions = set(_SERVICE_KEY_BASE_PERMISSIONS)
-    scope_type = key.scope_type
-    if hasattr(scope_type, "value"):
-        scope_type = scope_type.value
-    permission = key.permission
-    if hasattr(permission, "value"):
-        permission = permission.value
-    if (
-        scope_type == ApiKeyScopeType.TENANT.value
-        and permission == ApiKeyPermission.ADMIN.value
-    ):
+    if _administration_level_of(key) is not ResourcePermissionLevel.NONE:
         permissions.add(Permission.ADMIN)
     return permissions
+
+
+def _administration_level_of(key: ApiKeyV2InDB) -> ResourcePermissionLevel:
+    return administration_level(
+        scope_type=key.scope_type,
+        permission=key.permission,
+        resource_permissions=key.resource_permissions,
+    )
+
+
+def _check_administration_permission(
+    key: ApiKeyV2InDB,
+    required: str,
+) -> None:
+    """Enforce the key's administration permission on an administration route.
+
+    The key's resource permissions do not count here, and neither does the
+    permission derived from them. NOT gated by the feature flag.
+    """
+    granted = _administration_level_of(key)
+    if PERMISSION_LEVEL_ORDER[granted.value] >= PERMISSION_LEVEL_ORDER[required]:
+        return
+    raise ApiKeyValidationError(
+        status_code=403,
+        code="insufficient_permission",
+        message=(
+            f"API key does not have the 'administration' {required} permission "
+            "this endpoint requires. Give an organization-scoped key that "
+            "level, or authenticate with a bearer token."
+        ),
+        context={
+            "auth_layer": "api_key_method",
+            "action": "management",
+            "required_level": required,
+        },
+    )
 
 
 def _check_basic_method_permission(
@@ -1486,6 +1516,9 @@ class UserService:
         if perm_configs is None:
             perm_config = getattr(request.state, "_resource_perm_config", None)
             perm_configs = [] if perm_config is None else [perm_config]
+        required_administration = getattr(
+            request.state, "_required_administration_level", None
+        )
         if perm_configs:
             # Route has resource guard — method check with read-overrides + resource check
             try:
@@ -1501,8 +1534,10 @@ class UserService:
                     request=request,
                 )
                 raise
-        else:
-            # No resource guard — basic method→permission check
+        elif required_administration is None:
+            # No resource guard — basic method→permission check. An
+            # administration route checks the method against the key's
+            # administration permission below, not against its resources.
             try:
                 _check_basic_method_permission(request, resolved.key)
             except ApiKeyValidationError as exc:
@@ -1537,6 +1572,21 @@ class UserService:
                     resolved.key,
                     scope_config,
                 )
+            except ApiKeyValidationError as exc:
+                await self._log_api_key_auth_failed(
+                    user,
+                    resolved.key,
+                    exc,
+                    request=request,
+                )
+                raise
+
+        # Administration guard (NOT gated by feature flag). After the scope
+        # check, so a key of one space, assistant or app is told that its
+        # scope is what keeps it out; an organization key is told the level.
+        if required_administration is not None:
+            try:
+                _check_administration_permission(resolved.key, required_administration)
             except ApiKeyValidationError as exc:
                 await self._log_api_key_auth_failed(
                     user,

@@ -503,8 +503,8 @@ class TestTenantAdminApiKeyGuards:
                 assert self._has_dependency(route, "_scope_check_dep"), (
                     f"{path} missing _scope_check_dep"
                 )
-                assert self._has_dependency(route, "_api_key_permission_dep"), (
-                    f"{path} missing _api_key_permission_dep"
+                assert self._has_dependency(route, "_api_key_administration_dep"), (
+                    f"{path} missing _api_key_administration_dep"
                 )
 
     def test_api_keys_list_remains_self_service(self):
@@ -521,7 +521,7 @@ class TestTenantAdminApiKeyGuards:
         assert self._has_dependency(list_route, "_scope_check_dep"), (
             "GET /api-keys must retain admin scope guard"
         )
-        assert not self._has_dependency(list_route, "_api_key_permission_dep"), (
+        assert not self._has_dependency(list_route, "_api_key_administration_dep"), (
             "GET /api-keys should remain self-service and must not require admin key permission"
         )
 
@@ -607,7 +607,7 @@ class TestHighRiskExactRouteGuards:
         }
         for method, path, route in admin:
             assert _route_has_dep_name(route, "_scope_check_dep"), f"{method} {path}"
-            assert _route_has_dep_name(route, "_api_key_permission_dep"), (
+            assert _route_has_dep_name(route, "_api_key_administration_dep"), (
                 f"{method} {path}"
             )
 
@@ -622,8 +622,8 @@ class TestHighRiskExactRouteGuards:
         assert _route_has_dep_name(route, "_scope_check_dep"), (
             f"{method} /admin/widget-policy/ missing _scope_check_dep"
         )
-        assert _route_has_dep_name(route, "_api_key_permission_dep"), (
-            f"{method} /admin/widget-policy/ missing _api_key_permission_dep"
+        assert _route_has_dep_name(route, "_api_key_administration_dep"), (
+            f"{method} /admin/widget-policy/ missing _api_key_administration_dep"
         )
 
     def test_chat_turn_diagnostics_is_session_only_and_permission_gated(self):
@@ -651,8 +651,8 @@ class TestHighRiskExactRouteGuards:
         assert _route_has_dep_name(route, "_scope_check_dep"), (
             "GET /integrations/ missing _scope_check_dep"
         )
-        assert _route_has_dep_name(route, "_api_key_permission_dep"), (
-            "GET /integrations/ missing _api_key_permission_dep"
+        assert _route_has_dep_name(route, "_api_key_administration_dep"), (
+            "GET /integrations/ missing _api_key_administration_dep"
         )
 
     def test_storage_admin_route_has_scope_and_admin_key_guards(self):
@@ -660,8 +660,8 @@ class TestHighRiskExactRouteGuards:
         assert _route_has_dep_name(route, "_scope_check_dep"), (
             "GET /storage/ missing _scope_check_dep"
         )
-        assert _route_has_dep_name(route, "_api_key_permission_dep"), (
-            "GET /storage/ missing _api_key_permission_dep"
+        assert _route_has_dep_name(route, "_api_key_administration_dep"), (
+            "GET /storage/ missing _api_key_administration_dep"
         )
 
     def test_user_groups_admin_route_has_scope_and_admin_key_guards(self):
@@ -669,8 +669,8 @@ class TestHighRiskExactRouteGuards:
         assert _route_has_dep_name(route, "_scope_check_dep"), (
             "GET /user-groups/ missing _scope_check_dep"
         )
-        assert _route_has_dep_name(route, "_api_key_permission_dep"), (
-            "GET /user-groups/ missing _api_key_permission_dep"
+        assert _route_has_dep_name(route, "_api_key_administration_dep"), (
+            "GET /user-groups/ missing _api_key_administration_dep"
         )
 
     def test_allowed_origins_admin_route_has_scope_and_admin_key_guards(self):
@@ -680,8 +680,8 @@ class TestHighRiskExactRouteGuards:
         assert _route_has_dep_name(route, "_scope_check_dep"), (
             "GET /allowed-origins/ missing _scope_check_dep"
         )
-        assert _route_has_dep_name(route, "_api_key_permission_dep"), (
-            "GET /allowed-origins/ missing _api_key_permission_dep"
+        assert _route_has_dep_name(route, "_api_key_administration_dep"), (
+            "GET /allowed-origins/ missing _api_key_administration_dep"
         )
 
     def test_security_classifications_admin_route_has_scope_and_admin_key_guards(self):
@@ -691,8 +691,8 @@ class TestHighRiskExactRouteGuards:
         assert _route_has_dep_name(route, "_scope_check_dep"), (
             "GET /security-classifications/ missing _scope_check_dep"
         )
-        assert _route_has_dep_name(route, "_api_key_permission_dep"), (
-            "GET /security-classifications/ missing _api_key_permission_dep"
+        assert _route_has_dep_name(route, "_api_key_administration_dep"), (
+            "GET /security-classifications/ missing _api_key_administration_dep"
         )
 
     def test_roles_admin_route_has_scope_and_admin_key_guards_when_enabled(self):
@@ -702,8 +702,8 @@ class TestHighRiskExactRouteGuards:
         assert _route_has_dep_name(route, "_scope_check_dep"), (
             "GET /roles/ missing _scope_check_dep"
         )
-        assert _route_has_dep_name(route, "_api_key_permission_dep"), (
-            "GET /roles/ missing _api_key_permission_dep"
+        assert _route_has_dep_name(route, "_api_key_administration_dep"), (
+            "GET /roles/ missing _api_key_administration_dep"
         )
 
     @pytest.mark.parametrize(
@@ -725,8 +725,8 @@ class TestHighRiskExactRouteGuards:
         assert _route_has_dep_name(route, "_scope_check_dep"), (
             f"{label} missing _scope_check_dep"
         )
-        assert not _route_has_dep_name(route, "_api_key_permission_dep"), (
-            f"{label} should not require _api_key_permission_dep"
+        assert not _route_has_dep_name(route, "_api_key_administration_dep"), (
+            f"{label} should not require _api_key_administration_dep"
         )
 
     def test_logging_details_requires_bearer_session(self):
@@ -929,6 +929,7 @@ class TestNoEndpointLevelStashDependencies:
                 if dep_name in {
                     "require_api_key_scope_check",
                     "require_api_key_permission",
+                    "require_api_key_administration",
                 }:
                     hits.append(f"{node.name}:{arg.arg}")
         return hits
@@ -1056,7 +1057,8 @@ class TestMutatingRoutesArePerRouteGuarded:
     exact (path, method) level. Accepts any of:
 
       - ``_resource_permission_dep`` (router-level fine-grained check)
-      - ``_api_key_permission_dep`` (endpoint- or router-level admin assertion)
+      - ``_api_key_permission_dep`` or ``_api_key_administration_dep``
+        (endpoint- or router-level admin assertion)
       - Membership in MUTATING_ALLOWLIST_PREFIXES or MUTATING_ALLOWLIST_EXACT
 
     These deps wire scope filtering and resource-type granularity on top of

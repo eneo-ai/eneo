@@ -949,7 +949,7 @@ class TestScopeRouteGuardCoverage:
             if path.startswith("/settings") and "PATCH" in methods:
                 has_scope_dep = route_has_dependency_named(route, "_scope_check_dep")
                 has_admin_key_dep = route_has_dependency_named(
-                    route, "_api_key_permission_dep"
+                    route, "_api_key_administration_dep"
                 )
                 patch_routes.append((path, has_scope_dep, has_admin_key_dep))
 
@@ -961,7 +961,7 @@ class TestScopeRouteGuardCoverage:
                 f"Settings PATCH endpoint {path} missing _scope_check_dep"
             )
             assert has_admin_key_dep, (
-                f"Settings PATCH endpoint {path} missing _api_key_permission_dep"
+                f"Settings PATCH endpoint {path} missing _api_key_administration_dep"
             )
 
     def test_template_admin_routes_have_scope_check(self):
@@ -986,7 +986,7 @@ class TestScopeRouteGuardCoverage:
 
         Includes GET /users/ (get_tenant_users): mounted on the non-admin
         `router` but with *route-level* `_scope_check_dep` +
-        `_api_key_permission_dep` so scoped API keys cannot enumerate the
+        `_api_key_administration_dep` so scoped API keys cannot enumerate the
         tenant directory. Those guards are no-ops for bearer tokens — see
         TestUserListingEndpointSplitGate in test_api_key_contract_matrix.py.
         """
@@ -997,7 +997,7 @@ class TestScopeRouteGuardCoverage:
             if path == "/users/" or path.startswith("/users/admin"):
                 has_scope_dep = route_has_dependency_named(route, "_scope_check_dep")
                 has_admin_key_dep = route_has_dependency_named(
-                    route, "_api_key_permission_dep"
+                    route, "_api_key_administration_dep"
                 )
                 admin_routes.append(
                     (path, sorted(methods), has_scope_dep, has_admin_key_dep)
@@ -1011,7 +1011,7 @@ class TestScopeRouteGuardCoverage:
                 f"User admin route {path} {methods} missing _scope_check_dep"
             )
             assert has_admin_key_dep, (
-                f"User admin route {path} {methods} missing _api_key_permission_dep"
+                f"User admin route {path} {methods} missing _api_key_administration_dep"
             )
 
 

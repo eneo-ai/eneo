@@ -10,6 +10,8 @@ from eneo.allowed_origins.origin_matching import origin_matches_pattern
 from eneo.authentication.api_key_request_context import resolve_client_ip
 from eneo.authentication.api_key_resolver import ApiKeyValidationError
 from eneo.authentication.auth_models import (
+    ADMINISTRATION_PERMISSION_FIELD,
+    PERMISSION_LEVEL_ORDER,
     PK_FORBIDDEN_RESOURCE_FIELDS,
     RESOURCE_PERMISSION_FIELDS,
     ApiKeyCreateRequest,
@@ -21,9 +23,11 @@ from eneo.authentication.auth_models import (
     ApiKeyV2InDB,
     ResourcePermissionLevel,
     ResourcePermissions,
+    administration_level,
     compute_effective_state,
     default_public_resource_permissions,
     derive_permission_from_resource_permissions,
+    stored_resource_permissions,
 )
 from eneo.main.config import get_settings
 from eneo.main.exceptions import NotFoundException, UnauthorizedException
@@ -71,7 +75,11 @@ def _validate_public_resource_permissions(rp: ResourcePermissions) -> None:
 
 
 _SCOPE_RESOURCE_PERMISSION_FIELDS: dict[ApiKeyScopeType, tuple[str, ...]] = {
-    ApiKeyScopeType.TENANT: RESOURCE_PERMISSION_FIELDS,
+    # The organization's administration is no part of any narrower scope.
+    ApiKeyScopeType.TENANT: (
+        *RESOURCE_PERMISSION_FIELDS,
+        ADMINISTRATION_PERMISSION_FIELD,
+    ),
     ApiKeyScopeType.SPACE: RESOURCE_PERMISSION_FIELDS,
     ApiKeyScopeType.ASSISTANT: ("assistants", "conversations", "files"),
     ApiKeyScopeType.APP: ("apps", "files"),
@@ -90,7 +98,7 @@ def _validate_scope_resource_permissions(
     allowed_fields = set(_SCOPE_RESOURCE_PERMISSION_FIELDS[scope_type])
     disallowed = [
         field
-        for field in RESOURCE_PERMISSION_FIELDS
+        for field in (*RESOURCE_PERMISSION_FIELDS, ADMINISTRATION_PERMISSION_FIELD)
         if field not in allowed_fields
         and getattr(rp, field) != ResourcePermissionLevel.NONE
     ]
@@ -129,6 +137,17 @@ class ApiKeyPolicyService:
         self.space_service = space_service
         self.user = user
         self.settings = get_settings()
+
+    def _require_admin_to_grant_administration(self) -> None:
+        """Anyone may lower a key's administration; only an admin gives it."""
+        if Permission.ADMIN not in self._require_user().permissions:
+            raise ApiKeyValidationError(
+                status_code=403,
+                code="insufficient_permission",
+                message=(
+                    "Only tenant admins can give a key the 'administration' permission."
+                ),
+            )
 
     def _require_space_service(self) -> "SpaceService":
         if self.space_service is None:
@@ -172,6 +191,14 @@ class ApiKeyPolicyService:
                 request.resource_permissions
             )
 
+        administration = (
+            request.resource_permissions.administration
+            if request.resource_permissions is not None
+            else ResourcePermissionLevel.NONE
+        )
+        if administration != ResourcePermissionLevel.NONE:
+            self._require_admin_to_grant_administration()
+
         # Service key guardrails
         if request.ownership == ApiKeyOwnership.SERVICE:
             user = self._require_user()
@@ -182,7 +209,13 @@ class ApiKeyPolicyService:
                     message="Only tenant admins can create service keys.",
                 )
             # Extra guardrail: service write/admin keys need IP allowlist or expiration
-            if effective_permission in (ApiKeyPermission.WRITE, ApiKeyPermission.ADMIN):
+            if effective_permission in (
+                ApiKeyPermission.WRITE,
+                ApiKeyPermission.ADMIN,
+            ) or administration in (
+                ResourcePermissionLevel.WRITE,
+                ResourcePermissionLevel.ADMIN,
+            ):
                 has_ip = (
                     request.allowed_ips is not None and len(request.allowed_ips) > 0
                 )
@@ -426,15 +459,34 @@ class ApiKeyPolicyService:
                     ApiKeyScopeType.TENANT,
                     ApiKeyScopeType.SPACE,
                 ):
-                    updates["resource_permissions"] = (
-                        default_public_resource_permissions().model_dump(mode="json")
+                    updates["resource_permissions"] = stored_resource_permissions(
+                        default_public_resource_permissions()
                     )
             else:
                 rp = ResourcePermissions.model_validate(raw_rp)
+                held = administration_level(
+                    scope_type=key.scope_type,
+                    permission=key.permission,
+                    resource_permissions=key.resource_permissions,
+                )
+                named = (
+                    raw_rp.model_fields_set
+                    if isinstance(raw_rp, ResourcePermissions)
+                    else cast(dict[str, object], raw_rp)
+                )
+                if ADMINISTRATION_PERMISSION_FIELD not in named:
+                    # A client that does not know the permission leaves it as
+                    # it is: saving the resource rows must not take it away.
+                    rp.administration = held
                 _validate_scope_resource_permissions(scope_type, rp)
                 if key_type == ApiKeyType.PK:
                     _validate_public_resource_permissions(rp)
-                updates["resource_permissions"] = rp.model_dump(mode="json")
+                if (
+                    PERMISSION_LEVEL_ORDER[rp.administration.value]
+                    > PERMISSION_LEVEL_ORDER[held.value]
+                ):
+                    self._require_admin_to_grant_administration()
+                updates["resource_permissions"] = stored_resource_permissions(rp)
 
     async def ensure_ownership_authorized(self, *, key: ApiKeyV2InDB):
         """Service keys: any scope-authorized user can manage.

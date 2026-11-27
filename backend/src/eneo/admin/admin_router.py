@@ -35,7 +35,7 @@ from eneo.authentication.api_key_router_helpers import (
     raise_api_key_http_error,
 )
 from eneo.authentication.api_key_v2_repo import ApiKeysV2Repository
-from eneo.authentication.auth_dependencies import require_api_key_permission
+from eneo.authentication.auth_dependencies import require_api_key_administration
 from eneo.authentication.auth_models import (
     ApiKeyCreatedResponse,
     ApiKeyExactLookupRequest,
@@ -44,7 +44,6 @@ from eneo.authentication.auth_models import (
     ApiKeyListCursor,
     ApiKeyNotificationPolicyResponse,
     ApiKeyNotificationPolicyUpdate,
-    ApiKeyPermission,
     ApiKeyPolicyResponse,
     ApiKeyPolicyUpdate,
     ApiKeyRotateRequest,
@@ -57,6 +56,7 @@ from eneo.authentication.auth_models import (
     ApiKeyV2InDB,
     ExpiringKeysSummary,
     ExpiringKeySummaryItem,
+    ResourcePermissionLevel,
     SuperApiKeyStatus,
 )
 from eneo.authentication.endpoint_access import Authentication, endpoint_access
@@ -92,9 +92,11 @@ AdminApiKeyMutationContainer = Annotated[
     Container,
     Depends(get_container(with_user=True, transaction_scope="function")),
 ]
-AdminApiKeyGuard = Annotated[
-    None, Depends(require_api_key_permission(ApiKeyPermission.ADMIN))
-]
+# Changing another key's permissions, state or secret takes the whole
+# administration permission, whatever the HTTP method: a key with less must
+# not be able to raise itself or mint a stronger one.
+_FULL_ADMINISTRATION = require_api_key_administration(ResourcePermissionLevel.ADMIN)
+AdminApiKeyGuard = Annotated[None, Depends(_FULL_ADMINISTRATION)]
 
 
 def _classify_severity(
@@ -1455,7 +1457,7 @@ async def update_api_key_policy(
         ),
     ],
     container: AdminContainer,
-    _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
+    _guard: None = Depends(_FULL_ADMINISTRATION),
 ):
     admin_service = container.admin_service()
     user = container.user()
@@ -1556,7 +1558,7 @@ async def update_api_key_notification_policy(
         ),
     ],
     container: AdminContainer,
-    _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
+    _guard: None = Depends(_FULL_ADMINISTRATION),
 ):
     admin_service = container.admin_service()
     user = container.user()
@@ -1860,7 +1862,7 @@ async def get_expiring_keys_admin(
 async def lookup_api_key_admin(
     payload: ApiKeyExactLookupRequest,
     container: AdminContainer,
-    _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
+    _guard: None = Depends(_FULL_ADMINISTRATION),
 ):
     admin_service = container.admin_service()
     await admin_service.validate_admin_permission()
@@ -2020,7 +2022,7 @@ async def update_api_key_admin(
     id: UUID,
     payload: ApiKeyUpdateRequest,
     container: AdminApiKeyMutationContainer,
-    _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
+    _guard: None = Depends(_FULL_ADMINISTRATION),
 ):
     admin_service = container.admin_service()
     await admin_service.validate_admin_permission()
@@ -2057,7 +2059,7 @@ async def update_api_key_admin(
 async def revoke_api_key_admin_deprecated(
     id: UUID,
     container: AdminApiKeyMutationContainer,
-    _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
+    _guard: None = Depends(_FULL_ADMINISTRATION),
 ) -> Response:
     admin_service = container.admin_service()
     await admin_service.validate_admin_permission()
@@ -2098,7 +2100,7 @@ async def revoke_api_key_admin_deprecated(
 async def revoke_api_key_admin(
     id: UUID,
     container: AdminApiKeyMutationContainer,
-    _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
+    _guard: None = Depends(_FULL_ADMINISTRATION),
     payload: Annotated[
         ApiKeyStateChangeRequest | None,
         Body(examples=[_ADMIN_API_KEY_STATE_CHANGE_EXAMPLE]),
@@ -2143,7 +2145,7 @@ async def revoke_api_key_admin(
 async def suspend_api_key_admin(
     id: UUID,
     container: AdminApiKeyMutationContainer,
-    _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
+    _guard: None = Depends(_FULL_ADMINISTRATION),
     payload: Annotated[
         ApiKeyStateChangeRequest | None,
         Body(examples=[_ADMIN_API_KEY_STATE_CHANGE_EXAMPLE]),
@@ -2184,7 +2186,7 @@ async def suspend_api_key_admin(
 async def reactivate_api_key_admin(
     id: UUID,
     container: AdminApiKeyMutationContainer,
-    _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
+    _guard: None = Depends(_FULL_ADMINISTRATION),
 ):
     admin_service = container.admin_service()
     await admin_service.validate_admin_permission()
@@ -2222,7 +2224,7 @@ async def reactivate_api_key_admin(
 async def rotate_api_key_admin(
     id: UUID,
     container: AdminApiKeyMutationContainer,
-    _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
+    _guard: None = Depends(_FULL_ADMINISTRATION),
     payload: Annotated[ApiKeyRotateRequest | None, Body()] = None,
 ):
     admin_service = container.admin_service()
@@ -2266,7 +2268,7 @@ async def extend_api_key_expiration_admin(
         Body(examples=[{"expires_at": "2030-01-01T00:00:00Z"}]),
     ],
     container: AdminApiKeyMutationContainer,
-    _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
+    _guard: None = Depends(_FULL_ADMINISTRATION),
 ):
     admin_service = container.admin_service()
     await admin_service.validate_admin_permission()
@@ -2305,7 +2307,7 @@ async def extend_api_key_expiration_admin(
 async def purge_api_key_admin(
     id: UUID,
     container: AdminApiKeyMutationContainer,
-    _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
+    _guard: None = Depends(_FULL_ADMINISTRATION),
 ) -> Response:
     admin_service = container.admin_service()
     await admin_service.validate_admin_permission()
